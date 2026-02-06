@@ -1,0 +1,14 @@
+{
+    "$schema": "./node_modules/oxfmt/configuration_schema.json",
+    "singleQuote": false,
+    "jsxSingleQuote": true,
+    "printWidth": 160,
+    "experimentalTailwindcss": {
+        "functions": ["clsx", "cn", "cva", "tw"],
+        "stylesheet": "./src/index.css"
+    },
+    "useTabs": false,
+    "tabWidth": 4,
+    "experimentalSortPackageJson": true,
+    "ignorePatterns": ["src/components/ui/**", "src/components/ui/", "src/routeTree.gen.ts", "vendor", "node_modules", ".automaker/**", "dist/"]
+}

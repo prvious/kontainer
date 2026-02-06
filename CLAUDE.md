@@ -4,20 +4,96 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Devoper is a lightweight desktop app for managing containerized infrastructure — a self-hosted alternative to Portainer for small teams and solo developers.
+Devoper is a desktop app for managing containerized infrastructure (Docker Swarm, with Compose and Kubernetes planned). It consists of two components:
 
-## Architecture
+- **Agent** — A Go (Chi) HTTP/WebSocket API deployed alongside the infrastructure, talks to the Docker socket
+- **Desktop App** — A Tauri (Rust + React + ShadcnUI + Tailwindcss) app that connects to one or more agents
 
-Two main components:
+## Conventions
 
-1. **Agent (Go)** — Stateless Go binary deployed alongside infrastructure. Exposes REST + WebSocket API that talks to the Docker socket. Handles OAuth authentication (GitHub, Google) with a Laravel Socialite-inspired flow and issues short-lived JWTs.
+### Action Pattern (Both Go and Rust)
 
-2. **Desktop App (Tauri + React)** — Cross-platform desktop app built with Tauri (Rust) and React. Connects to one or more agents, handles OAuth login via system browser, stores credentials in OS keychain.
+Every discrete operation is a single-responsibility action. One action per file. Actions receive their dependencies via constructor injection.
+
+**Go (Agent):**
+
+- File: `services/scale_service.go`
+- Struct: `ScaleServiceAction` with an `Execute` method
+- Injected via `main.go`
+
+**Rust (Tauri):**
+
+- Follow the same pattern for Tauri commands — one command per file, dependencies injected via Tauri's state management
+
+### Project Structure
+
+Group related code by domain, not by type:
+
+```
+# ✅ Do this
+services/
+  list_services.go
+  scale_service.go
+
+# ❌ Not this
+actions/
+  list_services.go
+  scale_service.go
+handlers/
+  services_handler.go
+```
+
+### API Design
+
+- The agent exposes its own clean API — it is NOT a proxy to the Docker socket
+- Response shapes should be flat and minimal — only what the frontend needs
+- Auth routes are public, all `/api/*` routes require JWT
+- Real-time features (logs, auth flow) use WebSocket with polling fallback
+
+### Auth
+
+- Laravel Socialite-inspired OAuth flow (redirect → callback → JWT)
+- The agent handles the full OAuth dance; the desktop app just receives a deeplink with the JWT from the agent once auth flow is done
+- JWTs are short-lived, stored in the OS keychain
+
+### General
+
+- Keep dependencies minimal — prefer stdlib where reasonable
+- Go agent should remain stateless — no database, in-memory only
+- Desktop app stores connection profiles and tokens locally (SQLite + OS keychain)
+
+## Repository Structure
+
+Monorepo managed with pnpm workspaces:
+
+- `/app` — Desktop app (Tauri + React). Frontend in `app/src/`, Rust backend in `app/src-tauri/`.
+- `/agent` — Go agent binary deployed alongside infrastructure. Exposes REST + WebSocket API to Docker socket.
+
+## Development Commands
+
+All commands run from the repo root:
+
+```bash
+pnpm dev              # Run both app and agent in parallel
+pnpm dev:app          # Tauri desktop app only (hot reload)
+pnpm dev:agent        # Go agent only (go run)
+pnpm build            # Build both
+pnpm build:app        # Build desktop app
+pnpm build:agent      # Build Go agent → agent/bin/agent
+pnpm lint             # Lint frontend
+pnpm fmt           # Format frontend
+```
+
+Run commands in a specific workspace:
+
+```bash
+pnpm --filter app <script>     # Run a script in /app
+```
 
 ## Tech Stack
 
-- Desktop: Tauri (Rust) + React
-- Agent: Go (stdlib)
+- Desktop: Tauri (Rust) + React + ShadcnUI + Tailwindcss
+- Agent: Go (stdlib, Chi)
 - Auth: OAuth 2.0 + JWT
 - Transport: HTTPS + WebSocket
 - App Storage: OS Keychain + SQLite
@@ -176,16 +252,6 @@ export const Route = createFileRoute("/about")({
 });
 ```
 
-## Index Route
-
-```tsx
-import { createFileRoute } from "@tanstack/react-router";
-
-export const Route = createFileRoute("/")({
-    component: () => <div>Home</div>,
-});
-```
-
 ## Dynamic Routes
 
 routes/posts/$postId.tsx
@@ -200,38 +266,6 @@ export const Route = createFileRoute("/posts/$postId")({
     },
 });
 ```
-
-## Layout Routes
-
-routes/dashboard/
-├── \_layout.tsx
-├── index.tsx
-└── settings.tsx
-
-```tsx
-import { Outlet, createFileRoute } from "@tanstack/react-router";
-
-export const Route = createFileRoute("/dashboard")({
-    component: () => <Outlet />,
-});
-```
-
-## Navigation
-
-```tsx
-import { Link } from '@tanstack/react-router'
-
-<Link to="/about">About</Link>
-<Link to="/posts/$postId" params={{ postId: '123' }} />
-```
-
-## Notes
-
-- \_\_root.tsx is required
-- index.tsx = default route
-- $param.tsx = URL param
-- \_layout.tsx = shared layout
-- Route tree generation gives full type safety
 
 === vitest rules ===
 
@@ -325,55 +359,30 @@ expect(getAll().map((w) => w.label)).toEqual(['main', 'second', 'third']);
 });
 </code-snippet>
 
-## Development Commands
-
-### Core Development
-
-```bash
-# Start Vite dev server only (port 1420)
-pnpm dev
-
-# Start Tauri development mode with hot reload (RECOMMENDED)
-pnpm tauri dev
-
-# Preview production build
-pnpm preview
-```
-
-### Building
-
-```bash
-# Build frontend (TypeScript compilation + Vite build)
-pnpm build
-
-# Build Tauri application for production
-pnpm tauri build
-```
-
 ### Testing
 
 ```bash
-# Run Playwright tests
-pnpm test
-
-# Run tests in UI mode
-pnpm test:ui
+# Run Vitest tests
+pnpm --filter app test
 
 # Run specific test file
-pnpm test test tests/example.spec.ts
+pnpm --filter app test tests/example.spec.ts
 ```
 
-### Rust Development
+### Rust (from app/src-tauri/)
 
 ```bash
-# Check Rust code (from src-tauri/)
-cd src-tauri && cargo check
+cargo check
+cargo fmt
+cargo test
+```
 
-# Format Rust code
-cd src-tauri && cargo fmt
+### Go Agent (from agent/)
 
-# Run Rust tests
-cd src-tauri && cargo test
+```bash
+go run .
+go build -o bin/agent .
+go test ./...
 ```
 
 ## Architecture

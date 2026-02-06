@@ -1,0 +1,50 @@
+{
+    "$schema": "https://schema.tauri.app/config/2",
+    "productName": "tauri-app",
+    "version": "0.1.0",
+    "identifier": "dev.devoper.app",
+    "build": {
+        "beforeDevCommand": "pnpm dev",
+        "devUrl": "http://localhost:1420",
+        "beforeBuildCommand": "pnpm build",
+        "frontendDist": "../dist"
+    },
+    "app": {
+        "windows": [
+            {
+                "label": "main",
+                "title": "devoper",
+                "width": 1024,
+                "height": 700,
+                "minWidth": 800,
+                "minHeight": 600,
+                "visible": false
+            },
+            {
+                "label": "splashscreen",
+                "url": "/splashscreen.html",
+                "width": 400,
+                "height": 250,
+                "decorations": false,
+                "resizable": false,
+                "alwaysOnTop": true,
+                "center": true
+            }
+        ],
+        "security": {
+            "csp": null
+        }
+    },
+    "plugins": {
+        "deep-link": {
+            "desktop": {
+                "schemes": ["devoper"]
+            }
+        }
+    },
+    "bundle": {
+        "active": true,
+        "targets": "all",
+        "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"]
+    }
+}
