@@ -1,6 +1,5 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { invoke } from "@tauri-apps/api/core";
 import App from "./app";
 import "./index.css";
 
@@ -9,5 +8,3 @@ createRoot(document.getElementById("root")!).render(
         <App />
     </StrictMode>,
 );
-
-invoke("close_splashscreen");

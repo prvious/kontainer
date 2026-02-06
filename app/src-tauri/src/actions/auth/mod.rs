@@ -1,4 +1,7 @@
+pub mod delete_session;
+pub mod load_session;
 pub mod parse_auth_token;
+pub mod save_session;
 
 use serde::{Deserialize, Serialize};
 
@@ -28,4 +31,30 @@ pub(crate) struct AuthUser {
 pub(crate) struct ParsedToken {
     pub user: AuthUser,
     pub expires_at: u64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct SaveSessionInput {
+    pub user_id: String,
+    pub user_name: String,
+    pub user_email: String,
+    pub user_avatar_url: String,
+    pub user_provider: String,
+    pub token: String,
+    pub expires_at: u64,
+    pub agent_url: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct StoredSession {
+    pub user_id: String,
+    pub user_name: String,
+    pub user_email: String,
+    pub user_avatar_url: String,
+    pub user_provider: String,
+    pub token: String,
+    pub expires_at: u64,
+    pub agent_url: String,
 }

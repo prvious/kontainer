@@ -20,6 +20,11 @@ func New(authHandler *auth.AuthHandler, jwtMiddleware func(http.Handler) http.Ha
 		fmt.Fprintf(w, `{"status":"ok"}`)
 	})
 
+	r.Get("/ping", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"app":"dev.devoper.app"}`)
+	})
+
 	r.Get("/auth/{provider}", authHandler.RedirectHandler)
 	r.Get("/auth/{provider}/callback", authHandler.CallbackHandler)
 

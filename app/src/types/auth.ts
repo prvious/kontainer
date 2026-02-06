@@ -15,4 +15,17 @@ export interface AuthState {
     user: AuthUser | null;
     token: string | null;
     expiresAt: number | null;
+    agentUrl: string | null;
+    isLoading: boolean;
+}
+
+export interface StoredSession {
+    userId: string;
+    userName: string;
+    userEmail: string;
+    userAvatarUrl: string;
+    userProvider: string;
+    token: string;
+    expiresAt: number;
+    agentUrl: string;
 }

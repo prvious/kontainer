@@ -4,6 +4,7 @@ tmp_dir = "tmp"
 [build]
   bin = "./tmp/agent"
   cmd = "go build -o ./tmp/agent ."
+  env_file = [".env"]
   delay = 1000
   exclude_dir = ["tmp", "bin", "vendor"]
   exclude_regex = ["_test.go"]

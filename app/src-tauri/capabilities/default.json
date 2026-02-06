@@ -3,5 +3,5 @@
     "identifier": "default",
     "description": "Capability for the main window",
     "windows": ["main", "splashscreen"],
-    "permissions": ["core:default", "opener:default", "deep-link:default"]
+    "permissions": ["core:default", "opener:default", "deep-link:default", "store:default"]
 }
