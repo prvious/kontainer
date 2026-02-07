@@ -3,11 +3,13 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"log"
 	"net/http"
 	"strings"
 
 	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/swarm"
 )
@@ -17,6 +19,7 @@ type DockerClient interface {
 	TaskList(ctx context.Context, opts types.TaskListOptions) ([]swarm.Task, error)
 	ServiceInspectWithRaw(ctx context.Context, serviceID string, opts types.ServiceInspectOptions) (swarm.Service, []byte, error)
 	NodeList(ctx context.Context, opts types.NodeListOptions) ([]swarm.Node, error)
+	ServiceLogs(ctx context.Context, serviceID string, opts container.LogsOptions) (io.ReadCloser, error)
 }
 
 type ServiceItem struct {

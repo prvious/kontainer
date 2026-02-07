@@ -14,6 +14,7 @@ pub fn run() {
             actions::agent::list_services::list_services,
             actions::agent::inspect_service::inspect_service,
             actions::agent::list_nodes::list_nodes,
+            actions::agent::list_task_stats::list_task_stats,
             actions::app::close_splashscreen::close_splashscreen
         ])
         .run(tauri::generate_context!())

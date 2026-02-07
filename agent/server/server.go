@@ -16,6 +16,8 @@ func New(
 	listServicesHandler *services.ListServicesHandler,
 	inspectServiceHandler *services.InspectServiceHandler,
 	listNodesHandler *services.ListNodesHandler,
+	listTaskStatsHandler *services.ListTaskStatsHandler,
+	streamLogsHandler *services.StreamServiceLogsHandler,
 ) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -38,10 +40,17 @@ func New(
 
 	// Protected routes
 	r.Route("/api", func(r chi.Router) {
-		r.Use(jwtMiddleware)
-		r.Method("GET", "/services", listServicesHandler)
-		r.Method("GET", "/services/{serviceID}", inspectServiceHandler)
-		r.Method("GET", "/nodes", listNodesHandler)
+		// WebSocket route — self-managed auth via query param token
+		r.Get("/services/{serviceID}/logs", streamLogsHandler.ServeHTTP)
+
+		// REST routes — JWT middleware via Authorization header
+		r.Group(func(r chi.Router) {
+			r.Use(jwtMiddleware)
+			r.Method("GET", "/services", listServicesHandler)
+			r.Method("GET", "/services/{serviceID}", inspectServiceHandler)
+			r.Method("GET", "/nodes", listNodesHandler)
+			r.Method("GET", "/task-stats", listTaskStatsHandler)
+		})
 	})
 
 	return r

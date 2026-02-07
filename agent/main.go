@@ -58,12 +58,17 @@ func main() {
 	listNodesAction := services.NewListNodesAction(dockerClient)
 	listNodesHandler := services.NewListNodesHandler(listNodesAction)
 
+	listTaskStatsAction := services.NewListTaskStatsAction(dockerClient)
+	listTaskStatsHandler := services.NewListTaskStatsHandler(listTaskStatsAction)
+
+	streamLogsHandler := services.NewStreamServiceLogsHandler(dockerClient, cfg.JWTSecret)
+
 	sessions := auth.NewSessionStore()
 	bridge := auth.NewAuthBridge()
 	authHandler := auth.NewAuthHandler(registry, sessions, cfg.JWTSecret, bridge)
 	jwtMiddleware := auth.JWTMiddleware(cfg.JWTSecret)
 
-	handler := server.New(authHandler, jwtMiddleware, listServicesHandler, inspectServiceHandler, listNodesHandler)
+	handler := server.New(authHandler, jwtMiddleware, listServicesHandler, inspectServiceHandler, listNodesHandler, listTaskStatsHandler, streamLogsHandler)
 
 	addr := ":" + cfg.Port
 	log.Printf("  listening on    : %s", addr)

@@ -8,7 +8,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
-import { AlertCircle, ArrowLeft, Container, Globe, HardDrive, Key, Layers, Lock, Network, Settings } from "lucide-react";
+import { LogViewer } from "@/components/log-viewer";
+import { AlertCircle, ArrowLeft, Container, Globe, HardDrive, Key, Layers, Lock, Network, ScrollText, Settings } from "lucide-react";
 
 function formatTimestamp(iso: string): string {
     return new Date(iso).toLocaleString();
@@ -175,6 +176,9 @@ function ServiceDetailPage() {
                         <TabsTrigger value='storage'>
                             <HardDrive className='size-3.5' /> Storage
                         </TabsTrigger>
+                        <TabsTrigger value='logs'>
+                            <ScrollText className='size-3.5' /> Logs
+                        </TabsTrigger>
                     </TabsList>
 
                     <TabsContent value='overview' className='mt-4'>
@@ -333,6 +337,10 @@ function ServiceDetailPage() {
                                 )}
                             </CardContent>
                         </Card>
+                    </TabsContent>
+
+                    <TabsContent value='logs' className='mt-4'>
+                        <LogViewer serviceId={serviceId} />
                     </TabsContent>
                 </Tabs>
             </div>

@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/docker/docker/api/types"
+	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/swarm"
 )
 
@@ -22,6 +24,8 @@ type mockDockerClient struct {
 	inspectErr error
 	nodes      []swarm.Node
 	nodeErr    error
+	logsReader io.ReadCloser
+	logsErr    error
 }
 
 func (m *mockDockerClient) ServiceList(_ context.Context, _ types.ServiceListOptions) ([]swarm.Service, error) {
@@ -38,6 +42,10 @@ func (m *mockDockerClient) ServiceInspectWithRaw(_ context.Context, _ string, _ 
 
 func (m *mockDockerClient) NodeList(_ context.Context, _ types.NodeListOptions) ([]swarm.Node, error) {
 	return m.nodes, m.nodeErr
+}
+
+func (m *mockDockerClient) ServiceLogs(_ context.Context, _ string, _ container.LogsOptions) (io.ReadCloser, error) {
+	return m.logsReader, m.logsErr
 }
 
 func uint64Ptr(v uint64) *uint64 { return &v }
