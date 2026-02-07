@@ -39,19 +39,20 @@ type UpdateStatusInfo struct {
 }
 
 type ServiceDetail struct {
-	ID           string            `json:"id"`
-	Name         string            `json:"name"`
-	Image        string            `json:"image"`
-	Stack        string            `json:"stack"`
-	Mode         string            `json:"mode"`
-	Replicas     *int              `json:"replicas"`
-	CreatedAt    string            `json:"createdAt"`
-	UpdatedAt    string            `json:"updatedAt"`
-	Env          []EnvVar          `json:"env"`
-	Mounts       []MountInfo       `json:"mounts"`
-	Constraints  []string          `json:"constraints"`
-	Ports        []PortInfo        `json:"ports"`
-	UpdateStatus *UpdateStatusInfo `json:"updateStatus"`
+	ID            string            `json:"id"`
+	Name          string            `json:"name"`
+	Image         string            `json:"image"`
+	Stack         string            `json:"stack"`
+	Mode          string            `json:"mode"`
+	Replicas      *int              `json:"replicas"`
+	CreatedAt     string            `json:"createdAt"`
+	UpdatedAt     string            `json:"updatedAt"`
+	Env           []EnvVar          `json:"env"`
+	Mounts        []MountInfo       `json:"mounts"`
+	Constraints   []string          `json:"constraints"`
+	Ports         []PortInfo        `json:"ports"`
+	UpdateStatus  *UpdateStatusInfo `json:"updateStatus"`
+	PreviousImage *string           `json:"previousImage"`
 }
 
 type InspectServiceAction struct {
@@ -141,20 +142,33 @@ func (a *InspectServiceAction) Execute(ctx context.Context, serviceID string) (*
 		updateStatus = &us
 	}
 
+	// Extract previous image if a previous spec exists
+	var previousImage *string
+	if svc.PreviousSpec != nil && svc.PreviousSpec.TaskTemplate.ContainerSpec != nil {
+		prev := svc.PreviousSpec.TaskTemplate.ContainerSpec.Image
+		if idx := strings.Index(prev, "@sha256:"); idx != -1 {
+			prev = prev[:idx]
+		}
+		if prev != image {
+			previousImage = &prev
+		}
+	}
+
 	return &ServiceDetail{
-		ID:           svc.ID,
-		Name:         svc.Spec.Name,
-		Image:        image,
-		Stack:        stack,
-		Mode:         mode,
-		Replicas:     replicas,
-		CreatedAt:    svc.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
-		UpdatedAt:    svc.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"),
-		Env:          env,
-		Mounts:       mounts,
-		Constraints:  constraints,
-		Ports:        ports,
-		UpdateStatus: updateStatus,
+		ID:            svc.ID,
+		Name:          svc.Spec.Name,
+		Image:         image,
+		Stack:         stack,
+		Mode:          mode,
+		Replicas:      replicas,
+		CreatedAt:     svc.CreatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		UpdatedAt:     svc.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"),
+		Env:           env,
+		Mounts:        mounts,
+		Constraints:   constraints,
+		Ports:         ports,
+		UpdateStatus:  updateStatus,
+		PreviousImage: previousImage,
 	}, nil
 }
 

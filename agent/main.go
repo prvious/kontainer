@@ -55,6 +55,27 @@ func main() {
 	inspectServiceAction := services.NewInspectServiceAction(dockerClient)
 	inspectServiceHandler := services.NewInspectServiceHandler(inspectServiceAction)
 
+	scaleServiceAction := services.NewScaleServiceAction(dockerClient)
+	scaleServiceHandler := services.NewScaleServiceHandler(scaleServiceAction)
+
+	restartServiceAction := services.NewRestartServiceAction(dockerClient)
+	restartServiceHandler := services.NewRestartServiceHandler(restartServiceAction)
+
+	rollbackServiceAction := services.NewRollbackServiceAction(dockerClient)
+	rollbackServiceHandler := services.NewRollbackServiceHandler(rollbackServiceAction)
+
+	listServiceTasksAction := services.NewListServiceTasksAction(dockerClient)
+	listServiceTasksHandler := services.NewListServiceTasksHandler(listServiceTasksAction)
+
+	inspectTaskAction := services.NewInspectTaskAction(dockerClient)
+	inspectTaskHandler := services.NewInspectTaskHandler(inspectTaskAction)
+
+	listStacksAction := services.NewListStacksAction(dockerClient)
+	listStacksHandler := services.NewListStacksHandler(listStacksAction)
+
+	removeStackAction := services.NewRemoveStackAction(dockerClient)
+	removeStackHandler := services.NewRemoveStackHandler(removeStackAction)
+
 	listNodesAction := services.NewListNodesAction(dockerClient)
 	listNodesHandler := services.NewListNodesHandler(listNodesAction)
 
@@ -62,13 +83,14 @@ func main() {
 	listTaskStatsHandler := services.NewListTaskStatsHandler(listTaskStatsAction)
 
 	streamLogsHandler := services.NewStreamServiceLogsHandler(dockerClient, cfg.JWTSecret)
+	streamTaskLogsHandler := services.NewStreamTaskLogsHandler(dockerClient, cfg.JWTSecret)
 
 	sessions := auth.NewSessionStore()
 	bridge := auth.NewAuthBridge()
 	authHandler := auth.NewAuthHandler(registry, sessions, cfg.JWTSecret, bridge)
 	jwtMiddleware := auth.JWTMiddleware(cfg.JWTSecret)
 
-	handler := server.New(authHandler, jwtMiddleware, listServicesHandler, inspectServiceHandler, listNodesHandler, listTaskStatsHandler, streamLogsHandler)
+	handler := server.New(authHandler, jwtMiddleware, listServicesHandler, inspectServiceHandler, scaleServiceHandler, restartServiceHandler, rollbackServiceHandler, listStacksHandler, removeStackHandler, listServiceTasksHandler, inspectTaskHandler, listNodesHandler, listTaskStatsHandler, streamLogsHandler, streamTaskLogsHandler)
 
 	addr := ":" + cfg.Port
 	log.Printf("  listening on    : %s", addr)

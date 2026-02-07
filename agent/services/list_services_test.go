@@ -26,6 +26,13 @@ type mockDockerClient struct {
 	nodeErr    error
 	logsReader io.ReadCloser
 	logsErr    error
+	updateErr  error
+	removeErr      error
+	removedIDs     []string
+	inspectTask    swarm.Task
+	inspectTaskErr error
+	taskLogsReader io.ReadCloser
+	taskLogsErr    error
 }
 
 func (m *mockDockerClient) ServiceList(_ context.Context, _ types.ServiceListOptions) ([]swarm.Service, error) {
@@ -46,6 +53,26 @@ func (m *mockDockerClient) NodeList(_ context.Context, _ types.NodeListOptions) 
 
 func (m *mockDockerClient) ServiceLogs(_ context.Context, _ string, _ container.LogsOptions) (io.ReadCloser, error) {
 	return m.logsReader, m.logsErr
+}
+
+func (m *mockDockerClient) ServiceUpdate(_ context.Context, _ string, _ swarm.Version, _ swarm.ServiceSpec, _ swarm.ServiceUpdateOptions) (swarm.ServiceUpdateResponse, error) {
+	return swarm.ServiceUpdateResponse{}, m.updateErr
+}
+
+func (m *mockDockerClient) TaskInspectWithRaw(_ context.Context, _ string) (swarm.Task, []byte, error) {
+	return m.inspectTask, nil, m.inspectTaskErr
+}
+
+func (m *mockDockerClient) TaskLogs(_ context.Context, _ string, _ container.LogsOptions) (io.ReadCloser, error) {
+	return m.taskLogsReader, m.taskLogsErr
+}
+
+func (m *mockDockerClient) ServiceRemove(_ context.Context, serviceID string) error {
+	if m.removeErr != nil {
+		return m.removeErr
+	}
+	m.removedIDs = append(m.removedIDs, serviceID)
+	return nil
 }
 
 func uint64Ptr(v uint64) *uint64 { return &v }

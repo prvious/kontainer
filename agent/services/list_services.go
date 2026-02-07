@@ -20,6 +20,10 @@ type DockerClient interface {
 	ServiceInspectWithRaw(ctx context.Context, serviceID string, opts types.ServiceInspectOptions) (swarm.Service, []byte, error)
 	NodeList(ctx context.Context, opts types.NodeListOptions) ([]swarm.Node, error)
 	ServiceLogs(ctx context.Context, serviceID string, opts container.LogsOptions) (io.ReadCloser, error)
+	ServiceUpdate(ctx context.Context, serviceID string, version swarm.Version, service swarm.ServiceSpec, options swarm.ServiceUpdateOptions) (swarm.ServiceUpdateResponse, error)
+	ServiceRemove(ctx context.Context, serviceID string) error
+	TaskInspectWithRaw(ctx context.Context, taskID string) (swarm.Task, []byte, error)
+	TaskLogs(ctx context.Context, taskID string, opts container.LogsOptions) (io.ReadCloser, error)
 }
 
 type ServiceItem struct {

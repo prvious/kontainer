@@ -1,8 +1,14 @@
+import { useState } from "react";
 import { useServiceDetail } from "@/hooks/use-service-detail";
+import { useScaleService } from "@/hooks/use-scale-service";
+import { useRestartService } from "@/hooks/use-restart-service";
+import { useRollbackService } from "@/hooks/use-rollback-service";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, Loader2, Minus, Plus, RefreshCw, RotateCcw } from "lucide-react";
 
 function formatTimestamp(iso: string): string {
     return new Date(iso).toLocaleString();
@@ -37,8 +43,70 @@ function LoadingSkeleton() {
     );
 }
 
+function ScaleControls({ serviceId, replicas }: { serviceId: string; replicas: number }) {
+    const [localReplicas, setLocalReplicas] = useState(replicas);
+    const { mutate, isPending } = useScaleService(serviceId);
+
+    function handleScale(newReplicas: number) {
+        const clamped = Math.max(0, newReplicas);
+        setLocalReplicas(clamped);
+        mutate(clamped);
+    }
+
+    return (
+        <span className='ml-2 inline-flex items-center gap-1.5'>
+            <Button
+                variant='outline'
+                size='sm'
+                className='size-6 p-0'
+                disabled={isPending || localReplicas <= 0}
+                onClick={() => handleScale(localReplicas - 1)}
+                aria-label='Decrease replicas'
+            >
+                {isPending ? <Loader2 className='size-3 animate-spin' /> : <Minus className='size-3' />}
+            </Button>
+            <Input
+                type='number'
+                min={0}
+                value={localReplicas}
+                onChange={(e) => {
+                    const val = parseInt(e.target.value, 10);
+                    if (!isNaN(val) && val >= 0) {
+                        setLocalReplicas(val);
+                    }
+                }}
+                onBlur={() => {
+                    if (localReplicas !== replicas) {
+                        mutate(localReplicas);
+                    }
+                }}
+                onKeyDown={(e) => {
+                    if (e.key === "Enter" && localReplicas !== replicas) {
+                        mutate(localReplicas);
+                    }
+                }}
+                className='h-6 w-12 [appearance:textfield] text-center font-mono text-xs [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none'
+                disabled={isPending}
+                aria-label='Replica count'
+            />
+            <Button
+                variant='outline'
+                size='sm'
+                className='size-6 p-0'
+                disabled={isPending}
+                onClick={() => handleScale(localReplicas + 1)}
+                aria-label='Increase replicas'
+            >
+                {isPending ? <Loader2 className='size-3 animate-spin' /> : <Plus className='size-3' />}
+            </Button>
+        </span>
+    );
+}
+
 export function ServiceDetail({ serviceId }: { serviceId: string }) {
     const { data, isLoading, error } = useServiceDetail(serviceId);
+    const { mutate: restart, isPending: isRestarting } = useRestartService(serviceId);
+    const { mutate: rollback, isPending: isRollingBack } = useRollbackService(serviceId);
 
     if (isLoading) {
         return <LoadingSkeleton />;
@@ -57,6 +125,19 @@ export function ServiceDetail({ serviceId }: { serviceId: string }) {
 
     return (
         <div className='space-y-4'>
+            <div className='flex justify-end gap-2'>
+                {data.previousImage && (
+                    <Button variant='outline' size='sm' disabled={isRollingBack} onClick={() => rollback()} aria-label='Rollback service'>
+                        <RotateCcw className={`size-4 ${isRollingBack ? "animate-spin" : ""}`} />
+                        Rollback
+                    </Button>
+                )}
+                <Button variant='outline' size='sm' disabled={isRestarting} onClick={() => restart()} aria-label='Restart service'>
+                    <RefreshCw className={`size-4 ${isRestarting ? "animate-spin" : ""}`} />
+                    Restart
+                </Button>
+            </div>
+
             {/* Overview */}
             <Card>
                 <CardHeader>
@@ -70,14 +151,17 @@ export function ServiceDetail({ serviceId }: { serviceId: string }) {
                         <dt className='text-muted-foreground'>Image</dt>
                         <dd className='font-mono text-xs'>{data.image}</dd>
 
+                        {data.previousImage && (
+                            <>
+                                <dt className='text-muted-foreground'>Previous Image</dt>
+                                <dd className='font-mono text-xs text-muted-foreground'>{data.previousImage}</dd>
+                            </>
+                        )}
+
                         <dt className='text-muted-foreground'>Mode</dt>
                         <dd>
                             <Badge variant='secondary'>{data.mode}</Badge>
-                            {data.replicas !== null && (
-                                <span className='ml-2 text-muted-foreground'>
-                                    {data.replicas} {data.replicas === 1 ? "replica" : "replicas"}
-                                </span>
-                            )}
+                            {data.mode !== "global" && data.replicas !== null && <ScaleControls serviceId={serviceId} replicas={data.replicas} />}
                         </dd>
 
                         {data.stack && (

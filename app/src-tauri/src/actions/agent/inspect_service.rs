@@ -52,6 +52,7 @@ pub struct ServiceDetail {
     pub constraints: Vec<String>,
     pub ports: Vec<PortInfo>,
     pub update_status: Option<UpdateStatusInfo>,
+    pub previous_image: Option<String>,
 }
 
 #[tauri::command]

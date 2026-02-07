@@ -14,10 +14,10 @@
             {
                 "label": "main",
                 "title": "devoper",
-                "width": 1024,
-                "height": 700,
-                "minWidth": 800,
-                "minHeight": 600,
+                "width": 1100,
+                "height": 750,
+                "minWidth": 900,
+                "minHeight": 650,
                 "visible": false
             },
             {

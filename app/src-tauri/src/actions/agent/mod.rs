@@ -1,5 +1,12 @@
 pub mod inspect_service;
+pub mod inspect_task;
 pub mod list_nodes;
+pub mod list_service_tasks;
 pub mod list_services;
+pub mod list_stacks;
 pub mod list_task_stats;
 pub mod ping_agent;
+pub mod remove_stack;
+pub mod restart_service;
+pub mod rollback_service;
+pub mod scale_service;

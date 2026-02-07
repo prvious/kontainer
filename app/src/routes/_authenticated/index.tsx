@@ -152,7 +152,7 @@ function StackBreakdown({ services }: { services: ServiceItem[] }) {
             <CardHeader className='pb-3'>
                 <CardTitle className='flex items-center justify-between text-sm'>
                     Stacks
-                    <Link to='/services'>
+                    <Link to='/stacks'>
                         <Button variant='ghost' size='sm' className='h-auto gap-1 px-2 py-1 text-xs text-muted-foreground'>
                             View all <ArrowRight className='size-3' />
                         </Button>

@@ -60,6 +60,7 @@ const fullService: ServiceDetailType = {
         completedAt: "2025-01-02T00:01:00Z",
         message: "update completed",
     },
+    previousImage: null,
 };
 
 describe("ServiceDetail", () => {
@@ -91,7 +92,7 @@ describe("ServiceDetail", () => {
         expect(screen.getByText("web")).toBeInTheDocument();
         expect(screen.getByText("nginx:latest")).toBeInTheDocument();
         expect(screen.getByText("replicated")).toBeInTheDocument();
-        expect(screen.getByText("3 replicas")).toBeInTheDocument();
+        expect(screen.getByLabelText("Replica count")).toHaveValue(3);
         expect(screen.getByText("myapp")).toBeInTheDocument();
 
         // Ports
@@ -150,6 +151,7 @@ describe("ServiceDetail", () => {
             constraints: [],
             ports: [],
             updateStatus: null,
+            previousImage: null,
         };
 
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
@@ -182,6 +184,7 @@ describe("ServiceDetail", () => {
             constraints: [],
             ports: [],
             updateStatus: null,
+            previousImage: null,
         };
 
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
@@ -195,7 +198,7 @@ describe("ServiceDetail", () => {
             expect(screen.getByText("global")).toBeInTheDocument();
         });
 
-        expect(screen.queryByText(/replicas/)).not.toBeInTheDocument();
+        expect(screen.queryByLabelText("Replica count")).not.toBeInTheDocument();
     });
 
     it("does not fetch when auth is missing", () => {

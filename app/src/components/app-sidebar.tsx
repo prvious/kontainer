@@ -16,13 +16,14 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/hooks/use-auth";
 import { Logo } from "@/components/logo";
-import { Activity, ChevronsUpDown, Container, LayoutDashboard, LogOut, Moon, Server, Sun } from "lucide-react";
+import { Activity, ChevronsUpDown, Container, Layers, LayoutDashboard, LogOut, Moon, Server, Sun } from "lucide-react";
 import { useAppearance } from "@/hooks/use-appearance";
 import { router } from "@/router";
 
 const navigation = [
     { label: "Overview", to: "/" as const, icon: LayoutDashboard },
     { label: "Services", to: "/services" as const, icon: Container },
+    { label: "Stacks", to: "/stacks" as const, icon: Layers },
     { label: "Nodes", to: "/nodes" as const, icon: Server },
     { label: "Tasks", to: "/tasks" as const, icon: Activity },
 ];

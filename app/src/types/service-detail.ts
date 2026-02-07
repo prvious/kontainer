@@ -38,4 +38,5 @@ export interface ServiceDetail {
     constraints: string[];
     ports: PortInfo[];
     updateStatus: UpdateStatusInfo | null;
+    previousImage: string | null;
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useServiceLogs, type LogOptions } from "@/hooks/use-service-logs";
+import { useLogStream, type LogOptions } from "@/hooks/use-log-stream";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,9 @@ const TAIL_OPTIONS = [
     { value: "all", label: "All" },
 ];
 
-export function LogViewer({ serviceId }: { serviceId: string }) {
+export function LogViewer({ serviceId, taskId, compact }: { serviceId?: string; taskId?: string; compact?: boolean }) {
+    const path = taskId ? `/api/tasks/${taskId}/logs` : `/api/services/${serviceId}/logs`;
+
     const [options, setOptions] = useState<LogOptions>({
         tail: "100",
         timestamps: true,
@@ -23,7 +25,7 @@ export function LogViewer({ serviceId }: { serviceId: string }) {
         stderr: true,
     });
 
-    const { logs, status, isPaused, clearLogs, pause, resume, reconnect } = useServiceLogs(serviceId, options);
+    const { logs, status, isPaused, clearLogs, pause, resume, reconnect } = useLogStream(path, options);
 
     const scrollRef = useRef<HTMLDivElement>(null);
     const [autoScroll, setAutoScroll] = useState(true);
@@ -131,7 +133,11 @@ export function LogViewer({ serviceId }: { serviceId: string }) {
                 </div>
 
                 {/* Log output */}
-                <div ref={scrollRef} onScroll={handleScroll} className='h-[500px] overflow-auto rounded-md border bg-background p-3 font-mono text-xs'>
+                <div
+                    ref={scrollRef}
+                    onScroll={handleScroll}
+                    className={`${compact ? "h-[300px]" : "h-[500px]"} overflow-auto rounded-md border bg-background p-3 font-mono text-xs`}
+                >
                     {logs.length === 0 ? (
                         <p className='text-muted-foreground'>
                             {status === "connecting" ? "Connecting..." : status === "connected" ? "Waiting for logs..." : "No logs"}

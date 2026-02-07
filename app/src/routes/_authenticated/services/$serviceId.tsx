@@ -1,5 +1,9 @@
+import { useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServiceDetail } from "@/hooks/use-service-detail";
+import { useScaleService } from "@/hooks/use-scale-service";
+import { useRestartService } from "@/hooks/use-restart-service";
+import { useRollbackService } from "@/hooks/use-rollback-service";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,8 +12,28 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { LogViewer } from "@/components/log-viewer";
-import { AlertCircle, ArrowLeft, Container, Globe, HardDrive, Key, Layers, Lock, Network, ScrollText, Settings } from "lucide-react";
+import { ServiceTasks } from "@/components/service-tasks";
+import {
+    AlertCircle,
+    ArrowLeft,
+    Container,
+    Globe,
+    HardDrive,
+    Key,
+    Layers,
+    ListTodo,
+    Loader2,
+    Lock,
+    Minus,
+    Network,
+    Plus,
+    RefreshCw,
+    RotateCcw,
+    ScrollText,
+    Settings,
+} from "lucide-react";
 
 function formatTimestamp(iso: string): string {
     return new Date(iso).toLocaleString();
@@ -51,9 +75,71 @@ function LoadingSkeleton() {
     );
 }
 
+function ScaleControls({ serviceId, replicas }: { serviceId: string; replicas: number }) {
+    const [localReplicas, setLocalReplicas] = useState(replicas);
+    const { mutate, isPending } = useScaleService(serviceId);
+
+    function handleScale(newReplicas: number) {
+        const clamped = Math.max(0, newReplicas);
+        setLocalReplicas(clamped);
+        mutate(clamped);
+    }
+
+    return (
+        <div className='mt-1.5 flex items-center gap-1.5'>
+            <Button
+                variant='outline'
+                size='sm'
+                className='size-7 p-0'
+                disabled={isPending || localReplicas <= 0}
+                onClick={() => handleScale(localReplicas - 1)}
+                aria-label='Decrease replicas'
+            >
+                {isPending ? <Loader2 className='size-3 animate-spin' /> : <Minus className='size-3' />}
+            </Button>
+            <Input
+                type='number'
+                min={0}
+                value={localReplicas}
+                onChange={(e) => {
+                    const val = parseInt(e.target.value, 10);
+                    if (!isNaN(val) && val >= 0) {
+                        setLocalReplicas(val);
+                    }
+                }}
+                onBlur={() => {
+                    if (localReplicas !== replicas) {
+                        mutate(localReplicas);
+                    }
+                }}
+                onKeyDown={(e) => {
+                    if (e.key === "Enter" && localReplicas !== replicas) {
+                        mutate(localReplicas);
+                    }
+                }}
+                className='h-7 w-14 [appearance:textfield] text-center font-mono text-sm [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none'
+                disabled={isPending}
+                aria-label='Replica count'
+            />
+            <Button
+                variant='outline'
+                size='sm'
+                className='size-7 p-0'
+                disabled={isPending}
+                onClick={() => handleScale(localReplicas + 1)}
+                aria-label='Increase replicas'
+            >
+                {isPending ? <Loader2 className='size-3 animate-spin' /> : <Plus className='size-3' />}
+            </Button>
+        </div>
+    );
+}
+
 function ServiceDetailPage() {
     const { serviceId } = Route.useParams();
     const { data, isLoading, error } = useServiceDetail(serviceId);
+    const { mutate: restart, isPending: isRestarting } = useRestartService(serviceId);
+    const { mutate: rollback, isPending: isRollingBack } = useRollbackService(serviceId);
 
     if (isLoading) {
         return (
@@ -92,9 +178,21 @@ function ServiceDetailPage() {
                 title={data.name}
                 description={data.image}
                 actions={
-                    <Button variant='ghost' size='sm' render={(props) => <Link {...props} to='/services' />}>
-                        <ArrowLeft className='size-4' /> Back
-                    </Button>
+                    <>
+                        {data.previousImage && (
+                            <Button variant='outline' size='sm' disabled={isRollingBack} onClick={() => rollback()} aria-label='Rollback service'>
+                                <RotateCcw className={`size-4 ${isRollingBack ? "animate-spin" : ""}`} />
+                                Rollback
+                            </Button>
+                        )}
+                        <Button variant='outline' size='sm' disabled={isRestarting} onClick={() => restart()} aria-label='Restart service'>
+                            <RefreshCw className={`size-4 ${isRestarting ? "animate-spin" : ""}`} />
+                            Restart
+                        </Button>
+                        <Button variant='ghost' size='sm' render={(props) => <Link {...props} to='/services' />}>
+                            <ArrowLeft className='size-4' /> Back
+                        </Button>
+                    </>
                 }
             />
 
@@ -115,11 +213,7 @@ function ServiceDetailPage() {
                         <CardContent className='p-4'>
                             <p className='mb-1 text-xs text-muted-foreground'>Mode</p>
                             <Badge variant='secondary'>{data.mode}</Badge>
-                            {data.replicas !== null && (
-                                <span className='ml-2 font-mono text-sm text-muted-foreground'>
-                                    {data.replicas} {data.replicas === 1 ? "replica" : "replicas"}
-                                </span>
-                            )}
+                            {isGlobal ? null : data.replicas !== null ? <ScaleControls serviceId={serviceId} replicas={data.replicas} /> : null}
                         </CardContent>
                     </Card>
 
@@ -176,6 +270,9 @@ function ServiceDetailPage() {
                         <TabsTrigger value='storage'>
                             <HardDrive className='size-3.5' /> Storage
                         </TabsTrigger>
+                        <TabsTrigger value='tasks'>
+                            <ListTodo className='size-3.5' /> Tasks
+                        </TabsTrigger>
                         <TabsTrigger value='logs'>
                             <ScrollText className='size-3.5' /> Logs
                         </TabsTrigger>
@@ -193,6 +290,13 @@ function ServiceDetailPage() {
 
                                     <dt className='text-muted-foreground'>Image</dt>
                                     <dd className='truncate font-mono text-xs'>{data.image}</dd>
+
+                                    {data.previousImage && (
+                                        <>
+                                            <dt className='text-muted-foreground'>Previous Image</dt>
+                                            <dd className='truncate font-mono text-xs text-muted-foreground'>{data.previousImage}</dd>
+                                        </>
+                                    )}
 
                                     <dt className='text-muted-foreground'>Created</dt>
                                     <dd>{formatTimestamp(data.createdAt)}</dd>
@@ -337,6 +441,10 @@ function ServiceDetailPage() {
                                 )}
                             </CardContent>
                         </Card>
+                    </TabsContent>
+
+                    <TabsContent value='tasks' className='mt-4'>
+                        <ServiceTasks serviceId={serviceId} />
                     </TabsContent>
 
                     <TabsContent value='logs' className='mt-4'>
