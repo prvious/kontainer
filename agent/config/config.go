@@ -8,7 +8,6 @@ type Config struct {
 	JWTSecret          string
 	GithubClientID     string
 	GithubClientSecret string
-	AppScheme          string
 }
 
 func Load() *Config {
@@ -18,7 +17,6 @@ func Load() *Config {
 		JWTSecret:          getEnv("JWT_SECRET", ""),
 		GithubClientID:     getEnv("GITHUB_CLIENT_ID", ""),
 		GithubClientSecret: getEnv("GITHUB_CLIENT_SECRET", ""),
-		AppScheme:          getEnv("APP_SCHEME", "devoper"),
 	}
 }
 

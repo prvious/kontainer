@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Logo } from "@/components/logo";
 import { useAuth } from "@/hooks/use-auth";
 import { Route } from "@/routes/login";
-import { Field, FieldError, FieldGroup, FieldLabel, FieldLegend, FieldSet } from "@/components/ui/field";
+import { Field, FieldError, FieldGroup, FieldLabel, FieldSet } from "@/components/ui/field";
 
 export function LoginScreen() {
     const { user, login } = useAuth();
@@ -38,28 +38,33 @@ export function LoginScreen() {
             return;
         }
 
-        setIsPinging(false);
-        login(url);
+        try {
+            await login(url);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "Authentication failed");
+        } finally {
+            setIsPinging(false);
+        }
     }
 
     return (
-        <div className="flex min-h-screen flex-col items-center justify-center px-4">
-            <form onSubmit={handleSubmit} className="-mt-20 flex w-full max-w-sm flex-col items-center gap-8">
+        <div className='flex min-h-screen flex-col items-center justify-center px-4'>
+            <form onSubmit={handleSubmit} className='-mt-20 flex w-full max-w-sm flex-col items-center gap-8'>
                 <Logo />
-                <Card className="w-full">
+                <Card className='w-full'>
                     <CardHeader>
                         <CardTitle>Connect to agent</CardTitle>
                         <CardDescription>Enter your agent's URL to get started.</CardDescription>
                     </CardHeader>
-                    <CardContent className="">
+                    <CardContent className=''>
                         <FieldGroup>
-                            <FieldSet className="gap-5">
+                            <FieldSet className='gap-5'>
                                 <Field>
-                                    <FieldLabel htmlFor="agent-url">Agent URL</FieldLabel>
+                                    <FieldLabel htmlFor='agent-url'>Agent URL</FieldLabel>
                                     <Input
-                                        id="agent-url"
-                                        type="url"
-                                        placeholder="http://localhost:8080"
+                                        id='agent-url'
+                                        type='url'
+                                        placeholder='http://localhost:8080'
                                         value={agentUrl}
                                         onChange={(e) => setAgentUrl(e.target.value)}
                                         required
@@ -67,7 +72,7 @@ export function LoginScreen() {
                                     {error && <FieldError>{error}</FieldError>}
                                 </Field>
                                 <Field>
-                                    <Button type="submit" disabled={isPinging}>
+                                    <Button type='submit' disabled={isPinging}>
                                         {isPinging ? "Connecting..." : "Connect"}
                                     </Button>
                                 </Field>
@@ -76,14 +81,9 @@ export function LoginScreen() {
                     </CardContent>
                 </Card>
             </form>
-            <p className="absolute bottom-6 text-xs text-muted-foreground">
+            <p className='absolute bottom-6 text-xs text-muted-foreground'>
                 Built by{" "}
-                <a
-                    href="https://prvious.dev"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="underline underline-offset-2 hover:text-foreground"
-                >
+                <a href='https://prvious.dev' target='_blank' rel='noopener noreferrer' className='underline underline-offset-2 hover:text-foreground'>
                     prvious.dev
                 </a>
             </p>

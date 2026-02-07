@@ -9,6 +9,16 @@ Devoper is a desktop app for managing containerized infrastructure (Docker Swarm
 - **Agent** — A Go (Chi) HTTP/WebSocket API deployed alongside the infrastructure, talks to the Docker socket
 - **Desktop App** — A Tauri (Rust + React + ShadcnUI + Tailwindcss) app that connects to one or more agents
 
+## UI Requirements (MANDATORY)
+
+**Shadcn UI is REQUIRED for all UI work. This is non-negotiable.**
+
+- You MUST always use Shadcn UI components before even considering creating custom components. If Shadcn has a component for it, use it. No exceptions.
+- If a needed Shadcn component is not yet installed, install it first (`pnpm dlx shadcn@latest add <component>`), then use it.
+- Do NOT create custom UI components when a Shadcn equivalent exists. Exhaust all Shadcn options first.
+- When working on any UI task, you MUST activate the `frontend-design` and `shadcn-ui` skills before writing any code.
+- The `src/components/ui/` directory is a NO-GO zone — never manually edit, extend, or fix files in it. These are Shadcn-managed.
+
 ## Conventions
 
 ### Action Pattern (Both Go and Rust)

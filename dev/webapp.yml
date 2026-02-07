@@ -1,0 +1,36 @@
+services:
+  web:
+    image: traefik/whoami
+    deploy:
+      replicas: 3
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.webapp-web.rule=Host(`webapp.test`)
+        - traefik.http.services.webapp-web.loadbalancer.server.port=80
+        - prvious.ssl=true
+    networks:
+      - devoper
+
+  api:
+    image: traefik/whoami
+    deploy:
+      replicas: 2
+      labels:
+        - traefik.enable=true
+        - traefik.http.routers.webapp-api.rule=Host(`api.webapp.test`)
+        - traefik.http.services.webapp-api.loadbalancer.server.port=80
+        - prvious.ssl=true
+    networks:
+      - devoper
+
+  worker:
+    image: traefik/whoami
+    deploy:
+      replicas: 1
+    networks:
+      - devoper
+
+networks:
+  devoper:
+    driver: overlay
+    attachable: true

@@ -1,8 +1,7 @@
 import { useEffect } from "react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
-import { onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { createMemoryHistory, createRootRouteWithContext, createRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { AuthProvider } from "@/contexts/auth-context";
 import { useAuth } from "@/hooks/use-auth";
@@ -19,6 +18,30 @@ const mockParsedToken: ParsedToken = {
     },
     expiresAt: 9999999999,
 };
+
+class MockWebSocket {
+    static instances: MockWebSocket[] = [];
+    onmessage: ((ev: { data: string }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    onclose: ((ev: { wasClean: boolean }) => void) | null = null;
+    url: string;
+    constructor(url: string) {
+        this.url = url;
+        MockWebSocket.instances.push(this);
+    }
+    close() {
+        this.onclose?.({ wasClean: true });
+    }
+    serverSend(data: object) {
+        this.onmessage?.({ data: JSON.stringify(data) });
+    }
+    static latest() {
+        return this.instances.at(-1)!;
+    }
+    static clear() {
+        this.instances = [];
+    }
+}
 
 function LoginComponent() {
     const { user, login } = useAuth();
@@ -88,16 +111,10 @@ function TestApp({ initialPath }: { initialPath: string }) {
 }
 
 describe("Redirect After Login", () => {
-    let deepLinkCallback: ((urls: string[]) => void) | null = null;
-
     beforeEach(() => {
         vi.clearAllMocks();
-        deepLinkCallback = null;
-
-        vi.mocked(onOpenUrl).mockImplementation((cb) => {
-            deepLinkCallback = cb;
-            return Promise.resolve(() => {});
-        });
+        MockWebSocket.clear();
+        vi.stubGlobal("WebSocket", MockWebSocket);
 
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_session") return null;
@@ -106,6 +123,10 @@ describe("Redirect After Login", () => {
             if (cmd === "delete_session") return undefined;
             return undefined;
         });
+    });
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
     });
 
     it("navigates to redirect param after authentication", async () => {
@@ -119,9 +140,19 @@ describe("Redirect After Login", () => {
         // Should be on login page
         expect(screen.getByTestId("location")).toHaveTextContent("login");
 
-        // Authenticate
+        // Initiate login
         await act(async () => {
-            deepLinkCallback?.(["devoper://auth/callback?token=fake.jwt.token"]);
+            screen.getByText("Login").click();
+        });
+
+        const ws = MockWebSocket.latest();
+
+        // Simulate WS auth flow
+        await act(async () => {
+            ws.serverSend({ sessionId: "abc" });
+        });
+        await act(async () => {
+            ws.serverSend({ token: "fake.jwt.token" });
         });
 
         // Should redirect to /dashboard
@@ -139,9 +170,19 @@ describe("Redirect After Login", () => {
         // Should be on login page
         expect(screen.getByTestId("location")).toHaveTextContent("login");
 
-        // Authenticate
+        // Initiate login
         await act(async () => {
-            deepLinkCallback?.(["devoper://auth/callback?token=fake.jwt.token"]);
+            screen.getByText("Login").click();
+        });
+
+        const ws = MockWebSocket.latest();
+
+        // Simulate WS auth flow
+        await act(async () => {
+            ws.serverSend({ sessionId: "abc" });
+        });
+        await act(async () => {
+            ws.serverSend({ token: "fake.jwt.token" });
         });
 
         // Should redirect to /

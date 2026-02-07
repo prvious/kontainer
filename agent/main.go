@@ -8,6 +8,8 @@ import (
 	"github.com/clovismuneza/devoper/agent/auth/providers"
 	"github.com/clovismuneza/devoper/agent/config"
 	"github.com/clovismuneza/devoper/agent/server"
+	"github.com/clovismuneza/devoper/agent/services"
+	"github.com/docker/docker/client"
 	"github.com/joho/godotenv"
 )
 
@@ -25,7 +27,6 @@ func main() {
 
 	log.Println("--- devoper agent config ---")
 	log.Printf("  agent url       : %s", cfg.AgentURL)
-	log.Printf("  app scheme      : %s", cfg.AppScheme)
 	log.Printf("  github client id: %s", mask(cfg.GithubClientID))
 	log.Printf("  jwt secret      : %s", mask(cfg.JWTSecret))
 
@@ -43,11 +44,26 @@ func main() {
 		cfg.AgentURL+"/auth/github/callback",
 	))
 
+	dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		log.Fatalf("Failed to create Docker client: %v", err)
+	}
+
+	listServicesAction := services.NewListServicesAction(dockerClient)
+	listServicesHandler := services.NewListServicesHandler(listServicesAction)
+
+	inspectServiceAction := services.NewInspectServiceAction(dockerClient)
+	inspectServiceHandler := services.NewInspectServiceHandler(inspectServiceAction)
+
+	listNodesAction := services.NewListNodesAction(dockerClient)
+	listNodesHandler := services.NewListNodesHandler(listNodesAction)
+
 	sessions := auth.NewSessionStore()
-	authHandler := auth.NewAuthHandler(registry, sessions, cfg.JWTSecret, cfg.AppScheme)
+	bridge := auth.NewAuthBridge()
+	authHandler := auth.NewAuthHandler(registry, sessions, cfg.JWTSecret, bridge)
 	jwtMiddleware := auth.JWTMiddleware(cfg.JWTSecret)
 
-	handler := server.New(authHandler, jwtMiddleware)
+	handler := server.New(authHandler, jwtMiddleware, listServicesHandler, inspectServiceHandler, listNodesHandler)
 
 	addr := ":" + cfg.Port
 	log.Printf("  listening on    : %s", addr)

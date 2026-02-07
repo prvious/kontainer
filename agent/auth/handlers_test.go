@@ -9,18 +9,20 @@ import (
 	"golang.org/x/oauth2"
 )
 
-func newTestHandler() (*AuthHandler, *providers.ProviderRegistry, *SessionStore) {
+func newTestHandler() (*AuthHandler, *providers.ProviderRegistry, *SessionStore, *AuthBridge) {
 	registry := providers.NewProviderRegistry()
 	registry.Register(&fakeProvider{name: "github"})
 	sessions := &SessionStore{entries: make(map[string]sessionEntry)}
-	handler := NewAuthHandler(registry, sessions, testSecret, "devoper")
-	return handler, registry, sessions
+	bridge := NewAuthBridge()
+	handler := NewAuthHandler(registry, sessions, testSecret, bridge)
+	return handler, registry, sessions, bridge
 }
 
 func TestRedirectHandler_ValidProvider(t *testing.T) {
-	handler, _, _ := newTestHandler()
+	handler, _, _, bridge := newTestHandler()
 
-	req := httptest.NewRequest(http.MethodGet, "/auth/github", nil)
+	sessionID, _ := bridge.CreateSession()
+	req := httptest.NewRequest(http.MethodGet, "/auth/github?session="+sessionID, nil)
 	req = withChiURLParam(req, "provider", "github")
 	rec := httptest.NewRecorder()
 
@@ -37,9 +39,9 @@ func TestRedirectHandler_ValidProvider(t *testing.T) {
 }
 
 func TestRedirectHandler_UnknownProvider(t *testing.T) {
-	handler, _, _ := newTestHandler()
+	handler, _, _, _ := newTestHandler()
 
-	req := httptest.NewRequest(http.MethodGet, "/auth/unknown", nil)
+	req := httptest.NewRequest(http.MethodGet, "/auth/unknown?session=abc", nil)
 	req = withChiURLParam(req, "provider", "unknown")
 	rec := httptest.NewRecorder()
 
@@ -50,10 +52,24 @@ func TestRedirectHandler_UnknownProvider(t *testing.T) {
 	}
 }
 
-func TestCallbackHandler_MissingCode(t *testing.T) {
-	handler, _, sessions := newTestHandler()
+func TestRedirectHandler_MissingSession(t *testing.T) {
+	handler, _, _, _ := newTestHandler()
 
-	state, _ := sessions.Generate()
+	req := httptest.NewRequest(http.MethodGet, "/auth/github", nil)
+	req = withChiURLParam(req, "provider", "github")
+	rec := httptest.NewRecorder()
+
+	handler.RedirectHandler(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestCallbackHandler_MissingCode(t *testing.T) {
+	handler, _, sessions, _ := newTestHandler()
+
+	state, _ := sessions.Generate("test-session")
 	req := httptest.NewRequest(http.MethodGet, "/auth/github/callback?state="+state, nil)
 	req = withChiURLParam(req, "provider", "github")
 	rec := httptest.NewRecorder()
@@ -66,7 +82,7 @@ func TestCallbackHandler_MissingCode(t *testing.T) {
 }
 
 func TestCallbackHandler_MissingState(t *testing.T) {
-	handler, _, _ := newTestHandler()
+	handler, _, _, _ := newTestHandler()
 
 	req := httptest.NewRequest(http.MethodGet, "/auth/github/callback?code=abc123", nil)
 	req = withChiURLParam(req, "provider", "github")
@@ -80,7 +96,7 @@ func TestCallbackHandler_MissingState(t *testing.T) {
 }
 
 func TestCallbackHandler_InvalidState(t *testing.T) {
-	handler, _, _ := newTestHandler()
+	handler, _, _, _ := newTestHandler()
 
 	req := httptest.NewRequest(http.MethodGet, "/auth/github/callback?code=abc123&state=bogus", nil)
 	req = withChiURLParam(req, "provider", "github")
@@ -94,7 +110,7 @@ func TestCallbackHandler_InvalidState(t *testing.T) {
 }
 
 func TestCallbackHandler_UnknownProvider(t *testing.T) {
-	handler, _, _ := newTestHandler()
+	handler, _, _, _ := newTestHandler()
 
 	req := httptest.NewRequest(http.MethodGet, "/auth/unknown/callback?code=abc123&state=xyz", nil)
 	req = withChiURLParam(req, "provider", "unknown")
@@ -119,9 +135,10 @@ func TestCallbackHandler_OAuthExchangeFailure(t *testing.T) {
 		},
 	})
 	sessions := &SessionStore{entries: make(map[string]sessionEntry)}
-	handler := NewAuthHandler(registry, sessions, testSecret, "devoper")
+	bridge := NewAuthBridge()
+	handler := NewAuthHandler(registry, sessions, testSecret, bridge)
 
-	state, _ := sessions.Generate()
+	state, _ := sessions.Generate("test-session")
 	req := httptest.NewRequest(http.MethodGet, "/auth/github/callback?code=abc123&state="+state, nil)
 	req = withChiURLParam(req, "provider", "github")
 	rec := httptest.NewRecorder()

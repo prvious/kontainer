@@ -4,7 +4,6 @@ mod actions;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .invoke_handler(tauri::generate_handler![
             actions::auth::parse_auth_token::parse_auth_token,
@@ -12,6 +11,9 @@ pub fn run() {
             actions::auth::load_session::load_session,
             actions::auth::delete_session::delete_session,
             actions::agent::ping_agent::ping_agent,
+            actions::agent::list_services::list_services,
+            actions::agent::inspect_service::inspect_service,
+            actions::agent::list_nodes::list_nodes,
             actions::app::close_splashscreen::close_splashscreen
         ])
         .run(tauri::generate_context!())

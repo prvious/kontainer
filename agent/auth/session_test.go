@@ -12,7 +12,7 @@ func newTestStore() *SessionStore {
 func TestSessionStore_GenerateAndValidate(t *testing.T) {
 	s := newTestStore()
 
-	token, err := s.Generate()
+	token, err := s.Generate("test-session")
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
@@ -20,8 +20,12 @@ func TestSessionStore_GenerateAndValidate(t *testing.T) {
 		t.Fatal("Generate returned empty token")
 	}
 
-	if !s.Validate(token) {
+	sessionID, ok := s.Validate(token)
+	if !ok {
 		t.Fatal("Validate returned false for valid token")
+	}
+	if sessionID != "test-session" {
+		t.Fatalf("sessionID = %q, want %q", sessionID, "test-session")
 	}
 }
 
@@ -30,7 +34,7 @@ func TestSessionStore_GenerateUniqueness(t *testing.T) {
 
 	tokens := make(map[string]bool)
 	for i := 0; i < 100; i++ {
-		token, err := s.Generate()
+		token, err := s.Generate("session")
 		if err != nil {
 			t.Fatalf("Generate failed: %v", err)
 		}
@@ -44,16 +48,16 @@ func TestSessionStore_GenerateUniqueness(t *testing.T) {
 func TestSessionStore_ValidateConsumesToken(t *testing.T) {
 	s := newTestStore()
 
-	token, err := s.Generate()
+	token, err := s.Generate("test-session")
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
 
-	if !s.Validate(token) {
+	if _, ok := s.Validate(token); !ok {
 		t.Fatal("first Validate should return true")
 	}
 
-	if s.Validate(token) {
+	if _, ok := s.Validate(token); ok {
 		t.Fatal("second Validate should return false (token consumed)")
 	}
 }
@@ -61,7 +65,7 @@ func TestSessionStore_ValidateConsumesToken(t *testing.T) {
 func TestSessionStore_ValidateUnknownToken(t *testing.T) {
 	s := newTestStore()
 
-	if s.Validate("nonexistent-token") {
+	if _, ok := s.Validate("nonexistent-token"); ok {
 		t.Fatal("Validate should return false for unknown token")
 	}
 }
@@ -69,17 +73,17 @@ func TestSessionStore_ValidateUnknownToken(t *testing.T) {
 func TestSessionStore_ValidateExpiredToken(t *testing.T) {
 	s := newTestStore()
 
-	token, err := s.Generate()
+	token, err := s.Generate("test-session")
 	if err != nil {
 		t.Fatalf("Generate failed: %v", err)
 	}
 
 	// Manually expire the entry
 	s.mu.Lock()
-	s.entries[token] = sessionEntry{createdAt: time.Now().Add(-sessionTTL - time.Second)}
+	s.entries[token] = sessionEntry{createdAt: time.Now().Add(-sessionTTL - time.Second), sessionID: "test-session"}
 	s.mu.Unlock()
 
-	if s.Validate(token) {
+	if _, ok := s.Validate(token); ok {
 		t.Fatal("Validate should return false for expired token")
 	}
 }
@@ -87,7 +91,7 @@ func TestSessionStore_ValidateExpiredToken(t *testing.T) {
 func TestSessionStore_ValidateEmptyToken(t *testing.T) {
 	s := newTestStore()
 
-	if s.Validate("") {
+	if _, ok := s.Validate(""); ok {
 		t.Fatal("Validate should return false for empty token")
 	}
 }

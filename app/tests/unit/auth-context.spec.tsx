@@ -1,7 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useState } from "react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
-import { onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { AuthProvider } from "@/contexts/auth-context";
 import { useAuth } from "@/hooks/use-auth";
@@ -18,8 +18,33 @@ const mockParsedToken: ParsedToken = {
     expiresAt: 9999999999,
 };
 
+class MockWebSocket {
+    static instances: MockWebSocket[] = [];
+    onmessage: ((ev: { data: string }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    onclose: ((ev: { wasClean: boolean }) => void) | null = null;
+    url: string;
+    constructor(url: string) {
+        this.url = url;
+        MockWebSocket.instances.push(this);
+    }
+    close() {
+        this.onclose?.({ wasClean: true });
+    }
+    serverSend(data: object) {
+        this.onmessage?.({ data: JSON.stringify(data) });
+    }
+    static latest() {
+        return this.instances.at(-1)!;
+    }
+    static clear() {
+        this.instances = [];
+    }
+}
+
 function TestConsumer() {
     const { user, token, expiresAt, agentUrl, isLoading, login, logout } = useAuth();
+    const [loginError, setLoginError] = useState<string | null>(null);
     return (
         <div>
             <span data-testid='user'>{user ? user.name : "none"}</span>
@@ -27,29 +52,28 @@ function TestConsumer() {
             <span data-testid='expiresAt'>{expiresAt?.toString() ?? "none"}</span>
             <span data-testid='agentUrl'>{agentUrl ?? "none"}</span>
             <span data-testid='isLoading'>{isLoading ? "true" : "false"}</span>
-            <button onClick={() => login("http://localhost:8080")}>Login</button>
+            <span data-testid='loginError'>{loginError ?? "none"}</span>
+            <button onClick={() => login("http://localhost:8080").catch((e) => setLoginError(e.message))}>Login</button>
             <button onClick={() => logout()}>Logout</button>
         </div>
     );
 }
 
 describe("AuthProvider", () => {
-    let deepLinkCallback: ((urls: string[]) => void) | null = null;
-
     beforeEach(() => {
         vi.clearAllMocks();
-        deepLinkCallback = null;
-
-        vi.mocked(onOpenUrl).mockImplementation((cb) => {
-            deepLinkCallback = cb;
-            return Promise.resolve(() => {});
-        });
+        MockWebSocket.clear();
+        vi.stubGlobal("WebSocket", MockWebSocket);
 
         // Default: load_session returns null (no saved session)
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_session") return null;
             return undefined;
         });
+    });
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
     });
 
     function renderWithProvider() {
@@ -72,7 +96,7 @@ describe("AuthProvider", () => {
         expect(screen.getByTestId("isLoading")).toHaveTextContent("false");
     });
 
-    it("login opens the agent auth URL in browser", async () => {
+    it("login opens a WebSocket and calls openUrl with session ID", async () => {
         renderWithProvider();
         await act(async () => {});
 
@@ -80,10 +104,17 @@ describe("AuthProvider", () => {
             screen.getByText("Login").click();
         });
 
-        expect(openUrl).toHaveBeenCalledWith("http://localhost:8080/auth/github");
+        const ws = MockWebSocket.latest();
+        expect(ws.url).toBe("ws://localhost:8080/auth/listen");
+
+        await act(async () => {
+            ws.serverSend({ sessionId: "abc123" });
+        });
+
+        expect(openUrl).toHaveBeenCalledWith("http://localhost:8080/auth/github?session=abc123");
     });
 
-    it("handles deep link token callback", async () => {
+    it("handles WebSocket token delivery", async () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_session") return null;
             if (cmd === "parse_auth_token") return mockParsedToken;
@@ -94,7 +125,17 @@ describe("AuthProvider", () => {
         await act(async () => {});
 
         await act(async () => {
-            deepLinkCallback?.(["devoper://auth/callback?token=fake.jwt.token"]);
+            screen.getByText("Login").click();
+        });
+
+        const ws = MockWebSocket.latest();
+
+        await act(async () => {
+            ws.serverSend({ sessionId: "abc123" });
+        });
+
+        await act(async () => {
+            ws.serverSend({ token: "fake.jwt.token" });
         });
 
         expect(invoke).toHaveBeenCalledWith("parse_auth_token", {
@@ -103,30 +144,6 @@ describe("AuthProvider", () => {
         expect(screen.getByTestId("user")).toHaveTextContent("Jane Doe");
         expect(screen.getByTestId("token")).toHaveTextContent("fake.jwt.token");
         expect(screen.getByTestId("expiresAt")).toHaveTextContent("9999999999");
-    });
-
-    it("ignores deep link URLs that are not auth callbacks", async () => {
-        renderWithProvider();
-        await act(async () => {});
-
-        await act(async () => {
-            deepLinkCallback?.(["devoper://settings/something"]);
-        });
-
-        expect(invoke).not.toHaveBeenCalledWith("parse_auth_token", expect.anything());
-        expect(screen.getByTestId("user")).toHaveTextContent("none");
-    });
-
-    it("ignores deep link URLs without a token param", async () => {
-        renderWithProvider();
-        await act(async () => {});
-
-        await act(async () => {
-            deepLinkCallback?.(["devoper://auth/callback"]);
-        });
-
-        expect(invoke).not.toHaveBeenCalledWith("parse_auth_token", expect.anything());
-        expect(screen.getByTestId("user")).toHaveTextContent("none");
     });
 
     it("logout calls delete_session before clearing state", async () => {
@@ -145,9 +162,17 @@ describe("AuthProvider", () => {
         renderWithProvider();
         await act(async () => {});
 
-        // Authenticate first
+        // Authenticate first via WS
         await act(async () => {
-            deepLinkCallback?.(["devoper://auth/callback?token=fake.jwt.token"]);
+            screen.getByText("Login").click();
+        });
+
+        const ws = MockWebSocket.latest();
+        await act(async () => {
+            ws.serverSend({ sessionId: "abc" });
+        });
+        await act(async () => {
+            ws.serverSend({ token: "fake.jwt.token" });
         });
 
         expect(screen.getByTestId("user")).toHaveTextContent("Jane Doe");
@@ -177,9 +202,17 @@ describe("AuthProvider", () => {
         renderWithProvider();
         await act(async () => {});
 
-        // Authenticate first
+        // Authenticate first via WS
         await act(async () => {
-            deepLinkCallback?.(["devoper://auth/callback?token=fake.jwt.token"]);
+            screen.getByText("Login").click();
+        });
+
+        const ws = MockWebSocket.latest();
+        await act(async () => {
+            ws.serverSend({ sessionId: "abc" });
+        });
+        await act(async () => {
+            ws.serverSend({ token: "fake.jwt.token" });
         });
 
         expect(screen.getByTestId("user")).toHaveTextContent("Jane Doe");
@@ -208,7 +241,15 @@ describe("AuthProvider", () => {
         await act(async () => {});
 
         await act(async () => {
-            deepLinkCallback?.(["devoper://auth/callback?token=bad.token.here"]);
+            screen.getByText("Login").click();
+        });
+
+        const ws = MockWebSocket.latest();
+        await act(async () => {
+            ws.serverSend({ sessionId: "abc" });
+        });
+        await act(async () => {
+            ws.serverSend({ token: "bad.token.here" });
         });
 
         expect(screen.getByTestId("user")).toHaveTextContent("none");
@@ -217,10 +258,25 @@ describe("AuthProvider", () => {
         consoleSpy.mockRestore();
     });
 
-    it("registers the onOpenUrl listener on mount", async () => {
+    it("rejects login promise on WebSocket error message", async () => {
+        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+            if (cmd === "load_session") return null;
+            return undefined;
+        });
+
         renderWithProvider();
         await act(async () => {});
-        expect(onOpenUrl).toHaveBeenCalledTimes(1);
-        expect(onOpenUrl).toHaveBeenCalledWith(expect.any(Function));
+
+        await act(async () => {
+            screen.getByText("Login").click();
+        });
+
+        const ws = MockWebSocket.latest();
+        await act(async () => {
+            ws.serverSend({ error: "session expired" });
+        });
+
+        expect(screen.getByTestId("user")).toHaveTextContent("none");
+        expect(screen.getByTestId("loginError")).toHaveTextContent("session expired");
     });
 });

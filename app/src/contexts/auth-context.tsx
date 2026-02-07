@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { AuthUser, ParsedToken, StoredSession } from "@/types/auth";
 import { AuthContext } from "@/contexts/auth-context-value";
@@ -12,7 +11,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [agentUrl, setAgentUrl] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(true);
 
-    const pendingAgentUrl = useRef<string | null>(null);
+    const wsRef = useRef<WebSocket | null>(null);
 
     const clearState = useCallback(() => {
         setUser(null);
@@ -30,7 +29,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         clearState();
     }, [clearState]);
 
-    const handleToken = useCallback(async (jwt: string) => {
+    const handleToken = useCallback(async (jwt: string, loginAgentUrl: string) => {
         try {
             const parsed = await invoke<ParsedToken>("parse_auth_token", {
                 token: jwt,
@@ -38,9 +37,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setUser(parsed.user);
             setToken(jwt);
             setExpiresAt(parsed.expiresAt);
-
-            const savedAgentUrl = pendingAgentUrl.current || null;
-            setAgentUrl(savedAgentUrl);
+            setAgentUrl(loginAgentUrl);
 
             try {
                 await invoke("save_session", {
@@ -52,7 +49,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                         userProvider: parsed.user.provider,
                         token: jwt,
                         expiresAt: parsed.expiresAt,
-                        agentUrl: savedAgentUrl || "",
+                        agentUrl: loginAgentUrl,
                     },
                 });
             } catch (err) {
@@ -104,24 +101,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         };
     }, []);
 
-    // Deep link listener
+    // Cleanup WS on unmount
     useEffect(() => {
-        const unlisten = onOpenUrl((urls) => {
-            for (const raw of urls) {
-                const url = new URL(raw);
-                if (url.host === "auth" && url.pathname === "/callback") {
-                    const jwt = url.searchParams.get("token");
-                    if (jwt) {
-                        handleToken(jwt);
-                    }
-                }
-            }
-        });
-
         return () => {
-            unlisten.then((fn) => fn());
+            wsRef.current?.close();
         };
-    }, [handleToken]);
+    }, []);
 
     // Expiry timer
     useEffect(() => {
@@ -134,10 +119,66 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return () => clearInterval(interval);
     }, [expiresAt, logout]);
 
-    const login = useCallback(async (url: string) => {
-        pendingAgentUrl.current = url;
-        await openUrl(`${url}/auth/github`);
-    }, []);
+    const login = useCallback(
+        (url: string) => {
+            return new Promise<void>((resolve, reject) => {
+                const wsUrl = url.replace(/^http/, "ws") + "/auth/listen";
+                const ws = new WebSocket(wsUrl);
+                wsRef.current = ws;
+                let settled = false;
+
+                const timeout = setTimeout(
+                    () => {
+                        settled = true;
+                        ws.close();
+                        reject(new Error("Authentication timed out"));
+                    },
+                    10 * 60 * 1000,
+                );
+
+                ws.onmessage = (ev) => {
+                    const data = JSON.parse(ev.data);
+
+                    if (data.sessionId) {
+                        openUrl(`${url}/auth/github?session=${data.sessionId}`);
+                        return;
+                    }
+
+                    if (data.token) {
+                        settled = true;
+                        clearTimeout(timeout);
+                        ws.close();
+                        handleToken(data.token, url).then(resolve, reject);
+                        return;
+                    }
+
+                    if (data.error) {
+                        settled = true;
+                        clearTimeout(timeout);
+                        ws.close();
+                        reject(new Error(data.error));
+                    }
+                };
+
+                ws.onerror = () => {
+                    if (settled) return;
+                    settled = true;
+                    clearTimeout(timeout);
+                    reject(new Error("WebSocket connection failed"));
+                };
+
+                ws.onclose = (ev) => {
+                    if (settled) return;
+                    settled = true;
+                    clearTimeout(timeout);
+                    if (!ev.wasClean) {
+                        reject(new Error("WebSocket closed unexpectedly"));
+                    }
+                };
+            });
+        },
+        [handleToken],
+    );
 
     return <AuthContext value={{ user, token, expiresAt, agentUrl, isLoading, login, logout }}>{children}</AuthContext>;
 }

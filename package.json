@@ -10,6 +10,8 @@
         "build:agent": "cd agent && go build -o bin/agent .",
         "lint": "pnpm --filter app lint",
         "fmt": "pnpm --filter app fmt",
-        "types": "pnpm --filter app types"
+        "types": "pnpm --filter app types",
+        "dev:cluster": "docker stack deploy -c dev/webapp.yml webapp && docker stack deploy -c dev/monitoring.yml monitoring",
+        "dev:cluster:rm": "docker stack rm webapp monitoring"
     }
 }

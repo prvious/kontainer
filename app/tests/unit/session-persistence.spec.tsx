@@ -1,7 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
-import { onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { AuthProvider } from "@/contexts/auth-context";
 import { useAuth } from "@/hooks/use-auth";
 import type { ParsedToken, StoredSession } from "@/types/auth";
@@ -28,6 +27,30 @@ const mockStoredSession: StoredSession = {
     agentUrl: "http://localhost:8080",
 };
 
+class MockWebSocket {
+    static instances: MockWebSocket[] = [];
+    onmessage: ((ev: { data: string }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    onclose: ((ev: { wasClean: boolean }) => void) | null = null;
+    url: string;
+    constructor(url: string) {
+        this.url = url;
+        MockWebSocket.instances.push(this);
+    }
+    close() {
+        this.onclose?.({ wasClean: true });
+    }
+    serverSend(data: object) {
+        this.onmessage?.({ data: JSON.stringify(data) });
+    }
+    static latest() {
+        return this.instances.at(-1)!;
+    }
+    static clear() {
+        this.instances = [];
+    }
+}
+
 function TestConsumer() {
     const { user, token, expiresAt, agentUrl, isLoading, login } = useAuth();
     return (
@@ -43,16 +66,14 @@ function TestConsumer() {
 }
 
 describe("Session Persistence", () => {
-    let deepLinkCallback: ((urls: string[]) => void) | null = null;
-
     beforeEach(() => {
         vi.clearAllMocks();
-        deepLinkCallback = null;
+        MockWebSocket.clear();
+        vi.stubGlobal("WebSocket", MockWebSocket);
+    });
 
-        vi.mocked(onOpenUrl).mockImplementation((cb) => {
-            deepLinkCallback = cb;
-            return Promise.resolve(() => {});
-        });
+    afterEach(() => {
+        vi.unstubAllGlobals();
     });
 
     function renderWithProvider() {
@@ -63,7 +84,7 @@ describe("Session Persistence", () => {
         );
     }
 
-    it("calls save_session after successful deep-link auth", async () => {
+    it("calls save_session after successful WebSocket auth", async () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_session") return null;
             if (cmd === "parse_auth_token") return mockParsedToken;
@@ -74,14 +95,21 @@ describe("Session Persistence", () => {
         renderWithProvider();
         await act(async () => {});
 
-        // Click login to set the pending agent URL
+        // Click login to open WebSocket
         await act(async () => {
             screen.getByText("Login").click();
         });
 
-        // Simulate deep link callback
+        const ws = MockWebSocket.latest();
+
+        // Simulate session ID
         await act(async () => {
-            deepLinkCallback?.(["devoper://auth/callback?token=fake.jwt.token"]);
+            ws.serverSend({ sessionId: "abc" });
+        });
+
+        // Simulate token delivery
+        await act(async () => {
+            ws.serverSend({ token: "fake.jwt.token" });
         });
 
         expect(invoke).toHaveBeenCalledWith("save_session", {
@@ -180,9 +208,14 @@ describe("Session Persistence", () => {
             screen.getByText("Login").click();
         });
 
-        // Deep link callback
+        const ws = MockWebSocket.latest();
+
         await act(async () => {
-            deepLinkCallback?.(["devoper://auth/callback?token=fake.jwt.token"]);
+            ws.serverSend({ sessionId: "abc" });
+        });
+
+        await act(async () => {
+            ws.serverSend({ token: "fake.jwt.token" });
         });
 
         // Verify agentUrl is set in the context

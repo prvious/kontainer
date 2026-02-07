@@ -1,32 +1,65 @@
 package auth
 
 import (
-	"fmt"
 	"log"
 	"net/http"
-	"net/url"
 	"time"
 
 	"github.com/clovismuneza/devoper/agent/auth/providers"
 	"github.com/go-chi/chi/v5"
+	"github.com/gorilla/websocket"
 )
 
 const tokenTTL = 24 * time.Hour
+
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool { return true },
+}
 
 type AuthHandler struct {
 	registry  *providers.ProviderRegistry
 	sessions  *SessionStore
 	jwtSecret string
-	appScheme string
+	bridge    *AuthBridge
 }
 
-func NewAuthHandler(registry *providers.ProviderRegistry, sessions *SessionStore, jwtSecret, appScheme string) *AuthHandler {
+func NewAuthHandler(registry *providers.ProviderRegistry, sessions *SessionStore, jwtSecret string, bridge *AuthBridge) *AuthHandler {
 	return &AuthHandler{
 		registry:  registry,
 		sessions:  sessions,
 		jwtSecret: jwtSecret,
-		appScheme: appScheme,
+		bridge:    bridge,
 	}
+}
+
+// AuthListenHandler upgrades to WebSocket, creates a bridge session, sends the session ID,
+// then blocks until the OAuth callback delivers a token (or timeout).
+func (h *AuthHandler) AuthListenHandler(w http.ResponseWriter, r *http.Request) {
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("ws upgrade error: %v", err)
+		return
+	}
+	defer conn.Close()
+
+	sessionID, err := h.bridge.CreateSession()
+	if err != nil {
+		conn.WriteJSON(map[string]string{"error": "failed to create session"})
+		return
+	}
+	defer h.bridge.Cleanup(sessionID)
+
+	if err := conn.WriteJSON(map[string]string{"sessionId": sessionID}); err != nil {
+		return
+	}
+
+	token, err := h.bridge.WaitForToken(sessionID, 10*time.Minute)
+	if err != nil {
+		conn.WriteJSON(map[string]string{"error": err.Error()})
+		return
+	}
+
+	conn.WriteJSON(map[string]string{"token": token})
 }
 
 // RedirectHandler initiates OAuth by redirecting to the provider's authorize URL.
@@ -39,7 +72,13 @@ func (h *AuthHandler) RedirectHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	state, err := h.sessions.Generate()
+	sessionID := r.URL.Query().Get("session")
+	if sessionID == "" {
+		http.Error(w, "missing session parameter", http.StatusBadRequest)
+		return
+	}
+
+	state, err := h.sessions.Generate(sessionID)
 	if err != nil {
 		http.Error(w, "failed to generate state", http.StatusInternalServerError)
 		return
@@ -49,7 +88,7 @@ func (h *AuthHandler) RedirectHandler(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, authURL, http.StatusFound)
 }
 
-// CallbackHandler handles the OAuth callback, exchanges the code, and redirects to the desktop app.
+// CallbackHandler handles the OAuth callback, exchanges the code, and pushes the JWT through the bridge.
 func (h *AuthHandler) CallbackHandler(w http.ResponseWriter, r *http.Request) {
 	providerName := chi.URLParam(r, "provider")
 
@@ -67,7 +106,8 @@ func (h *AuthHandler) CallbackHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !h.sessions.Validate(state) {
+	sessionID, ok := h.sessions.Validate(state)
+	if !ok {
 		http.Error(w, "invalid or expired state", http.StatusBadRequest)
 		return
 	}
@@ -93,6 +133,17 @@ func (h *AuthHandler) CallbackHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	deepLink := fmt.Sprintf("%s://auth/callback?token=%s", h.appScheme, url.QueryEscape(token))
-	http.Redirect(w, r, deepLink, http.StatusFound)
+	h.bridge.SendToken(sessionID, token)
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(successHTML))
 }
+
+const successHTML = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Authenticated</title></head>
+<body style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:system-ui,sans-serif">
+<p>Authentication successful. You can close this tab.</p>
+</body>
+</html>`

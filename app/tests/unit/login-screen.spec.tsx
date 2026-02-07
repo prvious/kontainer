@@ -1,14 +1,37 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
-import { onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { createMemoryHistory, createRootRouteWithContext, createRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { AuthProvider } from "@/contexts/auth-context";
 import { LoginScreen } from "@/components/login-screen";
 import { useAuth } from "@/hooks/use-auth";
 import type { AuthContextValue } from "@/contexts/auth-context-value";
+
+class MockWebSocket {
+    static instances: MockWebSocket[] = [];
+    onmessage: ((ev: { data: string }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    onclose: ((ev: { wasClean: boolean }) => void) | null = null;
+    url: string;
+    constructor(url: string) {
+        this.url = url;
+        MockWebSocket.instances.push(this);
+    }
+    close() {
+        this.onclose?.({ wasClean: true });
+    }
+    serverSend(data: object) {
+        this.onmessage?.({ data: JSON.stringify(data) });
+    }
+    static latest() {
+        return this.instances.at(-1)!;
+    }
+    static clear() {
+        this.instances = [];
+    }
+}
 
 // Create a minimal test router that includes the /login route
 const rootRoute = createRootRouteWithContext<{ auth: AuthContextValue }>()({});
@@ -43,16 +66,18 @@ function TestWrapper() {
 describe("LoginScreen", () => {
     beforeEach(() => {
         vi.clearAllMocks();
-
-        vi.mocked(onOpenUrl).mockImplementation(() => {
-            return Promise.resolve(() => {});
-        });
+        MockWebSocket.clear();
+        vi.stubGlobal("WebSocket", MockWebSocket);
 
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_session") return null;
             if (cmd === "ping_agent") return undefined;
             return undefined;
         });
+    });
+
+    afterEach(() => {
+        vi.unstubAllGlobals();
     });
 
     async function renderLoginScreen() {
@@ -82,7 +107,7 @@ describe("LoginScreen", () => {
         expect(screen.getByRole("button", { name: /connect/i })).toBeInTheDocument();
     });
 
-    it("pings the agent and calls openUrl on submit", async () => {
+    it("pings the agent and opens WebSocket on submit", async () => {
         await renderLoginScreen();
         const user = userEvent.setup();
 
@@ -90,7 +115,17 @@ describe("LoginScreen", () => {
         await user.click(button);
 
         expect(invoke).toHaveBeenCalledWith("ping_agent", { url: "http://localhost:8080" });
-        expect(openUrl).toHaveBeenCalledWith("http://localhost:8080/auth/github");
+
+        // After ping, a WebSocket should be opened
+        const ws = MockWebSocket.latest();
+        expect(ws.url).toBe("ws://localhost:8080/auth/listen");
+
+        // Simulate session ID → opens browser
+        await act(async () => {
+            ws.serverSend({ sessionId: "test-session" });
+        });
+
+        expect(openUrl).toHaveBeenCalledWith("http://localhost:8080/auth/github?session=test-session");
     });
 
     it("allows changing the agent URL", async () => {
@@ -116,7 +151,9 @@ describe("LoginScreen", () => {
         await user.click(button);
 
         expect(invoke).toHaveBeenCalledWith("ping_agent", { url: "http://myserver:9090" });
-        expect(openUrl).toHaveBeenCalledWith("http://myserver:9090/auth/github");
+
+        const ws = MockWebSocket.latest();
+        expect(ws.url).toBe("ws://myserver:9090/auth/listen");
     });
 
     it("shows error and does not proceed when ping fails", async () => {
@@ -133,7 +170,7 @@ describe("LoginScreen", () => {
         await user.click(button);
 
         expect(screen.getByText(/could not reach agent/i)).toBeInTheDocument();
-        expect(openUrl).not.toHaveBeenCalled();
+        expect(MockWebSocket.instances).toHaveLength(0);
     });
 
     it("disables button while pinging", async () => {
@@ -160,8 +197,5 @@ describe("LoginScreen", () => {
         await act(async () => {
             resolvePing!();
         });
-
-        expect(button).not.toBeDisabled();
-        expect(button).toHaveTextContent("Connect");
     });
 });

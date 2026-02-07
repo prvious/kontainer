@@ -10,5 +10,5 @@
     "useTabs": false,
     "tabWidth": 4,
     "experimentalSortPackageJson": true,
-    "ignorePatterns": ["src/components/ui/**", "src/components/ui/", "src/routeTree.gen.ts", "vendor", "node_modules", ".automaker/**", "dist/"]
+    "ignorePatterns": ["src/components/ui/**", "src/components/ui", "src/routeTree.gen.ts", "vendor", "node_modules", ".automaker/**", "dist/"]
 }

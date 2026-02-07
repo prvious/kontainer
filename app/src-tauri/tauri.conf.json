@@ -35,13 +35,6 @@
             "csp": null
         }
     },
-    "plugins": {
-        "deep-link": {
-            "desktop": {
-                "schemes": ["devoper"]
-            }
-        }
-    },
     "bundle": {
         "active": true,
         "targets": "all",
