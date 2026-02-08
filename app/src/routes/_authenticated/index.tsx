@@ -7,7 +7,8 @@ import { StatsCards } from "@/components/dashboard/stats-cards";
 import { ResourceCharts } from "@/components/dashboard/resource-charts";
 import { ContainerTable } from "@/components/dashboard/container-table";
 import { ServicesList } from "@/components/dashboard/services-list";
-import { ActivityFeed } from "@/components/dashboard/activity-feed";
+import { StacksList } from "@/components/dashboard/stacks-list";
+import { useStacks } from "@/hooks/use-stacks";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertTriangle, RefreshCw } from "lucide-react";
@@ -52,6 +53,7 @@ function DashboardPage() {
     const { data: nodes, isLoading: nodesLoading, error: nodesError } = useNodes();
     const { data: taskStats, isLoading: taskStatsLoading, error: taskStatsError } = useTaskStats();
     const { data: metricsData } = useClusterMetrics();
+    const { data: stacks } = useStacks();
 
     const isLoading = servicesLoading || nodesLoading || taskStatsLoading;
     const error = servicesError || nodesError || taskStatsError;
@@ -73,6 +75,7 @@ function DashboardPage() {
     const serviceItems = services ?? [];
     const nodeItems = nodes ?? [];
     const stats = taskStats ?? { total: 0, running: 0, failed: 0, preparing: 0, complete: 0, desiredRunning: 0 };
+    const stackItems = stacks ?? [];
     const agents = metricsData?.agents ?? [];
     const history = metricsData?.history ?? [];
     const lastUpdate = dataUpdatedAt ? new Date(dataUpdatedAt).toLocaleTimeString() : "";
@@ -105,13 +108,13 @@ function DashboardPage() {
             {/* Container Table */}
             <ContainerTable agents={agents} taskStats={taskStats ?? null} />
 
-            {/* Services + Activity Feed */}
+            {/* Services + Stacks */}
             <div className='grid gap-4 lg:grid-cols-5'>
                 <div className='lg:col-span-3'>
                     <ServicesList services={serviceItems} />
                 </div>
                 <div className='lg:col-span-2'>
-                    <ActivityFeed />
+                    <StacksList stacks={stackItems} />
                 </div>
             </div>
         </div>

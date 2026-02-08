@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { ChevronDown, ChevronUp, Cpu, MemoryStick, Network, Server, TrendingDown, TrendingUp } from "lucide-react";
 import type { NodeItem } from "@/types/nodes";
 import type { AgentMetricsSnapshot } from "@/types/metrics";
+import { Button } from "../ui/button";
 
 interface StatsCardsProps {
     nodes: NodeItem[];
@@ -36,14 +37,13 @@ interface StatCardData {
     healthNodes?: NodeHealthItem[];
 }
 
-function StatCard({ stat, delay }: { stat: StatCardData; delay: number }) {
-    const [expanded, setExpanded] = useState(false);
+function StatCard({ stat, delay, expanded, onToggle }: { stat: StatCardData; delay: number; expanded: boolean; onToggle: () => void }) {
     const hasNodes = stat.nodes && stat.nodes.length > 0;
     const hasHealthNodes = stat.healthNodes && stat.healthNodes.length > 0;
     const expandable = hasNodes || hasHealthNodes;
 
     return (
-        <Card className='animate-fade-in-up overflow-hidden pt-0' style={{ animationDelay: `${delay}ms` }}>
+        <Card className='animate-fade-in-up overflow-hidden py-0' style={{ animationDelay: `${delay}ms` }}>
             <CardContent className='p-4'>
                 <div className='flex items-start justify-between'>
                     <div>
@@ -68,14 +68,15 @@ function StatCard({ stat, delay }: { stat: StatCardData; delay: number }) {
 
             {/* Expandable breakdown */}
             {expandable && (
-                <>
-                    <button
-                        onClick={() => setExpanded(!expanded)}
-                        className='flex w-full items-center justify-center gap-1 border-t border-border py-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent'
+                <CardFooter className='flex flex-col items-stretch px-0 py-0'>
+                    <Button
+                        onClick={onToggle}
+                        variant='ghost'
+                        className='flex w-full items-center justify-center gap-1 py-2 text-xs text-muted-foreground transition-colors hover:bg-accent'
                     >
                         {expanded ? <ChevronUp className='size-3' /> : <ChevronDown className='size-3' />}
                         {expanded ? "Hide" : "Show"} per-node
-                    </button>
+                    </Button>
                     {expanded && hasHealthNodes && (
                         <div className='space-y-0 border-t border-border'>
                             {stat.healthNodes!.map((node) => {
@@ -128,13 +129,14 @@ function StatCard({ stat, delay }: { stat: StatCardData; delay: number }) {
                             })}
                         </div>
                     )}
-                </>
+                </CardFooter>
             )}
         </Card>
     );
 }
 
 export function StatsCards({ nodes, agents }: StatsCardsProps) {
+    const [expanded, setExpanded] = useState(false);
     const nodeCount = nodes.length;
     const readyNodes = nodes.filter((n) => n.status === "ready").length;
     const managers = nodes.filter((n) => n.role === "manager").length;
@@ -204,7 +206,7 @@ export function StatsCards({ nodes, agents }: StatsCardsProps) {
     return (
         <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-4'>
             {stats.map((stat, i) => (
-                <StatCard key={stat.label} stat={stat} delay={i * 50} />
+                <StatCard key={stat.label} stat={stat} delay={i * 50} expanded={expanded} onToggle={() => setExpanded(!expanded)} />
             ))}
         </div>
     );
