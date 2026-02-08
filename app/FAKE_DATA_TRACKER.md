@@ -34,12 +34,12 @@ Same — just _"Settings coming soon"_ with a placeholder card. No real function
 
 ## Real vs Fake Summary
 
-| Component                       | Real Data                        | Fake Data                            |
-| ------------------------------- | -------------------------------- | ------------------------------------ |
-| Stats Cards (Nodes/CPU/Memory)  | Nodes, CPU, Memory from hooks    | Network I/O card                     |
-| Resource Charts                 | CPU/Memory current snapshot      | Historical time-series, all Net I/O  |
-| Container Table                 | Task counts from `useTaskStats`  | Individual container rows (fallback) |
-| Services List                   | All real from `useServices`      | —                                    |
-| Activity Feed                   | —                                | Everything                           |
-| Logs page                       | —                                | Everything                           |
-| Settings page                   | —                                | Everything                           |
+| Component                      | Real Data                       | Fake Data                            |
+| ------------------------------ | ------------------------------- | ------------------------------------ |
+| Stats Cards (Nodes/CPU/Memory) | Nodes, CPU, Memory from hooks   | Network I/O card                     |
+| Resource Charts                | CPU/Memory current snapshot     | Historical time-series, all Net I/O  |
+| Container Table                | Task counts from `useTaskStats` | Individual container rows (fallback) |
+| Services List                  | All real from `useServices`     | —                                    |
+| Activity Feed                  | —                               | Everything                           |
+| Logs page                      | —                               | Everything                           |
+| Settings page                  | —                               | Everything                           |

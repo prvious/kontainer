@@ -43,7 +43,7 @@ function StatCard({ stat, delay }: { stat: StatCardData; delay: number }) {
     const expandable = hasNodes || hasHealthNodes;
 
     return (
-        <Card className='animate-fade-in-up overflow-hidden' style={{ animationDelay: `${delay}ms` }}>
+        <Card className='animate-fade-in-up overflow-hidden pt-0' style={{ animationDelay: `${delay}ms` }}>
             <CardContent className='p-4'>
                 <div className='flex items-start justify-between'>
                     <div>
@@ -147,12 +147,12 @@ export function StatsCards({ nodes, agents }: StatsCardsProps) {
     const memPct = totalMemTotal > 0 ? (totalMemUsed / totalMemTotal) * 100 : 0;
 
     const cpuNodes = agents.map((a) => ({
-        name: a.hostname,
+        name: a.nodeId.slice(0, 12),
         value: a.node.cpuPercent,
         max: 100,
     }));
     const memNodes = agents.map((a) => ({
-        name: a.hostname,
+        name: a.nodeId.slice(0, 12),
         value: a.node.memoryUsed,
         max: a.node.memoryTotal,
     }));
@@ -166,7 +166,7 @@ export function StatsCards({ nodes, agents }: StatsCardsProps) {
             trendValue: `${readyNodes}/${nodeCount} ready`,
             detail: `${managers} manager${managers !== 1 ? "s" : ""}`,
             healthNodes: nodes.map((n) => ({
-                name: n.hostname,
+                name: n.id.slice(0, 12),
                 role: n.role,
                 status: n.status,
                 availability: n.availability,

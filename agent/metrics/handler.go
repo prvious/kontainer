@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/clovismuneza/devoper/agent/cluster"
+	"github.com/clovismuneza/devoper/agent/storage"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -37,7 +38,7 @@ func NewInternalMetricsHandler(
 }
 
 func (h *InternalMetricsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	snapshot, err := h.collect(r.Context())
+	snapshot, err := h.Collect(r.Context())
 	if err != nil {
 		log.Printf("internal metrics error: %v", err)
 		w.Header().Set("Content-Type", "application/json")
@@ -50,7 +51,7 @@ func (h *InternalMetricsHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 	json.NewEncoder(w).Encode(snapshot)
 }
 
-func (h *InternalMetricsHandler) collect(ctx context.Context) (AgentMetricsSnapshot, error) {
+func (h *InternalMetricsHandler) Collect(ctx context.Context) (AgentMetricsSnapshot, error) {
 	nodeMetrics, err := h.nodeAction.Execute(ctx)
 	if err != nil {
 		return AgentMetricsSnapshot{}, fmt.Errorf("node metrics: %w", err)
@@ -76,22 +77,25 @@ type ClusterMetricsHandler struct {
 	local          *InternalMetricsHandler
 	registry       *cluster.Registry
 	internalSecret string
+	store          *storage.MetricsStore
 }
 
 func NewClusterMetricsHandler(
 	local *InternalMetricsHandler,
 	registry *cluster.Registry,
 	internalSecret string,
+	store *storage.MetricsStore,
 ) *ClusterMetricsHandler {
 	return &ClusterMetricsHandler{
 		local:          local,
 		registry:       registry,
 		internalSecret: internalSecret,
+		store:          store,
 	}
 }
 
 func (h *ClusterMetricsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	localSnapshot, err := h.local.collect(r.Context())
+	localSnapshot, err := h.local.Collect(r.Context())
 	if err != nil {
 		log.Printf("cluster metrics (local) error: %v", err)
 		w.Header().Set("Content-Type", "application/json")
@@ -111,10 +115,30 @@ func (h *ClusterMetricsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		agents = append(agents, snapshot)
 	}
 
+	// Parse range query param (default 1h, allowed: 1h, 6h, 24h)
+	rangeDuration := 1 * time.Hour
+	switch r.URL.Query().Get("range") {
+	case "6h":
+		rangeDuration = 6 * time.Hour
+	case "24h":
+		rangeDuration = 24 * time.Hour
+	}
+
+	since := time.Now().Add(-rangeDuration)
+	rows, err := h.store.Query(since, "")
+	if err != nil {
+		log.Printf("cluster metrics: history query error: %v", err)
+	}
+
+	history := make([]AgentMetricsSnapshot, 0, len(rows))
+	for _, row := range rows {
+		history = append(history, rowToSnapshot(row))
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(ClusterMetricsResponse{
 		Agents:  agents,
-		History: []AgentMetricsSnapshot{},
+		History: history,
 	})
 }
 
@@ -165,6 +189,25 @@ func (h *NodeMetricsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(snapshot)
+}
+
+func rowToSnapshot(r storage.MetricsRow) AgentMetricsSnapshot {
+	return AgentMetricsSnapshot{
+		Timestamp: r.Timestamp,
+		NodeID:    r.NodeID,
+		Hostname:  r.Hostname,
+		Node: NodeMetrics{
+			CPUs:          r.CPUs,
+			CPUPercent:    r.CPUPercent,
+			MemoryUsed:    r.MemUsed,
+			MemoryTotal:   r.MemTotal,
+			MemoryPercent: r.MemPercent,
+			DiskUsed:      r.DiskUsed,
+			DiskTotal:     r.DiskTotal,
+			DiskPercent:   r.DiskPercent,
+		},
+		Containers: []ContainerMetrics{},
+	}
 }
 
 var metricsHTTPClient = &http.Client{Timeout: 5 * time.Second}
