@@ -39,6 +39,7 @@ pub struct AgentMetricsSnapshot {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ClusterMetricsResponse {
     pub agents: Vec<AgentMetricsSnapshot>,
+    #[serde(default)]
     pub history: Vec<AgentMetricsSnapshot>,
 }
 

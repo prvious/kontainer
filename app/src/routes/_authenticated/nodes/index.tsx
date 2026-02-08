@@ -10,7 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { NodeActions } from "@/components/node-actions";
 import { AlertCircle, ChevronRight, Search, Server } from "lucide-react";
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import type { NodeItem } from "@/types/nodes";
 import type { AgentMetricsSnapshot, ContainerMetrics } from "@/types/metrics";
 
@@ -174,8 +174,8 @@ function NodesTable({ nodes, metricsMap, expandedNodeId, onToggleExpand }: Nodes
                     const isExpanded = expandedNodeId === node.id;
 
                     return (
-                        <>
-                            <TableRow key={node.id} className={metrics ? "cursor-pointer" : ""} onClick={() => metrics && onToggleExpand(node.id)}>
+                        <Fragment key={node.id}>
+                            <TableRow className={metrics ? "cursor-pointer" : ""} onClick={() => metrics && onToggleExpand(node.id)}>
                                 <TableCell>
                                     <StatusDot node={node} />
                                 </TableCell>
@@ -248,7 +248,7 @@ function NodesTable({ nodes, metricsMap, expandedNodeId, onToggleExpand }: Nodes
                                     </TableCell>
                                 </TableRow>
                             )}
-                        </>
+                        </Fragment>
                     );
                 })}
             </TableBody>

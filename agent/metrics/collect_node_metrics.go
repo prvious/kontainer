@@ -6,17 +6,25 @@ import (
 	"os"
 	"runtime"
 
-	"github.com/docker/docker/client"
+	"github.com/docker/docker/api/types/system"
 	"github.com/shirou/gopsutil/v4/cpu"
 	"github.com/shirou/gopsutil/v4/disk"
 	"github.com/shirou/gopsutil/v4/mem"
 )
 
-type CollectNodeMetricsAction struct {
-	dockerClient *client.Client
+// NodeMetricsDockerClient defines the Docker API subset needed for node metrics in dev mode.
+type NodeMetricsDockerClient interface {
+	Info(ctx context.Context) (system.Info, error)
 }
 
-func NewCollectNodeMetricsAction(dockerClient *client.Client) *CollectNodeMetricsAction {
+type CollectNodeMetricsAction struct {
+	dockerClient NodeMetricsDockerClient
+}
+
+func NewCollectNodeMetricsAction(dockerClient NodeMetricsDockerClient) *CollectNodeMetricsAction {
+	if _, err := os.Stat("/host/proc"); err == nil {
+		os.Setenv("HOST_PROC", "/host/proc")
+	}
 	return &CollectNodeMetricsAction{dockerClient: dockerClient}
 }
 
@@ -44,10 +52,6 @@ func (a *CollectNodeMetricsAction) collectFromDocker(ctx context.Context) (NodeM
 }
 
 func collectFromProc() (NodeMetrics, error) {
-	if _, err := os.Stat("/host/proc"); err == nil {
-		os.Setenv("HOST_PROC", "/host/proc")
-	}
-
 	v, err := mem.VirtualMemory()
 	if err != nil {
 		return NodeMetrics{}, err

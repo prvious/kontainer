@@ -43,7 +43,12 @@ func (a *CollectContainerMetricsAction) Execute(ctx context.Context) ([]Containe
 		stats.Body.Close()
 
 		cpuPct := calculateCPUPercent(&statsJSON)
-		memUsed := statsJSON.MemoryStats.Usage - statsJSON.MemoryStats.Stats["cache"]
+		memUsed := statsJSON.MemoryStats.Usage
+		if v, ok := statsJSON.MemoryStats.Stats["total_inactive_file"]; ok && v < memUsed {
+			memUsed -= v
+		} else if v, ok := statsJSON.MemoryStats.Stats["inactive_file"]; ok && v < memUsed {
+			memUsed -= v
+		}
 		memLimit := statsJSON.MemoryStats.Limit
 		memPct := 0.0
 		if memLimit > 0 {

@@ -113,7 +113,8 @@ func (h *ClusterMetricsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(ClusterMetricsResponse{
-		Agents: agents,
+		Agents:  agents,
+		History: []AgentMetricsSnapshot{},
 	})
 }
 
@@ -166,6 +167,8 @@ func (h *NodeMetricsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(snapshot)
 }
 
+var metricsHTTPClient = &http.Client{Timeout: 5 * time.Second}
+
 func fetchFollowerMetrics(ctx context.Context, addr string, secret string) (AgentMetricsSnapshot, error) {
 	url := fmt.Sprintf("http://%s/internal/metrics", addr)
 
@@ -175,14 +178,14 @@ func fetchFollowerMetrics(ctx context.Context, addr string, secret string) (Agen
 	}
 	req.Header.Set(cluster.InternalSecretHeader, secret)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := metricsHTTPClient.Do(req)
 	if err != nil {
 		return AgentMetricsSnapshot{}, fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return AgentMetricsSnapshot{}, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
 	}
 
