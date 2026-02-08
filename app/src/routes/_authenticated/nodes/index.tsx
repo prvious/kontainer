@@ -1,15 +1,18 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useNodes } from "@/hooks/use-nodes";
+import { useClusterMetrics } from "@/hooks/use-cluster-metrics";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { NodeActions } from "@/components/node-actions";
-import { AlertCircle, Search, Server } from "lucide-react";
-import { useState } from "react";
+import { AlertCircle, ChevronRight, Search, Server } from "lucide-react";
+import { useMemo, useState } from "react";
 import type { NodeItem } from "@/types/nodes";
+import type { AgentMetricsSnapshot, ContainerMetrics } from "@/types/metrics";
 
 function formatRelativeTime(iso: string): string {
     const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
@@ -20,6 +23,20 @@ function formatRelativeTime(iso: string): string {
     if (hours < 24) return `${hours}h ago`;
     const days = Math.floor(hours / 24);
     return `${days}d ago`;
+}
+
+function formatBytes(bytes: number): string {
+    if (bytes === 0) return "0 B";
+    const k = 1024;
+    const sizes = ["B", "KB", "MB", "GB", "TB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+}
+
+function metricsColorClass(pct: number): string {
+    if (pct >= 85) return "text-destructive";
+    if (pct >= 60) return "text-amber-500";
+    return "text-success";
 }
 
 function StatusDot({ node }: { node: NodeItem }) {
@@ -49,7 +66,90 @@ function AvailabilityBadge({ availability }: { availability: string }) {
     return <Badge variant='default'>active</Badge>;
 }
 
-function NodesTable({ nodes }: { nodes: NodeItem[] }) {
+function ContainersTable({ containers }: { containers: ContainerMetrics[] }) {
+    if (containers.length === 0) {
+        return <p className='text-xs text-muted-foreground'>No running containers</p>;
+    }
+
+    return (
+        <Table>
+            <TableHeader>
+                <TableRow>
+                    <TableHead className='text-xs'>Name</TableHead>
+                    <TableHead className='text-xs'>Service</TableHead>
+                    <TableHead className='text-right text-xs'>CPU %</TableHead>
+                    <TableHead className='text-right text-xs'>Memory</TableHead>
+                </TableRow>
+            </TableHeader>
+            <TableBody>
+                {containers.map((c) => (
+                    <TableRow key={c.containerId}>
+                        <TableCell className='py-1'>
+                            <span className='font-mono text-xs'>{c.name}</span>
+                        </TableCell>
+                        <TableCell className='py-1'>
+                            <span className='text-xs text-muted-foreground'>{c.serviceName || "—"}</span>
+                        </TableCell>
+                        <TableCell className='py-1 text-right'>
+                            <span className={`text-xs font-medium ${metricsColorClass(c.cpuPercent)}`}>{c.cpuPercent.toFixed(1)}%</span>
+                        </TableCell>
+                        <TableCell className='py-1 text-right'>
+                            <span className='text-xs text-muted-foreground'>
+                                {formatBytes(c.memoryUsed)} / {formatBytes(c.memoryLimit)}
+                            </span>
+                        </TableCell>
+                    </TableRow>
+                ))}
+            </TableBody>
+        </Table>
+    );
+}
+
+function ExpandedNodeDetail({ metrics }: { metrics: AgentMetricsSnapshot }) {
+    const { node, containers } = metrics;
+
+    return (
+        <div className='flex flex-col gap-4 p-4'>
+            <div className='grid grid-cols-3 gap-4'>
+                <div className='flex flex-col gap-1'>
+                    <span className='text-xs font-medium text-muted-foreground'>CPU</span>
+                    <span className='text-sm font-medium'>
+                        {node.cpuPercent.toFixed(1)}% of {node.cpus} cores
+                    </span>
+                    <Progress value={node.cpuPercent} className='h-1.5' />
+                </div>
+                <div className='flex flex-col gap-1'>
+                    <span className='text-xs font-medium text-muted-foreground'>Memory</span>
+                    <span className='text-sm font-medium'>
+                        {formatBytes(node.memoryUsed)} / {formatBytes(node.memoryTotal)} ({node.memoryPercent.toFixed(1)}%)
+                    </span>
+                    <Progress value={node.memoryPercent} className='h-1.5' />
+                </div>
+                <div className='flex flex-col gap-1'>
+                    <span className='text-xs font-medium text-muted-foreground'>Disk</span>
+                    <span className='text-sm font-medium'>
+                        {formatBytes(node.diskUsed)} / {formatBytes(node.diskTotal)} ({node.diskPercent.toFixed(1)}%)
+                    </span>
+                    <Progress value={node.diskPercent} className='h-1.5' />
+                </div>
+            </div>
+
+            <div>
+                <h4 className='mb-2 text-xs font-medium text-muted-foreground'>Containers ({containers.length})</h4>
+                <ContainersTable containers={containers} />
+            </div>
+        </div>
+    );
+}
+
+interface NodesTableProps {
+    nodes: NodeItem[];
+    metricsMap: Record<string, AgentMetricsSnapshot>;
+    expandedNodeId: string | null;
+    onToggleExpand: (nodeId: string) => void;
+}
+
+function NodesTable({ nodes, metricsMap, expandedNodeId, onToggleExpand }: NodesTableProps) {
     return (
         <Table>
             <TableHeader>
@@ -61,42 +161,96 @@ function NodesTable({ nodes }: { nodes: NodeItem[] }) {
                     <TableHead>IP</TableHead>
                     <TableHead>Engine</TableHead>
                     <TableHead>OS / Arch</TableHead>
+                    <TableHead>CPU</TableHead>
+                    <TableHead>Memory</TableHead>
+                    <TableHead>Disk</TableHead>
                     <TableHead className='text-right'>Updated</TableHead>
                     <TableHead className='w-10' />
                 </TableRow>
             </TableHeader>
             <TableBody>
-                {nodes.map((node) => (
-                    <TableRow key={node.id}>
-                        <TableCell>
-                            <StatusDot node={node} />
-                        </TableCell>
-                        <TableCell className='font-medium'>{node.hostname}</TableCell>
-                        <TableCell>
-                            <RoleBadge node={node} />
-                        </TableCell>
-                        <TableCell>
-                            <AvailabilityBadge availability={node.availability} />
-                        </TableCell>
-                        <TableCell>
-                            <span className='font-mono text-xs text-muted-foreground'>{node.ip}</span>
-                        </TableCell>
-                        <TableCell>
-                            <span className='font-mono text-xs text-muted-foreground'>{node.engineVersion}</span>
-                        </TableCell>
-                        <TableCell>
-                            <span className='text-xs text-muted-foreground'>
-                                {node.os}/{node.architecture}
-                            </span>
-                        </TableCell>
-                        <TableCell className='text-right'>
-                            <span className='text-xs text-muted-foreground'>{formatRelativeTime(node.updatedAt)}</span>
-                        </TableCell>
-                        <TableCell>
-                            <NodeActions node={node} />
-                        </TableCell>
-                    </TableRow>
-                ))}
+                {nodes.map((node) => {
+                    const metrics = metricsMap[node.id];
+                    const isExpanded = expandedNodeId === node.id;
+
+                    return (
+                        <>
+                            <TableRow key={node.id} className={metrics ? "cursor-pointer" : ""} onClick={() => metrics && onToggleExpand(node.id)}>
+                                <TableCell>
+                                    <StatusDot node={node} />
+                                </TableCell>
+                                <TableCell className='font-medium'>
+                                    <span className='flex items-center gap-1.5'>
+                                        {metrics && (
+                                            <ChevronRight className={`size-3.5 text-muted-foreground transition-transform ${isExpanded ? "rotate-90" : ""}`} />
+                                        )}
+                                        {node.hostname}
+                                    </span>
+                                </TableCell>
+                                <TableCell>
+                                    <RoleBadge node={node} />
+                                </TableCell>
+                                <TableCell>
+                                    <AvailabilityBadge availability={node.availability} />
+                                </TableCell>
+                                <TableCell>
+                                    <span className='font-mono text-xs text-muted-foreground'>{node.ip}</span>
+                                </TableCell>
+                                <TableCell>
+                                    <span className='font-mono text-xs text-muted-foreground'>{node.engineVersion}</span>
+                                </TableCell>
+                                <TableCell>
+                                    <span className='text-xs text-muted-foreground'>
+                                        {node.os}/{node.architecture}
+                                    </span>
+                                </TableCell>
+                                <TableCell>
+                                    {metrics ? (
+                                        <div className='flex items-center gap-2'>
+                                            <span className={`text-xs font-medium ${metricsColorClass(metrics.node.cpuPercent)}`}>
+                                                {metrics.node.cpuPercent.toFixed(1)}%
+                                            </span>
+                                            <Progress value={metrics.node.cpuPercent} className='h-1.5 w-16' />
+                                        </div>
+                                    ) : (
+                                        <span className='text-xs text-muted-foreground'>—</span>
+                                    )}
+                                </TableCell>
+                                <TableCell>
+                                    {metrics ? (
+                                        <span className='text-xs text-muted-foreground'>
+                                            {formatBytes(metrics.node.memoryUsed)} / {formatBytes(metrics.node.memoryTotal)}
+                                        </span>
+                                    ) : (
+                                        <span className='text-xs text-muted-foreground'>—</span>
+                                    )}
+                                </TableCell>
+                                <TableCell>
+                                    {metrics ? (
+                                        <span className={`text-xs font-medium ${metricsColorClass(metrics.node.diskPercent)}`}>
+                                            {metrics.node.diskPercent.toFixed(1)}%
+                                        </span>
+                                    ) : (
+                                        <span className='text-xs text-muted-foreground'>—</span>
+                                    )}
+                                </TableCell>
+                                <TableCell className='text-right'>
+                                    <span className='text-xs text-muted-foreground'>{formatRelativeTime(node.updatedAt)}</span>
+                                </TableCell>
+                                <TableCell onClick={(e) => e.stopPropagation()}>
+                                    <NodeActions node={node} />
+                                </TableCell>
+                            </TableRow>
+                            {isExpanded && metrics && (
+                                <TableRow key={`${node.id}-expanded`}>
+                                    <TableCell colSpan={12} className='bg-muted/30 p-0'>
+                                        <ExpandedNodeDetail metrics={metrics} />
+                                    </TableCell>
+                                </TableRow>
+                            )}
+                        </>
+                    );
+                })}
             </TableBody>
         </Table>
     );
@@ -127,7 +281,21 @@ function LoadingSkeleton() {
 
 function NodesPage() {
     const { data: nodes, isLoading, error } = useNodes();
+    const { data: metricsData } = useClusterMetrics();
     const [search, setSearch] = useState("");
+    const [expandedNodeId, setExpandedNodeId] = useState<string | null>(null);
+
+    const metricsMap = useMemo(() => {
+        const map: Record<string, AgentMetricsSnapshot> = {};
+        for (const agent of metricsData?.agents ?? []) {
+            map[agent.nodeId] = agent;
+        }
+        return map;
+    }, [metricsData]);
+
+    function handleToggleExpand(nodeId: string): void {
+        setExpandedNodeId((prev) => (prev === nodeId ? null : nodeId));
+    }
 
     const filtered = (nodes ?? []).filter(
         (node) =>
@@ -180,7 +348,7 @@ function NodesPage() {
                 ) : (
                     <Card>
                         <CardContent className='p-0'>
-                            <NodesTable nodes={filtered} />
+                            <NodesTable nodes={filtered} metricsMap={metricsMap} expandedNodeId={expandedNodeId} onToggleExpand={handleToggleExpand} />
                         </CardContent>
                     </Card>
                 )}
