@@ -59,8 +59,6 @@ func runExecSession(conn *websocket.Conn, wsMu *sync.Mutex, client DockerClient,
 	var attached bool
 
 	for _, sh := range shells {
-		log.Printf("exec: trying shell=%s for container=%s", sh, containerID)
-
 		resp, err := client.ContainerExecCreate(ctx, containerID, container.ExecOptions{
 			Tty:          true,
 			AttachStdin:  true,
@@ -95,7 +93,6 @@ func runExecSession(conn *websocket.Conn, wsMu *sync.Mutex, client DockerClient,
 		time.Sleep(50 * time.Millisecond)
 		inspect, err := client.ContainerExecInspect(ctx, resp.ID)
 		if err == nil && !inspect.Running && inspect.ExitCode == 127 {
-			log.Printf("exec: shell %s not found in container (exit 127), trying next", sh)
 			hj.Close()
 			continue
 		}
@@ -103,7 +100,6 @@ func runExecSession(conn *websocket.Conn, wsMu *sync.Mutex, client DockerClient,
 		execID = resp.ID
 		hijacked = hj
 		attached = true
-		log.Printf("exec: attached with shell=%s execID=%s", sh, execID)
 		break
 	}
 
@@ -225,7 +221,6 @@ func (h *ExecContainerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	rows := parseUint(r.URL.Query().Get("rows"), 24)
 
 	isLocal := nodeID == "" || nodeID == h.leaderNodeID
-	log.Printf("exec: containerID=%s nodeID=%s leaderNodeID=%s isLocal=%v", containerID, nodeID, h.leaderNodeID, isLocal)
 
 	// Pre-validate routing BEFORE upgrading WebSocket so we can return
 	// proper HTTP errors instead of upgrading and immediately closing.

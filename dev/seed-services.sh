@@ -12,6 +12,10 @@ echo "  Deploying monitoring stack..."
 docker cp "$SCRIPT_DIR/monitoring.yml" devoper-cluster-manager-1:/monitoring.yml
 $DOCKER stack deploy -c /monitoring.yml monitoring
 
+echo "  Deploying toolbox stack..."
+docker cp "$SCRIPT_DIR/toolbox.yml" devoper-cluster-manager-1:/toolbox.yml
+$DOCKER stack deploy -c /toolbox.yml toolbox
+
 echo "  Waiting for services to converge..."
 sleep 5
 

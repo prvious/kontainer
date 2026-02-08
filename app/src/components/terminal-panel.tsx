@@ -156,7 +156,9 @@ export function TerminalPanel({ target, onClose }: { target: ExecTarget; onClose
 
     const containerName = target.containerName || target.containerId.slice(0, 12);
 
-    const panelClasses = isFullscreen ? "fixed inset-0 z-50 flex flex-col bg-[#1a1b26]" : "flex flex-col border-t border-border bg-[#1a1b26]";
+    const panelClasses = isFullscreen
+        ? "fixed inset-0 z-50 flex flex-col bg-[#1a1b26]"
+        : "fixed bottom-0 left-0 right-0 z-40 flex flex-col border-t border-border bg-[#1a1b26] shadow-[0_-4px_20px_rgba(0,0,0,0.3)]";
 
     return (
         <div className={panelClasses} style={isFullscreen ? undefined : { height: panelHeight }}>
