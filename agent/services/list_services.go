@@ -36,6 +36,10 @@ type DockerClient interface {
 	ConfigList(ctx context.Context, opts swarm.ConfigListOptions) ([]swarm.Config, error)
 	ConfigCreate(ctx context.Context, config swarm.ConfigSpec) (swarm.ConfigCreateResponse, error)
 	ConfigRemove(ctx context.Context, id string) error
+	ContainerExecCreate(ctx context.Context, container string, config container.ExecOptions) (types.IDResponse, error)
+	ContainerExecAttach(ctx context.Context, execID string, config container.ExecAttachOptions) (types.HijackedResponse, error)
+	ContainerExecResize(ctx context.Context, execID string, options container.ResizeOptions) error
+	ContainerExecInspect(ctx context.Context, execID string) (container.ExecInspect, error)
 }
 
 type ServiceItem struct {

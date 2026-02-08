@@ -40,6 +40,7 @@ func New(
 	createConfigHandler *services.CreateConfigHandler,
 	removeConfigHandler *services.RemoveConfigHandler,
 	listAgentsHandler *services.ListAgentsHandler,
+	execHandler *services.ExecContainerHandler,
 	clusterMetricsHandler *metrics.ClusterMetricsHandler,
 	nodeMetricsHandler *metrics.NodeMetricsHandler,
 ) http.Handler {
@@ -67,6 +68,7 @@ func New(
 		// WebSocket routes — self-managed auth via query param token
 		r.Get("/services/{serviceID}/logs", streamLogsHandler.ServeHTTP)
 		r.Get("/tasks/{taskID}/logs", streamTaskLogsHandler.ServeHTTP)
+		r.Get("/exec/{containerID}", execHandler.ServeHTTP)
 
 		// REST routes — JWT middleware via Authorization header
 		r.Group(func(r chi.Router) {

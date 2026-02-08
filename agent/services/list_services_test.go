@@ -134,6 +134,22 @@ func (m *mockDockerClient) ConfigRemove(_ context.Context, _ string) error {
 	return m.configRemoveErr
 }
 
+func (m *mockDockerClient) ContainerExecCreate(_ context.Context, _ string, _ container.ExecOptions) (types.IDResponse, error) {
+	return types.IDResponse{}, nil
+}
+
+func (m *mockDockerClient) ContainerExecAttach(_ context.Context, _ string, _ container.ExecAttachOptions) (types.HijackedResponse, error) {
+	return types.HijackedResponse{}, nil
+}
+
+func (m *mockDockerClient) ContainerExecResize(_ context.Context, _ string, _ container.ResizeOptions) error {
+	return nil
+}
+
+func (m *mockDockerClient) ContainerExecInspect(_ context.Context, _ string) (container.ExecInspect, error) {
+	return container.ExecInspect{}, nil
+}
+
 func uint64Ptr(v uint64) *uint64 { return &v }
 
 func TestListServicesHandler_ReplicatedWithStack(t *testing.T) {

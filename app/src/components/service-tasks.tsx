@@ -7,7 +7,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { AlertCircle, ListTodo } from "lucide-react";
+import { AlertCircle, ListTodo, Terminal } from "lucide-react";
+import { useTerminal } from "@/hooks/use-terminal";
+import { Button } from "@/components/ui/button";
 import type { ServiceTaskItem } from "@/types/service-tasks";
 import type { ContainerMetrics } from "@/types/metrics";
 
@@ -57,6 +59,8 @@ function TasksTable({
     onTaskClick: (taskId: string) => void;
     containerMetricsMap: Record<string, ContainerMetrics>;
 }) {
+    const { openExec } = useTerminal();
+
     return (
         <Table>
             <TableHeader>
@@ -70,6 +74,7 @@ function TasksTable({
                     <TableHead>CPU</TableHead>
                     <TableHead>Memory</TableHead>
                     <TableHead className='text-right'>Updated</TableHead>
+                    <TableHead className='w-12' />
                 </TableRow>
             </TableHeader>
             <TableBody>
@@ -133,6 +138,27 @@ function TasksTable({
                             </TableCell>
                             <TableCell className='text-right'>
                                 <span className='text-xs text-muted-foreground'>{formatRelativeTime(task.timestamp)}</span>
+                            </TableCell>
+                            <TableCell>
+                                {task.state === "running" && task.containerId && (
+                                    <Button
+                                        variant='ghost'
+                                        size='sm'
+                                        className='size-7 p-0'
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            openExec({
+                                                containerId: task.containerId,
+                                                nodeId: task.nodeId,
+                                                containerName: task.nodeName
+                                                    ? `${task.nodeName}/${task.containerId.slice(0, 12)}`
+                                                    : task.containerId.slice(0, 12),
+                                            });
+                                        }}
+                                    >
+                                        <Terminal className='size-3.5' />
+                                    </Button>
+                                )}
                             </TableCell>
                         </TableRow>
                     );
