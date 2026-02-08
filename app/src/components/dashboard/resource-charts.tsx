@@ -135,7 +135,7 @@ export function ResourceCharts({ agents, history }: ResourceChartsProps) {
                                 <CartesianGrid vertical={false} strokeDasharray='3 3' className='stroke-border' />
                                 <XAxis dataKey='time' tickLine={false} axisLine={false} tick={{ fontSize: 10 }} className='fill-muted-foreground' />
                                 <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 10 }} domain={[0, 100]} unit='%' className='fill-muted-foreground' />
-                                <ChartTooltip content={<ChartTooltipContent formatter={(value) => Number(value).toFixed(1)} />} />
+                                <ChartTooltip content={<ChartTooltipContent />} />
                                 <Area type='monotone' dataKey='cpu' stroke='var(--color-chart-1)' fill='url(#cpuGradient)' strokeWidth={2} />
                                 <Area type='monotone' dataKey='memory' stroke='var(--color-chart-2)' fill='url(#memGradient)' strokeWidth={2} />
                             </AreaChart>
