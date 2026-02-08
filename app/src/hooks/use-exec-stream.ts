@@ -67,7 +67,10 @@ export function useExecStream(containerId: string, nodeId: string, shell = "/bin
             ws.binaryType = "arraybuffer";
             wsRef.current = ws;
 
+            let didOpen = false;
+
             ws.onopen = () => {
+                didOpen = true;
                 setStatus("connected");
             };
 
@@ -103,11 +106,14 @@ export function useExecStream(containerId: string, nodeId: string, shell = "/bin
             };
 
             ws.onclose = () => {
-                setStatus((prev) => (prev === "exited" ? prev : "disconnected"));
+                setStatus((prev) => (prev === "exited" || prev === "error" ? prev : "disconnected"));
             };
 
             ws.onerror = () => {
                 setStatus("error");
+                if (!didOpen && terminalRef.current) {
+                    terminalRef.current.write("\r\n\x1b[31mFailed to connect. The container may not have a shell.\x1b[0m\r\n");
+                }
             };
         },
         [agentUrl, token, containerId, nodeId, shell],

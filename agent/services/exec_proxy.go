@@ -32,6 +32,7 @@ func proxyWebSocket(clientConn *websocket.Conn, followerAddr, containerID, shell
 	header := http.Header{}
 	header.Set("X-Devoper-Secret", secret)
 
+	log.Printf("proxy: dialing follower at %s for container=%s", dialURL, containerID)
 	followerConn, _, err := proxyDialer.Dial(dialURL, header)
 	if err != nil {
 		log.Printf("proxy dial follower error: %v", err)
@@ -40,6 +41,7 @@ func proxyWebSocket(clientConn *websocket.Conn, followerAddr, containerID, shell
 		return
 	}
 	defer followerConn.Close()
+	log.Printf("proxy: connected to follower for container=%s", containerID)
 
 	done := make(chan struct{})
 	var once sync.Once
@@ -51,9 +53,11 @@ func proxyWebSocket(clientConn *websocket.Conn, followerAddr, containerID, shell
 		for {
 			msgType, msg, err := clientConn.ReadMessage()
 			if err != nil {
+				log.Printf("proxy: client→follower exiting: %v", err)
 				return
 			}
 			if err := followerConn.WriteMessage(msgType, msg); err != nil {
+				log.Printf("proxy: client→follower write error: %v", err)
 				return
 			}
 		}
@@ -65,15 +69,18 @@ func proxyWebSocket(clientConn *websocket.Conn, followerAddr, containerID, shell
 		for {
 			msgType, msg, err := followerConn.ReadMessage()
 			if err != nil {
+				log.Printf("proxy: follower→client exiting: %v", err)
 				return
 			}
 			if err := clientConn.WriteMessage(msgType, msg); err != nil {
+				log.Printf("proxy: follower→client write error: %v", err)
 				return
 			}
 		}
 	}()
 
 	<-done
+	log.Printf("proxy: session done for container=%s", containerID)
 }
 
 func (m *execStatusMsg) marshal() ([]byte, error) {

@@ -4,14 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/clovismuneza/devoper/agent/auth"
 	"github.com/clovismuneza/devoper/agent/cluster"
+	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
@@ -38,39 +39,79 @@ func writeExecMsg(conn *websocket.Conn, mu *sync.Mutex, msg execStatusMsg) {
 	mu.Unlock()
 }
 
+// defaultShells is the order in which shells are tried when the requested
+// shell is not found (exit code 127).
+var defaultShells = []string{"/bin/sh", "/bin/bash", "/bin/ash"}
+
 func runExecSession(conn *websocket.Conn, wsMu *sync.Mutex, client DockerClient, containerID, shell string, cols, rows uint) {
 	ctx := context.Background()
 
-	execResp, err := client.ContainerExecCreate(ctx, containerID, container.ExecOptions{
-		Tty:          true,
-		AttachStdin:  true,
-		AttachStdout: true,
-		AttachStderr: true,
-		Cmd:          []string{shell},
-	})
-	if err != nil {
-		log.Printf("exec create error: %v", err)
-		writeExecMsg(conn, wsMu, execStatusMsg{Type: "error", Message: fmt.Sprintf("failed to create exec: %v", err)})
-		return
+	// Build list of shells to try: requested first, then defaults (deduped).
+	shells := []string{shell}
+	for _, s := range defaultShells {
+		if s != shell {
+			shells = append(shells, s)
+		}
 	}
 
-	hijacked, err := client.ContainerExecAttach(ctx, execResp.ID, container.ExecAttachOptions{
-		Tty: true,
-	})
-	if err != nil {
-		log.Printf("exec attach error: %v", err)
-		writeExecMsg(conn, wsMu, execStatusMsg{Type: "error", Message: fmt.Sprintf("failed to attach exec: %v", err)})
+	var execID string
+	var hijacked types.HijackedResponse
+	var attached bool
+
+	for _, sh := range shells {
+		log.Printf("exec: trying shell=%s for container=%s", sh, containerID)
+
+		resp, err := client.ContainerExecCreate(ctx, containerID, container.ExecOptions{
+			Tty:          true,
+			AttachStdin:  true,
+			AttachStdout: true,
+			AttachStderr: true,
+			Cmd:          []string{sh},
+		})
+		if err != nil {
+			log.Printf("exec create error: %v", err)
+			writeExecMsg(conn, wsMu, execStatusMsg{Type: "error", Message: fmt.Sprintf("failed to create exec: %v", err)})
+			return
+		}
+
+		hj, err := client.ContainerExecAttach(ctx, resp.ID, container.ExecAttachOptions{
+			Tty: true,
+		})
+		if err != nil {
+			log.Printf("exec attach error: %v", err)
+			writeExecMsg(conn, wsMu, execStatusMsg{Type: "error", Message: fmt.Sprintf("failed to attach exec: %v", err)})
+			return
+		}
+
+		// Set initial terminal size
+		if cols > 0 && rows > 0 {
+			_ = client.ContainerExecResize(ctx, resp.ID, container.ResizeOptions{
+				Width:  cols,
+				Height: rows,
+			})
+		}
+
+		// Wait briefly and check if the exec exited immediately (command not found).
+		time.Sleep(50 * time.Millisecond)
+		inspect, err := client.ContainerExecInspect(ctx, resp.ID)
+		if err == nil && !inspect.Running && inspect.ExitCode == 127 {
+			log.Printf("exec: shell %s not found in container (exit 127), trying next", sh)
+			hj.Close()
+			continue
+		}
+
+		execID = resp.ID
+		hijacked = hj
+		attached = true
+		log.Printf("exec: attached with shell=%s execID=%s", sh, execID)
+		break
+	}
+
+	if !attached {
+		writeExecMsg(conn, wsMu, execStatusMsg{Type: "error", Message: "no shell found in container (tried: " + fmt.Sprintf("%v", shells) + ")"})
 		return
 	}
 	defer hijacked.Close()
-
-	// Set initial terminal size
-	if cols > 0 && rows > 0 {
-		_ = client.ContainerExecResize(ctx, execResp.ID, container.ResizeOptions{
-			Width:  cols,
-			Height: rows,
-		})
-	}
 
 	done := make(chan struct{})
 	var once sync.Once
@@ -95,7 +136,7 @@ func runExecSession(conn *websocket.Conn, wsMu *sync.Mutex, client DockerClient,
 					continue
 				}
 				if msg.Type == "resize" && msg.Cols > 0 && msg.Rows > 0 {
-					_ = client.ContainerExecResize(ctx, execResp.ID, container.ResizeOptions{
+					_ = client.ContainerExecResize(ctx, execID, container.ResizeOptions{
 						Width:  msg.Cols,
 						Height: msg.Rows,
 					})
@@ -119,9 +160,6 @@ func runExecSession(conn *websocket.Conn, wsMu *sync.Mutex, client DockerClient,
 				}
 			}
 			if err != nil {
-				if err != io.EOF {
-					log.Printf("exec read error: %v", err)
-				}
 				return
 			}
 		}
@@ -129,9 +167,8 @@ func runExecSession(conn *websocket.Conn, wsMu *sync.Mutex, client DockerClient,
 
 	<-done
 
-	// Try to get exit code — safe to write now since goroutine 2 has exited or
-	// will exit shortly (hijacked.Close runs via defer after we return)
-	inspect, err := client.ContainerExecInspect(ctx, execResp.ID)
+	// Try to get exit code
+	inspect, err := client.ContainerExecInspect(ctx, execID)
 	if err == nil && !inspect.Running {
 		writeExecMsg(conn, wsMu, execStatusMsg{Type: "exit", Code: inspect.ExitCode})
 	}
@@ -188,6 +225,7 @@ func (h *ExecContainerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	rows := parseUint(r.URL.Query().Get("rows"), 24)
 
 	isLocal := nodeID == "" || nodeID == h.leaderNodeID
+	log.Printf("exec: containerID=%s nodeID=%s leaderNodeID=%s isLocal=%v", containerID, nodeID, h.leaderNodeID, isLocal)
 
 	// Pre-validate routing BEFORE upgrading WebSocket so we can return
 	// proper HTTP errors instead of upgrading and immediately closing.
@@ -216,10 +254,22 @@ func (h *ExecContainerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 
 	if isLocal {
 		runExecSession(conn, &wsMu, h.client, containerID, shell, cols, rows)
+		sendCloseFrame(conn)
 		return
 	}
 
 	proxyWebSocket(conn, followerAddr, containerID, shell, h.internalSecret, cols, rows)
+	sendCloseFrame(conn)
+}
+
+// sendCloseFrame writes a clean WebSocket close frame so the peer
+// (proxy or browser) receives any pending messages before the TCP drop.
+func sendCloseFrame(conn *websocket.Conn) {
+	_ = conn.WriteControl(
+		websocket.CloseMessage,
+		websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
+		time.Now().Add(2*time.Second),
+	)
 }
 
 // ExecContainerFollowerHandler handles exec WebSocket connections on followers.
@@ -261,6 +311,7 @@ func (h *ExecContainerFollowerHandler) ServeHTTP(w http.ResponseWriter, r *http.
 
 	var wsMu sync.Mutex
 	runExecSession(conn, &wsMu, h.client, containerID, shell, cols, rows)
+	sendCloseFrame(conn)
 }
 
 func parseUint(s string, fallback uint) uint {
