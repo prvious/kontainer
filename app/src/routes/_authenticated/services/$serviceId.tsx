@@ -4,6 +4,8 @@ import { useServiceDetail } from "@/hooks/use-service-detail";
 import { useScaleService } from "@/hooks/use-scale-service";
 import { useRestartService } from "@/hooks/use-restart-service";
 import { useRollbackService } from "@/hooks/use-rollback-service";
+import { EnvEditor } from "@/components/env-editor";
+import { ImageEditor } from "@/components/image-editor";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -289,7 +291,9 @@ function ServiceDetailPage() {
                                     <dd className='truncate font-mono text-xs'>{data.id}</dd>
 
                                     <dt className='text-muted-foreground'>Image</dt>
-                                    <dd className='truncate font-mono text-xs'>{data.image}</dd>
+                                    <dd>
+                                        <ImageEditor key={data.image} serviceId={serviceId} currentImage={data.image} />
+                                    </dd>
 
                                     {data.previousImage && (
                                         <>
@@ -375,26 +379,7 @@ function ServiceDetailPage() {
                                 <CardTitle className='text-sm'>Environment Variables</CardTitle>
                             </CardHeader>
                             <CardContent>
-                                {data.env.length === 0 ? (
-                                    <p className='text-sm text-muted-foreground'>No environment variables set</p>
-                                ) : (
-                                    <Table>
-                                        <TableHeader>
-                                            <TableRow>
-                                                <TableHead>Key</TableHead>
-                                                <TableHead>Value</TableHead>
-                                            </TableRow>
-                                        </TableHeader>
-                                        <TableBody>
-                                            {data.env.map((env, i) => (
-                                                <TableRow key={i}>
-                                                    <TableCell className='font-mono text-xs font-medium'>{env.key}</TableCell>
-                                                    <TableCell className='max-w-md truncate font-mono text-xs text-muted-foreground'>{env.value}</TableCell>
-                                                </TableRow>
-                                            ))}
-                                        </TableBody>
-                                    </Table>
-                                )}
+                                <EnvEditor key={data.env.map((e) => `${e.key}=${e.value}`).join(",")} serviceId={serviceId} initialEnv={data.env} />
                             </CardContent>
                         </Card>
                     </TabsContent>

@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { NodeActions } from "@/components/node-actions";
 import { AlertCircle, Search, Server } from "lucide-react";
 import { useState } from "react";
 import type { NodeItem } from "@/types/nodes";
@@ -61,6 +62,7 @@ function NodesTable({ nodes }: { nodes: NodeItem[] }) {
                     <TableHead>Engine</TableHead>
                     <TableHead>OS / Arch</TableHead>
                     <TableHead className='text-right'>Updated</TableHead>
+                    <TableHead className='w-10' />
                 </TableRow>
             </TableHeader>
             <TableBody>
@@ -89,6 +91,9 @@ function NodesTable({ nodes }: { nodes: NodeItem[] }) {
                         </TableCell>
                         <TableCell className='text-right'>
                             <span className='text-xs text-muted-foreground'>{formatRelativeTime(node.updatedAt)}</span>
+                        </TableCell>
+                        <TableCell>
+                            <NodeActions node={node} />
                         </TableCell>
                     </TableRow>
                 ))}

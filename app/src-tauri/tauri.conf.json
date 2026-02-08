@@ -14,8 +14,8 @@
             {
                 "label": "main",
                 "title": "devoper",
-                "width": 1100,
-                "height": 750,
+                "width": 1400,
+                "height": 900,
                 "minWidth": 900,
                 "minHeight": 650,
                 "visible": false
