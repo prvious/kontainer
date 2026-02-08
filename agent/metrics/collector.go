@@ -3,6 +3,7 @@ package metrics
 import (
 	"context"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/clovismuneza/devoper/agent/cluster"
@@ -16,6 +17,8 @@ type MetricsCollector struct {
 	store          *storage.MetricsStore
 	interval       time.Duration
 	stopCh         chan struct{}
+	stopOnce       sync.Once
+	wg             sync.WaitGroup
 }
 
 func NewMetricsCollector(
@@ -36,7 +39,10 @@ func NewMetricsCollector(
 }
 
 func (c *MetricsCollector) Start(ctx context.Context) {
+	c.wg.Add(1)
 	go func() {
+		defer c.wg.Done()
+
 		ticker := time.NewTicker(c.interval)
 		defer ticker.Stop()
 
@@ -64,7 +70,10 @@ func (c *MetricsCollector) Start(ctx context.Context) {
 }
 
 func (c *MetricsCollector) Stop() {
-	close(c.stopCh)
+	c.stopOnce.Do(func() {
+		close(c.stopCh)
+	})
+	c.wg.Wait()
 }
 
 func snapshotToRow(s AgentMetricsSnapshot) storage.MetricsRow {

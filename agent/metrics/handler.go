@@ -115,12 +115,13 @@ func (h *ClusterMetricsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		agents = append(agents, snapshot)
 	}
 
-	// Parse range query param (default 1h)
+	// Parse range query param (default 1h, allowed: 1h, 6h, 24h)
 	rangeDuration := 1 * time.Hour
-	if rangeParam := r.URL.Query().Get("range"); rangeParam != "" {
-		if d, err := time.ParseDuration(rangeParam); err == nil {
-			rangeDuration = d
-		}
+	switch r.URL.Query().Get("range") {
+	case "6h":
+		rangeDuration = 6 * time.Hour
+	case "24h":
+		rangeDuration = 24 * time.Hour
 	}
 
 	since := time.Now().Add(-rangeDuration)

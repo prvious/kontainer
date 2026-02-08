@@ -5,6 +5,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/clovismuneza/devoper/agent/auth"
@@ -212,11 +214,9 @@ func startLeader(cfg *config.Config) {
 	if err != nil {
 		log.Fatalf("Failed to create metrics store: %v", err)
 	}
-	defer metricsStore.Close()
 
 	collector := metrics.NewMetricsCollector(internalMetricsHandler, clusterRegistry, cfg.InternalSecret, metricsStore, interval)
 	collector.Start(context.Background())
-	defer collector.Stop()
 
 	clusterMetricsHandler := metrics.NewClusterMetricsHandler(internalMetricsHandler, clusterRegistry, cfg.InternalSecret, metricsStore)
 	nodeMetricsHandler := metrics.NewNodeMetricsHandler(internalMetricsHandler, clusterRegistry, cfg.InternalSecret)
@@ -237,8 +237,29 @@ func startLeader(cfg *config.Config) {
 
 	handler := server.New(authHandler, jwtMiddleware, listServicesHandler, inspectServiceHandler, scaleServiceHandler, restartServiceHandler, rollbackServiceHandler, listStacksHandler, removeStackHandler, listServiceTasksHandler, inspectTaskHandler, listNodesHandler, listTaskStatsHandler, streamLogsHandler, streamTaskLogsHandler, listNetworksHandler, listVolumesHandler, updateServiceEnvHandler, updateServiceImageHandler, updateNodeAvailabilityHandler, updateNodeRoleHandler, listSecretsHandler, createSecretHandler, removeSecretHandler, listConfigsHandler, createConfigHandler, removeConfigHandler, listAgentsHandler, clusterMetricsHandler, nodeMetricsHandler)
 
-	addr := ":" + cfg.Port
-	log.Printf("  listening on    : %s (leader)", addr)
+	srv := &http.Server{Addr: ":" + cfg.Port, Handler: handler}
+
+	// Graceful shutdown on SIGINT/SIGTERM
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		<-sigCh
+		log.Println("shutting down...")
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		srv.Shutdown(ctx)
+	}()
+
+	log.Printf("  listening on    : %s (leader)", srv.Addr)
 	log.Println("----------------------------")
-	log.Fatal(http.ListenAndServe(addr, handler))
+
+	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+		log.Fatalf("server error: %v", err)
+	}
+
+	// Cleanup in correct order: stop collector before closing store
+	collector.Stop()
+	metricsStore.Close()
 }

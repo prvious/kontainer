@@ -69,7 +69,7 @@ handlers/
 ### General
 
 - Keep dependencies minimal — prefer stdlib where reasonable
-- Go agent should remain stateless — no database, in-memory only
+- Go agent is mostly stateless — the only exception is an embedded SQLite database (`modernc.org/sqlite`, pure Go) used by the leader to store time-series node metrics with automatic retention-based pruning. All other state is in-memory only.
 - Desktop app stores session data locally via `tauri-plugin-store` (`session.json`)
 
 ## Repository Structure
@@ -107,7 +107,7 @@ pnpm --filter app <script>     # Run a script in /app
 - Auth: OAuth 2.0 + JWT
 - Transport: HTTPS + WebSocket
 - App Storage: tauri-plugin-store (session.json)
-- Agent Storage: Stateless (in-memory only)
+- Agent Storage: In-memory + embedded SQLite for metrics history (leader only)
 
 ## Supported Orchestrators
 

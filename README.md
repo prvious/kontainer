@@ -89,7 +89,7 @@ A desktop app for managing Docker Swarm clusters. Self-hosted, lightweight, mult
 | Agent | Go (Chi, Docker SDK, gorilla/websocket) |
 | Auth | OAuth 2.0 + JWT (HS256) |
 | Transport | HTTPS + WebSocket |
-| Storage | Agent: stateless (in-memory). App: tauri-plugin-store |
+| Storage | Agent: in-memory + embedded SQLite for metrics (leader only). App: tauri-plugin-store |
 
 ## Deployment
 
