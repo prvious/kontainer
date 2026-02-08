@@ -3,7 +3,12 @@ import { render, screen, act } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import { AuthProvider } from "@/contexts/auth-context";
 import { useAuth } from "@/hooks/use-auth";
-import type { StoredSession } from "@/types/auth";
+import type { StoredProfiles } from "@/types/connection";
+
+const emptyProfiles: StoredProfiles = {
+    profiles: [],
+    activeProfileId: null,
+};
 
 class MockWebSocket {
     static instances: MockWebSocket[] = [];
@@ -57,20 +62,32 @@ describe("Token Expiry", () => {
     it("auto-logs out when token expires", async () => {
         // Token expires at now + 15 seconds
         const nowSec = Math.floor(Date.now() / 1000);
-        const session: StoredSession = {
-            userId: "123",
-            userName: "Jane Doe",
-            userEmail: "jane@example.com",
-            userAvatarUrl: "https://example.com/avatar.png",
-            userProvider: "github",
-            token: "valid.jwt.token",
-            expiresAt: nowSec + 15,
-            agentUrl: "http://localhost:8080",
+        const profiles: StoredProfiles = {
+            profiles: [
+                {
+                    id: "p1",
+                    label: "Default",
+                    agentUrl: "http://localhost:8080",
+                    userId: "123",
+                    userName: "Jane Doe",
+                    userEmail: "jane@example.com",
+                    userAvatarUrl: "https://example.com/avatar.png",
+                    userProvider: "github",
+                    token: "valid.jwt.token",
+                    expiresAt: nowSec + 15,
+                },
+            ],
+            activeProfileId: "p1",
         };
 
+        let deleted = false;
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === "load_session") return session;
-            if (cmd === "delete_session") return undefined;
+            if (cmd === "load_profiles") return deleted ? emptyProfiles : profiles;
+            if (cmd === "delete_profile") {
+                deleted = true;
+                return undefined;
+            }
+            if (cmd === "set_active_profile") return undefined;
             return undefined;
         });
 
@@ -87,24 +104,31 @@ describe("Token Expiry", () => {
 
         // User should be logged out
         expect(screen.getByTestId("user")).toHaveTextContent("none");
-        expect(invoke).toHaveBeenCalledWith("delete_session");
+        expect(invoke).toHaveBeenCalledWith("delete_profile", { profileId: "p1" });
     });
 
     it("does not log out when token is still valid", async () => {
         const nowSec = Math.floor(Date.now() / 1000);
-        const session: StoredSession = {
-            userId: "123",
-            userName: "Jane Doe",
-            userEmail: "jane@example.com",
-            userAvatarUrl: "https://example.com/avatar.png",
-            userProvider: "github",
-            token: "valid.jwt.token",
-            expiresAt: nowSec + 99999,
-            agentUrl: "http://localhost:8080",
+        const profiles: StoredProfiles = {
+            profiles: [
+                {
+                    id: "p1",
+                    label: "Default",
+                    agentUrl: "http://localhost:8080",
+                    userId: "123",
+                    userName: "Jane Doe",
+                    userEmail: "jane@example.com",
+                    userAvatarUrl: "https://example.com/avatar.png",
+                    userProvider: "github",
+                    token: "valid.jwt.token",
+                    expiresAt: nowSec + 99999,
+                },
+            ],
+            activeProfileId: "p1",
         };
 
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === "load_session") return session;
+            if (cmd === "load_profiles") return profiles;
             return undefined;
         });
 
@@ -124,7 +148,7 @@ describe("Token Expiry", () => {
 
     it("clears interval on unmount", async () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === "load_session") return null;
+            if (cmd === "load_profiles") return emptyProfiles;
             return undefined;
         });
 

@@ -117,9 +117,9 @@ describe("Redirect After Login", () => {
         vi.stubGlobal("WebSocket", MockWebSocket);
 
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === "load_session") return null;
+            if (cmd === "load_profiles") return { profiles: [], activeProfileId: null };
             if (cmd === "parse_auth_token") return mockParsedToken;
-            if (cmd === "save_session") return undefined;
+            if (cmd === "save_profile") return undefined;
             if (cmd === "delete_session") return undefined;
             return undefined;
         });

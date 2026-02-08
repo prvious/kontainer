@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { AuthUser, ParsedToken, StoredSession } from "@/types/auth";
+import type { AuthUser, ParsedToken } from "@/types/auth";
+import type { ConnectionProfile, StoredProfiles } from "@/types/connection";
 import { AuthContext } from "@/contexts/auth-context-value";
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -10,14 +11,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [expiresAt, setExpiresAt] = useState<number | null>(null);
     const [agentUrl, setAgentUrl] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(true);
+    const [profiles, setProfiles] = useState<ConnectionProfile[]>([]);
+    const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
 
     const wsRef = useRef<WebSocket | null>(null);
+    const pendingLabelRef = useRef<string>("Default");
 
     const clearState = useCallback(() => {
         setUser(null);
         setToken(null);
         setExpiresAt(null);
         setAgentUrl(null);
+    }, []);
+
+    const applyProfile = useCallback((profile: ConnectionProfile) => {
+        setUser({
+            id: profile.userId,
+            name: profile.userName,
+            email: profile.userEmail,
+            avatarUrl: profile.userAvatarUrl,
+            provider: profile.userProvider,
+        });
+        setToken(profile.token);
+        setExpiresAt(profile.expiresAt);
+        setAgentUrl(profile.agentUrl);
+        setActiveProfileId(profile.id);
     }, []);
 
     const logout = useCallback(async () => {
@@ -27,6 +45,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             console.error("Failed to delete session:", err);
         }
         clearState();
+
+        // Reload profiles after removing the active one
+        try {
+            const data = await invoke<StoredProfiles>("load_profiles");
+            setProfiles(data.profiles);
+            setActiveProfileId(data.activeProfileId);
+        } catch {
+            setProfiles([]);
+            setActiveProfileId(null);
+        }
     }, [clearState]);
 
     const handleToken = useCallback(async (jwt: string, loginAgentUrl: string) => {
@@ -34,14 +62,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             const parsed = await invoke<ParsedToken>("parse_auth_token", {
                 token: jwt,
             });
+
+            const profileId = crypto.randomUUID();
+            const label = pendingLabelRef.current;
+
             setUser(parsed.user);
             setToken(jwt);
             setExpiresAt(parsed.expiresAt);
             setAgentUrl(loginAgentUrl);
 
             try {
-                await invoke("save_session", {
+                await invoke("save_profile", {
                     input: {
+                        id: profileId,
+                        label,
+                        agentUrl: loginAgentUrl,
                         userId: parsed.user.id,
                         userName: parsed.user.name,
                         userEmail: parsed.user.email,
@@ -49,11 +84,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                         userProvider: parsed.user.provider,
                         token: jwt,
                         expiresAt: parsed.expiresAt,
-                        agentUrl: loginAgentUrl,
                     },
                 });
             } catch (err) {
-                console.error("Failed to save session:", err);
+                console.error("Failed to save profile:", err);
+            }
+
+            // Reload profiles
+            try {
+                const data = await invoke<StoredProfiles>("load_profiles");
+                setProfiles(data.profiles);
+                setActiveProfileId(data.activeProfileId);
+            } catch {
+                // At minimum set the new profile locally
+                setActiveProfileId(profileId);
             }
         } catch (err) {
             console.error("Failed to parse auth token:", err);
@@ -66,25 +110,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         async function restore() {
             try {
-                const session = await invoke<StoredSession | null>("load_session");
-                if (cancelled || !session) return;
+                const data = await invoke<StoredProfiles>("load_profiles");
+                if (cancelled) return;
 
-                const now = Math.floor(Date.now() / 1000);
-                if (session.expiresAt <= now) {
-                    await invoke("delete_session");
-                    return;
+                setProfiles(data.profiles);
+                setActiveProfileId(data.activeProfileId);
+
+                if (data.activeProfileId) {
+                    const active = data.profiles.find((p) => p.id === data.activeProfileId);
+                    if (active) {
+                        const now = Math.floor(Date.now() / 1000);
+                        if (active.expiresAt <= now) {
+                            await invoke("delete_profile", { profileId: active.id });
+                            const refreshed = await invoke<StoredProfiles>("load_profiles");
+                            if (!cancelled) {
+                                setProfiles(refreshed.profiles);
+                                setActiveProfileId(refreshed.activeProfileId);
+                            }
+                            return;
+                        }
+
+                        setUser({
+                            id: active.userId,
+                            name: active.userName,
+                            email: active.userEmail,
+                            avatarUrl: active.userAvatarUrl,
+                            provider: active.userProvider,
+                        });
+                        setToken(active.token);
+                        setExpiresAt(active.expiresAt);
+                        setAgentUrl(active.agentUrl);
+                    }
                 }
-
-                setUser({
-                    id: session.userId,
-                    name: session.userName,
-                    email: session.userEmail,
-                    avatarUrl: session.userAvatarUrl,
-                    provider: session.userProvider,
-                });
-                setToken(session.token);
-                setExpiresAt(session.expiresAt);
-                setAgentUrl(session.agentUrl || null);
             } catch (err) {
                 console.error("Failed to restore session:", err);
             } finally {
@@ -110,17 +167,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // Expiry timer
     useEffect(() => {
-        const interval = setInterval(() => {
+        const interval = setInterval(async () => {
             if (expiresAt !== null && expiresAt <= Math.floor(Date.now() / 1000)) {
-                logout();
+                if (activeProfileId) {
+                    try {
+                        await invoke("delete_profile", { profileId: activeProfileId });
+                    } catch {
+                        // ignore
+                    }
+                }
+                clearState();
+
+                // Reload profiles, switch to another if available
+                try {
+                    const data = await invoke<StoredProfiles>("load_profiles");
+                    setProfiles(data.profiles);
+                    setActiveProfileId(data.activeProfileId);
+
+                    if (data.profiles.length > 0) {
+                        const next = data.profiles[0];
+                        await invoke("set_active_profile", { profileId: next.id });
+                        applyProfile(next);
+                    } else {
+                        setActiveProfileId(null);
+                    }
+                } catch {
+                    setProfiles([]);
+                    setActiveProfileId(null);
+                }
             }
         }, 30_000);
 
         return () => clearInterval(interval);
-    }, [expiresAt, logout]);
+    }, [expiresAt, activeProfileId, clearState, applyProfile]);
 
     const login = useCallback(
-        (url: string) => {
+        (url: string, label?: string) => {
+            pendingLabelRef.current = label || "Default";
             return new Promise<void>((resolve, reject) => {
                 const wsUrl = url.replace(/^http/, "ws") + "/auth/listen";
                 const ws = new WebSocket(wsUrl);
@@ -180,5 +263,53 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         [handleToken],
     );
 
-    return <AuthContext value={{ user, token, expiresAt, agentUrl, isLoading, login, logout }}>{children}</AuthContext>;
+    const switchProfile = useCallback(
+        async (profileId: string) => {
+            try {
+                await invoke("set_active_profile", { profileId });
+                const data = await invoke<StoredProfiles>("load_profiles");
+                setProfiles(data.profiles);
+                setActiveProfileId(data.activeProfileId);
+
+                const profile = data.profiles.find((p) => p.id === profileId);
+                if (profile) {
+                    applyProfile(profile);
+                }
+            } catch (err) {
+                console.error("Failed to switch profile:", err);
+            }
+        },
+        [applyProfile],
+    );
+
+    const removeProfile = useCallback(async (profileId: string) => {
+        try {
+            await invoke("delete_profile", { profileId });
+            const data = await invoke<StoredProfiles>("load_profiles");
+            setProfiles(data.profiles);
+            setActiveProfileId(data.activeProfileId);
+        } catch (err) {
+            console.error("Failed to remove profile:", err);
+        }
+    }, []);
+
+    return (
+        <AuthContext
+            value={{
+                user,
+                token,
+                expiresAt,
+                agentUrl,
+                isLoading,
+                profiles,
+                activeProfileId,
+                login,
+                logout,
+                switchProfile,
+                removeProfile,
+            }}
+        >
+            {children}
+        </AuthContext>
+    );
 }

@@ -1,9 +1,14 @@
 import { createContext } from "react";
 import type { AuthState } from "@/types/auth";
+import type { ConnectionProfile } from "@/types/connection";
 
 export interface AuthContextValue extends AuthState {
-    login: (agentUrl: string) => Promise<void>;
+    profiles: ConnectionProfile[];
+    activeProfileId: string | null;
+    login: (agentUrl: string, label?: string) => Promise<void>;
     logout: () => Promise<void>;
+    switchProfile: (profileId: string) => Promise<void>;
+    removeProfile: (profileId: string) => Promise<void>;
 }
 
 export const AuthContext = createContext<AuthContextValue | null>(null);

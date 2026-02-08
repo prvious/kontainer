@@ -70,7 +70,7 @@ describe("LoginScreen", () => {
         vi.stubGlobal("WebSocket", MockWebSocket);
 
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === "load_session") return null;
+            if (cmd === "load_profiles") return { profiles: [], activeProfileId: null };
             if (cmd === "ping_agent") return undefined;
             return undefined;
         });
@@ -158,7 +158,7 @@ describe("LoginScreen", () => {
 
     it("shows error and does not proceed when ping fails", async () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === "load_session") return null;
+            if (cmd === "load_profiles") return { profiles: [], activeProfileId: null };
             if (cmd === "ping_agent") throw "Could not reach agent at http://localhost:8080";
             return undefined;
         });
@@ -176,7 +176,7 @@ describe("LoginScreen", () => {
     it("disables button while pinging", async () => {
         let resolvePing: () => void;
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === "load_session") return null;
+            if (cmd === "load_profiles") return { profiles: [], activeProfileId: null };
             if (cmd === "ping_agent") {
                 return new Promise<void>((resolve) => {
                     resolvePing = resolve;

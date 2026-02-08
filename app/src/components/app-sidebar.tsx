@@ -16,7 +16,8 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/hooks/use-auth";
 import { Logo } from "@/components/logo";
-import { Activity, ChevronsUpDown, Container, Layers, LayoutDashboard, LogOut, Moon, Server, Sun } from "lucide-react";
+import { ClusterSwitcher } from "@/components/cluster-switcher";
+import { Activity, ChevronsUpDown, Container, HardDrive, KeyRound, Layers, LayoutDashboard, LogOut, Moon, Network, Server, Sun } from "lucide-react";
 import { useAppearance } from "@/hooks/use-appearance";
 import { router } from "@/router";
 
@@ -25,6 +26,9 @@ const navigation = [
     { label: "Services", to: "/services" as const, icon: Container },
     { label: "Stacks", to: "/stacks" as const, icon: Layers },
     { label: "Nodes", to: "/nodes" as const, icon: Server },
+    { label: "Networks", to: "/networks" as const, icon: Network },
+    { label: "Volumes", to: "/volumes" as const, icon: HardDrive },
+    { label: "Secrets & Configs", to: "/secrets-configs" as const, icon: KeyRound },
     { label: "Tasks", to: "/tasks" as const, icon: Activity },
 ];
 
@@ -38,7 +42,7 @@ function getInitials(name: string): string {
 }
 
 export function AppSidebar() {
-    const { user, logout, agentUrl } = useAuth();
+    const { user, logout } = useAuth();
     const { resolvedScheme, setScheme } = useAppearance();
     const matches = useMatches();
 
@@ -78,19 +82,7 @@ export function AppSidebar() {
                     </SidebarGroupContent>
                 </SidebarGroup>
 
-                {agentUrl && (
-                    <SidebarGroup className='mt-auto'>
-                        <SidebarGroupLabel>Connection</SidebarGroupLabel>
-                        <SidebarGroupContent>
-                            <div className='px-2 py-1'>
-                                <div className='flex items-center gap-2'>
-                                    <span className='animate-pulse-dot size-1.5 shrink-0 rounded-full bg-success' />
-                                    <span className='truncate font-mono text-xs text-muted-foreground'>{agentUrl.replace(/^https?:\/\//, "")}</span>
-                                </div>
-                            </div>
-                        </SidebarGroupContent>
-                    </SidebarGroup>
-                )}
+                <ClusterSwitcher />
             </SidebarContent>
 
             <SidebarFooter>
