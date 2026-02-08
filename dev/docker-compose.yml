@@ -1,0 +1,50 @@
+name: devoper-cluster
+
+services:
+  manager:
+    image: docker:dind
+    privileged: true
+    hostname: manager
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+    ports:
+      - "2375:2375"
+    networks:
+      - dind
+    volumes:
+      - manager-data:/var/lib/docker
+
+  worker-1:
+    image: docker:dind
+    privileged: true
+    hostname: worker-1
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+    ports:
+      - "2376:2375"
+    networks:
+      - dind
+    volumes:
+      - worker1-data:/var/lib/docker
+
+  worker-2:
+    image: docker:dind
+    privileged: true
+    hostname: worker-2
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+    ports:
+      - "2378:2375"
+    networks:
+      - dind
+    volumes:
+      - worker2-data:/var/lib/docker
+
+networks:
+  dind:
+    driver: bridge
+
+volumes:
+  manager-data:
+  worker1-data:
+  worker2-data:
