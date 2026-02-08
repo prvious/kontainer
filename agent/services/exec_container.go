@@ -31,12 +31,14 @@ type execStatusMsg struct {
 	Code    int    `json:"code,omitempty"`
 }
 
-func writeExecError(conn *websocket.Conn, msg string) {
-	data, _ := json.Marshal(execStatusMsg{Type: "error", Message: msg})
+func writeExecMsg(conn *websocket.Conn, mu *sync.Mutex, msg execStatusMsg) {
+	data, _ := json.Marshal(msg)
+	mu.Lock()
 	conn.WriteMessage(websocket.TextMessage, data)
+	mu.Unlock()
 }
 
-func runExecSession(conn *websocket.Conn, client DockerClient, containerID, shell string, cols, rows uint) {
+func runExecSession(conn *websocket.Conn, wsMu *sync.Mutex, client DockerClient, containerID, shell string, cols, rows uint) {
 	ctx := context.Background()
 
 	execResp, err := client.ContainerExecCreate(ctx, containerID, container.ExecOptions{
@@ -48,7 +50,7 @@ func runExecSession(conn *websocket.Conn, client DockerClient, containerID, shel
 	})
 	if err != nil {
 		log.Printf("exec create error: %v", err)
-		writeExecError(conn, fmt.Sprintf("failed to create exec: %v", err))
+		writeExecMsg(conn, wsMu, execStatusMsg{Type: "error", Message: fmt.Sprintf("failed to create exec: %v", err)})
 		return
 	}
 
@@ -57,7 +59,7 @@ func runExecSession(conn *websocket.Conn, client DockerClient, containerID, shel
 	})
 	if err != nil {
 		log.Printf("exec attach error: %v", err)
-		writeExecError(conn, fmt.Sprintf("failed to attach exec: %v", err))
+		writeExecMsg(conn, wsMu, execStatusMsg{Type: "error", Message: fmt.Sprintf("failed to attach exec: %v", err)})
 		return
 	}
 	defer hijacked.Close()
@@ -84,12 +86,10 @@ func runExecSession(conn *websocket.Conn, client DockerClient, containerID, shel
 				return
 			}
 			if msgType == websocket.BinaryMessage {
-				// Raw terminal input → write directly to container stdin
 				if _, err := hijacked.Conn.Write(msgBytes); err != nil {
 					return
 				}
 			} else {
-				// Text frame → JSON control message
 				var msg execControlMsg
 				if err := json.Unmarshal(msgBytes, &msg); err != nil {
 					continue
@@ -111,7 +111,10 @@ func runExecSession(conn *websocket.Conn, client DockerClient, containerID, shel
 		for {
 			n, err := hijacked.Reader.Read(buf)
 			if n > 0 {
-				if writeErr := conn.WriteMessage(websocket.BinaryMessage, buf[:n]); writeErr != nil {
+				wsMu.Lock()
+				writeErr := conn.WriteMessage(websocket.BinaryMessage, buf[:n])
+				wsMu.Unlock()
+				if writeErr != nil {
 					return
 				}
 			}
@@ -126,11 +129,11 @@ func runExecSession(conn *websocket.Conn, client DockerClient, containerID, shel
 
 	<-done
 
-	// Try to get exit code
+	// Try to get exit code — safe to write now since goroutine 2 has exited or
+	// will exit shortly (hijacked.Close runs via defer after we return)
 	inspect, err := client.ContainerExecInspect(ctx, execResp.ID)
 	if err == nil && !inspect.Running {
-		exitMsg, _ := json.Marshal(execStatusMsg{Type: "exit", Code: inspect.ExitCode})
-		conn.WriteMessage(websocket.TextMessage, exitMsg)
+		writeExecMsg(conn, wsMu, execStatusMsg{Type: "exit", Code: inspect.ExitCode})
 	}
 }
 
@@ -184,6 +187,21 @@ func (h *ExecContainerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	cols := parseUint(r.URL.Query().Get("cols"), 80)
 	rows := parseUint(r.URL.Query().Get("rows"), 24)
 
+	isLocal := nodeID == "" || nodeID == h.leaderNodeID
+
+	// Pre-validate routing BEFORE upgrading WebSocket so we can return
+	// proper HTTP errors instead of upgrading and immediately closing.
+	var followerAddr string
+	if !isLocal {
+		addr, ok := h.registry.ByNodeID(nodeID)
+		if !ok {
+			log.Printf("exec: no follower found for node %s", nodeID)
+			http.Error(w, fmt.Sprintf("no follower found for node %s", nodeID), http.StatusBadGateway)
+			return
+		}
+		followerAddr = addr
+	}
+
 	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("exec websocket upgrade error: %v", err)
@@ -191,16 +209,10 @@ func (h *ExecContainerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	}
 	defer conn.Close()
 
-	// Route: local if nodeID matches leader or is empty
-	if nodeID == "" || nodeID == h.leaderNodeID {
-		runExecSession(conn, h.client, containerID, shell, cols, rows)
-		return
-	}
+	var wsMu sync.Mutex
 
-	// Route: proxy to follower
-	followerAddr, ok := h.registry.ByNodeID(nodeID)
-	if !ok {
-		writeExecError(conn, fmt.Sprintf("no follower found for node %s", nodeID))
+	if isLocal {
+		runExecSession(conn, &wsMu, h.client, containerID, shell, cols, rows)
 		return
 	}
 
@@ -244,7 +256,8 @@ func (h *ExecContainerFollowerHandler) ServeHTTP(w http.ResponseWriter, r *http.
 	}
 	defer conn.Close()
 
-	runExecSession(conn, h.client, containerID, shell, cols, rows)
+	var wsMu sync.Mutex
+	runExecSession(conn, &wsMu, h.client, containerID, shell, cols, rows)
 }
 
 func parseUint(s string, fallback uint) uint {
