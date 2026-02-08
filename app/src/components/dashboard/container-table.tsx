@@ -40,7 +40,7 @@ function buildContainerRows(agents: AgentMetricsSnapshot[]): ContainerRow[] {
                 name: c.name || c.serviceName,
                 image: c.serviceName,
                 status: "running",
-                node: agent.hostname,
+                node: agent.nodeId.slice(0, 12),
                 cpu: `${c.cpuPercent.toFixed(1)}%`,
                 memory: formatBytes(c.memoryUsed),
                 uptime: "—",

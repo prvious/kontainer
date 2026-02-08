@@ -35,7 +35,7 @@ const networkConfig = {
 };
 
 export function ResourceCharts({ agents, history }: ResourceChartsProps) {
-    const hostnames = agents.map((a) => a.hostname);
+    const nodeEntries = agents.map((a) => ({ id: a.nodeId, label: a.nodeId.slice(0, 12) }));
     const [selectedNode, setSelectedNode] = useState<string>("all");
 
     const cpuMemData = useMemo(() => {
@@ -46,7 +46,7 @@ export function ResourceCharts({ agents, history }: ResourceChartsProps) {
         for (const snap of history) {
             const key = new Date(snap.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
             if (!grouped[key]) grouped[key] = { cpu: [], mem: [] };
-            if (selectedNode === "all" || snap.hostname === selectedNode) {
+            if (selectedNode === "all" || snap.nodeId === selectedNode) {
                 grouped[key].cpu.push(snap.node.cpuPercent);
                 grouped[key].mem.push(snap.node.memoryPercent);
             }
@@ -73,7 +73,7 @@ export function ResourceCharts({ agents, history }: ResourceChartsProps) {
                                 {selectedNode !== "all" && (
                                     <>
                                         {" "}
-                                        — <span className='text-primary'>{selectedNode}</span>
+                                        — <span className='text-primary'>{selectedNode.slice(0, 12)}</span>
                                     </>
                                 )}
                             </p>
@@ -90,7 +90,7 @@ export function ResourceCharts({ agents, history }: ResourceChartsProps) {
                         </div>
                     </div>
                     {/* Node selector */}
-                    {hostnames.length > 0 && (
+                    {nodeEntries.length > 0 && (
                         <div className='mt-2 flex flex-wrap gap-1'>
                             <button
                                 onClick={() => setSelectedNode("all")}
@@ -100,15 +100,15 @@ export function ResourceCharts({ agents, history }: ResourceChartsProps) {
                             >
                                 All Nodes
                             </button>
-                            {hostnames.map((h) => (
+                            {nodeEntries.map((n) => (
                                 <button
-                                    key={h}
-                                    onClick={() => setSelectedNode(h)}
+                                    key={n.id}
+                                    onClick={() => setSelectedNode(n.id)}
                                     className={`rounded-md px-2 py-1 font-mono text-[11px] transition-colors ${
-                                        selectedNode === h ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-accent'
+                                        selectedNode === n.id ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-accent'
                                     }`}
                                 >
-                                    {h}
+                                    {n.label}
                                 </button>
                             ))}
                         </div>
