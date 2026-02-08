@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/clovismuneza/devoper/agent/auth"
 	"github.com/clovismuneza/devoper/agent/auth/providers"
@@ -13,6 +14,7 @@ import (
 	"github.com/clovismuneza/devoper/agent/metrics"
 	"github.com/clovismuneza/devoper/agent/server"
 	"github.com/clovismuneza/devoper/agent/services"
+	"github.com/clovismuneza/devoper/agent/storage"
 	"github.com/docker/docker/client"
 	"github.com/joho/godotenv"
 )
@@ -53,6 +55,13 @@ func startFollower(cfg *config.Config) {
 	dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		log.Fatalf("Failed to create Docker client: %v", err)
+	}
+
+	if nodeID == "" {
+		info, err := dockerClient.Info(context.Background())
+		if err == nil && info.Swarm.NodeID != "" {
+			nodeID = info.Swarm.NodeID
+		}
 	}
 
 	nodeAction := metrics.NewCollectNodeMetricsAction(dockerClient)
@@ -97,6 +106,12 @@ func startLeader(cfg *config.Config) {
 	nodeAction := metrics.NewCollectNodeMetricsAction(dockerClient)
 	containerAction := metrics.NewCollectContainerMetricsAction(dockerClient)
 	leaderNodeID := os.Getenv("DOCKER_NODE_ID")
+	if leaderNodeID == "" {
+		info, err := dockerClient.Info(context.Background())
+		if err == nil && info.Swarm.NodeID != "" {
+			leaderNodeID = info.Swarm.NodeID
+		}
+	}
 	internalMetricsHandler := metrics.NewInternalMetricsHandler(nodeAction, containerAction, leaderNodeID, hostname)
 
 	listServicesAction := services.NewListServicesAction(dockerClient)
@@ -183,7 +198,27 @@ func startLeader(cfg *config.Config) {
 	listAgentsAction := services.NewListAgentsAction(clusterRegistry, selfInfo)
 	listAgentsHandler := services.NewListAgentsHandler(listAgentsAction)
 
-	clusterMetricsHandler := metrics.NewClusterMetricsHandler(internalMetricsHandler, clusterRegistry, cfg.InternalSecret)
+	// Metrics storage and background collector
+	interval, err := time.ParseDuration(cfg.MetricsInterval)
+	if err != nil {
+		interval = 30 * time.Second
+	}
+	retention, err := time.ParseDuration(cfg.MetricsRetention)
+	if err != nil {
+		retention = 24 * time.Hour
+	}
+
+	metricsStore, err := storage.NewMetricsStore(cfg.MetricsDBPath, retention)
+	if err != nil {
+		log.Fatalf("Failed to create metrics store: %v", err)
+	}
+	defer metricsStore.Close()
+
+	collector := metrics.NewMetricsCollector(internalMetricsHandler, clusterRegistry, cfg.InternalSecret, metricsStore, interval)
+	collector.Start(context.Background())
+	defer collector.Stop()
+
+	clusterMetricsHandler := metrics.NewClusterMetricsHandler(internalMetricsHandler, clusterRegistry, cfg.InternalSecret, metricsStore)
 	nodeMetricsHandler := metrics.NewNodeMetricsHandler(internalMetricsHandler, clusterRegistry, cfg.InternalSecret)
 
 	// Start follower discovery

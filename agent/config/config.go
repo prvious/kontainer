@@ -12,6 +12,9 @@ type Config struct {
 	InternalSecret     string
 	FollowerService    string
 	DevFollowers       string
+	MetricsInterval    string
+	MetricsRetention   string
+	MetricsDBPath      string
 }
 
 func Load() *Config {
@@ -25,6 +28,9 @@ func Load() *Config {
 		InternalSecret:     getEnv("DEVOPER_INTERNAL_SECRET", ""),
 		FollowerService:    getEnv("DEVOPER_FOLLOWER_SERVICE", "devoper-agent"),
 		DevFollowers:       getEnv("DEVOPER_DEV_FOLLOWERS", ""),
+		MetricsInterval:    getEnv("DEVOPER_METRICS_INTERVAL", "30s"),
+		MetricsRetention:   getEnv("DEVOPER_METRICS_RETENTION", "24h"),
+		MetricsDBPath:      getEnv("DEVOPER_METRICS_DB", "devoper-metrics.db"),
 	}
 }
 
