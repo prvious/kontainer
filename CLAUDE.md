@@ -64,13 +64,13 @@ handlers/
 
 - Laravel Socialite-inspired OAuth flow (redirect → callback → JWT)
 - The agent handles the full OAuth dance; the desktop app just receives a deeplink with the JWT from the agent once auth flow is done
-- JWTs are short-lived, stored in the OS keychain
+- JWTs are short-lived, stored in `session.json` via `tauri-plugin-store`
 
 ### General
 
 - Keep dependencies minimal — prefer stdlib where reasonable
 - Go agent should remain stateless — no database, in-memory only
-- Desktop app stores connection profiles and tokens locally (SQLite + OS keychain)
+- Desktop app stores session data locally via `tauri-plugin-store` (`session.json`)
 
 ## Repository Structure
 
@@ -106,7 +106,7 @@ pnpm --filter app <script>     # Run a script in /app
 - Agent: Go (stdlib, Chi)
 - Auth: OAuth 2.0 + JWT
 - Transport: HTTPS + WebSocket
-- App Storage: OS Keychain + SQLite
+- App Storage: tauri-plugin-store (session.json)
 - Agent Storage: Stateless (in-memory only)
 
 ## Supported Orchestrators
@@ -395,72 +395,77 @@ go build -o bin/agent .
 go test ./...
 ```
 
-## Architecture
+## Current Architecture
+
+### Multi-Node Cluster (Leader/Follower)
+
+The agent binary runs in two modes controlled by `DEVOPER_ROLE`:
+
+- **Leader** — Full REST + WebSocket API. Handles auth, serves all `/api/*` routes, discovers and healthchecks follower agents. One per cluster.
+- **Follower** — Lightweight. Only exposes `/internal/health` and `/internal/info` behind a shared secret (`X-Devoper-Secret` header). Deployed as a global Swarm service across worker nodes.
+
+**Discovery:** Leader finds followers by querying Docker Swarm tasks for the follower service name (`DEVOPER_FOLLOWER_SERVICE`), pings each task IP on `/internal/health` every 10s, and maintains an in-memory agent registry.
+
+**Dev mode:** Set `DEVOPER_DEV_FOLLOWERS` to a comma-separated list of static addresses instead of Swarm-based discovery.
+
+Key files:
+- `agent/cluster/discovery.go` — Swarm-based follower discovery (production)
+- `agent/cluster/dev_discovery.go` — Static follower list (development)
+- `agent/cluster/registry.go` — Thread-safe in-memory agent registry
+- `agent/cluster/middleware.go` — Internal secret auth middleware
+- `agent/server/server.go` — Leader routes
+- `agent/server/follower.go` — Follower routes
 
 ### Frontend-Backend Communication
 
-The app uses Tauri's IPC (Inter-Process Communication) to call Rust functions from React:
+React → Tauri IPC (`invoke`) → Rust HTTP client → Go agent API.
 
 ```typescript
-// Frontend (React/TypeScript)
-import { invoke } from "@tauri-apps/api/core";
-
-// Calls the create_bucket Tauri command
-await invoke("create_bucket", {
-    input: { bucketName, region, acl, connectionId },
-});
+// Frontend calls Tauri command
+const services = await invoke("list_services", { url: agentUrl, token });
 ```
 
 ```rust
-// Backend (Rust)
+// Rust command makes HTTP request to agent
 #[tauri::command]
-async fn create_bucket(
-    state: tauri::State<'_, AppState>,
-    input: CreateBucketInput,
-) -> Result<CreateBucketResponse, ErrorResponse> {
-    // Implementation
+async fn list_services(url: String, token: String) -> Result<ListServicesResponse, String> {
+    // GET {url}/api/services with Bearer token
 }
 ```
 
-All Tauri commands must be registered in `src-tauri/src/lib.rs` in the `invoke_handler!` macro.
+All Tauri commands registered in `src-tauri/src/lib.rs` `invoke_handler!` macro.
 
 ### Type Synchronization (CRITICAL)
 
 When modifying data structures passed between Rust and TypeScript:
 
-1. **Update Rust first:** Modify struct in `src-tauri/src/models/*.rs`
+1. **Update Rust first:** Modify struct in the relevant action file under `src-tauri/src/actions/`
 2. **Update TypeScript:** Match the interface in `src/types/*.ts`
 3. **Verify serialization:** Ensure serde attributes match camelCase in TypeScript
     ```rust
     #[derive(Serialize, Deserialize)]
-    #[serde(rename_all = "camelCase")]  // This converts snake_case to camelCase
+    #[serde(rename_all = "camelCase")]
     pub struct MyStruct {
         pub bucket_name: String,  // Becomes "bucketName" in JSON
     }
     ```
 
+### Data Flow
+
+- **React hooks** (`src/hooks/`) use TanStack Query with 5s refetch intervals
+- **Mutation hooks** call Tauri commands and invalidate relevant query keys
+- **Auth context** (`src/contexts/auth-context.tsx`) provides `token` and `agentUrl` to all hooks
+- **WebSocket features** (logs, auth bridge) connect directly from the Rust layer or React to the agent
+
 ### Error Handling
 
-**Structured Error System:**
-
-- Backend errors defined in `src-tauri/src/errors/mod.rs` using `thiserror`
-- All errors convert to `ErrorResponse` with `error_type` and `message` fields
-- Frontend receives consistent error format from all Tauri commands
-
-**Error Types:**
-
-- Validation errors (empty fields, invalid bucket names)
-- S3 operation errors (AWS SDK errors)
-- Internal errors (connection not found, serialization failures)
-
-Frontend should handle errors from `invoke()` calls:
+All Tauri commands return `Result<T, String>`. The agent returns structured JSON errors with HTTP status codes. Frontend handles errors from `invoke()`:
 
 ```typescript
 try {
-    await invoke("create_bucket", { input });
+    await invoke("scale_service", { url, token, serviceId, replicas });
 } catch (error) {
-    // error is already a structured ErrorResponse
-    console.error(error);
+    console.error(error); // string error message
 }
 ```
 
@@ -473,17 +478,17 @@ try {
 - **Imports:** Use `@/` alias for absolute imports (configured in vite.config.ts and tsconfig.json)
 - **Styling:** Tailwind CSS 4 utility classes, shadcn/ui components
 - **Types:** Strict TypeScript (`strict: true` in tsconfig), define interfaces in `src/types/`
-- **Formatting:** This project uses prettier, Use `pnpm format` before committing
-- **Quality Checks:** Always run `pnpm run lint` and `pnpm run format` after finishing all tasks in a session
+- **Formatting:** This project uses oxfmt, Use `pnpm fmt` before committing
+- **Quality Checks:** Always run `pnpm run lint` and `pnpm fmt` after finishing all tasks in a session
 
 ### Rust
 
 - **Edition:** Rust 2021
 - **Formatting:** Use `cargo fmt` before committing
 - **Error Handling:** Use `thiserror` for custom error types, propagate with `?`
-- **Async:** All S3 operations are async, using Tokio runtime
+- **Async:** All Tauri commands are async, using Tokio runtime
 - **Serialization:** Use `#[serde(rename_all = "camelCase")]` for structs sent to frontend
-- **Modules:** Organize by feature (models, s3, errors), use `pub` visibility intentionally
+- **Modules:** Organize by feature under `actions/{domain}/`, use `pub` visibility intentionally
 
 ### Path Aliases
 
