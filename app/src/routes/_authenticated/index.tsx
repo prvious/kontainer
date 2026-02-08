@@ -8,11 +8,13 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
-import { AlertTriangle, ArrowRight, CheckCircle, Container, Layers, RefreshCw, Server, XCircle } from "lucide-react";
+import { AlertTriangle, ArrowRight, CheckCircle, Container, Cpu, HardDrive, Layers, MemoryStick, RefreshCw, Server, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useClusterMetrics } from "@/hooks/use-cluster-metrics";
 import type { ServiceItem } from "@/types/services";
 import type { NodeItem } from "@/types/nodes";
 import type { TaskStats } from "@/types/task-stats";
+import type { AgentMetricsSnapshot } from "@/types/metrics";
 
 function formatRelativeTime(iso: string): string {
     const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
@@ -23,6 +25,26 @@ function formatRelativeTime(iso: string): string {
     if (hours < 24) return `${hours}h ago`;
     const days = Math.floor(hours / 24);
     return `${days}d ago`;
+}
+
+function formatBytes(bytes: number): string {
+    if (bytes === 0) return "0 B";
+    const k = 1024;
+    const sizes = ["B", "KB", "MB", "GB", "TB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+}
+
+function computeClusterMetrics(agents: AgentMetricsSnapshot[]) {
+    if (agents.length === 0) return null;
+    const avgCpu = agents.reduce((sum, a) => sum + a.node.cpuPercent, 0) / agents.length;
+    const totalMemUsed = agents.reduce((sum, a) => sum + a.node.memoryUsed, 0);
+    const totalMemTotal = agents.reduce((sum, a) => sum + a.node.memoryTotal, 0);
+    const totalDiskUsed = agents.reduce((sum, a) => sum + a.node.diskUsed, 0);
+    const totalDiskTotal = agents.reduce((sum, a) => sum + a.node.diskTotal, 0);
+    const memPct = totalMemTotal > 0 ? (totalMemUsed / totalMemTotal) * 100 : 0;
+    const diskPct = totalDiskTotal > 0 ? (totalDiskUsed / totalDiskTotal) * 100 : 0;
+    return { avgCpu, totalMemUsed, totalMemTotal, memPct, totalDiskUsed, totalDiskTotal, diskPct };
 }
 
 function computeServiceStats(services: ServiceItem[]) {
@@ -282,6 +304,7 @@ function DashboardPage() {
     const { data: services, isLoading: servicesLoading, error: servicesError, refetch: refetchServices, dataUpdatedAt } = useServices();
     const { data: nodes, isLoading: nodesLoading, error: nodesError } = useNodes();
     const { data: taskStats, isLoading: taskStatsLoading, error: taskStatsError } = useTaskStats();
+    const { data: metricsData } = useClusterMetrics();
 
     const isLoading = servicesLoading || nodesLoading || taskStatsLoading;
     const error = servicesError || nodesError || taskStatsError;
@@ -308,6 +331,7 @@ function DashboardPage() {
     const stats = taskStats ?? { total: 0, running: 0, failed: 0, preparing: 0, complete: 0, desiredRunning: 0 };
     const svcStats = computeServiceStats(serviceItems);
     const nStats = computeNodeStats(nodeItems);
+    const clusterMetrics = computeClusterMetrics(metricsData?.agents ?? []);
     const lastUpdate = dataUpdatedAt ? new Date(dataUpdatedAt).toLocaleTimeString() : "";
 
     return (
@@ -340,6 +364,25 @@ function DashboardPage() {
                         accent={stats.failed > 0 ? "bg-destructive/10 text-destructive" : "bg-muted"}
                         delay={150}
                     />
+                    {clusterMetrics && (
+                        <>
+                            <StatCard label='Avg CPU' value={`${Math.round(clusterMetrics.avgCpu)}%`} icon={Cpu} accent='bg-muted' delay={200} />
+                            <StatCard
+                                label='Memory'
+                                value={`${formatBytes(clusterMetrics.totalMemUsed)} / ${formatBytes(clusterMetrics.totalMemTotal)}`}
+                                icon={MemoryStick}
+                                accent='bg-muted'
+                                delay={250}
+                            />
+                            <StatCard
+                                label='Disk'
+                                value={`${formatBytes(clusterMetrics.totalDiskUsed)} / ${formatBytes(clusterMetrics.totalDiskTotal)}`}
+                                icon={HardDrive}
+                                accent='bg-muted'
+                                delay={300}
+                            />
+                        </>
+                    )}
                 </div>
 
                 <Separator />
