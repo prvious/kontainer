@@ -195,11 +195,14 @@ func (h *ExecContainerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	if !isLocal {
 		addr, ok := h.registry.ByNodeID(nodeID)
 		if !ok {
-			log.Printf("exec: no follower found for node %s", nodeID)
-			http.Error(w, fmt.Sprintf("no follower found for node %s", nodeID), http.StatusBadGateway)
-			return
+			// Node ID not in registry — likely a Swarm node ID that doesn't
+			// match agent-reported IDs. Fall back to local exec; Docker will
+			// return "No such container" if the container isn't here.
+			log.Printf("exec: node %s not in registry, falling back to local exec", nodeID)
+			isLocal = true
+		} else {
+			followerAddr = addr
 		}
-		followerAddr = addr
 	}
 
 	conn, err := h.upgrader.Upgrade(w, r, nil)
