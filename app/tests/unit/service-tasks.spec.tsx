@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthContext } from "@/contexts/auth-context-value";
 import type { AuthContextValue } from "@/contexts/auth-context-value";
+import { TerminalProvider } from "@/contexts/terminal-context";
 import { ServiceTasks } from "@/components/service-tasks";
 
 function createTestQueryClient() {
@@ -30,7 +31,9 @@ function renderWithProviders(serviceId: string) {
     return render(
         <AuthContext value={mockAuth}>
             <QueryClientProvider client={queryClient}>
-                <ServiceTasks serviceId={serviceId} />
+                <TerminalProvider>
+                    <ServiceTasks serviceId={serviceId} />
+                </TerminalProvider>
             </QueryClientProvider>
         </AuthContext>,
     );
