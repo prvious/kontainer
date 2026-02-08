@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useNodes } from "@/hooks/use-nodes";
 import { useClusterMetrics } from "@/hooks/use-cluster-metrics";
-import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -306,54 +305,43 @@ function NodesPage() {
     );
 
     if (isLoading) {
-        return (
-            <>
-                <PageHeader title='Nodes' />
-                <LoadingSkeleton />
-            </>
-        );
+        return <LoadingSkeleton />;
     }
 
     if (error) {
         return (
-            <>
-                <PageHeader title='Nodes' />
-                <div className='flex flex-col items-center justify-center gap-2 py-12 text-sm text-destructive'>
-                    <AlertCircle className='size-5' />
-                    <p>Failed to load nodes</p>
-                </div>
-            </>
+            <div className='flex flex-col items-center justify-center gap-2 py-12 text-sm text-destructive'>
+                <AlertCircle className='size-5' />
+                <p>Failed to load nodes</p>
+            </div>
         );
     }
 
     return (
-        <>
-            <PageHeader
-                title='Nodes'
-                description={`${nodes?.length ?? 0} nodes`}
-                actions={
-                    <div className='relative'>
-                        <Search className='absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground' />
-                        <Input placeholder='Search nodes...' value={search} onChange={(e) => setSearch(e.target.value)} className='h-8 w-56 pl-8 text-sm' />
-                    </div>
-                }
-            />
-
-            <div className='p-6'>
-                {filtered.length === 0 ? (
-                    <div className='flex flex-col items-center justify-center gap-2 py-12 text-sm text-muted-foreground'>
-                        <Server className='size-5' />
-                        <p>{search ? "No nodes match your search" : "No nodes found"}</p>
-                    </div>
-                ) : (
-                    <Card>
-                        <CardContent className='p-0'>
-                            <NodesTable nodes={filtered} metricsMap={metricsMap} expandedNodeId={expandedNodeId} onToggleExpand={handleToggleExpand} />
-                        </CardContent>
-                    </Card>
-                )}
+        <div className='p-6'>
+            <div className='mb-6 flex items-center justify-between'>
+                <div>
+                    <h1 className='text-xl font-semibold tracking-tight'>Nodes</h1>
+                    <p className='mt-1 text-sm text-muted-foreground'>{nodes?.length ?? 0} nodes</p>
+                </div>
+                <div className='relative'>
+                    <Search className='absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground' />
+                    <Input placeholder='Search nodes...' value={search} onChange={(e) => setSearch(e.target.value)} className='h-8 w-56 pl-8 text-sm' />
+                </div>
             </div>
-        </>
+            {filtered.length === 0 ? (
+                <div className='flex flex-col items-center justify-center gap-2 py-12 text-sm text-muted-foreground'>
+                    <Server className='size-5' />
+                    <p>{search ? "No nodes match your search" : "No nodes found"}</p>
+                </div>
+            ) : (
+                <Card>
+                    <CardContent className='p-0'>
+                        <NodesTable nodes={filtered} metricsMap={metricsMap} expandedNodeId={expandedNodeId} onToggleExpand={handleToggleExpand} />
+                    </CardContent>
+                </Card>
+            )}
+        </div>
     );
 }
 

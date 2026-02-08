@@ -15,10 +15,12 @@ import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/
 import { Route as AuthenticatedVolumesIndexRouteImport } from './routes/_authenticated/volumes/index'
 import { Route as AuthenticatedTasksIndexRouteImport } from './routes/_authenticated/tasks/index'
 import { Route as AuthenticatedStacksIndexRouteImport } from './routes/_authenticated/stacks/index'
+import { Route as AuthenticatedSettingsIndexRouteImport } from './routes/_authenticated/settings/index'
 import { Route as AuthenticatedServicesIndexRouteImport } from './routes/_authenticated/services/index'
 import { Route as AuthenticatedSecretsConfigsIndexRouteImport } from './routes/_authenticated/secrets-configs/index'
 import { Route as AuthenticatedNodesIndexRouteImport } from './routes/_authenticated/nodes/index'
 import { Route as AuthenticatedNetworksIndexRouteImport } from './routes/_authenticated/networks/index'
+import { Route as AuthenticatedLogsIndexRouteImport } from './routes/_authenticated/logs/index'
 import { Route as AuthenticatedServicesServiceIdRouteImport } from './routes/_authenticated/services/$serviceId'
 
 const LoginRoute = LoginRouteImport.update({
@@ -52,6 +54,12 @@ const AuthenticatedStacksIndexRoute =
     path: '/stacks/',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
+const AuthenticatedSettingsIndexRoute =
+  AuthenticatedSettingsIndexRouteImport.update({
+    id: '/settings/',
+    path: '/settings/',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedServicesIndexRoute =
   AuthenticatedServicesIndexRouteImport.update({
     id: '/services/',
@@ -75,6 +83,11 @@ const AuthenticatedNetworksIndexRoute =
     path: '/networks/',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
+const AuthenticatedLogsIndexRoute = AuthenticatedLogsIndexRouteImport.update({
+  id: '/logs/',
+  path: '/logs/',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
 const AuthenticatedServicesServiceIdRoute =
   AuthenticatedServicesServiceIdRouteImport.update({
     id: '/services/$serviceId',
@@ -86,10 +99,12 @@ export interface FileRoutesByFullPath {
   '/': typeof AuthenticatedIndexRoute
   '/login': typeof LoginRoute
   '/services/$serviceId': typeof AuthenticatedServicesServiceIdRoute
+  '/logs/': typeof AuthenticatedLogsIndexRoute
   '/networks/': typeof AuthenticatedNetworksIndexRoute
   '/nodes/': typeof AuthenticatedNodesIndexRoute
   '/secrets-configs/': typeof AuthenticatedSecretsConfigsIndexRoute
   '/services/': typeof AuthenticatedServicesIndexRoute
+  '/settings/': typeof AuthenticatedSettingsIndexRoute
   '/stacks/': typeof AuthenticatedStacksIndexRoute
   '/tasks/': typeof AuthenticatedTasksIndexRoute
   '/volumes/': typeof AuthenticatedVolumesIndexRoute
@@ -98,10 +113,12 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/': typeof AuthenticatedIndexRoute
   '/services/$serviceId': typeof AuthenticatedServicesServiceIdRoute
+  '/logs': typeof AuthenticatedLogsIndexRoute
   '/networks': typeof AuthenticatedNetworksIndexRoute
   '/nodes': typeof AuthenticatedNodesIndexRoute
   '/secrets-configs': typeof AuthenticatedSecretsConfigsIndexRoute
   '/services': typeof AuthenticatedServicesIndexRoute
+  '/settings': typeof AuthenticatedSettingsIndexRoute
   '/stacks': typeof AuthenticatedStacksIndexRoute
   '/tasks': typeof AuthenticatedTasksIndexRoute
   '/volumes': typeof AuthenticatedVolumesIndexRoute
@@ -112,10 +129,12 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
   '/_authenticated/services/$serviceId': typeof AuthenticatedServicesServiceIdRoute
+  '/_authenticated/logs/': typeof AuthenticatedLogsIndexRoute
   '/_authenticated/networks/': typeof AuthenticatedNetworksIndexRoute
   '/_authenticated/nodes/': typeof AuthenticatedNodesIndexRoute
   '/_authenticated/secrets-configs/': typeof AuthenticatedSecretsConfigsIndexRoute
   '/_authenticated/services/': typeof AuthenticatedServicesIndexRoute
+  '/_authenticated/settings/': typeof AuthenticatedSettingsIndexRoute
   '/_authenticated/stacks/': typeof AuthenticatedStacksIndexRoute
   '/_authenticated/tasks/': typeof AuthenticatedTasksIndexRoute
   '/_authenticated/volumes/': typeof AuthenticatedVolumesIndexRoute
@@ -126,10 +145,12 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/services/$serviceId'
+    | '/logs/'
     | '/networks/'
     | '/nodes/'
     | '/secrets-configs/'
     | '/services/'
+    | '/settings/'
     | '/stacks/'
     | '/tasks/'
     | '/volumes/'
@@ -138,10 +159,12 @@ export interface FileRouteTypes {
     | '/login'
     | '/'
     | '/services/$serviceId'
+    | '/logs'
     | '/networks'
     | '/nodes'
     | '/secrets-configs'
     | '/services'
+    | '/settings'
     | '/stacks'
     | '/tasks'
     | '/volumes'
@@ -151,10 +174,12 @@ export interface FileRouteTypes {
     | '/login'
     | '/_authenticated/'
     | '/_authenticated/services/$serviceId'
+    | '/_authenticated/logs/'
     | '/_authenticated/networks/'
     | '/_authenticated/nodes/'
     | '/_authenticated/secrets-configs/'
     | '/_authenticated/services/'
+    | '/_authenticated/settings/'
     | '/_authenticated/stacks/'
     | '/_authenticated/tasks/'
     | '/_authenticated/volumes/'
@@ -209,6 +234,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedStacksIndexRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/settings/': {
+      id: '/_authenticated/settings/'
+      path: '/settings'
+      fullPath: '/settings/'
+      preLoaderRoute: typeof AuthenticatedSettingsIndexRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/services/': {
       id: '/_authenticated/services/'
       path: '/services'
@@ -237,6 +269,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedNetworksIndexRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/logs/': {
+      id: '/_authenticated/logs/'
+      path: '/logs'
+      fullPath: '/logs/'
+      preLoaderRoute: typeof AuthenticatedLogsIndexRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/services/$serviceId': {
       id: '/_authenticated/services/$serviceId'
       path: '/services/$serviceId'
@@ -250,10 +289,12 @@ declare module '@tanstack/react-router' {
 interface AuthenticatedRouteChildren {
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
   AuthenticatedServicesServiceIdRoute: typeof AuthenticatedServicesServiceIdRoute
+  AuthenticatedLogsIndexRoute: typeof AuthenticatedLogsIndexRoute
   AuthenticatedNetworksIndexRoute: typeof AuthenticatedNetworksIndexRoute
   AuthenticatedNodesIndexRoute: typeof AuthenticatedNodesIndexRoute
   AuthenticatedSecretsConfigsIndexRoute: typeof AuthenticatedSecretsConfigsIndexRoute
   AuthenticatedServicesIndexRoute: typeof AuthenticatedServicesIndexRoute
+  AuthenticatedSettingsIndexRoute: typeof AuthenticatedSettingsIndexRoute
   AuthenticatedStacksIndexRoute: typeof AuthenticatedStacksIndexRoute
   AuthenticatedTasksIndexRoute: typeof AuthenticatedTasksIndexRoute
   AuthenticatedVolumesIndexRoute: typeof AuthenticatedVolumesIndexRoute
@@ -262,10 +303,12 @@ interface AuthenticatedRouteChildren {
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
   AuthenticatedServicesServiceIdRoute: AuthenticatedServicesServiceIdRoute,
+  AuthenticatedLogsIndexRoute: AuthenticatedLogsIndexRoute,
   AuthenticatedNetworksIndexRoute: AuthenticatedNetworksIndexRoute,
   AuthenticatedNodesIndexRoute: AuthenticatedNodesIndexRoute,
   AuthenticatedSecretsConfigsIndexRoute: AuthenticatedSecretsConfigsIndexRoute,
   AuthenticatedServicesIndexRoute: AuthenticatedServicesIndexRoute,
+  AuthenticatedSettingsIndexRoute: AuthenticatedSettingsIndexRoute,
   AuthenticatedStacksIndexRoute: AuthenticatedStacksIndexRoute,
   AuthenticatedTasksIndexRoute: AuthenticatedTasksIndexRoute,
   AuthenticatedVolumesIndexRoute: AuthenticatedVolumesIndexRoute,

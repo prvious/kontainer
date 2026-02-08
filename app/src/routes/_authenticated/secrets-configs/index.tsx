@@ -6,7 +6,6 @@ import { useCreateSecret } from "@/hooks/use-create-secret";
 import { useCreateConfig } from "@/hooks/use-create-config";
 import { useRemoveSecret } from "@/hooks/use-remove-secret";
 import { useRemoveConfig } from "@/hooks/use-remove-config";
-import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -303,22 +302,23 @@ function SecretsConfigsPage() {
     const count = activeTab === "secrets" ? (secrets?.length ?? 0) : (configs?.length ?? 0);
 
     return (
-        <>
-            <PageHeader
-                title='Secrets & Configs'
-                description={`${count} ${activeTab}`}
-                actions={
-                    <div className='flex items-center gap-2'>
-                        <div className='relative'>
-                            <Search className='absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground' />
-                            <Input placeholder='Search...' value={search} onChange={(e) => setSearch(e.target.value)} className='h-8 w-48 pl-8 text-sm' />
-                        </div>
-                        {activeTab === "secrets" ? <CreateSecretDialog /> : <CreateConfigDialog />}
+        <div className='p-6'>
+            <div className='mb-6 flex items-center justify-between'>
+                <div>
+                    <h1 className='text-xl font-semibold tracking-tight'>Secrets & Configs</h1>
+                    <p className='mt-1 text-sm text-muted-foreground'>
+                        {count} {activeTab}
+                    </p>
+                </div>
+                <div className='flex items-center gap-2'>
+                    <div className='relative'>
+                        <Search className='absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground' />
+                        <Input placeholder='Search...' value={search} onChange={(e) => setSearch(e.target.value)} className='h-8 w-48 pl-8 text-sm' />
                     </div>
-                }
-            />
-
-            <div className='p-6'>
+                    {activeTab === "secrets" ? <CreateSecretDialog /> : <CreateConfigDialog />}
+                </div>
+            </div>
+            <div>
                 <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as string)}>
                     <TabsList>
                         <TabsTrigger value='secrets'>
@@ -376,7 +376,7 @@ function SecretsConfigsPage() {
                     </TabsContent>
                 </Tabs>
             </div>
-        </>
+        </div>
     );
 }
 

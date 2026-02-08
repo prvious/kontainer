@@ -1,6 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useStacks } from "@/hooks/use-stacks";
-import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -103,54 +102,43 @@ function StacksPage() {
     const filtered = (stacks ?? []).filter((s) => s.name.toLowerCase().includes(search.toLowerCase()));
 
     if (isLoading) {
-        return (
-            <>
-                <PageHeader title='Stacks' />
-                <LoadingSkeleton />
-            </>
-        );
+        return <LoadingSkeleton />;
     }
 
     if (error) {
         return (
-            <>
-                <PageHeader title='Stacks' />
-                <div className='flex flex-col items-center justify-center gap-2 py-12 text-sm text-destructive'>
-                    <AlertCircle className='size-5' />
-                    <p>Failed to load stacks</p>
-                </div>
-            </>
+            <div className='flex flex-col items-center justify-center gap-2 py-12 text-sm text-destructive'>
+                <AlertCircle className='size-5' />
+                <p>Failed to load stacks</p>
+            </div>
         );
     }
 
     return (
-        <>
-            <PageHeader
-                title='Stacks'
-                description={`${stacks?.length ?? 0} stacks`}
-                actions={
-                    <div className='relative'>
-                        <Search className='absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground' />
-                        <Input placeholder='Search stacks...' value={search} onChange={(e) => setSearch(e.target.value)} className='h-8 w-56 pl-8 text-sm' />
-                    </div>
-                }
-            />
-
-            <div className='p-6'>
-                {filtered.length === 0 ? (
-                    <div className='flex flex-col items-center justify-center gap-2 py-12 text-sm text-muted-foreground'>
-                        <Layers className='size-5' />
-                        <p>{search ? "No stacks match your search" : "No stacks found"}</p>
-                    </div>
-                ) : (
-                    <Card>
-                        <CardContent className='p-0'>
-                            <StacksTable stacks={filtered} />
-                        </CardContent>
-                    </Card>
-                )}
+        <div className='p-6'>
+            <div className='mb-6 flex items-center justify-between'>
+                <div>
+                    <h1 className='text-xl font-semibold tracking-tight'>Stacks</h1>
+                    <p className='mt-1 text-sm text-muted-foreground'>{stacks?.length ?? 0} stacks</p>
+                </div>
+                <div className='relative'>
+                    <Search className='absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground' />
+                    <Input placeholder='Search stacks...' value={search} onChange={(e) => setSearch(e.target.value)} className='h-8 w-56 pl-8 text-sm' />
+                </div>
             </div>
-        </>
+            {filtered.length === 0 ? (
+                <div className='flex flex-col items-center justify-center gap-2 py-12 text-sm text-muted-foreground'>
+                    <Layers className='size-5' />
+                    <p>{search ? "No stacks match your search" : "No stacks found"}</p>
+                </div>
+            ) : (
+                <Card>
+                    <CardContent className='p-0'>
+                        <StacksTable stacks={filtered} />
+                    </CardContent>
+                </Card>
+            )}
+        </div>
     );
 }
 

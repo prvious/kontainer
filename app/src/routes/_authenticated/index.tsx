@@ -1,298 +1,45 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useServices } from "@/hooks/use-services";
 import { useNodes } from "@/hooks/use-nodes";
 import { useTaskStats } from "@/hooks/use-task-stats";
-import { PageHeader } from "@/components/page-header";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Progress } from "@/components/ui/progress";
-import { Separator } from "@/components/ui/separator";
-import { AlertTriangle, ArrowRight, CheckCircle, Container, Cpu, HardDrive, Layers, MemoryStick, RefreshCw, Server, XCircle } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { useClusterMetrics } from "@/hooks/use-cluster-metrics";
-import type { ServiceItem } from "@/types/services";
-import type { NodeItem } from "@/types/nodes";
-import type { TaskStats } from "@/types/task-stats";
-import type { AgentMetricsSnapshot } from "@/types/metrics";
-
-function formatRelativeTime(iso: string): string {
-    const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-    if (seconds < 60) return "just now";
-    const minutes = Math.floor(seconds / 60);
-    if (minutes < 60) return `${minutes}m ago`;
-    const hours = Math.floor(minutes / 60);
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(hours / 24);
-    return `${days}d ago`;
-}
-
-function formatBytes(bytes: number): string {
-    if (bytes === 0) return "0 B";
-    const k = 1024;
-    const sizes = ["B", "KB", "MB", "GB", "TB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
-}
-
-function computeClusterMetrics(agents: AgentMetricsSnapshot[]) {
-    if (agents.length === 0) return null;
-    const avgCpu = agents.reduce((sum, a) => sum + a.node.cpuPercent, 0) / agents.length;
-    const totalMemUsed = agents.reduce((sum, a) => sum + a.node.memoryUsed, 0);
-    const totalMemTotal = agents.reduce((sum, a) => sum + a.node.memoryTotal, 0);
-    const totalDiskUsed = agents.reduce((sum, a) => sum + a.node.diskUsed, 0);
-    const totalDiskTotal = agents.reduce((sum, a) => sum + a.node.diskTotal, 0);
-    const memPct = totalMemTotal > 0 ? (totalMemUsed / totalMemTotal) * 100 : 0;
-    const diskPct = totalDiskTotal > 0 ? (totalDiskUsed / totalDiskTotal) * 100 : 0;
-    return { avgCpu, totalMemUsed, totalMemTotal, memPct, totalDiskUsed, totalDiskTotal, diskPct };
-}
-
-function computeServiceStats(services: ServiceItem[]) {
-    const total = services.length;
-    const running = services.filter((s) => s.replicasRunning > 0).length;
-    const stacks = new Set(services.map((s) => s.stack).filter(Boolean)).size;
-    const healthPct = total > 0 ? Math.round((running / total) * 100) : 0;
-    return { total, running, stacks, healthPct };
-}
-
-function computeNodeStats(nodes: NodeItem[]) {
-    const total = nodes.length;
-    const managers = nodes.filter((n) => n.role === "manager").length;
-    const workers = nodes.filter((n) => n.role === "worker").length;
-    const down = nodes.filter((n) => n.status === "down" || n.status === "disconnected").length;
-    const ready = nodes.filter((n) => n.status === "ready").length;
-    const healthPct = total > 0 ? Math.round((ready / total) * 100) : 0;
-    return { total, managers, workers, down, ready, healthPct };
-}
-
-function StatCard({
-    label,
-    value,
-    icon: Icon,
-    accent,
-    delay,
-}: {
-    label: string;
-    value: string | number;
-    icon: React.ComponentType<{ className?: string }>;
-    accent?: string;
-    delay: number;
-}) {
-    return (
-        <Card className='animate-fade-in-up' style={{ animationDelay: `${delay}ms` }}>
-            <CardContent className='flex items-center gap-4 p-4'>
-                <div className={`flex size-10 items-center justify-center rounded-lg ${accent ?? "bg-muted"}`}>
-                    <Icon className='size-5' />
-                </div>
-                <div>
-                    <p className='text-2xl font-semibold tracking-tight'>{value}</p>
-                    <p className='text-xs text-muted-foreground'>{label}</p>
-                </div>
-            </CardContent>
-        </Card>
-    );
-}
-
-function ClusterHealthCard({ services, nodes, taskStats }: { services: ServiceItem[]; nodes: NodeItem[]; taskStats: TaskStats }) {
-    const svcStats = computeServiceStats(services);
-    const nodeStats = computeNodeStats(nodes);
-    const taskHealthPct = taskStats.desiredRunning > 0 ? Math.round((taskStats.running / taskStats.desiredRunning) * 100) : 0;
-
-    const composite = Math.round((svcStats.healthPct + nodeStats.healthPct + taskHealthPct) / 3);
-
-    return (
-        <Card className='animate-fade-in-up' style={{ animationDelay: "200ms" }}>
-            <CardHeader className='pb-3'>
-                <CardTitle className='flex items-center justify-between text-sm'>
-                    Cluster Health
-                    <span className='font-mono text-xs text-muted-foreground'>{composite}%</span>
-                </CardTitle>
-            </CardHeader>
-            <CardContent className='space-y-3'>
-                <Progress value={composite} className='h-2' />
-                <p className='text-xs text-muted-foreground'>
-                    {svcStats.running}/{svcStats.total} services &middot; {nodeStats.ready}/{nodeStats.total} nodes &middot; {taskStats.running}/
-                    {taskStats.desiredRunning} tasks
-                </p>
-            </CardContent>
-        </Card>
-    );
-}
-
-function NodesOverviewCard({ nodes }: { nodes: NodeItem[] }) {
-    const stats = computeNodeStats(nodes);
-
-    return (
-        <Card className='animate-fade-in-up' style={{ animationDelay: "250ms" }}>
-            <CardHeader className='pb-3'>
-                <CardTitle className='flex items-center justify-between text-sm'>
-                    Nodes Overview
-                    <Link to='/nodes'>
-                        <Button variant='ghost' size='sm' className='h-auto gap-1 px-2 py-1 text-xs text-muted-foreground'>
-                            View all <ArrowRight className='size-3' />
-                        </Button>
-                    </Link>
-                </CardTitle>
-            </CardHeader>
-            <CardContent className='space-y-3'>
-                <div className='grid grid-cols-3 gap-4 text-center'>
-                    <div>
-                        <p className='text-lg font-semibold'>{stats.managers}</p>
-                        <p className='text-xs text-muted-foreground'>Managers</p>
-                    </div>
-                    <div>
-                        <p className='text-lg font-semibold'>{stats.workers}</p>
-                        <p className='text-xs text-muted-foreground'>Workers</p>
-                    </div>
-                    <div>
-                        <p className={`text-lg font-semibold ${stats.down > 0 ? "text-destructive" : ""}`}>{stats.down}</p>
-                        <p className='text-xs text-muted-foreground'>Down</p>
-                    </div>
-                </div>
-                <Progress value={stats.healthPct} className='h-2' />
-            </CardContent>
-        </Card>
-    );
-}
-
-function StackBreakdown({ services }: { services: ServiceItem[] }) {
-    const groups: Record<string, ServiceItem[]> = {};
-    for (const svc of services) {
-        const key = svc.stack || "Standalone";
-        if (!groups[key]) groups[key] = [];
-        groups[key].push(svc);
-    }
-
-    const sortedKeys = Object.keys(groups).sort((a, b) => {
-        if (a === "Standalone") return 1;
-        if (b === "Standalone") return -1;
-        return a.localeCompare(b);
-    });
-
-    return (
-        <Card className='animate-fade-in-up' style={{ animationDelay: "300ms" }}>
-            <CardHeader className='pb-3'>
-                <CardTitle className='flex items-center justify-between text-sm'>
-                    Stacks
-                    <Link to='/stacks'>
-                        <Button variant='ghost' size='sm' className='h-auto gap-1 px-2 py-1 text-xs text-muted-foreground'>
-                            View all <ArrowRight className='size-3' />
-                        </Button>
-                    </Link>
-                </CardTitle>
-            </CardHeader>
-            <CardContent>
-                <div className='space-y-1'>
-                    {sortedKeys.map((stack) => {
-                        const items = groups[stack];
-                        const healthy = items.filter((s) => s.replicasDesired === -1 || s.replicasRunning >= s.replicasDesired).length;
-                        const allHealthy = healthy === items.length;
-
-                        return (
-                            <div key={stack} className='flex items-center justify-between rounded-md px-2 py-2 text-sm transition-colors hover:bg-muted/50'>
-                                <div className='flex items-center gap-2.5'>
-                                    <Layers className='size-3.5 text-muted-foreground' />
-                                    <span className='font-medium'>{stack}</span>
-                                </div>
-                                <div className='flex items-center gap-2'>
-                                    <span className='font-mono text-xs text-muted-foreground'>
-                                        {healthy}/{items.length}
-                                    </span>
-                                    <span className={`size-1.5 rounded-full ${allHealthy ? "bg-success" : 'animate-pulse-dot bg-destructive'}`} />
-                                </div>
-                            </div>
-                        );
-                    })}
-                </div>
-            </CardContent>
-        </Card>
-    );
-}
-
-function RecentServices({ services }: { services: ServiceItem[] }) {
-    const recent = [...services].sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()).slice(0, 6);
-
-    return (
-        <Card className='animate-fade-in-up' style={{ animationDelay: "400ms" }}>
-            <CardHeader className='pb-3'>
-                <CardTitle className='flex items-center justify-between text-sm'>
-                    Recent Activity
-                    <Link to='/services'>
-                        <Button variant='ghost' size='sm' className='h-auto gap-1 px-2 py-1 text-xs text-muted-foreground'>
-                            All services <ArrowRight className='size-3' />
-                        </Button>
-                    </Link>
-                </CardTitle>
-            </CardHeader>
-            <CardContent>
-                <div className='space-y-0.5'>
-                    {recent.map((svc) => {
-                        const healthy = svc.replicasDesired === -1 || svc.replicasRunning >= svc.replicasDesired;
-                        return (
-                            <Link
-                                key={svc.id}
-                                to='/services/$serviceId'
-                                params={{ serviceId: svc.id }}
-                                className='flex items-center justify-between rounded-md px-2 py-2 transition-colors hover:bg-muted/50'
-                            >
-                                <div className='flex items-center gap-2.5 overflow-hidden'>
-                                    <span className={`size-1.5 shrink-0 rounded-full ${healthy ? "bg-success" : 'animate-pulse-dot bg-destructive'}`} />
-                                    <span className='truncate text-sm font-medium'>{svc.name}</span>
-                                </div>
-                                <div className='flex shrink-0 items-center gap-3'>
-                                    <span className='font-mono text-xs text-muted-foreground'>{formatRelativeTime(svc.updatedAt)}</span>
-                                    {svc.replicasDesired === -1 ? (
-                                        <Badge variant='secondary' className='text-[10px]'>
-                                            global
-                                        </Badge>
-                                    ) : (
-                                        <Badge variant={healthy ? "default" : "destructive"} className='font-mono text-[10px]'>
-                                            {svc.replicasRunning}/{svc.replicasDesired}
-                                        </Badge>
-                                    )}
-                                </div>
-                            </Link>
-                        );
-                    })}
-                </div>
-            </CardContent>
-        </Card>
-    );
-}
+import { StatsCards } from "@/components/dashboard/stats-cards";
+import { ResourceCharts } from "@/components/dashboard/resource-charts";
+import { ContainerTable } from "@/components/dashboard/container-table";
+import { ServicesList } from "@/components/dashboard/services-list";
+import { ActivityFeed } from "@/components/dashboard/activity-feed";
+import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { AlertTriangle, RefreshCw } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 function LoadingSkeleton() {
     return (
         <div className='space-y-6 p-6'>
+            <div className='space-y-1'>
+                <Skeleton className='h-7 w-56' />
+                <Skeleton className='h-4 w-96' />
+            </div>
             <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-4'>
                 {[1, 2, 3, 4].map((i) => (
                     <Card key={i}>
-                        <CardContent className='flex items-center gap-4 p-4'>
-                            <Skeleton className='size-10 rounded-lg' />
-                            <div className='space-y-1.5'>
-                                <Skeleton className='h-6 w-12' />
-                                <Skeleton className='h-3 w-20' />
-                            </div>
+                        <CardContent className='p-4'>
+                            <Skeleton className='mb-2 h-3 w-20' />
+                            <Skeleton className='h-8 w-16' />
+                            <Skeleton className='mt-2 h-3 w-32' />
                         </CardContent>
                     </Card>
                 ))}
             </div>
             <div className='grid gap-4 lg:grid-cols-2'>
                 <Card>
-                    <CardHeader>
-                        <Skeleton className='h-4 w-32' />
-                    </CardHeader>
-                    <CardContent>
-                        <Skeleton className='h-2 w-full' />
+                    <CardContent className='p-6'>
+                        <Skeleton className='h-[200px] w-full' />
                     </CardContent>
                 </Card>
                 <Card>
-                    <CardHeader>
-                        <Skeleton className='h-4 w-24' />
-                    </CardHeader>
-                    <CardContent className='space-y-3'>
-                        {[1, 2, 3].map((i) => (
-                            <Skeleton key={i} className='h-8 w-full' />
-                        ))}
+                    <CardContent className='p-6'>
+                        <Skeleton className='h-[200px] w-full' />
                     </CardContent>
                 </Card>
             </div>
@@ -313,93 +60,61 @@ function DashboardPage() {
 
     if (error) {
         return (
-            <>
-                <PageHeader title='Overview' />
-                <div className='flex flex-1 flex-col items-center justify-center gap-3 text-sm text-muted-foreground'>
-                    <AlertTriangle className='size-6 text-destructive' />
-                    <p>Failed to connect to agent</p>
-                    <Button variant='outline' size='sm' onClick={() => refetchServices()}>
-                        <RefreshCw className='size-3.5' /> Retry
-                    </Button>
-                </div>
-            </>
+            <div className='flex flex-1 flex-col items-center justify-center gap-3 text-sm text-muted-foreground'>
+                <AlertTriangle className='size-6 text-destructive' />
+                <p>Failed to connect to agent</p>
+                <Button variant='outline' size='sm' onClick={() => refetchServices()}>
+                    <RefreshCw className='size-3.5' /> Retry
+                </Button>
+            </div>
         );
     }
 
     const serviceItems = services ?? [];
     const nodeItems = nodes ?? [];
     const stats = taskStats ?? { total: 0, running: 0, failed: 0, preparing: 0, complete: 0, desiredRunning: 0 };
-    const svcStats = computeServiceStats(serviceItems);
-    const nStats = computeNodeStats(nodeItems);
-    const clusterMetrics = computeClusterMetrics(metricsData?.agents ?? []);
+    const agents = metricsData?.agents ?? [];
+    const history = metricsData?.history ?? [];
     const lastUpdate = dataUpdatedAt ? new Date(dataUpdatedAt).toLocaleTimeString() : "";
 
     return (
-        <>
-            <PageHeader
-                title='Overview'
-                description={`${svcStats.total} services \u00b7 ${nStats.total} nodes \u00b7 ${stats.running} tasks running`}
-                actions={
-                    <div className='flex items-center gap-3'>
-                        {lastUpdate && (
-                            <span className='flex items-center gap-1.5 text-xs text-muted-foreground'>
-                                <span className='animate-pulse-dot size-1.5 rounded-full bg-success' />
-                                Live
-                            </span>
-                        )}
-                    </div>
-                }
-            />
-
-            <div className='space-y-6 p-6'>
-                {/* Row 1 — Stat Cards */}
-                <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-4'>
-                    <StatCard label='Total Services' value={svcStats.total} icon={Container} accent='bg-muted' delay={0} />
-                    <StatCard label='Total Nodes' value={nStats.total} icon={Server} accent='bg-muted' delay={50} />
-                    <StatCard label='Running Tasks' value={stats.running} icon={CheckCircle} accent='bg-success/10 text-success' delay={100} />
-                    <StatCard
-                        label='Failed Tasks'
-                        value={stats.failed}
-                        icon={XCircle}
-                        accent={stats.failed > 0 ? "bg-destructive/10 text-destructive" : "bg-muted"}
-                        delay={150}
-                    />
-                    {clusterMetrics && (
-                        <>
-                            <StatCard label='Avg CPU' value={`${Math.round(clusterMetrics.avgCpu)}%`} icon={Cpu} accent='bg-muted' delay={200} />
-                            <StatCard
-                                label='Memory'
-                                value={`${formatBytes(clusterMetrics.totalMemUsed)} / ${formatBytes(clusterMetrics.totalMemTotal)}`}
-                                icon={MemoryStick}
-                                accent='bg-muted'
-                                delay={250}
-                            />
-                            <StatCard
-                                label='Disk'
-                                value={`${formatBytes(clusterMetrics.totalDiskUsed)} / ${formatBytes(clusterMetrics.totalDiskTotal)}`}
-                                icon={HardDrive}
-                                accent='bg-muted'
-                                delay={300}
-                            />
-                        </>
+        <div className='space-y-6 p-6'>
+            {/* Page Title */}
+            <div>
+                <div className='flex items-center gap-3'>
+                    <h1 className='text-xl font-semibold tracking-tight'>Infrastructure Overview</h1>
+                    {lastUpdate && (
+                        <span className='flex items-center gap-1.5 text-xs text-muted-foreground'>
+                            <span className='animate-pulse-dot size-1.5 rounded-full bg-primary' />
+                            Live
+                        </span>
                     )}
                 </div>
+                <p className='mt-1 text-sm text-muted-foreground'>
+                    {nodeItems.length} node{nodeItems.length !== 1 ? "s" : ""} &middot; {serviceItems.length} service{serviceItems.length !== 1 ? "s" : ""}{" "}
+                    &middot; {stats.running} task{stats.running !== 1 ? "s" : ""} running
+                </p>
+            </div>
 
-                <Separator />
+            {/* Stats Cards */}
+            <StatsCards nodes={nodeItems} agents={agents} />
 
-                {/* Row 2 — Cluster Health + Nodes Overview */}
-                <div className='grid gap-4 lg:grid-cols-2'>
-                    <ClusterHealthCard services={serviceItems} nodes={nodeItems} taskStats={stats} />
-                    <NodesOverviewCard nodes={nodeItems} />
+            {/* Resource Charts */}
+            <ResourceCharts agents={agents} history={history} />
+
+            {/* Container Table */}
+            <ContainerTable agents={agents} taskStats={taskStats ?? null} />
+
+            {/* Services + Activity Feed */}
+            <div className='grid gap-4 lg:grid-cols-5'>
+                <div className='lg:col-span-3'>
+                    <ServicesList services={serviceItems} />
                 </div>
-
-                {/* Row 3 — Stacks + Recent Activity */}
-                <div className='grid gap-4 lg:grid-cols-2'>
-                    <StackBreakdown services={serviceItems} />
-                    <RecentServices services={serviceItems} />
+                <div className='lg:col-span-2'>
+                    <ActivityFeed />
                 </div>
             </div>
-        </>
+        </div>
     );
 }
 
