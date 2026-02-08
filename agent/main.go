@@ -78,10 +78,27 @@ func startFollower(cfg *config.Config) {
 	execFollowerHandler := services.NewExecContainerFollowerHandler(dockerClient)
 	handler := server.NewFollower(identity, cfg.InternalSecret, metricsHandler, execFollowerHandler)
 
-	addr := ":" + cfg.Port
-	log.Printf("  listening on    : %s (follower)", addr)
+	srv := &http.Server{Addr: ":" + cfg.Port, Handler: handler}
+
+	// Graceful shutdown on SIGINT/SIGTERM
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		<-sigCh
+		log.Println("shutting down...")
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		srv.Shutdown(ctx)
+	}()
+
+	log.Printf("  listening on    : %s (follower)", srv.Addr)
 	log.Println("----------------------------")
-	log.Fatal(http.ListenAndServe(addr, handler))
+
+	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+		log.Fatalf("server error: %v", err)
+	}
 }
 
 func startLeader(cfg *config.Config) {
