@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/clovismuneza/devoper/agent/auth"
 	"github.com/clovismuneza/devoper/agent/auth/providers"
+	"github.com/clovismuneza/devoper/agent/cluster"
 	"github.com/clovismuneza/devoper/agent/config"
 	"github.com/clovismuneza/devoper/agent/server"
 	"github.com/clovismuneza/devoper/agent/services"
@@ -26,10 +29,40 @@ func main() {
 	cfg := config.Load()
 
 	log.Println("--- devoper agent config ---")
+	log.Printf("  role            : %s", cfg.Role)
 	log.Printf("  agent url       : %s", cfg.AgentURL)
 	log.Printf("  github client id: %s", mask(cfg.GithubClientID))
 	log.Printf("  jwt secret      : %s", mask(cfg.JWTSecret))
 
+	if cfg.Role == cluster.RoleFollower {
+		startFollower(cfg)
+	} else {
+		startLeader(cfg)
+	}
+}
+
+func startFollower(cfg *config.Config) {
+	if cfg.InternalSecret == "" {
+		log.Fatal("DEVOPER_INTERNAL_SECRET is required for follower mode")
+	}
+
+	hostname, _ := os.Hostname()
+	nodeID := os.Getenv("DOCKER_NODE_ID")
+
+	identity := server.FollowerIdentity{
+		NodeID:   nodeID,
+		Hostname: hostname,
+	}
+
+	handler := server.NewFollower(identity, cfg.InternalSecret)
+
+	addr := ":" + cfg.Port
+	log.Printf("  listening on    : %s (follower)", addr)
+	log.Println("----------------------------")
+	log.Fatal(http.ListenAndServe(addr, handler))
+}
+
+func startLeader(cfg *config.Config) {
 	if cfg.GithubClientID == "" || cfg.GithubClientSecret == "" {
 		log.Println("  ⚠ GITHUB_CLIENT_ID or GITHUB_CLIENT_SECRET is empty — OAuth will not work")
 	}
@@ -82,6 +115,42 @@ func main() {
 	listTaskStatsAction := services.NewListTaskStatsAction(dockerClient)
 	listTaskStatsHandler := services.NewListTaskStatsHandler(listTaskStatsAction)
 
+	listNetworksAction := services.NewListNetworksAction(dockerClient)
+	listNetworksHandler := services.NewListNetworksHandler(listNetworksAction)
+
+	listVolumesAction := services.NewListVolumesAction(dockerClient)
+	listVolumesHandler := services.NewListVolumesHandler(listVolumesAction)
+
+	updateServiceEnvAction := services.NewUpdateServiceEnvAction(dockerClient)
+	updateServiceEnvHandler := services.NewUpdateServiceEnvHandler(updateServiceEnvAction)
+
+	updateServiceImageAction := services.NewUpdateServiceImageAction(dockerClient)
+	updateServiceImageHandler := services.NewUpdateServiceImageHandler(updateServiceImageAction)
+
+	updateNodeAvailabilityAction := services.NewUpdateNodeAvailabilityAction(dockerClient)
+	updateNodeAvailabilityHandler := services.NewUpdateNodeAvailabilityHandler(updateNodeAvailabilityAction)
+
+	updateNodeRoleAction := services.NewUpdateNodeRoleAction(dockerClient)
+	updateNodeRoleHandler := services.NewUpdateNodeRoleHandler(updateNodeRoleAction)
+
+	listSecretsAction := services.NewListSecretsAction(dockerClient)
+	listSecretsHandler := services.NewListSecretsHandler(listSecretsAction)
+
+	createSecretAction := services.NewCreateSecretAction(dockerClient)
+	createSecretHandler := services.NewCreateSecretHandler(createSecretAction)
+
+	removeSecretAction := services.NewRemoveSecretAction(dockerClient)
+	removeSecretHandler := services.NewRemoveSecretHandler(removeSecretAction)
+
+	listConfigsAction := services.NewListConfigsAction(dockerClient)
+	listConfigsHandler := services.NewListConfigsHandler(listConfigsAction)
+
+	createConfigAction := services.NewCreateConfigAction(dockerClient)
+	createConfigHandler := services.NewCreateConfigHandler(createConfigAction)
+
+	removeConfigAction := services.NewRemoveConfigAction(dockerClient)
+	removeConfigHandler := services.NewRemoveConfigHandler(removeConfigAction)
+
 	streamLogsHandler := services.NewStreamServiceLogsHandler(dockerClient, cfg.JWTSecret)
 	streamTaskLogsHandler := services.NewStreamTaskLogsHandler(dockerClient, cfg.JWTSecret)
 
@@ -90,10 +159,32 @@ func main() {
 	authHandler := auth.NewAuthHandler(registry, sessions, cfg.JWTSecret, bridge)
 	jwtMiddleware := auth.JWTMiddleware(cfg.JWTSecret)
 
-	handler := server.New(authHandler, jwtMiddleware, listServicesHandler, inspectServiceHandler, scaleServiceHandler, restartServiceHandler, rollbackServiceHandler, listStacksHandler, removeStackHandler, listServiceTasksHandler, inspectTaskHandler, listNodesHandler, listTaskStatsHandler, streamLogsHandler, streamTaskLogsHandler)
+	// Cluster setup
+	clusterRegistry := cluster.NewRegistry()
+	hostname, _ := os.Hostname()
+	selfInfo := cluster.NewAgentInfo("", hostname, cfg.AgentURL, cluster.RoleLeader, "healthy")
+
+	listAgentsAction := services.NewListAgentsAction(clusterRegistry, selfInfo)
+	listAgentsHandler := services.NewListAgentsHandler(listAgentsAction)
+
+	// Start follower discovery
+	if addrs := cluster.ParseDevFollowers(cfg.DevFollowers); len(addrs) > 0 {
+		// Dev mode: ping static localhost addresses
+		log.Printf("  dev followers   : %s", cfg.DevFollowers)
+		devDiscovery := cluster.NewDevDiscovery(addrs, cfg.InternalSecret, clusterRegistry)
+		devDiscovery.Start(context.Background())
+		defer devDiscovery.Stop()
+	} else if cfg.InternalSecret != "" {
+		// Production: discover followers via Swarm API
+		discovery := cluster.NewDiscovery(dockerClient, clusterRegistry, cfg.FollowerService, cfg.InternalSecret, cfg.Port)
+		discovery.Start(context.Background())
+		defer discovery.Stop()
+	}
+
+	handler := server.New(authHandler, jwtMiddleware, listServicesHandler, inspectServiceHandler, scaleServiceHandler, restartServiceHandler, rollbackServiceHandler, listStacksHandler, removeStackHandler, listServiceTasksHandler, inspectTaskHandler, listNodesHandler, listTaskStatsHandler, streamLogsHandler, streamTaskLogsHandler, listNetworksHandler, listVolumesHandler, updateServiceEnvHandler, updateServiceImageHandler, updateNodeAvailabilityHandler, updateNodeRoleHandler, listSecretsHandler, createSecretHandler, removeSecretHandler, listConfigsHandler, createConfigHandler, removeConfigHandler, listAgentsHandler)
 
 	addr := ":" + cfg.Port
-	log.Printf("  listening on    : %s", addr)
+	log.Printf("  listening on    : %s (leader)", addr)
 	log.Println("----------------------------")
 	log.Fatal(http.ListenAndServe(addr, handler))
 }

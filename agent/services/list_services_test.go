@@ -12,7 +12,9 @@ import (
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/api/types/swarm"
+	"github.com/docker/docker/api/types/volume"
 )
 
 type mockDockerClient struct {
@@ -33,6 +35,23 @@ type mockDockerClient struct {
 	inspectTaskErr error
 	taskLogsReader io.ReadCloser
 	taskLogsErr    error
+	networks       []network.Summary
+	networkErr     error
+	volumes        volume.ListResponse
+	volumeErr      error
+	inspectNode    swarm.Node
+	inspectNodeErr error
+	nodeUpdateErr  error
+	secrets          []swarm.Secret
+	secretErr        error
+	secretCreateResp swarm.SecretCreateResponse
+	secretCreateErr  error
+	secretRemoveErr  error
+	configs          []swarm.Config
+	configErr        error
+	configCreateResp swarm.ConfigCreateResponse
+	configCreateErr  error
+	configRemoveErr  error
 }
 
 func (m *mockDockerClient) ServiceList(_ context.Context, _ types.ServiceListOptions) ([]swarm.Service, error) {
@@ -67,12 +86,52 @@ func (m *mockDockerClient) TaskLogs(_ context.Context, _ string, _ container.Log
 	return m.taskLogsReader, m.taskLogsErr
 }
 
+func (m *mockDockerClient) NetworkList(_ context.Context, _ network.ListOptions) ([]network.Summary, error) {
+	return m.networks, m.networkErr
+}
+
+func (m *mockDockerClient) VolumeList(_ context.Context, _ volume.ListOptions) (volume.ListResponse, error) {
+	return m.volumes, m.volumeErr
+}
+
+func (m *mockDockerClient) NodeInspectWithRaw(_ context.Context, _ string) (swarm.Node, []byte, error) {
+	return m.inspectNode, nil, m.inspectNodeErr
+}
+
+func (m *mockDockerClient) NodeUpdate(_ context.Context, _ string, _ swarm.Version, _ swarm.NodeSpec) error {
+	return m.nodeUpdateErr
+}
+
 func (m *mockDockerClient) ServiceRemove(_ context.Context, serviceID string) error {
 	if m.removeErr != nil {
 		return m.removeErr
 	}
 	m.removedIDs = append(m.removedIDs, serviceID)
 	return nil
+}
+
+func (m *mockDockerClient) SecretList(_ context.Context, _ swarm.SecretListOptions) ([]swarm.Secret, error) {
+	return m.secrets, m.secretErr
+}
+
+func (m *mockDockerClient) SecretCreate(_ context.Context, _ swarm.SecretSpec) (swarm.SecretCreateResponse, error) {
+	return m.secretCreateResp, m.secretCreateErr
+}
+
+func (m *mockDockerClient) SecretRemove(_ context.Context, _ string) error {
+	return m.secretRemoveErr
+}
+
+func (m *mockDockerClient) ConfigList(_ context.Context, _ swarm.ConfigListOptions) ([]swarm.Config, error) {
+	return m.configs, m.configErr
+}
+
+func (m *mockDockerClient) ConfigCreate(_ context.Context, _ swarm.ConfigSpec) (swarm.ConfigCreateResponse, error) {
+	return m.configCreateResp, m.configCreateErr
+}
+
+func (m *mockDockerClient) ConfigRemove(_ context.Context, _ string) error {
+	return m.configRemoveErr
 }
 
 func uint64Ptr(v uint64) *uint64 { return &v }

@@ -11,7 +11,9 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
+	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/api/types/swarm"
+	"github.com/docker/docker/api/types/volume"
 )
 
 type DockerClient interface {
@@ -24,6 +26,16 @@ type DockerClient interface {
 	ServiceRemove(ctx context.Context, serviceID string) error
 	TaskInspectWithRaw(ctx context.Context, taskID string) (swarm.Task, []byte, error)
 	TaskLogs(ctx context.Context, taskID string, opts container.LogsOptions) (io.ReadCloser, error)
+	NetworkList(ctx context.Context, opts network.ListOptions) ([]network.Summary, error)
+	VolumeList(ctx context.Context, opts volume.ListOptions) (volume.ListResponse, error)
+	NodeInspectWithRaw(ctx context.Context, nodeID string) (swarm.Node, []byte, error)
+	NodeUpdate(ctx context.Context, nodeID string, version swarm.Version, node swarm.NodeSpec) error
+	SecretList(ctx context.Context, opts swarm.SecretListOptions) ([]swarm.Secret, error)
+	SecretCreate(ctx context.Context, secret swarm.SecretSpec) (swarm.SecretCreateResponse, error)
+	SecretRemove(ctx context.Context, id string) error
+	ConfigList(ctx context.Context, opts swarm.ConfigListOptions) ([]swarm.Config, error)
+	ConfigCreate(ctx context.Context, config swarm.ConfigSpec) (swarm.ConfigCreateResponse, error)
+	ConfigRemove(ctx context.Context, id string) error
 }
 
 type ServiceItem struct {

@@ -26,6 +26,19 @@ func New(
 	listTaskStatsHandler *services.ListTaskStatsHandler,
 	streamLogsHandler *services.StreamServiceLogsHandler,
 	streamTaskLogsHandler *services.StreamTaskLogsHandler,
+	listNetworksHandler *services.ListNetworksHandler,
+	listVolumesHandler *services.ListVolumesHandler,
+	updateServiceEnvHandler *services.UpdateServiceEnvHandler,
+	updateServiceImageHandler *services.UpdateServiceImageHandler,
+	updateNodeAvailabilityHandler *services.UpdateNodeAvailabilityHandler,
+	updateNodeRoleHandler *services.UpdateNodeRoleHandler,
+	listSecretsHandler *services.ListSecretsHandler,
+	createSecretHandler *services.CreateSecretHandler,
+	removeSecretHandler *services.RemoveSecretHandler,
+	listConfigsHandler *services.ListConfigsHandler,
+	createConfigHandler *services.CreateConfigHandler,
+	removeConfigHandler *services.RemoveConfigHandler,
+	listAgentsHandler *services.ListAgentsHandler,
 ) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -66,6 +79,19 @@ func New(
 			r.Method("DELETE", "/stacks/{stackName}", removeStackHandler)
 			r.Method("GET", "/nodes", listNodesHandler)
 			r.Method("GET", "/task-stats", listTaskStatsHandler)
+			r.Method("GET", "/networks", listNetworksHandler)
+			r.Method("GET", "/volumes", listVolumesHandler)
+			r.Method("PUT", "/services/{serviceID}/env", updateServiceEnvHandler)
+			r.Method("PUT", "/services/{serviceID}/image", updateServiceImageHandler)
+			r.Method("PUT", "/nodes/{nodeID}/availability", updateNodeAvailabilityHandler)
+			r.Method("PUT", "/nodes/{nodeID}/role", updateNodeRoleHandler)
+			r.Method("GET", "/secrets", listSecretsHandler)
+			r.Method("POST", "/secrets", createSecretHandler)
+			r.Method("DELETE", "/secrets/{secretID}", removeSecretHandler)
+			r.Method("GET", "/configs", listConfigsHandler)
+			r.Method("POST", "/configs", createConfigHandler)
+			r.Method("DELETE", "/configs/{configID}", removeConfigHandler)
+			r.Method("GET", "/agents", listAgentsHandler)
 		})
 	})
 

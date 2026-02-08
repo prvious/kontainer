@@ -8,6 +8,10 @@ type Config struct {
 	JWTSecret          string
 	GithubClientID     string
 	GithubClientSecret string
+	Role               string
+	InternalSecret     string
+	FollowerService    string
+	DevFollowers       string
 }
 
 func Load() *Config {
@@ -17,6 +21,10 @@ func Load() *Config {
 		JWTSecret:          getEnv("JWT_SECRET", ""),
 		GithubClientID:     getEnv("GITHUB_CLIENT_ID", ""),
 		GithubClientSecret: getEnv("GITHUB_CLIENT_SECRET", ""),
+		Role:               getEnv("DEVOPER_ROLE", "leader"),
+		InternalSecret:     getEnv("DEVOPER_INTERNAL_SECRET", ""),
+		FollowerService:    getEnv("DEVOPER_FOLLOWER_SERVICE", "devoper-agent"),
+		DevFollowers:       getEnv("DEVOPER_DEV_FOLLOWERS", ""),
 	}
 }
 
