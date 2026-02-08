@@ -39,6 +39,8 @@ pub fn run() {
             actions::agent::list_configs::list_configs,
             actions::agent::create_config::create_config,
             actions::agent::remove_config::remove_config,
+            actions::agent::list_cluster_metrics::list_cluster_metrics,
+            actions::agent::list_node_metrics::list_node_metrics,
             actions::app::close_splashscreen::close_splashscreen
         ])
         .run(tauri::generate_context!())
