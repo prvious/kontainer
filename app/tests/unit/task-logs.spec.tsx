@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthContext } from "@/contexts/auth-context-value";
 import type { AuthContextValue } from "@/contexts/auth-context-value";
+import { TerminalProvider } from "@/contexts/terminal-context";
 import { LogViewer } from "@/components/log-viewer";
 import { ServiceTasks } from "@/components/service-tasks";
 
@@ -194,7 +195,9 @@ describe("Task Log Streaming", () => {
         render(
             <AuthContext value={mockAuth}>
                 <QueryClientProvider client={queryClient}>
-                    <ServiceTasks serviceId='svc1' />
+                    <TerminalProvider>
+                        <ServiceTasks serviceId='svc1' />
+                    </TerminalProvider>
                 </QueryClientProvider>
             </AuthContext>,
         );

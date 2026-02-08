@@ -52,6 +52,12 @@ type mockDockerClient struct {
 	configCreateResp swarm.ConfigCreateResponse
 	configCreateErr  error
 	configRemoveErr  error
+
+	// Exec function fields — configurable per-test
+	execCreateFn  func(ctx context.Context, ctr string, opts container.ExecOptions) (types.IDResponse, error)
+	execAttachFn  func(ctx context.Context, execID string, opts container.ExecAttachOptions) (types.HijackedResponse, error)
+	execResizeFn  func(ctx context.Context, execID string, opts container.ResizeOptions) error
+	execInspectFn func(ctx context.Context, execID string) (container.ExecInspect, error)
 }
 
 func (m *mockDockerClient) ServiceList(_ context.Context, _ types.ServiceListOptions) ([]swarm.Service, error) {
@@ -132,6 +138,34 @@ func (m *mockDockerClient) ConfigCreate(_ context.Context, _ swarm.ConfigSpec) (
 
 func (m *mockDockerClient) ConfigRemove(_ context.Context, _ string) error {
 	return m.configRemoveErr
+}
+
+func (m *mockDockerClient) ContainerExecCreate(ctx context.Context, ctr string, opts container.ExecOptions) (types.IDResponse, error) {
+	if m.execCreateFn != nil {
+		return m.execCreateFn(ctx, ctr, opts)
+	}
+	return types.IDResponse{}, nil
+}
+
+func (m *mockDockerClient) ContainerExecAttach(ctx context.Context, execID string, opts container.ExecAttachOptions) (types.HijackedResponse, error) {
+	if m.execAttachFn != nil {
+		return m.execAttachFn(ctx, execID, opts)
+	}
+	return types.HijackedResponse{}, nil
+}
+
+func (m *mockDockerClient) ContainerExecResize(ctx context.Context, execID string, opts container.ResizeOptions) error {
+	if m.execResizeFn != nil {
+		return m.execResizeFn(ctx, execID, opts)
+	}
+	return nil
+}
+
+func (m *mockDockerClient) ContainerExecInspect(ctx context.Context, execID string) (container.ExecInspect, error) {
+	if m.execInspectFn != nil {
+		return m.execInspectFn(ctx, execID)
+	}
+	return container.ExecInspect{}, nil
 }
 
 func uint64Ptr(v uint64) *uint64 { return &v }

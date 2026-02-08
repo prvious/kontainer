@@ -75,7 +75,8 @@ func startFollower(cfg *config.Config) {
 		Hostname: hostname,
 	}
 
-	handler := server.NewFollower(identity, cfg.InternalSecret, metricsHandler)
+	execFollowerHandler := services.NewExecContainerFollowerHandler(dockerClient)
+	handler := server.NewFollower(identity, cfg.InternalSecret, metricsHandler, execFollowerHandler)
 
 	addr := ":" + cfg.Port
 	log.Printf("  listening on    : %s (follower)", addr)
@@ -200,6 +201,8 @@ func startLeader(cfg *config.Config) {
 	listAgentsAction := services.NewListAgentsAction(clusterRegistry, selfInfo)
 	listAgentsHandler := services.NewListAgentsHandler(listAgentsAction)
 
+	execHandler := services.NewExecContainerHandler(dockerClient, cfg.JWTSecret, clusterRegistry, leaderNodeID, cfg.InternalSecret)
+
 	// Metrics storage and background collector
 	interval, err := time.ParseDuration(cfg.MetricsInterval)
 	if err != nil {
@@ -235,7 +238,7 @@ func startLeader(cfg *config.Config) {
 		defer discovery.Stop()
 	}
 
-	handler := server.New(authHandler, jwtMiddleware, listServicesHandler, inspectServiceHandler, scaleServiceHandler, restartServiceHandler, rollbackServiceHandler, listStacksHandler, removeStackHandler, listServiceTasksHandler, inspectTaskHandler, listNodesHandler, listTaskStatsHandler, streamLogsHandler, streamTaskLogsHandler, listNetworksHandler, listVolumesHandler, updateServiceEnvHandler, updateServiceImageHandler, updateNodeAvailabilityHandler, updateNodeRoleHandler, listSecretsHandler, createSecretHandler, removeSecretHandler, listConfigsHandler, createConfigHandler, removeConfigHandler, listAgentsHandler, clusterMetricsHandler, nodeMetricsHandler)
+	handler := server.New(authHandler, jwtMiddleware, listServicesHandler, inspectServiceHandler, scaleServiceHandler, restartServiceHandler, rollbackServiceHandler, listStacksHandler, removeStackHandler, listServiceTasksHandler, inspectTaskHandler, listNodesHandler, listTaskStatsHandler, streamLogsHandler, streamTaskLogsHandler, listNetworksHandler, listVolumesHandler, updateServiceEnvHandler, updateServiceImageHandler, updateNodeAvailabilityHandler, updateNodeRoleHandler, listSecretsHandler, createSecretHandler, removeSecretHandler, listConfigsHandler, createConfigHandler, removeConfigHandler, listAgentsHandler, execHandler, clusterMetricsHandler, nodeMetricsHandler)
 
 	srv := &http.Server{Addr: ":" + cfg.Port, Handler: handler}
 

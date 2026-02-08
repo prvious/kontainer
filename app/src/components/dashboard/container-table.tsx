@@ -2,7 +2,8 @@ import { useState, useMemo } from "react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { MoreHorizontal, Pause, Play, RotateCw } from "lucide-react";
+import { MoreHorizontal, Pause, Play, RotateCw, Terminal } from "lucide-react";
+import { useTerminal } from "@/hooks/use-terminal";
 import { Button } from "@/components/ui/button";
 import type { AgentMetricsSnapshot } from "@/types/metrics";
 import type { TaskStats } from "@/types/task-stats";
@@ -21,6 +22,8 @@ interface ContainerRow {
     cpu: string;
     memory: string;
     uptime: string;
+    fullContainerId: string;
+    fullNodeId: string;
 }
 
 function formatBytes(bytes: number): string {
@@ -44,6 +47,8 @@ function buildContainerRows(agents: AgentMetricsSnapshot[]): ContainerRow[] {
                 cpu: `${c.cpuPercent.toFixed(1)}%`,
                 memory: formatBytes(c.memoryUsed),
                 uptime: "—",
+                fullContainerId: c.containerId,
+                fullNodeId: agent.nodeId,
             });
         }
     }
@@ -63,6 +68,8 @@ function buildPlaceholderRows(taskStats: TaskStats): ContainerRow[] {
             cpu: `${(Math.random() * 15).toFixed(1)}%`,
             memory: formatBytes(Math.random() * 512 * 1024 * 1024),
             uptime: `${Math.floor(Math.random() * 48)}h ${Math.floor(Math.random() * 60)}m`,
+            fullContainerId: "",
+            fullNodeId: "",
         });
     }
     for (let i = 0; i < Math.min(taskStats.failed, 3); i++) {
@@ -75,6 +82,8 @@ function buildPlaceholderRows(taskStats: TaskStats): ContainerRow[] {
             cpu: "0.0%",
             memory: "0 B",
             uptime: "—",
+            fullContainerId: "",
+            fullNodeId: "",
         });
     }
     return rows;
@@ -96,6 +105,7 @@ const statusDotStyles: Record<string, string> = {
 
 export function ContainerTable({ agents, taskStats }: ContainerTableProps) {
     const [filter, setFilter] = useState<FilterTab>("all");
+    const { openExec } = useTerminal();
 
     const rows = useMemo(() => {
         const agentRows = buildContainerRows(agents);
@@ -181,6 +191,22 @@ export function ContainerTable({ agents, taskStats }: ContainerTableProps) {
                                     <TableCell className='text-right font-mono text-xs'>{row.uptime}</TableCell>
                                     <TableCell>
                                         <div className='flex justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100'>
+                                            {row.status === "running" && row.fullContainerId && (
+                                                <Button
+                                                    variant='ghost'
+                                                    size='sm'
+                                                    className='size-7 p-0'
+                                                    onClick={() =>
+                                                        openExec({
+                                                            containerId: row.fullContainerId,
+                                                            nodeId: row.fullNodeId,
+                                                            containerName: row.name,
+                                                        })
+                                                    }
+                                                >
+                                                    <Terminal className='size-3' />
+                                                </Button>
+                                            )}
                                             {row.status === "running" ? (
                                                 <Button variant='ghost' size='sm' className='size-7 p-0'>
                                                     <Pause className='size-3' />

@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/clovismuneza/devoper/agent/cluster"
+	"github.com/clovismuneza/devoper/agent/services"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
@@ -14,7 +15,7 @@ type FollowerIdentity struct {
 	Hostname string `json:"hostname"`
 }
 
-func NewFollower(identity FollowerIdentity, internalSecret string, metricsHandler http.Handler) http.Handler {
+func NewFollower(identity FollowerIdentity, internalSecret string, metricsHandler http.Handler, execFollowerHandler *services.ExecContainerFollowerHandler) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
@@ -32,6 +33,7 @@ func NewFollower(identity FollowerIdentity, internalSecret string, metricsHandle
 		})
 
 		r.Method("GET", "/metrics", metricsHandler)
+		r.Get("/exec/{containerID}", execFollowerHandler.ServeHTTP)
 
 		r.Get("/info", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
