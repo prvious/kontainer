@@ -39,14 +39,16 @@ func proxyWebSocket(clientConn *websocket.Conn, followerAddr, containerID, shell
 		clientConn.WriteMessage(websocket.TextMessage, data)
 		return
 	}
-	defer followerConn.Close()
-
 	done := make(chan struct{})
 	var once sync.Once
 	closeDone := func() { once.Do(func() { close(done) }) }
 
+	var wg sync.WaitGroup
+	wg.Add(2)
+
 	// Client → Follower
 	go func() {
+		defer wg.Done()
 		defer closeDone()
 		for {
 			msgType, msg, err := clientConn.ReadMessage()
@@ -61,6 +63,7 @@ func proxyWebSocket(clientConn *websocket.Conn, followerAddr, containerID, shell
 
 	// Follower → Client
 	go func() {
+		defer wg.Done()
 		defer closeDone()
 		for {
 			msgType, msg, err := followerConn.ReadMessage()
@@ -74,6 +77,11 @@ func proxyWebSocket(clientConn *websocket.Conn, followerAddr, containerID, shell
 	}()
 
 	<-done
+	// Close follower connection to unblock any goroutine still blocked on
+	// follower reads/writes. The remaining Client→Follower goroutine (if
+	// still running) will exit when the caller closes clientConn.
+	followerConn.Close()
+	wg.Wait()
 }
 
 func (m *execStatusMsg) marshal() ([]byte, error) {
