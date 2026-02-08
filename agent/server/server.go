@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/clovismuneza/devoper/agent/auth"
+	"github.com/clovismuneza/devoper/agent/metrics"
 	"github.com/clovismuneza/devoper/agent/services"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -39,6 +40,8 @@ func New(
 	createConfigHandler *services.CreateConfigHandler,
 	removeConfigHandler *services.RemoveConfigHandler,
 	listAgentsHandler *services.ListAgentsHandler,
+	clusterMetricsHandler *metrics.ClusterMetricsHandler,
+	nodeMetricsHandler *metrics.NodeMetricsHandler,
 ) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -92,6 +95,8 @@ func New(
 			r.Method("POST", "/configs", createConfigHandler)
 			r.Method("DELETE", "/configs/{configID}", removeConfigHandler)
 			r.Method("GET", "/agents", listAgentsHandler)
+			r.Method("GET", "/metrics", clusterMetricsHandler)
+			r.Method("GET", "/metrics/{nodeID}", nodeMetricsHandler)
 		})
 	})
 

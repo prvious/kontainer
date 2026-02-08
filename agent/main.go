@@ -10,6 +10,7 @@ import (
 	"github.com/clovismuneza/devoper/agent/auth/providers"
 	"github.com/clovismuneza/devoper/agent/cluster"
 	"github.com/clovismuneza/devoper/agent/config"
+	"github.com/clovismuneza/devoper/agent/metrics"
 	"github.com/clovismuneza/devoper/agent/server"
 	"github.com/clovismuneza/devoper/agent/services"
 	"github.com/docker/docker/client"
@@ -49,12 +50,21 @@ func startFollower(cfg *config.Config) {
 	hostname, _ := os.Hostname()
 	nodeID := os.Getenv("DOCKER_NODE_ID")
 
+	dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		log.Fatalf("Failed to create Docker client: %v", err)
+	}
+
+	nodeAction := metrics.NewCollectNodeMetricsAction(dockerClient)
+	containerAction := metrics.NewCollectContainerMetricsAction(dockerClient)
+	metricsHandler := metrics.NewInternalMetricsHandler(nodeAction, containerAction, nodeID, hostname)
+
 	identity := server.FollowerIdentity{
 		NodeID:   nodeID,
 		Hostname: hostname,
 	}
 
-	handler := server.NewFollower(identity, cfg.InternalSecret)
+	handler := server.NewFollower(identity, cfg.InternalSecret, metricsHandler)
 
 	addr := ":" + cfg.Port
 	log.Printf("  listening on    : %s (follower)", addr)
@@ -81,6 +91,13 @@ func startLeader(cfg *config.Config) {
 	if err != nil {
 		log.Fatalf("Failed to create Docker client: %v", err)
 	}
+
+	hostname, _ := os.Hostname()
+
+	nodeAction := metrics.NewCollectNodeMetricsAction(dockerClient)
+	containerAction := metrics.NewCollectContainerMetricsAction(dockerClient)
+	leaderNodeID := os.Getenv("DOCKER_NODE_ID")
+	internalMetricsHandler := metrics.NewInternalMetricsHandler(nodeAction, containerAction, leaderNodeID, hostname)
 
 	listServicesAction := services.NewListServicesAction(dockerClient)
 	listServicesHandler := services.NewListServicesHandler(listServicesAction)
@@ -161,11 +178,13 @@ func startLeader(cfg *config.Config) {
 
 	// Cluster setup
 	clusterRegistry := cluster.NewRegistry()
-	hostname, _ := os.Hostname()
 	selfInfo := cluster.NewAgentInfo("", hostname, cfg.AgentURL, cluster.RoleLeader, "healthy")
 
 	listAgentsAction := services.NewListAgentsAction(clusterRegistry, selfInfo)
 	listAgentsHandler := services.NewListAgentsHandler(listAgentsAction)
+
+	clusterMetricsHandler := metrics.NewClusterMetricsHandler(internalMetricsHandler, clusterRegistry, cfg.InternalSecret)
+	nodeMetricsHandler := metrics.NewNodeMetricsHandler(internalMetricsHandler, clusterRegistry, cfg.InternalSecret)
 
 	// Start follower discovery
 	if addrs := cluster.ParseDevFollowers(cfg.DevFollowers); len(addrs) > 0 {
@@ -181,7 +200,7 @@ func startLeader(cfg *config.Config) {
 		defer discovery.Stop()
 	}
 
-	handler := server.New(authHandler, jwtMiddleware, listServicesHandler, inspectServiceHandler, scaleServiceHandler, restartServiceHandler, rollbackServiceHandler, listStacksHandler, removeStackHandler, listServiceTasksHandler, inspectTaskHandler, listNodesHandler, listTaskStatsHandler, streamLogsHandler, streamTaskLogsHandler, listNetworksHandler, listVolumesHandler, updateServiceEnvHandler, updateServiceImageHandler, updateNodeAvailabilityHandler, updateNodeRoleHandler, listSecretsHandler, createSecretHandler, removeSecretHandler, listConfigsHandler, createConfigHandler, removeConfigHandler, listAgentsHandler)
+	handler := server.New(authHandler, jwtMiddleware, listServicesHandler, inspectServiceHandler, scaleServiceHandler, restartServiceHandler, rollbackServiceHandler, listStacksHandler, removeStackHandler, listServiceTasksHandler, inspectTaskHandler, listNodesHandler, listTaskStatsHandler, streamLogsHandler, streamTaskLogsHandler, listNetworksHandler, listVolumesHandler, updateServiceEnvHandler, updateServiceImageHandler, updateNodeAvailabilityHandler, updateNodeRoleHandler, listSecretsHandler, createSecretHandler, removeSecretHandler, listConfigsHandler, createConfigHandler, removeConfigHandler, listAgentsHandler, clusterMetricsHandler, nodeMetricsHandler)
 
 	addr := ":" + cfg.Port
 	log.Printf("  listening on    : %s (leader)", addr)

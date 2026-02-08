@@ -14,7 +14,7 @@ type FollowerIdentity struct {
 	Hostname string `json:"hostname"`
 }
 
-func NewFollower(identity FollowerIdentity, internalSecret string) http.Handler {
+func NewFollower(identity FollowerIdentity, internalSecret string, metricsHandler http.Handler) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
@@ -30,6 +30,8 @@ func NewFollower(identity FollowerIdentity, internalSecret string) http.Handler 
 				"hostname": identity.Hostname,
 			})
 		})
+
+		r.Method("GET", "/metrics", metricsHandler)
 
 		r.Get("/info", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
