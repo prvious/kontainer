@@ -16,8 +16,8 @@ RUN go mod download
 COPY . .
 
 # Build the binary
-# CGO is required for modernc.org/sqlite
-RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -ldflags="-s -w" -o agent .
+# modernc.org/sqlite is pure Go — no CGO needed
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -ldflags="-s -w" -o agent .
 
 # Runtime stage
 FROM alpine:latest
