@@ -6,24 +6,32 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"golang.org/x/oauth2"
 	oauthGithub "golang.org/x/oauth2/endpoints"
 )
 
 type GitHubProvider struct {
-	config *oauth2.Config
+	config      *oauth2.Config
+	allowedOrgs []string
 }
 
-func NewGitHubProvider(clientID, clientSecret, redirectURL string) *GitHubProvider {
+func NewGitHubProvider(clientID, clientSecret, redirectURL string, allowedOrgs []string) *GitHubProvider {
+	scopes := []string{"read:user", "user:email"}
+	if len(allowedOrgs) > 0 {
+		scopes = append(scopes, "read:org")
+	}
+
 	return &GitHubProvider{
 		config: &oauth2.Config{
 			ClientID:     clientID,
 			ClientSecret: clientSecret,
 			RedirectURL:  redirectURL,
-			Scopes:       []string{"read:user", "user:email"},
+			Scopes:       scopes,
 			Endpoint:     oauthGithub.GitHub,
 		},
+		allowedOrgs: allowedOrgs,
 	}
 }
 
@@ -49,6 +57,12 @@ func (g *GitHubProvider) FetchUser(ctx context.Context, token *oauth2.Token) (*P
 			return nil, err
 		}
 		user.Email = email
+	}
+
+	if len(g.allowedOrgs) > 0 {
+		if err := g.checkOrgMembership(client); err != nil {
+			return nil, err
+		}
 	}
 
 	return user, nil
@@ -121,4 +135,46 @@ func (g *GitHubProvider) fetchPrimaryEmail(client *http.Client) (string, error) 
 	}
 
 	return "", fmt.Errorf("github: no primary verified email found")
+}
+
+type githubOrg struct {
+	Login string `json:"login"`
+}
+
+func (g *GitHubProvider) checkOrgMembership(client *http.Client) error {
+	page := 1
+	for {
+		url := fmt.Sprintf("https://api.github.com/user/orgs?per_page=100&page=%d", page)
+		resp, err := client.Get(url)
+		if err != nil {
+			return fmt.Errorf("github: fetch orgs: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("github: fetch orgs: status %d", resp.StatusCode)
+		}
+
+		var orgs []githubOrg
+		if err := json.NewDecoder(resp.Body).Decode(&orgs); err != nil {
+			return fmt.Errorf("github: decode orgs: %w", err)
+		}
+
+		for _, org := range orgs {
+			for _, allowed := range g.allowedOrgs {
+				if strings.EqualFold(org.Login, allowed) {
+					return nil
+				}
+			}
+		}
+
+		if len(orgs) < 100 {
+			break
+		}
+		page++
+	}
+
+	return &AccessDeniedError{
+		Message: "user is not a member of any allowed organization",
+	}
 }

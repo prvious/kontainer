@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"errors"
 	"log"
 	"net/http"
 	"time"
@@ -121,6 +122,11 @@ func (h *AuthHandler) CallbackHandler(w http.ResponseWriter, r *http.Request) {
 
 	user, err := provider.FetchUser(r.Context(), oauthToken)
 	if err != nil {
+		var accessErr *providers.AccessDeniedError
+		if errors.As(err, &accessErr) {
+			http.Error(w, accessErr.Message, http.StatusForbidden)
+			return
+		}
 		log.Printf("fetch user error: %v", err)
 		http.Error(w, "failed to fetch user", http.StatusBadGateway)
 		return

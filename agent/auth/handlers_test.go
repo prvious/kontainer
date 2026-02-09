@@ -1,8 +1,10 @@
 package auth
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/clovismuneza/devoper/agent/auth/providers"
@@ -120,6 +122,48 @@ func TestCallbackHandler_UnknownProvider(t *testing.T) {
 
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+}
+
+func TestCallbackHandler_AccessDenied(t *testing.T) {
+	// Create a fake token endpoint that returns a valid token
+	tokenSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"access_token": "fake-token",
+			"token_type":   "bearer",
+		})
+	}))
+	defer tokenSrv.Close()
+
+	registry := providers.NewProviderRegistry()
+	registry.Register(&fakeAccessDeniedProvider{
+		name: "github",
+		config: &oauth2.Config{
+			ClientID: "test",
+			Endpoint: oauth2.Endpoint{
+				TokenURL: tokenSrv.URL + "/token",
+			},
+		},
+	})
+	sessions := &SessionStore{entries: make(map[string]sessionEntry)}
+	bridge := NewAuthBridge()
+	handler := NewAuthHandler(registry, sessions, testSecret, bridge)
+
+	state, _ := sessions.Generate("test-session")
+	req := httptest.NewRequest(http.MethodGet, "/auth/github/callback?code=abc123&state="+state, nil)
+	req = withChiURLParam(req, "provider", "github")
+	rec := httptest.NewRecorder()
+
+	handler.CallbackHandler(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+
+	body := strings.TrimSpace(rec.Body.String())
+	if !strings.Contains(body, "not a member") {
+		t.Errorf("body = %q, want to contain 'not a member'", body)
 	}
 }
 

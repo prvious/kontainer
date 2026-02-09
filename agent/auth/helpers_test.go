@@ -49,3 +49,15 @@ func (f *fakeOAuthProvider) OAuthConfig() *oauth2.Config { return f.config }
 func (f *fakeOAuthProvider) FetchUser(_ context.Context, _ *oauth2.Token) (*providers.ProviderUser, error) {
 	return &providers.ProviderUser{ID: "1", Name: "Fake", Provider: f.name}, nil
 }
+
+// fakeAccessDeniedProvider returns an AccessDeniedError from FetchUser.
+type fakeAccessDeniedProvider struct {
+	name   string
+	config *oauth2.Config
+}
+
+func (f *fakeAccessDeniedProvider) Name() string                { return f.name }
+func (f *fakeAccessDeniedProvider) OAuthConfig() *oauth2.Config { return f.config }
+func (f *fakeAccessDeniedProvider) FetchUser(_ context.Context, _ *oauth2.Token) (*providers.ProviderUser, error) {
+	return nil, &providers.AccessDeniedError{Message: "user is not a member of any allowed organization"}
+}

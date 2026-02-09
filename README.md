@@ -106,6 +106,7 @@ A desktop app for managing Docker Swarm clusters. Self-hosted, lightweight, mult
 
 ### Authentication
 - GitHub OAuth 2.0 (extensible provider system via the `providers` package)
+- Optional GitHub organization allowlist -- restrict login to members of specific orgs via `GITHUB_ALLOWED_ORGS`
 - WebSocket-based auth bridge between desktop app and agent
 - System browser opens for OAuth, deep-link callback returns JWT to the app
 - Short-lived JWTs (HS256), session persistence via `tauri-plugin-store`
@@ -162,6 +163,22 @@ services:
     environment:
       - DEVOPER_ROLE=follower
 ```
+
+## Access Control
+
+Login can optionally be restricted to members of specific GitHub organizations using the `GITHUB_ALLOWED_ORGS` environment variable:
+
+```yaml
+environment:
+  - GITHUB_ALLOWED_ORGS=my-org,my-other-org
+```
+
+- **Comma-separated** list of GitHub organization logins (case-insensitive)
+- When set, only users who belong to at least one listed org can authenticate
+- When unset or empty, all GitHub users can log in (default behavior)
+- Requires the `read:org` OAuth scope (added automatically when the allowlist is configured)
+
+Non-members receive a `403 Forbidden` response during the OAuth callback.
 
 ## Development
 

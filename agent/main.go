@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -116,11 +117,24 @@ func startLeader(cfg *config.Config) {
 		log.Println("  ⚠ JWT_SECRET is empty — auth tokens will not be signed")
 	}
 
+	var allowedOrgs []string
+	if cfg.GithubAllowedOrgs != "" {
+		for _, org := range strings.Split(cfg.GithubAllowedOrgs, ",") {
+			if o := strings.TrimSpace(org); o != "" {
+				allowedOrgs = append(allowedOrgs, o)
+			}
+		}
+	}
+	if len(allowedOrgs) > 0 {
+		log.Printf("  GitHub org allowlist: %v", allowedOrgs)
+	}
+
 	registry := providers.NewProviderRegistry()
 	registry.Register(providers.NewGitHubProvider(
 		cfg.GithubClientID,
 		cfg.GithubClientSecret,
 		cfg.AgentURL+"/auth/github/callback",
+		allowedOrgs,
 	))
 
 	dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())

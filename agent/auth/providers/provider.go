@@ -7,6 +7,14 @@ import (
 	"golang.org/x/oauth2"
 )
 
+// AccessDeniedError is returned when a user authenticates successfully but is not
+// authorized (e.g. not a member of an allowed organization).
+type AccessDeniedError struct {
+	Message string
+}
+
+func (e *AccessDeniedError) Error() string { return e.Message }
+
 // ProviderUser is a normalized user representation returned by any OAuth provider.
 type ProviderUser struct {
 	ID        string `json:"id"`
