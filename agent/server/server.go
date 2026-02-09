@@ -5,8 +5,10 @@ import (
 	"net/http"
 
 	"github.com/clovismuneza/devoper/agent/auth"
+	"github.com/clovismuneza/devoper/agent/images"
 	"github.com/clovismuneza/devoper/agent/metrics"
 	"github.com/clovismuneza/devoper/agent/services"
+	"github.com/clovismuneza/devoper/agent/settings"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
@@ -39,10 +41,16 @@ func New(
 	listConfigsHandler *services.ListConfigsHandler,
 	createConfigHandler *services.CreateConfigHandler,
 	removeConfigHandler *services.RemoveConfigHandler,
+	inspectConfigHandler *services.InspectConfigHandler,
 	listAgentsHandler *services.ListAgentsHandler,
 	execHandler *services.ExecContainerHandler,
 	clusterMetricsHandler *metrics.ClusterMetricsHandler,
 	nodeMetricsHandler *metrics.NodeMetricsHandler,
+	clusterImagesHandler *images.ClusterImagesHandler,
+	removeImageHandler *images.RemoveImageHandler,
+	pruneImagesHandler *images.PruneImagesHandler,
+	getSettingsHandler *settings.GetSettingsHandler,
+	updateSettingsHandler *settings.UpdateSettingsHandler,
 ) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -96,9 +104,15 @@ func New(
 			r.Method("GET", "/configs", listConfigsHandler)
 			r.Method("POST", "/configs", createConfigHandler)
 			r.Method("DELETE", "/configs/{configID}", removeConfigHandler)
+			r.Method("GET", "/configs/{configID}", inspectConfigHandler)
 			r.Method("GET", "/agents", listAgentsHandler)
 			r.Method("GET", "/metrics", clusterMetricsHandler)
 			r.Method("GET", "/metrics/{nodeID}", nodeMetricsHandler)
+			r.Method("GET", "/images", clusterImagesHandler)
+			r.Delete("/images/{imageID}", removeImageHandler.ServeHTTP)
+			r.Post("/images/prune", pruneImagesHandler.ServeHTTP)
+			r.Method("GET", "/settings", getSettingsHandler)
+			r.Method("PUT", "/settings", updateSettingsHandler)
 		})
 	})
 

@@ -39,9 +39,17 @@ pub fn run() {
             actions::agent::list_configs::list_configs,
             actions::agent::create_config::create_config,
             actions::agent::remove_config::remove_config,
+            actions::agent::inspect_config::inspect_config,
             actions::agent::list_cluster_metrics::list_cluster_metrics,
             actions::agent::list_node_metrics::list_node_metrics,
-            actions::app::close_splashscreen::close_splashscreen
+            actions::agent::list_images::list_images,
+            actions::agent::remove_image::remove_image,
+            actions::agent::prune_images::prune_images,
+            actions::agent::get_agent_settings::get_agent_settings,
+            actions::agent::update_agent_settings::update_agent_settings,
+            actions::app::close_splashscreen::close_splashscreen,
+            actions::app::load_app_settings::load_app_settings,
+            actions::app::save_app_settings::save_app_settings
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

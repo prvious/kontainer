@@ -13,9 +13,11 @@ import (
 	"github.com/clovismuneza/devoper/agent/auth/providers"
 	"github.com/clovismuneza/devoper/agent/cluster"
 	"github.com/clovismuneza/devoper/agent/config"
+	"github.com/clovismuneza/devoper/agent/images"
 	"github.com/clovismuneza/devoper/agent/metrics"
 	"github.com/clovismuneza/devoper/agent/server"
 	"github.com/clovismuneza/devoper/agent/services"
+	"github.com/clovismuneza/devoper/agent/settings"
 	"github.com/clovismuneza/devoper/agent/storage"
 	"github.com/docker/docker/client"
 	"github.com/joho/godotenv"
@@ -75,8 +77,13 @@ func startFollower(cfg *config.Config) {
 		Hostname: hostname,
 	}
 
+	listImagesAction := images.NewListImagesAction(dockerClient)
+	internalImagesHandler := images.NewInternalImagesHandler(listImagesAction, nodeID, hostname)
+	internalRemoveImageHandler := images.NewInternalRemoveImageHandler(dockerClient)
+	internalPruneImagesHandler := images.NewInternalPruneImagesHandler(dockerClient)
+
 	execFollowerHandler := services.NewExecContainerFollowerHandler(dockerClient)
-	handler := server.NewFollower(identity, cfg.InternalSecret, metricsHandler, execFollowerHandler)
+	handler := server.NewFollower(identity, cfg.InternalSecret, metricsHandler, execFollowerHandler, internalImagesHandler, internalRemoveImageHandler, internalPruneImagesHandler)
 
 	srv := &http.Server{Addr: ":" + cfg.Port, Handler: handler}
 
@@ -203,6 +210,9 @@ func startLeader(cfg *config.Config) {
 	removeConfigAction := services.NewRemoveConfigAction(dockerClient)
 	removeConfigHandler := services.NewRemoveConfigHandler(removeConfigAction)
 
+	inspectConfigAction := services.NewInspectConfigAction(dockerClient)
+	inspectConfigHandler := services.NewInspectConfigHandler(inspectConfigAction)
+
 	streamLogsHandler := services.NewStreamServiceLogsHandler(dockerClient, cfg.JWTSecret)
 	streamTaskLogsHandler := services.NewStreamTaskLogsHandler(dockerClient, cfg.JWTSecret)
 
@@ -235,11 +245,27 @@ func startLeader(cfg *config.Config) {
 		log.Fatalf("Failed to create metrics store: %v", err)
 	}
 
+	settingsStore, err := storage.NewSettingsStore(cfg.MetricsDBPath)
+	if err != nil {
+		log.Fatalf("Failed to create settings store: %v", err)
+	}
+
 	collector := metrics.NewMetricsCollector(internalMetricsHandler, clusterRegistry, cfg.InternalSecret, metricsStore, interval)
 	collector.Start(context.Background())
 
 	clusterMetricsHandler := metrics.NewClusterMetricsHandler(internalMetricsHandler, clusterRegistry, cfg.InternalSecret, metricsStore)
 	nodeMetricsHandler := metrics.NewNodeMetricsHandler(internalMetricsHandler, clusterRegistry, cfg.InternalSecret)
+
+	listImagesAction := images.NewListImagesAction(dockerClient)
+	leaderImagesHandler := images.NewInternalImagesHandler(listImagesAction, leaderNodeID, hostname)
+	clusterImagesHandler := images.NewClusterImagesHandler(leaderImagesHandler, clusterRegistry, cfg.InternalSecret)
+	removeImageHandler := images.NewRemoveImageHandler(dockerClient, clusterRegistry, leaderNodeID, cfg.InternalSecret)
+	pruneImagesHandler := images.NewPruneImagesHandler(dockerClient, clusterRegistry, leaderNodeID, cfg.InternalSecret)
+
+	getSettingsAction := settings.NewGetSettingsAction(settingsStore)
+	getSettingsHandler := settings.NewGetSettingsHandler(getSettingsAction)
+	updateSettingsAction := settings.NewUpdateSettingsAction(settingsStore)
+	updateSettingsHandler := settings.NewUpdateSettingsHandler(updateSettingsAction, getSettingsAction)
 
 	// Start follower discovery
 	if addrs := cluster.ParseDevFollowers(cfg.DevFollowers); len(addrs) > 0 {
@@ -255,7 +281,7 @@ func startLeader(cfg *config.Config) {
 		defer discovery.Stop()
 	}
 
-	handler := server.New(authHandler, jwtMiddleware, listServicesHandler, inspectServiceHandler, scaleServiceHandler, restartServiceHandler, rollbackServiceHandler, listStacksHandler, removeStackHandler, listServiceTasksHandler, inspectTaskHandler, listNodesHandler, listTaskStatsHandler, streamLogsHandler, streamTaskLogsHandler, listNetworksHandler, listVolumesHandler, updateServiceEnvHandler, updateServiceImageHandler, updateNodeAvailabilityHandler, updateNodeRoleHandler, listSecretsHandler, createSecretHandler, removeSecretHandler, listConfigsHandler, createConfigHandler, removeConfigHandler, listAgentsHandler, execHandler, clusterMetricsHandler, nodeMetricsHandler)
+	handler := server.New(authHandler, jwtMiddleware, listServicesHandler, inspectServiceHandler, scaleServiceHandler, restartServiceHandler, rollbackServiceHandler, listStacksHandler, removeStackHandler, listServiceTasksHandler, inspectTaskHandler, listNodesHandler, listTaskStatsHandler, streamLogsHandler, streamTaskLogsHandler, listNetworksHandler, listVolumesHandler, updateServiceEnvHandler, updateServiceImageHandler, updateNodeAvailabilityHandler, updateNodeRoleHandler, listSecretsHandler, createSecretHandler, removeSecretHandler, listConfigsHandler, createConfigHandler, removeConfigHandler, inspectConfigHandler, listAgentsHandler, execHandler, clusterMetricsHandler, nodeMetricsHandler, clusterImagesHandler, removeImageHandler, pruneImagesHandler, getSettingsHandler, updateSettingsHandler)
 
 	srv := &http.Server{Addr: ":" + cfg.Port, Handler: handler}
 
@@ -279,7 +305,8 @@ func startLeader(cfg *config.Config) {
 		log.Fatalf("server error: %v", err)
 	}
 
-	// Cleanup in correct order: stop collector before closing store
+	// Cleanup in correct order: stop collector before closing stores
 	collector.Stop()
+	settingsStore.Close()
 	metricsStore.Close()
 }
