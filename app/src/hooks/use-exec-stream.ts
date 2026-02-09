@@ -13,7 +13,7 @@ interface ExecControlMsg {
 
 const encoder = new TextEncoder();
 
-export function useExecStream(containerId: string, nodeId: string, shell = "/bin/sh") {
+export function useExecStream(containerId: string, nodeId: string, shell?: string, user?: string) {
     const { agentUrl, token } = useAuth();
     const [status, setStatus] = useState<ExecStatus>("disconnected");
     const [exitCode, setExitCode] = useState<number | null>(null);
@@ -54,14 +54,19 @@ export function useExecStream(containerId: string, nodeId: string, shell = "/bin
             setStatus("connecting");
             setExitCode(null);
 
-            const wsUrl =
+            let wsUrl =
                 agentUrl.replace(/^http/, "ws") +
                 `/api/exec/${encodeURIComponent(containerId)}` +
                 `?token=${encodeURIComponent(token)}` +
                 `&nodeID=${encodeURIComponent(nodeId)}` +
-                `&shell=${encodeURIComponent(shell)}` +
                 `&cols=${initialCols}` +
                 `&rows=${initialRows}`;
+            if (shell) {
+                wsUrl += `&shell=${encodeURIComponent(shell)}`;
+            }
+            if (user) {
+                wsUrl += `&user=${encodeURIComponent(user)}`;
+            }
 
             const ws = new WebSocket(wsUrl);
             ws.binaryType = "arraybuffer";
@@ -116,7 +121,7 @@ export function useExecStream(containerId: string, nodeId: string, shell = "/bin
                 }
             };
         },
-        [agentUrl, token, containerId, nodeId, shell],
+        [agentUrl, token, containerId, nodeId, shell, user],
     );
 
     const disconnect = useCallback(() => {

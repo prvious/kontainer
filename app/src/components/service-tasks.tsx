@@ -153,6 +153,7 @@ function TasksTable({
                                                 containerName: task.nodeName
                                                     ? `${task.nodeName}/${task.containerId.slice(0, 12)}`
                                                     : task.containerId.slice(0, 12),
+                                                user: task.user || undefined,
                                             });
                                         }}
                                     >

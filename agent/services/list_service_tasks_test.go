@@ -36,6 +36,11 @@ func TestListServiceTasksHandler_Success(t *testing.T) {
 				Slot:         1,
 				NodeID:       "node1",
 				DesiredState: swarm.TaskStateRunning,
+				Spec: swarm.TaskSpec{
+					ContainerSpec: &swarm.ContainerSpec{
+						User: "appuser",
+					},
+				},
 				Status: swarm.TaskStatus{
 					State:     swarm.TaskStateRunning,
 					Timestamp: now,
@@ -116,6 +121,9 @@ func TestListServiceTasksHandler_Success(t *testing.T) {
 	if first.Slot != 1 {
 		t.Errorf("expected slot 1, got %d", first.Slot)
 	}
+	if first.User != "appuser" {
+		t.Errorf("expected user appuser, got %s", first.User)
+	}
 
 	second := resp.Tasks[1]
 	if second.ID != "task2" {
@@ -132,6 +140,9 @@ func TestListServiceTasksHandler_Success(t *testing.T) {
 	}
 	if second.NodeName != "worker-2" {
 		t.Errorf("expected worker-2, got %s", second.NodeName)
+	}
+	if second.User != "" {
+		t.Errorf("expected empty user, got %s", second.User)
 	}
 }
 

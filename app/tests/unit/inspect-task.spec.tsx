@@ -37,6 +37,7 @@ const mockTasks = [
         error: "",
         timestamp: "2025-01-02T00:00:00Z",
         containerId: "abc123def456",
+        user: "",
     },
 ];
 

@@ -60,6 +60,7 @@ describe("Service Tasks", () => {
                             error: "",
                             timestamp: "2025-01-02T00:00:00Z",
                             containerId: "abc123def456",
+                            user: "appuser",
                         },
                         {
                             id: "task2",
@@ -72,6 +73,7 @@ describe("Service Tasks", () => {
                             error: "task: non-zero exit (137)",
                             timestamp: "2025-01-01T00:00:00Z",
                             containerId: "xyz789",
+                            user: "",
                         },
                     ],
                 };
@@ -132,6 +134,7 @@ describe("Service Tasks", () => {
                             error: "",
                             timestamp: "2025-01-01T00:00:00Z",
                             containerId: "",
+                            user: "",
                         },
                     ],
                 };

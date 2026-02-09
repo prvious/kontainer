@@ -20,11 +20,14 @@ var proxyDialer = websocket.Dialer{
 	}).Dial,
 }
 
-func proxyWebSocket(clientConn *websocket.Conn, followerAddr, containerID, shell, secret string, cols, rows uint) {
+func proxyWebSocket(clientConn *websocket.Conn, followerAddr, containerID, shell, user, secret string, cols, rows uint) {
 	// Build URL with properly encoded query params
 	u := fmt.Sprintf("ws://%s/internal/exec/%s", followerAddr, containerID)
 	params := url.Values{}
 	params.Set("shell", shell)
+	if user != "" {
+		params.Set("user", user)
+	}
 	params.Set("cols", fmt.Sprintf("%d", cols))
 	params.Set("rows", fmt.Sprintf("%d", rows))
 	dialURL := u + "?" + params.Encode()

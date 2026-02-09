@@ -9,4 +9,5 @@ export interface ServiceTaskItem {
     error: string;
     timestamp: string;
     containerId: string;
+    user: string;
 }

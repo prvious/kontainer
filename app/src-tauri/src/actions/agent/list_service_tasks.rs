@@ -14,6 +14,8 @@ pub struct ServiceTaskItem {
     pub error: String,
     pub timestamp: String,
     pub container_id: String,
+    #[serde(default)]
+    pub user: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

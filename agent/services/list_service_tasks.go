@@ -24,6 +24,7 @@ type ServiceTaskItem struct {
 	Error        string `json:"error"`
 	Timestamp    string `json:"timestamp"`
 	ContainerID  string `json:"containerId"`
+	User         string `json:"user"`
 }
 
 type ListServiceTasksAction struct {
@@ -89,6 +90,11 @@ func (a *ListServiceTasksAction) Execute(ctx context.Context, serviceID string) 
 			containerID = cid
 		}
 
+		user := ""
+		if t.Spec.ContainerSpec != nil {
+			user = t.Spec.ContainerSpec.User
+		}
+
 		items = append(items, ServiceTaskItem{
 			ID:           t.ID,
 			Slot:         t.Slot,
@@ -100,6 +106,7 @@ func (a *ListServiceTasksAction) Execute(ctx context.Context, serviceID string) 
 			Error:        t.Status.Err,
 			Timestamp:    t.Status.Timestamp.UTC().Format("2006-01-02T15:04:05Z"),
 			ContainerID:  containerID,
+			User:         user,
 		})
 	}
 

@@ -43,14 +43,21 @@ func writeExecMsg(conn *websocket.Conn, mu *sync.Mutex, msg execStatusMsg) {
 // shell is not found (exit code 127).
 var defaultShells = []string{"/bin/sh", "/bin/bash", "/bin/ash"}
 
-func runExecSession(conn *websocket.Conn, wsMu *sync.Mutex, client DockerClient, containerID, shell string, cols, rows uint) {
+func runExecSession(conn *websocket.Conn, wsMu *sync.Mutex, client DockerClient, containerID, shell, user string, cols, rows uint) {
 	ctx := context.Background()
 
-	// Build list of shells to try: requested first, then defaults (deduped).
-	shells := []string{shell}
-	for _, s := range defaultShells {
-		if s != shell {
-			shells = append(shells, s)
+	// Build list of shells to try.
+	// When no shell is specified, try all defaults and let the container decide.
+	// When a specific shell is requested, try it first then fall back to defaults.
+	var shells []string
+	if shell == "" {
+		shells = append(shells, defaultShells...)
+	} else {
+		shells = []string{shell}
+		for _, s := range defaultShells {
+			if s != shell {
+				shells = append(shells, s)
+			}
 		}
 	}
 
@@ -65,6 +72,7 @@ func runExecSession(conn *websocket.Conn, wsMu *sync.Mutex, client DockerClient,
 			AttachStdout: true,
 			AttachStderr: true,
 			Cmd:          []string{sh},
+			User:         user,
 		})
 		if err != nil {
 			log.Printf("exec create error: %v", err)
@@ -214,9 +222,7 @@ func (h *ExecContainerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 
 	nodeID := r.URL.Query().Get("nodeID")
 	shell := r.URL.Query().Get("shell")
-	if shell == "" {
-		shell = "/bin/sh"
-	}
+	user := r.URL.Query().Get("user")
 	cols := parseUint(r.URL.Query().Get("cols"), 80)
 	rows := parseUint(r.URL.Query().Get("rows"), 24)
 
@@ -248,12 +254,12 @@ func (h *ExecContainerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	var wsMu sync.Mutex
 
 	if isLocal {
-		runExecSession(conn, &wsMu, h.client, containerID, shell, cols, rows)
+		runExecSession(conn, &wsMu, h.client, containerID, shell, user, cols, rows)
 		sendCloseFrame(conn)
 		return
 	}
 
-	proxyWebSocket(conn, followerAddr, containerID, shell, h.internalSecret, cols, rows)
+	proxyWebSocket(conn, followerAddr, containerID, shell, user, h.internalSecret, cols, rows)
 	sendCloseFrame(conn)
 }
 
@@ -291,9 +297,7 @@ func (h *ExecContainerFollowerHandler) ServeHTTP(w http.ResponseWriter, r *http.
 	}
 
 	shell := r.URL.Query().Get("shell")
-	if shell == "" {
-		shell = "/bin/sh"
-	}
+	user := r.URL.Query().Get("user")
 	cols := parseUint(r.URL.Query().Get("cols"), 80)
 	rows := parseUint(r.URL.Query().Get("rows"), 24)
 
@@ -305,7 +309,7 @@ func (h *ExecContainerFollowerHandler) ServeHTTP(w http.ResponseWriter, r *http.
 	defer conn.Close()
 
 	var wsMu sync.Mutex
-	runExecSession(conn, &wsMu, h.client, containerID, shell, cols, rows)
+	runExecSession(conn, &wsMu, h.client, containerID, shell, user, cols, rows)
 	sendCloseFrame(conn)
 }
 

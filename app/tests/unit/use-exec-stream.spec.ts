@@ -118,7 +118,7 @@ describe("useExecStream", () => {
         expect(ws.url).toContain("/api/exec/container1");
         expect(ws.url).toContain("token=test-token");
         expect(ws.url).toContain("nodeID=node1");
-        expect(ws.url).toContain("shell=%2Fbin%2Fsh");
+        expect(ws.url).not.toContain("shell=");
         expect(ws.url).toContain("cols=80");
         expect(ws.url).toContain("rows=24");
         expect(ws.binaryType).toBe("arraybuffer");
