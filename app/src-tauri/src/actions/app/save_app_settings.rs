@@ -3,10 +3,7 @@ use tauri_plugin_store::StoreExt;
 use super::load_app_settings::AppSettings;
 
 #[tauri::command]
-pub async fn save_app_settings(
-    app: tauri::AppHandle,
-    settings: AppSettings,
-) -> Result<(), String> {
+pub async fn save_app_settings(app: tauri::AppHandle, settings: AppSettings) -> Result<(), String> {
     let store = app
         .store("settings.json")
         .map_err(|e| format!("store error: {e}"))?;

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { useExecStream } from "@/hooks/use-exec-stream";
+import { useSettings } from "@/hooks/use-settings";
 import { Button } from "@/components/ui/button";
 import { RotateCw } from "lucide-react";
 import type { ExecTarget } from "@/contexts/terminal-context-value";
@@ -20,7 +21,15 @@ export function TerminalSessionView({ target, onStatusChange }: TerminalSessionV
     const onStatusChangeRef = useRef(onStatusChange);
     onStatusChangeRef.current = onStatusChange;
 
-    const { status, attachTerminal, sendInput, sendResize, connect, disconnect } = useExecStream(target.containerId, target.nodeId, target.shell, target.user);
+    const { terminalDefaults } = useSettings();
+
+    const effectiveShell = target.shell || terminalDefaults.shell || undefined;
+    const { status, attachTerminal, sendInput, sendResize, connect, disconnect } = useExecStream(
+        target.containerId,
+        target.nodeId,
+        effectiveShell,
+        target.user,
+    );
 
     // Report status changes to parent (ref avoids re-firing on callback identity change)
     useEffect(() => {
@@ -36,8 +45,9 @@ export function TerminalSessionView({ target, onStatusChange }: TerminalSessionV
 
         const term = new Terminal({
             cursorBlink: true,
-            fontSize: 13,
-            fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, Monaco, 'Courier New', monospace",
+            fontSize: terminalDefaults.fontSize,
+            fontFamily: terminalDefaults.fontFamily,
+            scrollback: terminalDefaults.scrollback,
             theme: {
                 background: "#1a1b26",
                 foreground: "#c0caf5",
@@ -97,7 +107,7 @@ export function TerminalSessionView({ target, onStatusChange }: TerminalSessionV
             fitAddonRef.current = null;
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [target.containerId, target.nodeId]);
+    }, [target.containerId, target.nodeId, terminalDefaults]);
 
     const handleReconnect = useCallback(() => {
         terminalRef.current?.clear();

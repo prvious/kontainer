@@ -5,12 +5,20 @@ use tauri_plugin_store::StoreExt;
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
     pub refresh_interval: Option<u32>,
+    pub terminal_shell: Option<String>,
+    pub terminal_font_size: Option<u32>,
+    pub terminal_font_family: Option<String>,
+    pub terminal_scrollback: Option<u32>,
 }
 
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
             refresh_interval: Some(5000),
+            terminal_shell: None,
+            terminal_font_size: None,
+            terminal_font_family: None,
+            terminal_scrollback: None,
         }
     }
 }
