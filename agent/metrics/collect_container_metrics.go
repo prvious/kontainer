@@ -70,6 +70,7 @@ func (a *CollectContainerMetricsAction) Execute(ctx context.Context) ([]Containe
 			MemoryUsed:    memUsed,
 			MemoryLimit:   memLimit,
 			MemoryPercent: memPct,
+			CreatedAt:     c.Created,
 		})
 	}
 

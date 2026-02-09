@@ -24,6 +24,8 @@ pub struct ContainerMetrics {
     pub memory_used: u64,
     pub memory_limit: u64,
     pub memory_percent: f64,
+    #[serde(default)]
+    pub created_at: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

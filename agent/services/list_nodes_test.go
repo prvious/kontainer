@@ -119,6 +119,92 @@ func TestListNodesHandler_ManagerAndWorker(t *testing.T) {
 	}
 }
 
+func TestListNodesHandler_ManagersSortedFirst(t *testing.T) {
+	now := time.Now().UTC()
+	mock := &mockDockerClient{
+		nodes: []swarm.Node{
+			{
+				ID:   "worker1",
+				Spec: swarm.NodeSpec{Role: swarm.NodeRoleWorker, Availability: swarm.NodeAvailabilityActive},
+				Description: swarm.NodeDescription{
+					Hostname: "worker-1",
+					Platform: swarm.Platform{OS: "linux", Architecture: "x86_64"},
+					Engine:   swarm.EngineDescription{EngineVersion: "24.0.7"},
+				},
+				Status: swarm.NodeStatus{State: swarm.NodeStateReady, Addr: "10.0.0.3"},
+				Meta:   swarm.Meta{UpdatedAt: now},
+			},
+			{
+				ID:   "mgr2",
+				Spec: swarm.NodeSpec{Role: swarm.NodeRoleManager, Availability: swarm.NodeAvailabilityActive},
+				Description: swarm.NodeDescription{
+					Hostname: "manager-2",
+					Platform: swarm.Platform{OS: "linux", Architecture: "x86_64"},
+					Engine:   swarm.EngineDescription{EngineVersion: "24.0.7"},
+				},
+				Status:        swarm.NodeStatus{State: swarm.NodeStateReady, Addr: "10.0.0.2"},
+				ManagerStatus: &swarm.ManagerStatus{Leader: false},
+				Meta:          swarm.Meta{UpdatedAt: now},
+			},
+			{
+				ID:   "worker2",
+				Spec: swarm.NodeSpec{Role: swarm.NodeRoleWorker, Availability: swarm.NodeAvailabilityActive},
+				Description: swarm.NodeDescription{
+					Hostname: "worker-2",
+					Platform: swarm.Platform{OS: "linux", Architecture: "x86_64"},
+					Engine:   swarm.EngineDescription{EngineVersion: "24.0.7"},
+				},
+				Status: swarm.NodeStatus{State: swarm.NodeStateReady, Addr: "10.0.0.4"},
+				Meta:   swarm.Meta{UpdatedAt: now},
+			},
+			{
+				ID:   "mgr1",
+				Spec: swarm.NodeSpec{Role: swarm.NodeRoleManager, Availability: swarm.NodeAvailabilityActive},
+				Description: swarm.NodeDescription{
+					Hostname: "manager-1",
+					Platform: swarm.Platform{OS: "linux", Architecture: "x86_64"},
+					Engine:   swarm.EngineDescription{EngineVersion: "24.0.7"},
+				},
+				Status:        swarm.NodeStatus{State: swarm.NodeStateReady, Addr: "10.0.0.1"},
+				ManagerStatus: &swarm.ManagerStatus{Leader: true},
+				Meta:          swarm.Meta{UpdatedAt: now},
+			},
+		},
+	}
+
+	action := NewListNodesAction(mock)
+	handler := NewListNodesHandler(action)
+
+	req := httptest.NewRequest("GET", "/api/nodes", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	var resp struct {
+		Nodes []NodeItem `json:"nodes"`
+	}
+	json.NewDecoder(w.Body).Decode(&resp)
+
+	if len(resp.Nodes) != 4 {
+		t.Fatalf("expected 4 nodes, got %d", len(resp.Nodes))
+	}
+
+	// Leader manager first
+	if resp.Nodes[0].ID != "mgr1" {
+		t.Errorf("expected leader manager first, got %s (role=%s, leader=%v)", resp.Nodes[0].ID, resp.Nodes[0].Role, resp.Nodes[0].Leader)
+	}
+	// Non-leader manager second
+	if resp.Nodes[1].ID != "mgr2" {
+		t.Errorf("expected non-leader manager second, got %s (role=%s, leader=%v)", resp.Nodes[1].ID, resp.Nodes[1].Role, resp.Nodes[1].Leader)
+	}
+	// Workers last
+	if resp.Nodes[2].Role != "worker" {
+		t.Errorf("expected worker at index 2, got role %s", resp.Nodes[2].Role)
+	}
+	if resp.Nodes[3].Role != "worker" {
+		t.Errorf("expected worker at index 3, got role %s", resp.Nodes[3].Role)
+	}
+}
+
 func TestListNodesHandler_DrainAvailability(t *testing.T) {
 	mock := &mockDockerClient{
 		nodes: []swarm.Node{

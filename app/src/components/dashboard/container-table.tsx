@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { MoreHorizontal, Pause, Play, RotateCw, Terminal } from "lucide-react";
+import { MoreHorizontal, Pause, Play, RotateCw, Server, Terminal } from "lucide-react";
 import { useTerminal } from "@/hooks/use-terminal";
 import { Button } from "@/components/ui/button";
 import type { AgentMetricsSnapshot } from "@/types/metrics";
@@ -34,6 +34,20 @@ function formatBytes(bytes: number): string {
     return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
 }
 
+function formatUptime(createdAt: number): string {
+    if (createdAt <= 0) return "—";
+    const seconds = Math.floor(Date.now() / 1000 - createdAt);
+    if (seconds < 60) return `${seconds}s`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m`;
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    if (hours < 24) return `${hours}h ${remainingMinutes}m`;
+    const days = Math.floor(hours / 24);
+    const remainingHours = hours % 24;
+    return `${days}d ${remainingHours}h`;
+}
+
 function buildContainerRows(agents: AgentMetricsSnapshot[]): ContainerRow[] {
     const rows: ContainerRow[] = [];
     for (const agent of agents) {
@@ -46,7 +60,7 @@ function buildContainerRows(agents: AgentMetricsSnapshot[]): ContainerRow[] {
                 node: agent.nodeId.slice(0, 12),
                 cpu: `${c.cpuPercent.toFixed(1)}%`,
                 memory: formatBytes(c.memoryUsed),
-                uptime: "—",
+                uptime: formatUptime(c.createdAt),
                 fullContainerId: c.containerId,
                 fullNodeId: agent.nodeId,
             });
@@ -184,7 +198,10 @@ export function ContainerTable({ agents, taskStats }: ContainerTableProps) {
                                         </Badge>
                                     </TableCell>
                                     <TableCell>
-                                        <span className='font-mono text-xs'>{row.node}</span>
+                                        <span className='inline-flex items-center gap-1.5 font-mono text-xs'>
+                                            <Server className='size-3 text-muted-foreground' />
+                                            {row.node}
+                                        </span>
                                     </TableCell>
                                     <TableCell className='text-right font-mono text-xs'>{row.cpu}</TableCell>
                                     <TableCell className='text-right font-mono text-xs'>{row.memory}</TableCell>

@@ -19,6 +19,7 @@ type ContainerMetrics struct {
 	MemoryUsed    uint64  `json:"memoryUsed"`
 	MemoryLimit   uint64  `json:"memoryLimit"`
 	MemoryPercent float64 `json:"memoryPercent"`
+	CreatedAt     int64   `json:"createdAt"`
 }
 
 type AgentMetricsSnapshot struct {

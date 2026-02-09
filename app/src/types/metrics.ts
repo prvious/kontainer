@@ -17,6 +17,7 @@ export interface ContainerMetrics {
     memoryUsed: number;
     memoryLimit: number;
     memoryPercent: number;
+    createdAt: number;
 }
 
 export interface AgentMetricsSnapshot {

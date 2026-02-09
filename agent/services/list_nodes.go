@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"sort"
 
 	"github.com/docker/docker/api/types"
 )
@@ -55,6 +56,14 @@ func (a *ListNodesAction) Execute(ctx context.Context) ([]NodeItem, error) {
 			UpdatedAt:     node.UpdatedAt.UTC().Format("2006-01-02T15:04:05Z"),
 		})
 	}
+
+	// Managers first, then workers. Within each group, leaders before non-leaders.
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].Role != items[j].Role {
+			return items[i].Role == "manager"
+		}
+		return items[i].Leader && !items[j].Leader
+	})
 
 	return items, nil
 }

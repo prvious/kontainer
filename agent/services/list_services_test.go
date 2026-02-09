@@ -12,6 +12,8 @@ import (
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/filters"
+	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/api/types/swarm"
 	"github.com/docker/docker/api/types/volume"
@@ -51,7 +53,11 @@ type mockDockerClient struct {
 	configErr        error
 	configCreateResp swarm.ConfigCreateResponse
 	configCreateErr  error
-	configRemoveErr  error
+	configRemoveErr    error
+	configInspect      swarm.Config
+	configInspectErr   error
+
+	lastServiceListOpts types.ServiceListOptions
 
 	// Exec function fields — configurable per-test
 	execCreateFn  func(ctx context.Context, ctr string, opts container.ExecOptions) (types.IDResponse, error)
@@ -60,7 +66,8 @@ type mockDockerClient struct {
 	execInspectFn func(ctx context.Context, execID string) (container.ExecInspect, error)
 }
 
-func (m *mockDockerClient) ServiceList(_ context.Context, _ types.ServiceListOptions) ([]swarm.Service, error) {
+func (m *mockDockerClient) ServiceList(_ context.Context, opts types.ServiceListOptions) ([]swarm.Service, error) {
+	m.lastServiceListOpts = opts
 	return m.services, m.svcErr
 }
 
@@ -136,6 +143,10 @@ func (m *mockDockerClient) ConfigCreate(_ context.Context, _ swarm.ConfigSpec) (
 	return m.configCreateResp, m.configCreateErr
 }
 
+func (m *mockDockerClient) ConfigInspectWithRaw(_ context.Context, _ string) (swarm.Config, []byte, error) {
+	return m.configInspect, nil, m.configInspectErr
+}
+
 func (m *mockDockerClient) ConfigRemove(_ context.Context, _ string) error {
 	return m.configRemoveErr
 }
@@ -166,6 +177,18 @@ func (m *mockDockerClient) ContainerExecInspect(ctx context.Context, execID stri
 		return m.execInspectFn(ctx, execID)
 	}
 	return container.ExecInspect{}, nil
+}
+
+func (m *mockDockerClient) ImageList(_ context.Context, _ image.ListOptions) ([]image.Summary, error) {
+	return nil, nil
+}
+
+func (m *mockDockerClient) ImageRemove(_ context.Context, _ string, _ image.RemoveOptions) ([]image.DeleteResponse, error) {
+	return nil, nil
+}
+
+func (m *mockDockerClient) ImagesPrune(_ context.Context, _ filters.Args) (image.PruneReport, error) {
+	return image.PruneReport{}, nil
 }
 
 func uint64Ptr(v uint64) *uint64 { return &v }
@@ -369,5 +392,92 @@ func TestListServicesHandler_TaskListError(t *testing.T) {
 
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500, got %d", w.Code)
+	}
+}
+
+func TestListServicesHandler_StackFilter(t *testing.T) {
+	now := time.Now().UTC()
+	mock := &mockDockerClient{
+		services: []swarm.Service{
+			{
+				ID: "svc-web",
+				Spec: swarm.ServiceSpec{
+					Annotations: swarm.Annotations{
+						Name:   "web_app",
+						Labels: map[string]string{"com.docker.stack.namespace": "web"},
+					},
+					Mode: swarm.ServiceMode{
+						Replicated: &swarm.ReplicatedService{Replicas: uint64Ptr(2)},
+					},
+					TaskTemplate: swarm.TaskSpec{
+						ContainerSpec: &swarm.ContainerSpec{Image: "nginx:latest"},
+					},
+				},
+				Meta: swarm.Meta{UpdatedAt: now},
+			},
+		},
+		tasks: []swarm.Task{
+			{ServiceID: "svc-web", Status: swarm.TaskStatus{State: swarm.TaskStateRunning}},
+			{ServiceID: "svc-web", Status: swarm.TaskStatus{State: swarm.TaskStateRunning}},
+		},
+	}
+
+	action := NewListServicesAction(mock)
+	handler := NewListServicesHandler(action)
+
+	req := httptest.NewRequest("GET", "/api/services?stack=web", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	// Verify the label filter was passed to Docker
+	filterValues := mock.lastServiceListOpts.Filters.Get("label")
+	found := false
+	for _, v := range filterValues {
+		if v == "com.docker.stack.namespace=web" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected label filter com.docker.stack.namespace=web, got %v", filterValues)
+	}
+
+	var resp struct {
+		Services []ServiceItem `json:"services"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(resp.Services) != 1 {
+		t.Fatalf("expected 1 service, got %d", len(resp.Services))
+	}
+
+	if resp.Services[0].Name != "web_app" {
+		t.Errorf("expected service name web_app, got %s", resp.Services[0].Name)
+	}
+}
+
+func TestListServicesHandler_NoStackFilter(t *testing.T) {
+	mock := &mockDockerClient{
+		services: []swarm.Service{},
+		tasks:    []swarm.Task{},
+	}
+
+	action := NewListServicesAction(mock)
+	handler := NewListServicesHandler(action)
+
+	req := httptest.NewRequest("GET", "/api/services", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	// Verify no label filter was set
+	filterValues := mock.lastServiceListOpts.Filters.Get("label")
+	if len(filterValues) != 0 {
+		t.Errorf("expected no label filters, got %v", filterValues)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
+	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/api/types/swarm"
 	"github.com/docker/docker/api/types/volume"
@@ -35,11 +36,15 @@ type DockerClient interface {
 	SecretRemove(ctx context.Context, id string) error
 	ConfigList(ctx context.Context, opts swarm.ConfigListOptions) ([]swarm.Config, error)
 	ConfigCreate(ctx context.Context, config swarm.ConfigSpec) (swarm.ConfigCreateResponse, error)
+	ConfigInspectWithRaw(ctx context.Context, id string) (swarm.Config, []byte, error)
 	ConfigRemove(ctx context.Context, id string) error
 	ContainerExecCreate(ctx context.Context, container string, config container.ExecOptions) (types.IDResponse, error)
 	ContainerExecAttach(ctx context.Context, execID string, config container.ExecAttachOptions) (types.HijackedResponse, error)
 	ContainerExecResize(ctx context.Context, execID string, options container.ResizeOptions) error
 	ContainerExecInspect(ctx context.Context, execID string) (container.ExecInspect, error)
+	ImageList(ctx context.Context, opts image.ListOptions) ([]image.Summary, error)
+	ImageRemove(ctx context.Context, imageID string, opts image.RemoveOptions) ([]image.DeleteResponse, error)
+	ImagesPrune(ctx context.Context, pruneFilters filters.Args) (image.PruneReport, error)
 }
 
 type ServiceItem struct {
@@ -60,8 +65,14 @@ func NewListServicesAction(client DockerClient) *ListServicesAction {
 	return &ListServicesAction{client: client}
 }
 
-func (a *ListServicesAction) Execute(ctx context.Context) ([]ServiceItem, error) {
-	svcs, err := a.client.ServiceList(ctx, types.ServiceListOptions{})
+func (a *ListServicesAction) Execute(ctx context.Context, stack string) ([]ServiceItem, error) {
+	opts := types.ServiceListOptions{}
+	if stack != "" {
+		f := filters.NewArgs()
+		f.Add("label", "com.docker.stack.namespace="+stack)
+		opts.Filters = f
+	}
+	svcs, err := a.client.ServiceList(ctx, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +131,8 @@ func NewListServicesHandler(action *ListServicesAction) *ListServicesHandler {
 }
 
 func (h *ListServicesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	items, err := h.action.Execute(r.Context())
+	stack := r.URL.Query().Get("stack")
+	items, err := h.action.Execute(r.Context(), stack)
 	if err != nil {
 		log.Printf("list services error: %v", err)
 		w.Header().Set("Content-Type", "application/json")

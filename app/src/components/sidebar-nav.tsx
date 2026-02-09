@@ -1,19 +1,26 @@
 import { Link, useMatches } from "@tanstack/react-router";
-import { Activity, Box, Database, Globe, Layers, LayoutDashboard, Server, Settings, Terminal } from "lucide-react";
+import { Activity, Box, Database, FileText, Globe, HardDrive, KeyRound, Layers, LayoutDashboard, Server, Settings, Terminal } from "lucide-react";
 import { ClusterSwitcher } from "@/components/cluster-switcher";
 import { useServices } from "@/hooks/use-services";
 import { useNodes } from "@/hooks/use-nodes";
+import { useStacks } from "@/hooks/use-stacks";
 import { useTaskStats } from "@/hooks/use-task-stats";
 import { useClusterMetrics } from "@/hooks/use-cluster-metrics";
+import { useImages } from "@/hooks/use-images";
+import { useSecrets } from "@/hooks/use-secrets";
+import { useConfigs } from "@/hooks/use-configs";
 
 const mainNav = [
     { label: "Overview", to: "/" as const, icon: LayoutDashboard },
+    { label: "Nodes", to: "/nodes" as const, icon: Server, countKey: "nodes" as const },
+    { label: "Stacks", to: "/stacks" as const, icon: Layers, countKey: "stacks" as const },
     { label: "Services", to: "/services" as const, icon: Activity, countKey: "services" as const },
     { label: "Containers", to: "/tasks" as const, icon: Box, countKey: "tasks" as const },
-    { label: "Nodes", to: "/nodes" as const, icon: Server, countKey: "nodes" as const },
-    { label: "Stacks", to: "/stacks" as const, icon: Layers },
     { label: "Networking", to: "/networks" as const, icon: Globe },
     { label: "Volumes", to: "/volumes" as const, icon: Database },
+    { label: "Images", to: "/images" as const, icon: HardDrive, countKey: "images" as const },
+    { label: "Secrets", to: "/secrets" as const, icon: KeyRound, countKey: "secrets" as const },
+    { label: "Configs", to: "/configs" as const, icon: FileText, countKey: "configs" as const },
     { label: "Logs", to: "/logs" as const, icon: Terminal },
 ];
 
@@ -25,13 +32,21 @@ export function SidebarNav() {
 
     const { data: services } = useServices();
     const { data: nodes } = useNodes();
+    const { data: stacks } = useStacks();
     const { data: taskStats } = useTaskStats();
     const { data: metricsData } = useClusterMetrics();
+    const { data: imagesData } = useImages();
+    const { data: secrets } = useSecrets();
+    const { data: configs } = useConfigs();
 
     const counts: Record<string, number> = {
         services: services?.length ?? 0,
         nodes: nodes?.length ?? 0,
+        stacks: stacks?.length ?? 0,
         tasks: taskStats?.running ?? 0,
+        images: imagesData?.nodes?.reduce((sum, n) => sum + n.images.length, 0) ?? 0,
+        secrets: secrets?.length ?? 0,
+        configs: configs?.length ?? 0,
     };
 
     function isActive(to: string): boolean {

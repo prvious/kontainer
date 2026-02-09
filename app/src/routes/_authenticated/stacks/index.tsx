@@ -1,11 +1,11 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useStacks } from "@/hooks/use-stacks";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { AlertCircle, Layers, Search } from "lucide-react";
+import { AlertCircle, ArrowUpRight, Layers, Search } from "lucide-react";
 import { useState } from "react";
 import type { StackItem } from "@/types/stacks";
 
@@ -53,10 +53,15 @@ function StacksTable({ stacks }: { stacks: StackItem[] }) {
                             <HealthDot stack={stack} />
                         </TableCell>
                         <TableCell>
-                            <span className='inline-flex items-center gap-1.5 font-medium'>
+                            <Link
+                                to='/stacks/$stackName'
+                                params={{ stackName: stack.name }}
+                                className='inline-flex items-center gap-1.5 font-medium hover:underline'
+                            >
                                 <Layers className='size-3.5 text-muted-foreground' />
                                 {stack.name}
-                            </span>
+                                <ArrowUpRight className='size-3 opacity-0 transition-opacity group-hover:opacity-100' />
+                            </Link>
                         </TableCell>
                         <TableCell>
                             <span className='font-mono text-sm'>{stack.services}</span>

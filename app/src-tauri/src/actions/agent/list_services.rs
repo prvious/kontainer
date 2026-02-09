@@ -19,14 +19,23 @@ pub struct ListServicesResponse {
 }
 
 #[tauri::command]
-pub async fn list_services(url: String, token: String) -> Result<ListServicesResponse, String> {
+pub async fn list_services(
+    url: String,
+    token: String,
+    stack: Option<String>,
+) -> Result<ListServicesResponse, String> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
         .build()
         .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
 
+    let mut endpoint = format!("{url}/api/services");
+    if let Some(ref s) = stack {
+        endpoint.push_str(&format!("?stack={s}"));
+    }
+
     let response = client
-        .get(format!("{url}/api/services"))
+        .get(&endpoint)
         .header("Authorization", format!("Bearer {token}"))
         .send()
         .await

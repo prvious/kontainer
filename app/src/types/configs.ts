@@ -6,3 +6,12 @@ export interface ConfigItem {
     createdAt: string;
     updatedAt: string;
 }
+
+export interface ConfigDetail {
+    id: string;
+    name: string;
+    labels: Record<string, string>;
+    data: string;
+    createdAt: string;
+    updatedAt: string;
+}

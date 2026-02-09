@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/clovismuneza/devoper/agent/cluster"
+	"github.com/clovismuneza/devoper/agent/images"
 	"github.com/clovismuneza/devoper/agent/services"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -15,7 +16,15 @@ type FollowerIdentity struct {
 	Hostname string `json:"hostname"`
 }
 
-func NewFollower(identity FollowerIdentity, internalSecret string, metricsHandler http.Handler, execFollowerHandler *services.ExecContainerFollowerHandler) http.Handler {
+func NewFollower(
+	identity FollowerIdentity,
+	internalSecret string,
+	metricsHandler http.Handler,
+	execFollowerHandler *services.ExecContainerFollowerHandler,
+	internalImagesHandler *images.InternalImagesHandler,
+	internalRemoveImageHandler *images.InternalRemoveImageHandler,
+	internalPruneImagesHandler *images.InternalPruneImagesHandler,
+) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
@@ -33,6 +42,9 @@ func NewFollower(identity FollowerIdentity, internalSecret string, metricsHandle
 		})
 
 		r.Method("GET", "/metrics", metricsHandler)
+		r.Method("GET", "/images", internalImagesHandler)
+		r.Delete("/images/{imageID}", internalRemoveImageHandler.ServeHTTP)
+		r.Post("/images/prune", internalPruneImagesHandler.ServeHTTP)
 		r.Get("/exec/{containerID}", execFollowerHandler.ServeHTTP)
 
 		r.Get("/info", func(w http.ResponseWriter, r *http.Request) {

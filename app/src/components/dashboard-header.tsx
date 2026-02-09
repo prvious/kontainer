@@ -28,7 +28,8 @@ const routeLabels: Record<string, string> = {
     "/volumes": "Volumes",
     "/logs": "Logs",
     "/settings": "Settings",
-    "/secrets-configs": "Secrets & Configs",
+    "/secrets": "Secrets",
+    "/configs": "Configs",
 };
 
 export function DashboardHeader() {
