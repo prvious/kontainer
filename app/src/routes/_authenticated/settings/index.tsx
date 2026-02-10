@@ -44,7 +44,8 @@ function SettingsPage() {
 
     const currentValue = refreshInterval === false ? "false" : String(refreshInterval);
 
-    function handleRefreshChange(value: string) {
+    function handleRefreshChange(value: string | null) {
+        if (!value) return;
         if (value === "false") {
             setRefreshInterval(false);
         } else {
@@ -101,7 +102,7 @@ function SettingsPage() {
                             <Select
                                 items={SHELL_OPTIONS}
                                 value={terminalDefaults.shell || "auto"}
-                                onValueChange={(v) => setTerminalDefaults({ shell: v === "auto" ? "" : v })}
+                                onValueChange={(v) => setTerminalDefaults({ shell: v === "auto" || !v ? "" : v })}
                             >
                                 <SelectTrigger id='terminal-shell' className='w-36'>
                                     <SelectValue placeholder='Select shell' />
