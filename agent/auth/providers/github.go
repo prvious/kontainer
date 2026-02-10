@@ -13,11 +13,12 @@ import (
 )
 
 type GitHubProvider struct {
-	config      *oauth2.Config
-	allowedOrgs []string
+	config       *oauth2.Config
+	allowedOrgs  []string
+	allowedUsers []string
 }
 
-func NewGitHubProvider(clientID, clientSecret, redirectURL string, allowedOrgs []string) *GitHubProvider {
+func NewGitHubProvider(clientID, clientSecret, redirectURL string, allowedOrgs, allowedUsers []string) *GitHubProvider {
 	scopes := []string{"read:user", "user:email"}
 	if len(allowedOrgs) > 0 {
 		scopes = append(scopes, "read:org")
@@ -31,7 +32,8 @@ func NewGitHubProvider(clientID, clientSecret, redirectURL string, allowedOrgs [
 			Scopes:       scopes,
 			Endpoint:     oauthGithub.GitHub,
 		},
-		allowedOrgs: allowedOrgs,
+		allowedOrgs:  allowedOrgs,
+		allowedUsers: allowedUsers,
 	}
 }
 
@@ -46,7 +48,7 @@ func (g *GitHubProvider) OAuthConfig() *oauth2.Config {
 func (g *GitHubProvider) FetchUser(ctx context.Context, token *oauth2.Token) (*ProviderUser, error) {
 	client := g.config.Client(ctx, token)
 
-	user, err := g.fetchProfile(client)
+	user, login, err := g.fetchProfile(client)
 	if err != nil {
 		return nil, err
 	}
@@ -59,10 +61,8 @@ func (g *GitHubProvider) FetchUser(ctx context.Context, token *oauth2.Token) (*P
 		user.Email = email
 	}
 
-	if len(g.allowedOrgs) > 0 {
-		if err := g.checkOrgMembership(client); err != nil {
-			return nil, err
-		}
+	if err := g.checkAccess(client, login); err != nil {
+		return nil, err
 	}
 
 	return user, nil
@@ -76,20 +76,20 @@ type githubProfile struct {
 	AvatarURL string `json:"avatar_url"`
 }
 
-func (g *GitHubProvider) fetchProfile(client *http.Client) (*ProviderUser, error) {
+func (g *GitHubProvider) fetchProfile(client *http.Client) (*ProviderUser, string, error) {
 	resp, err := client.Get("https://api.github.com/user")
 	if err != nil {
-		return nil, fmt.Errorf("github: fetch profile: %w", err)
+		return nil, "", fmt.Errorf("github: fetch profile: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("github: fetch profile: status %d", resp.StatusCode)
+		return nil, "", fmt.Errorf("github: fetch profile: status %d", resp.StatusCode)
 	}
 
 	var profile githubProfile
 	if err := json.NewDecoder(resp.Body).Decode(&profile); err != nil {
-		return nil, fmt.Errorf("github: decode profile: %w", err)
+		return nil, "", fmt.Errorf("github: decode profile: %w", err)
 	}
 
 	name := profile.Name
@@ -103,7 +103,7 @@ func (g *GitHubProvider) fetchProfile(client *http.Client) (*ProviderUser, error
 		Email:     profile.Email,
 		AvatarURL: profile.AvatarURL,
 		Provider:  "github",
-	}, nil
+	}, profile.Login, nil
 }
 
 type githubEmail struct {
@@ -177,4 +177,36 @@ func (g *GitHubProvider) checkOrgMembership(client *http.Client) error {
 	return &AccessDeniedError{
 		Message: "user is not a member of any allowed organization",
 	}
+}
+
+func (g *GitHubProvider) checkAccess(client *http.Client, login string) error {
+	hasUsers := len(g.allowedUsers) > 0
+	hasOrgs := len(g.allowedOrgs) > 0
+
+	if !hasUsers && !hasOrgs {
+		return nil
+	}
+
+	if hasUsers && !g.matchesUser(login) {
+		return &AccessDeniedError{
+			Message: fmt.Sprintf("user %q is not in the allowed users list", login),
+		}
+	}
+
+	if hasOrgs {
+		if err := g.checkOrgMembership(client); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (g *GitHubProvider) matchesUser(login string) bool {
+	for _, allowed := range g.allowedUsers {
+		if strings.EqualFold(login, allowed) {
+			return true
+		}
+	}
+	return false
 }

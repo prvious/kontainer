@@ -15,6 +15,7 @@ pub fn run() {
             actions::auth::save_profile::save_profile,
             actions::auth::delete_profile::delete_profile,
             actions::auth::set_active_profile::set_active_profile,
+            actions::agent::fetch_providers::fetch_providers,
             actions::agent::ping_agent::ping_agent,
             actions::agent::list_services::list_services,
             actions::agent::inspect_service::inspect_service,

@@ -72,6 +72,7 @@ describe("LoginScreen", () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_profiles") return { profiles: [], activeProfileId: null };
             if (cmd === "ping_agent") return undefined;
+            if (cmd === "fetch_providers") return ["github"];
             return undefined;
         });
     });
@@ -95,7 +96,13 @@ describe("LoginScreen", () => {
         expect(screen.getByText("devoper")).toBeInTheDocument();
     });
 
-    it("renders the agent URL input with default value", async () => {
+    it("renders the card title and description", async () => {
+        await renderLoginScreen();
+        expect(screen.getByText("Connect to Cluster")).toBeInTheDocument();
+        expect(screen.getByText("Enter your agent's URL to get started.")).toBeInTheDocument();
+    });
+
+    it("renders the cluster URL input with default value", async () => {
         await renderLoginScreen();
         const input = screen.getByPlaceholderText("http://localhost:8080");
         expect(input).toBeInTheDocument();
@@ -107,7 +114,7 @@ describe("LoginScreen", () => {
         expect(screen.getByRole("button", { name: /connect/i })).toBeInTheDocument();
     });
 
-    it("pings the agent and opens WebSocket on submit", async () => {
+    it("pings the agent on submit", async () => {
         await renderLoginScreen();
         const user = userEvent.setup();
 
@@ -115,12 +122,53 @@ describe("LoginScreen", () => {
         await user.click(button);
 
         expect(invoke).toHaveBeenCalledWith("ping_agent", { url: "http://localhost:8080" });
+    });
 
-        // After ping, a WebSocket should be opened
+    it("shows online status after successful ping", async () => {
+        await renderLoginScreen();
+        const user = userEvent.setup();
+
+        const button = screen.getByRole("button", { name: /connect/i });
+        await user.click(button);
+
+        expect(screen.getByText("Cluster Online")).toBeInTheDocument();
+    });
+
+    it("fetches providers after successful ping", async () => {
+        await renderLoginScreen();
+        const user = userEvent.setup();
+
+        const button = screen.getByRole("button", { name: /connect/i });
+        await user.click(button);
+
+        expect(invoke).toHaveBeenCalledWith("fetch_providers", { url: "http://localhost:8080" });
+    });
+
+    it("shows provider buttons when online", async () => {
+        await renderLoginScreen();
+        const user = userEvent.setup();
+
+        const button = screen.getByRole("button", { name: /connect/i });
+        await user.click(button);
+
+        expect(screen.getByRole("button", { name: /continue with github/i })).toBeInTheDocument();
+    });
+
+    it("opens WebSocket when provider button is clicked", async () => {
+        await renderLoginScreen();
+        const user = userEvent.setup();
+
+        const connectButton = screen.getByRole("button", { name: /connect/i });
+        await user.click(connectButton);
+
+        const githubButton = screen.getByRole("button", { name: /continue with github/i });
+        await user.click(githubButton);
+
+        // After clicking provider, a WebSocket should be opened
         const ws = MockWebSocket.latest();
         expect(ws.url).toBe("ws://localhost:8080/auth/listen");
 
-        // Simulate session ID → opens browser
+        // Simulate session ID → opens browser with correct provider
         await act(async () => {
             ws.serverSend({ sessionId: "test-session" });
         });
@@ -128,35 +176,7 @@ describe("LoginScreen", () => {
         expect(openUrl).toHaveBeenCalledWith("http://localhost:8080/auth/github?session=test-session");
     });
 
-    it("allows changing the agent URL", async () => {
-        await renderLoginScreen();
-        const user = userEvent.setup();
-
-        const input = screen.getByPlaceholderText("http://localhost:8080");
-        await user.clear(input);
-        await user.type(input, "http://myserver:9090");
-
-        expect(input).toHaveValue("http://myserver:9090");
-    });
-
-    it("strips trailing slashes from agent URL before login", async () => {
-        await renderLoginScreen();
-        const user = userEvent.setup();
-
-        const input = screen.getByPlaceholderText("http://localhost:8080");
-        await user.clear(input);
-        await user.type(input, "http://myserver:9090///");
-
-        const button = screen.getByRole("button", { name: /connect/i });
-        await user.click(button);
-
-        expect(invoke).toHaveBeenCalledWith("ping_agent", { url: "http://myserver:9090" });
-
-        const ws = MockWebSocket.latest();
-        expect(ws.url).toBe("ws://myserver:9090/auth/listen");
-    });
-
-    it("shows error and does not proceed when ping fails", async () => {
+    it("shows error when ping fails", async () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_profiles") return { profiles: [], activeProfileId: null };
             if (cmd === "ping_agent") throw "Could not reach agent at http://localhost:8080";
@@ -173,7 +193,39 @@ describe("LoginScreen", () => {
         expect(MockWebSocket.instances).toHaveLength(0);
     });
 
-    it("disables button while pinging", async () => {
+    it("resets status when URL changes", async () => {
+        await renderLoginScreen();
+        const user = userEvent.setup();
+
+        // Connect first
+        const button = screen.getByRole("button", { name: /connect/i });
+        await user.click(button);
+
+        expect(screen.getByText("Cluster Online")).toBeInTheDocument();
+
+        // Change URL — should reset
+        const input = screen.getByPlaceholderText("http://localhost:8080");
+        await user.type(input, "/new");
+
+        expect(screen.queryByText("Cluster Online")).not.toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /connect/i })).toBeInTheDocument();
+    });
+
+    it("strips trailing slashes from agent URL", async () => {
+        await renderLoginScreen();
+        const user = userEvent.setup();
+
+        const input = screen.getByPlaceholderText("http://localhost:8080");
+        await user.clear(input);
+        await user.type(input, "http://myserver:9090///");
+
+        const button = screen.getByRole("button", { name: /connect/i });
+        await user.click(button);
+
+        expect(invoke).toHaveBeenCalledWith("ping_agent", { url: "http://myserver:9090" });
+    });
+
+    it("disables button while connecting and shows reaching cluster text", async () => {
         let resolvePing: () => void;
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_profiles") return { profiles: [], activeProfileId: null };
@@ -182,6 +234,7 @@ describe("LoginScreen", () => {
                     resolvePing = resolve;
                 });
             }
+            if (cmd === "fetch_providers") return ["github"];
             return undefined;
         });
 
@@ -192,7 +245,7 @@ describe("LoginScreen", () => {
         await user.click(button);
 
         expect(button).toBeDisabled();
-        expect(button).toHaveTextContent("Connecting...");
+        expect(screen.getByText(/reaching cluster/i)).toBeInTheDocument();
 
         await act(async () => {
             resolvePing!();

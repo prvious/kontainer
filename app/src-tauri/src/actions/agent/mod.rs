@@ -1,5 +1,6 @@
 pub mod create_config;
 pub mod create_secret;
+pub mod fetch_providers;
 pub mod get_agent_settings;
 pub mod inspect_config;
 pub mod inspect_service;

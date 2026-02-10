@@ -202,8 +202,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }, [expiresAt, activeProfileId, clearState, applyProfile]);
 
     const login = useCallback(
-        (url: string, label?: string) => {
+        (url: string, label?: string, provider?: string) => {
             pendingLabelRef.current = label || "Default";
+            const authProvider = provider || "github";
             return new Promise<void>((resolve, reject) => {
                 const wsUrl = url.replace(/^http/, "ws") + "/auth/listen";
                 const ws = new WebSocket(wsUrl);
@@ -223,7 +224,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                     const data = JSON.parse(ev.data);
 
                     if (data.sessionId) {
-                        openUrl(`${url}/auth/github?session=${data.sessionId}`);
+                        openUrl(`${url}/auth/${authProvider}?session=${data.sessionId}`);
                         return;
                     }
 

@@ -2,7 +2,8 @@ import { useState, useRef, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { AddClusterDialog } from "@/components/add-cluster-dialog";
-import { Check, ChevronDown, Cloud, Monitor, Plus, Server, X } from "lucide-react";
+import { Check, ChevronDown, Cloud, LogOut, Monitor, Plus, Server, X } from "lucide-react";
+import { router } from "@/router";
 import type { ConnectionProfile } from "@/types/connection";
 
 function detectProvider(url: string): { icon: typeof Cloud; label: string } {
@@ -15,7 +16,19 @@ function detectProvider(url: string): { icon: typeof Cloud; label: string } {
     return { icon: Server, label: "Self-hosted" };
 }
 
-function ProfileRow({ profile, isActive, onSwitch, onRemove }: { profile: ConnectionProfile; isActive: boolean; onSwitch: () => void; onRemove: () => void }) {
+function ProfileRow({
+    profile,
+    isActive,
+    onSwitch,
+    onRemove,
+    onDisconnect,
+}: {
+    profile: ConnectionProfile;
+    isActive: boolean;
+    onSwitch: () => void;
+    onRemove: () => void;
+    onDisconnect?: () => void;
+}) {
     const provider = detectProvider(profile.agentUrl);
     const ProviderIcon = provider.icon;
 
@@ -34,7 +47,18 @@ function ProfileRow({ profile, isActive, onSwitch, onRemove }: { profile: Connec
                     <span className='truncate font-mono text-[11px] text-muted-foreground'>{profile.agentUrl.replace(/^https?:\/\//, "")}</span>
                 </div>
             </div>
-            {!isActive && (
+            {isActive ? (
+                <button
+                    className='shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:bg-muted hover:text-destructive'
+                    title='Disconnect'
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        onDisconnect?.();
+                    }}
+                >
+                    <LogOut className='size-3' />
+                </button>
+            ) : (
                 <button
                     className='shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:bg-muted hover:text-foreground'
                     onClick={(e) => {
@@ -50,7 +74,7 @@ function ProfileRow({ profile, isActive, onSwitch, onRemove }: { profile: Connec
 }
 
 export function ClusterSwitcher() {
-    const { profiles, activeProfileId, switchProfile, removeProfile } = useAuth();
+    const { profiles, activeProfileId, switchProfile, removeProfile, logout } = useAuth();
     const queryClient = useQueryClient();
     const [open, setOpen] = useState(false);
     const [dialogOpen, setDialogOpen] = useState(false);
@@ -131,6 +155,13 @@ export function ClusterSwitcher() {
                                             isActive={profile.id === activeProfileId}
                                             onSwitch={() => handleSwitch(profile.id)}
                                             onRemove={() => removeProfile(profile.id)}
+                                            onDisconnect={() => {
+                                                setOpen(false);
+                                                void logout().then(() => {
+                                                    queryClient.clear();
+                                                    router.navigate({ to: "/login", search: { redirect: undefined } });
+                                                });
+                                            }}
                                         />
                                     ))}
                                 </div>

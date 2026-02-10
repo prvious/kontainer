@@ -76,6 +76,19 @@ export function DashboardHeader() {
                 New Service
             </Button>
 
+            {/* Disconnect Button */}
+            <Button
+                variant='ghost'
+                size='sm'
+                className='size-8 p-0 text-muted-foreground hover:text-destructive'
+                title='Disconnect'
+                onClick={() => {
+                    void logout().then(() => router.navigate({ to: "/login", search: { redirect: undefined } }));
+                }}
+            >
+                <LogOut className='size-4' />
+            </Button>
+
             {/* User Avatar with Dropdown */}
             <DropdownMenu>
                 <DropdownMenuTrigger

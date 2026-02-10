@@ -5,9 +5,9 @@ export const Route = createFileRoute("/login")({
     validateSearch: (search: Record<string, unknown>) => ({
         redirect: (search.redirect as string) || undefined,
     }),
-    beforeLoad: ({ context }) => {
+    beforeLoad: ({ context, search }) => {
         if (context.auth.user) {
-            throw redirect({ to: "/" });
+            throw redirect({ to: search.redirect || "/" });
         }
     },
     component: LoginScreen,

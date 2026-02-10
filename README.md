@@ -106,7 +106,7 @@ A desktop app for managing Docker Swarm clusters. Self-hosted, lightweight, mult
 
 ### Authentication
 - GitHub OAuth 2.0 (extensible provider system via the `providers` package)
-- Optional GitHub organization allowlist -- restrict login to members of specific orgs via `GITHUB_ALLOWED_ORGS`
+- Optional access control -- restrict login by GitHub username (`GITHUB_ALLOWED_USERS`) and/or organization membership (`GITHUB_ALLOWED_ORGS`)
 - WebSocket-based auth bridge between desktop app and agent
 - System browser opens for OAuth, deep-link callback returns JWT to the app
 - Short-lived JWTs (HS256), session persistence via `tauri-plugin-store`
@@ -166,19 +166,26 @@ services:
 
 ## Access Control
 
-Login can optionally be restricted to members of specific GitHub organizations using the `GITHUB_ALLOWED_ORGS` environment variable:
+Login can optionally be restricted by GitHub username and/or organization membership:
 
 ```yaml
 environment:
+  - GITHUB_ALLOWED_USERS=alice,bob
   - GITHUB_ALLOWED_ORGS=my-org,my-other-org
 ```
 
-- **Comma-separated** list of GitHub organization logins (case-insensitive)
-- When set, only users who belong to at least one listed org can authenticate
-- When unset or empty, all GitHub users can log in (default behavior)
-- Requires the `read:org` OAuth scope (added automatically when the allowlist is configured)
+Both variables are **comma-separated** lists and matching is **case-insensitive**.
 
-Non-members receive a `403 Forbidden` response during the OAuth callback.
+| `GITHUB_ALLOWED_USERS` | `GITHUB_ALLOWED_ORGS` | Who can log in |
+|---|---|---|
+| unset | unset | All GitHub users (default) |
+| set | unset | Only listed usernames |
+| unset | set | Only members of listed orgs |
+| set | set | Only listed usernames **who are also** members of listed orgs |
+
+- `GITHUB_ALLOWED_ORGS` requires the `read:org` OAuth scope (added automatically when configured)
+
+Non-matching users receive a `403 Forbidden` response during the OAuth callback.
 
 ## Development
 

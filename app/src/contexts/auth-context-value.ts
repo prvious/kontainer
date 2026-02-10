@@ -5,7 +5,7 @@ import type { ConnectionProfile } from "@/types/connection";
 export interface AuthContextValue extends AuthState {
     profiles: ConnectionProfile[];
     activeProfileId: string | null;
-    login: (agentUrl: string, label?: string) => Promise<void>;
+    login: (agentUrl: string, label?: string, provider?: string) => Promise<void>;
     logout: () => Promise<void>;
     switchProfile: (profileId: string) => Promise<void>;
     removeProfile: (profileId: string) => Promise<void>;

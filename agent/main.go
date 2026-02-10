@@ -129,12 +129,25 @@ func startLeader(cfg *config.Config) {
 		log.Printf("  GitHub org allowlist: %v", allowedOrgs)
 	}
 
+	var allowedUsers []string
+	if cfg.GithubAllowedUsers != "" {
+		for _, user := range strings.Split(cfg.GithubAllowedUsers, ",") {
+			if u := strings.TrimSpace(user); u != "" {
+				allowedUsers = append(allowedUsers, u)
+			}
+		}
+	}
+	if len(allowedUsers) > 0 {
+		log.Printf("  GitHub user allowlist: %v", allowedUsers)
+	}
+
 	registry := providers.NewProviderRegistry()
 	registry.Register(providers.NewGitHubProvider(
 		cfg.GithubClientID,
 		cfg.GithubClientSecret,
 		cfg.AgentURL+"/auth/github/callback",
 		allowedOrgs,
+		allowedUsers,
 	))
 
 	dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
