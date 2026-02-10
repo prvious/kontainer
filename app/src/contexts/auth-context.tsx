@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { AuthUser, ParsedToken } from "@/types/auth";
 import type { ConnectionProfile, StoredProfiles } from "@/types/connection";
@@ -14,7 +15,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [profiles, setProfiles] = useState<ConnectionProfile[]>([]);
     const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
 
-    const wsRef = useRef<WebSocket | null>(null);
     const pendingLabelRef = useRef<string>("Default");
 
     const clearState = useCallback(() => {
@@ -158,13 +158,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         };
     }, []);
 
-    // Cleanup WS on unmount
-    useEffect(() => {
-        return () => {
-            wsRef.current?.close();
-        };
-    }, []);
-
     // Expiry timer
     useEffect(() => {
         const interval = setInterval(async () => {
@@ -202,64 +195,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }, [expiresAt, activeProfileId, clearState, applyProfile]);
 
     const login = useCallback(
-        (url: string, label?: string, provider?: string) => {
+        async (url: string, label?: string, provider?: string) => {
             pendingLabelRef.current = label || "Default";
             const authProvider = provider || "github";
-            return new Promise<void>((resolve, reject) => {
-                const wsUrl = url.replace(/^http/, "ws") + "/auth/listen";
-                const ws = new WebSocket(wsUrl);
-                wsRef.current = ws;
-                let settled = false;
 
-                const timeout = setTimeout(
-                    () => {
-                        settled = true;
-                        ws.close();
-                        reject(new Error("Authentication timed out"));
-                    },
-                    10 * 60 * 1000,
-                );
-
-                ws.onmessage = (ev) => {
-                    const data = JSON.parse(ev.data);
-
-                    if (data.sessionId) {
-                        openUrl(`${url}/auth/${authProvider}?session=${data.sessionId}`);
-                        return;
-                    }
-
-                    if (data.token) {
-                        settled = true;
-                        clearTimeout(timeout);
-                        ws.close();
-                        handleToken(data.token, url).then(resolve, reject);
-                        return;
-                    }
-
-                    if (data.error) {
-                        settled = true;
-                        clearTimeout(timeout);
-                        ws.close();
-                        reject(new Error(data.error));
-                    }
-                };
-
-                ws.onerror = () => {
-                    if (settled) return;
-                    settled = true;
-                    clearTimeout(timeout);
-                    reject(new Error("WebSocket connection failed"));
-                };
-
-                ws.onclose = (ev) => {
-                    if (settled) return;
-                    settled = true;
-                    clearTimeout(timeout);
-                    if (!ev.wasClean) {
-                        reject(new Error("WebSocket closed unexpectedly"));
-                    }
-                };
+            const unlisten = await listen<{ session_id: string }>("auth://session-id", (event) => {
+                openUrl(`${url}/auth/${authProvider}?session=${event.payload.session_id}`);
             });
+
+            try {
+                const jwt = await invoke<string>("auth_listen", { url });
+                await handleToken(jwt, url);
+            } finally {
+                unlisten();
+            }
         },
         [handleToken],
     );

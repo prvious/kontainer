@@ -1,3 +1,4 @@
+pub mod auth_listen;
 pub mod delete_profile;
 pub mod delete_session;
 pub mod load_profiles;

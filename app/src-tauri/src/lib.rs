@@ -7,6 +7,7 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .invoke_handler(tauri::generate_handler![
+            actions::auth::auth_listen::auth_listen,
             actions::auth::parse_auth_token::parse_auth_token,
             actions::auth::save_session::save_session,
             actions::auth::load_session::load_session,

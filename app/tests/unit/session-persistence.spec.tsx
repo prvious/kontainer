@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import { AuthProvider } from "@/contexts/auth-context";
@@ -40,30 +40,6 @@ const emptyProfiles: StoredProfiles = {
     activeProfileId: null,
 };
 
-class MockWebSocket {
-    static instances: MockWebSocket[] = [];
-    onmessage: ((ev: { data: string }) => void) | null = null;
-    onerror: (() => void) | null = null;
-    onclose: ((ev: { wasClean: boolean }) => void) | null = null;
-    url: string;
-    constructor(url: string) {
-        this.url = url;
-        MockWebSocket.instances.push(this);
-    }
-    close() {
-        this.onclose?.({ wasClean: true });
-    }
-    serverSend(data: object) {
-        this.onmessage?.({ data: JSON.stringify(data) });
-    }
-    static latest() {
-        return this.instances.at(-1)!;
-    }
-    static clear() {
-        this.instances = [];
-    }
-}
-
 function TestConsumer() {
     const { user, token, expiresAt, agentUrl, isLoading, login } = useAuth();
     return (
@@ -81,12 +57,11 @@ function TestConsumer() {
 describe("Session Persistence", () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        MockWebSocket.clear();
-        vi.stubGlobal("WebSocket", MockWebSocket);
-    });
 
-    afterEach(() => {
-        vi.unstubAllGlobals();
+        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+            if (cmd === "load_profiles") return emptyProfiles;
+            return undefined;
+        });
     });
 
     function renderWithProvider() {
@@ -97,32 +72,20 @@ describe("Session Persistence", () => {
         );
     }
 
-    it("calls save_profile after successful WebSocket auth", async () => {
+    it("calls save_profile after successful auth", async () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_profiles") return emptyProfiles;
             if (cmd === "parse_auth_token") return mockParsedToken;
             if (cmd === "save_profile") return undefined;
+            if (cmd === "auth_listen") return "fake.jwt.token";
             return undefined;
         });
 
         renderWithProvider();
         await act(async () => {});
 
-        // Click login to open WebSocket
         await act(async () => {
             screen.getByText("Login").click();
-        });
-
-        const ws = MockWebSocket.latest();
-
-        // Simulate session ID
-        await act(async () => {
-            ws.serverSend({ sessionId: "abc" });
-        });
-
-        // Simulate token delivery
-        await act(async () => {
-            ws.serverSend({ token: "fake.jwt.token" });
         });
 
         expect(invoke).toHaveBeenCalledWith(
@@ -219,25 +182,15 @@ describe("Session Persistence", () => {
             if (cmd === "load_profiles") return emptyProfiles;
             if (cmd === "parse_auth_token") return mockParsedToken;
             if (cmd === "save_profile") return undefined;
+            if (cmd === "auth_listen") return "fake.jwt.token";
             return undefined;
         });
 
         renderWithProvider();
         await act(async () => {});
 
-        // Login with a specific agent URL
         await act(async () => {
             screen.getByText("Login").click();
-        });
-
-        const ws = MockWebSocket.latest();
-
-        await act(async () => {
-            ws.serverSend({ sessionId: "abc" });
-        });
-
-        await act(async () => {
-            ws.serverSend({ token: "fake.jwt.token" });
         });
 
         // Verify agentUrl is set in the context

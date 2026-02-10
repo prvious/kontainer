@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { AuthProvider } from "@/contexts/auth-context";
 import { useAuth } from "@/hooks/use-auth";
@@ -24,30 +25,6 @@ const emptyProfiles: StoredProfiles = {
     activeProfileId: null,
 };
 
-class MockWebSocket {
-    static instances: MockWebSocket[] = [];
-    onmessage: ((ev: { data: string }) => void) | null = null;
-    onerror: (() => void) | null = null;
-    onclose: ((ev: { wasClean: boolean }) => void) | null = null;
-    url: string;
-    constructor(url: string) {
-        this.url = url;
-        MockWebSocket.instances.push(this);
-    }
-    close() {
-        this.onclose?.({ wasClean: true });
-    }
-    serverSend(data: object) {
-        this.onmessage?.({ data: JSON.stringify(data) });
-    }
-    static latest() {
-        return this.instances.at(-1)!;
-    }
-    static clear() {
-        this.instances = [];
-    }
-}
-
 function TestConsumer() {
     const { user, token, expiresAt, agentUrl, isLoading, profiles, activeProfileId, login, logout, switchProfile, removeProfile } = useAuth();
     const [loginError, setLoginError] = useState<string | null>(null);
@@ -61,7 +38,7 @@ function TestConsumer() {
             <span data-testid='loginError'>{loginError ?? "none"}</span>
             <span data-testid='profileCount'>{profiles.length}</span>
             <span data-testid='activeProfileId'>{activeProfileId ?? "none"}</span>
-            <button onClick={() => login("http://localhost:8080").catch((e) => setLoginError(e.message))}>Login</button>
+            <button onClick={() => login("http://localhost:8080").catch((e) => setLoginError(typeof e === "string" ? e : e.message))}>Login</button>
             <button onClick={() => logout()}>Logout</button>
             <button data-testid='switch' onClick={() => switchProfile("profile-2")}>
                 Switch
@@ -74,20 +51,25 @@ function TestConsumer() {
 }
 
 describe("AuthProvider", () => {
+    let sessionIdCallback: ((event: { payload: { session_id: string } }) => void) | null = null;
+
     beforeEach(() => {
         vi.clearAllMocks();
-        MockWebSocket.clear();
-        vi.stubGlobal("WebSocket", MockWebSocket);
+        sessionIdCallback = null;
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        vi.mocked(listen).mockImplementation(async (event: string, handler: any) => {
+            if (event === "auth://session-id") {
+                sessionIdCallback = handler;
+            }
+            return () => {};
+        });
 
         // Default: load_profiles returns empty
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_profiles") return emptyProfiles;
             return undefined;
         });
-    });
-
-    afterEach(() => {
-        vi.unstubAllGlobals();
     });
 
     function renderWithProvider() {
@@ -110,7 +92,19 @@ describe("AuthProvider", () => {
         expect(screen.getByTestId("profileCount")).toHaveTextContent("0");
     });
 
-    it("login opens a WebSocket and calls openUrl with session ID", async () => {
+    it("login calls auth_listen and opens browser with session ID", async () => {
+        let resolveAuthListen: (token: string) => void;
+
+        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+            if (cmd === "load_profiles") return emptyProfiles;
+            if (cmd === "auth_listen") {
+                return new Promise<string>((resolve) => {
+                    resolveAuthListen = resolve;
+                });
+            }
+            return undefined;
+        });
+
         renderWithProvider();
         await act(async () => {});
 
@@ -118,18 +112,23 @@ describe("AuthProvider", () => {
             screen.getByText("Login").click();
         });
 
-        const ws = MockWebSocket.latest();
-        expect(ws.url).toBe("ws://localhost:8080/auth/listen");
+        expect(invoke).toHaveBeenCalledWith("auth_listen", { url: "http://localhost:8080" });
 
+        // Simulate session ID event from Rust
         await act(async () => {
-            ws.serverSend({ sessionId: "abc123" });
+            sessionIdCallback?.({ payload: { session_id: "abc123" } });
         });
 
         expect(openUrl).toHaveBeenCalledWith("http://localhost:8080/auth/github?session=abc123");
+
+        // Clean up
+        await act(async () => {
+            resolveAuthListen!("fake.jwt.token");
+        });
     });
 
-    it("handles WebSocket token delivery and saves profile", async () => {
-        const savedProfile = {
+    it("handles token delivery and saves profile", async () => {
+        const savedProfile: StoredProfiles = {
             profiles: [
                 {
                     id: "test-uuid",
@@ -151,6 +150,7 @@ describe("AuthProvider", () => {
             if (cmd === "load_profiles") return savedProfile;
             if (cmd === "parse_auth_token") return mockParsedToken;
             if (cmd === "save_profile") return undefined;
+            if (cmd === "auth_listen") return "fake.jwt.token";
             return undefined;
         });
 
@@ -159,16 +159,6 @@ describe("AuthProvider", () => {
 
         await act(async () => {
             screen.getByText("Login").click();
-        });
-
-        const ws = MockWebSocket.latest();
-
-        await act(async () => {
-            ws.serverSend({ sessionId: "abc123" });
-        });
-
-        await act(async () => {
-            ws.serverSend({ token: "fake.jwt.token" });
         });
 
         expect(invoke).toHaveBeenCalledWith("parse_auth_token", {
@@ -204,9 +194,9 @@ describe("AuthProvider", () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_profiles") return savedProfile;
             if (cmd === "parse_auth_token") return mockParsedToken;
+            if (cmd === "auth_listen") return "fake.jwt.token";
             if (cmd === "delete_session") {
                 callOrder.push("delete_session");
-                // After delete, return empty profiles
                 savedProfile.profiles = [];
                 savedProfile.activeProfileId = null;
                 return undefined;
@@ -218,17 +208,9 @@ describe("AuthProvider", () => {
         renderWithProvider();
         await act(async () => {});
 
-        // Authenticate first via WS
+        // Authenticate first
         await act(async () => {
             screen.getByText("Login").click();
-        });
-
-        const ws = MockWebSocket.latest();
-        await act(async () => {
-            ws.serverSend({ sessionId: "abc" });
-        });
-        await act(async () => {
-            ws.serverSend({ token: "fake.jwt.token" });
         });
 
         expect(screen.getByTestId("user")).toHaveTextContent("Jane Doe");
@@ -248,6 +230,7 @@ describe("AuthProvider", () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_profiles") return emptyProfiles;
             if (cmd === "parse_auth_token") return mockParsedToken;
+            if (cmd === "auth_listen") return "fake.jwt.token";
             if (cmd === "delete_session") throw new Error("keychain error");
             if (cmd === "save_profile") return undefined;
             return undefined;
@@ -258,17 +241,9 @@ describe("AuthProvider", () => {
         renderWithProvider();
         await act(async () => {});
 
-        // Authenticate first via WS
+        // Authenticate first
         await act(async () => {
             screen.getByText("Login").click();
-        });
-
-        const ws = MockWebSocket.latest();
-        await act(async () => {
-            ws.serverSend({ sessionId: "abc" });
-        });
-        await act(async () => {
-            ws.serverSend({ token: "fake.jwt.token" });
         });
 
         expect(screen.getByTestId("user")).toHaveTextContent("Jane Doe");
@@ -288,6 +263,7 @@ describe("AuthProvider", () => {
     it("handles parse_auth_token failure gracefully", async () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_profiles") return emptyProfiles;
+            if (cmd === "auth_listen") return "bad.token.here";
             if (cmd === "parse_auth_token") throw new Error("parse failed");
             return undefined;
         });
@@ -300,23 +276,16 @@ describe("AuthProvider", () => {
             screen.getByText("Login").click();
         });
 
-        const ws = MockWebSocket.latest();
-        await act(async () => {
-            ws.serverSend({ sessionId: "abc" });
-        });
-        await act(async () => {
-            ws.serverSend({ token: "bad.token.here" });
-        });
-
         expect(screen.getByTestId("user")).toHaveTextContent("none");
         expect(consoleSpy).toHaveBeenCalledWith("Failed to parse auth token:", expect.any(Error));
 
         consoleSpy.mockRestore();
     });
 
-    it("rejects login promise on WebSocket error message", async () => {
+    it("rejects login promise on auth_listen error", async () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_profiles") return emptyProfiles;
+            if (cmd === "auth_listen") throw "session expired";
             return undefined;
         });
 
@@ -325,11 +294,6 @@ describe("AuthProvider", () => {
 
         await act(async () => {
             screen.getByText("Login").click();
-        });
-
-        const ws = MockWebSocket.latest();
-        await act(async () => {
-            ws.serverSend({ error: "session expired" });
         });
 
         expect(screen.getByTestId("user")).toHaveTextContent("none");

@@ -1,37 +1,14 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { createMemoryHistory, createRootRouteWithContext, createRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { AuthProvider } from "@/contexts/auth-context";
 import { LoginScreen } from "@/components/login-screen";
 import { useAuth } from "@/hooks/use-auth";
 import type { AuthContextValue } from "@/contexts/auth-context-value";
-
-class MockWebSocket {
-    static instances: MockWebSocket[] = [];
-    onmessage: ((ev: { data: string }) => void) | null = null;
-    onerror: (() => void) | null = null;
-    onclose: ((ev: { wasClean: boolean }) => void) | null = null;
-    url: string;
-    constructor(url: string) {
-        this.url = url;
-        MockWebSocket.instances.push(this);
-    }
-    close() {
-        this.onclose?.({ wasClean: true });
-    }
-    serverSend(data: object) {
-        this.onmessage?.({ data: JSON.stringify(data) });
-    }
-    static latest() {
-        return this.instances.at(-1)!;
-    }
-    static clear() {
-        this.instances = [];
-    }
-}
 
 // Create a minimal test router that includes the /login route
 const rootRoute = createRootRouteWithContext<{ auth: AuthContextValue }>()({});
@@ -66,8 +43,6 @@ function TestWrapper() {
 describe("LoginScreen", () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        MockWebSocket.clear();
-        vi.stubGlobal("WebSocket", MockWebSocket);
 
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_profiles") return { profiles: [], activeProfileId: null };
@@ -75,10 +50,6 @@ describe("LoginScreen", () => {
             if (cmd === "fetch_providers") return ["github"];
             return undefined;
         });
-    });
-
-    afterEach(() => {
-        vi.unstubAllGlobals();
     });
 
     async function renderLoginScreen() {
@@ -154,7 +125,31 @@ describe("LoginScreen", () => {
         expect(screen.getByRole("button", { name: /continue with github/i })).toBeInTheDocument();
     });
 
-    it("opens WebSocket when provider button is clicked", async () => {
+    it("calls auth_listen when provider button is clicked", async () => {
+        // Capture the listen callback so we can simulate the session-id event
+        let sessionIdCallback: ((event: { payload: { session_id: string } }) => void) | null = null;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        vi.mocked(listen).mockImplementation(async (event: string, handler: any) => {
+            if (event === "auth://session-id") {
+                sessionIdCallback = handler;
+            }
+            return () => {};
+        });
+
+        // auth_listen returns a pending promise (waiting for token)
+        let resolveAuthListen: (token: string) => void;
+        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+            if (cmd === "load_profiles") return { profiles: [], activeProfileId: null };
+            if (cmd === "ping_agent") return undefined;
+            if (cmd === "fetch_providers") return ["github"];
+            if (cmd === "auth_listen") {
+                return new Promise<string>((resolve) => {
+                    resolveAuthListen = resolve;
+                });
+            }
+            return undefined;
+        });
+
         await renderLoginScreen();
         const user = userEvent.setup();
 
@@ -164,16 +159,20 @@ describe("LoginScreen", () => {
         const githubButton = screen.getByRole("button", { name: /continue with github/i });
         await user.click(githubButton);
 
-        // After clicking provider, a WebSocket should be opened
-        const ws = MockWebSocket.latest();
-        expect(ws.url).toBe("ws://localhost:8080/auth/listen");
+        // auth_listen should be called
+        expect(invoke).toHaveBeenCalledWith("auth_listen", { url: "http://localhost:8080" });
 
-        // Simulate session ID → opens browser with correct provider
+        // Simulate session ID event from Rust
         await act(async () => {
-            ws.serverSend({ sessionId: "test-session" });
+            sessionIdCallback?.({ payload: { session_id: "test-session" } });
         });
 
         expect(openUrl).toHaveBeenCalledWith("http://localhost:8080/auth/github?session=test-session");
+
+        // Clean up: resolve the auth_listen promise
+        await act(async () => {
+            resolveAuthListen!("fake-jwt");
+        });
     });
 
     it("shows error when ping fails", async () => {
@@ -190,7 +189,6 @@ describe("LoginScreen", () => {
         await user.click(button);
 
         expect(screen.getByText(/could not reach agent/i)).toBeInTheDocument();
-        expect(MockWebSocket.instances).toHaveLength(0);
     });
 
     it("resets status when URL changes", async () => {

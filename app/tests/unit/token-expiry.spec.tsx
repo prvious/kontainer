@@ -10,24 +10,6 @@ const emptyProfiles: StoredProfiles = {
     activeProfileId: null,
 };
 
-class MockWebSocket {
-    static instances: MockWebSocket[] = [];
-    onmessage: ((ev: { data: string }) => void) | null = null;
-    onerror: (() => void) | null = null;
-    onclose: ((ev: { wasClean: boolean }) => void) | null = null;
-    url: string;
-    constructor(url: string) {
-        this.url = url;
-        MockWebSocket.instances.push(this);
-    }
-    close() {
-        this.onclose?.({ wasClean: true });
-    }
-    static clear() {
-        this.instances = [];
-    }
-}
-
 function TestConsumer() {
     const { user, isLoading } = useAuth();
     return (
@@ -42,13 +24,10 @@ describe("Token Expiry", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         vi.useFakeTimers();
-        MockWebSocket.clear();
-        vi.stubGlobal("WebSocket", MockWebSocket);
     });
 
     afterEach(() => {
         vi.useRealTimers();
-        vi.unstubAllGlobals();
     });
 
     function renderWithProvider() {
