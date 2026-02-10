@@ -4,6 +4,7 @@ use tauri::Emitter;
 use tokio_tungstenite::connect_async;
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct WsMessage {
     #[serde(default)]
     session_id: Option<String>,
