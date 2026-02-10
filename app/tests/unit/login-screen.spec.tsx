@@ -126,26 +126,24 @@ describe("LoginScreen", () => {
     });
 
     it("calls auth_listen when provider button is clicked", async () => {
-        // Capture the listen callback so we can simulate the session-id event
+        // Capture event callbacks
         let sessionIdCallback: ((event: { payload: { session_id: string } }) => void) | null = null;
+        let tokenCallback: ((event: { payload: { token: string } }) => void) | null = null;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         vi.mocked(listen).mockImplementation(async (event: string, handler: any) => {
-            if (event === "auth://session-id") {
-                sessionIdCallback = handler;
-            }
+            if (event === "auth://session-id") sessionIdCallback = handler;
+            if (event === "auth://token") tokenCallback = handler;
             return () => {};
         });
 
-        // auth_listen returns a pending promise (waiting for token)
-        let resolveAuthListen: (token: string) => void;
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_profiles") return { profiles: [], activeProfileId: null };
             if (cmd === "ping_agent") return undefined;
             if (cmd === "fetch_providers") return ["github"];
             if (cmd === "auth_listen") {
-                return new Promise<string>((resolve) => {
-                    resolveAuthListen = resolve;
-                });
+                // Background task delivers session ID
+                sessionIdCallback?.({ payload: { session_id: "test-session" } });
+                return undefined;
             }
             return undefined;
         });
@@ -162,16 +160,12 @@ describe("LoginScreen", () => {
         // auth_listen should be called
         expect(invoke).toHaveBeenCalledWith("auth_listen", { url: "http://localhost:8080" });
 
-        // Simulate session ID event from Rust
-        await act(async () => {
-            sessionIdCallback?.({ payload: { session_id: "test-session" } });
-        });
-
+        // session ID event fires synchronously in invoke mock → opens browser
         expect(openUrl).toHaveBeenCalledWith("http://localhost:8080/auth/github?session=test-session");
 
-        // Clean up: resolve the auth_listen promise
+        // Clean up: deliver token so login() resolves
         await act(async () => {
-            resolveAuthListen!("fake-jwt");
+            tokenCallback?.({ payload: { token: "fake-jwt" } });
         });
     });
 

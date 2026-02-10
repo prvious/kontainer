@@ -18,11 +18,31 @@ struct SessionIdPayload {
     session_id: String,
 }
 
+#[derive(Clone, serde::Serialize)]
+struct TokenPayload {
+    token: String,
+}
+
+#[derive(Clone, serde::Serialize)]
+struct ErrorPayload {
+    error: String,
+}
+
 #[tauri::command]
-pub async fn auth_listen(app: tauri::AppHandle, url: String) -> Result<String, String> {
+pub async fn auth_listen(app: tauri::AppHandle, url: String) -> Result<(), String> {
     let ws_url = url.replace("http", "ws") + "/auth/listen";
 
-    let (ws_stream, _) = connect_async(&ws_url)
+    tauri::async_runtime::spawn(async move {
+        if let Err(e) = connect_and_listen(&app, &ws_url).await {
+            let _ = app.emit("auth://error", ErrorPayload { error: e });
+        }
+    });
+
+    Ok(())
+}
+
+async fn connect_and_listen(app: &tauri::AppHandle, ws_url: &str) -> Result<(), String> {
+    let (ws_stream, _) = connect_async(ws_url)
         .await
         .map_err(|e| format!("WebSocket connection failed: {e}"))?;
 
@@ -46,7 +66,9 @@ pub async fn auth_listen(app: tauri::AppHandle, url: String) -> Result<String, S
         }
 
         if let Some(token) = parsed.token {
-            return Ok(token);
+            app.emit("auth://token", TokenPayload { token })
+                .map_err(|e| format!("Failed to emit event: {e}"))?;
+            return Ok(());
         }
 
         if let Some(error) = parsed.error {

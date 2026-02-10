@@ -199,15 +199,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             pendingLabelRef.current = label || "Default";
             const authProvider = provider || "github";
 
-            const unlisten = await listen<{ session_id: string }>("auth://session-id", (event) => {
+            // Set up all event listeners BEFORE starting the WebSocket
+            const unlistenSessionId = await listen<{ session_id: string }>("auth://session-id", (event) => {
                 openUrl(`${url}/auth/${authProvider}?session=${event.payload.session_id}`);
             });
 
+            let resolveToken: (jwt: string) => void;
+            let rejectToken: (err: Error) => void;
+            const tokenPromise = new Promise<string>((resolve, reject) => {
+                resolveToken = resolve;
+                rejectToken = reject;
+            });
+
+            const unlistenToken = await listen<{ token: string }>("auth://token", (event) => {
+                resolveToken(event.payload.token);
+            });
+
+            const unlistenError = await listen<{ error: string }>("auth://error", (event) => {
+                rejectToken(new Error(event.payload.error));
+            });
+
             try {
-                const jwt = await invoke<string>("auth_listen", { url });
+                // Fire-and-forget: starts the background WebSocket
+                await invoke("auth_listen", { url });
+
+                // Wait for token or error event from the background task
+                const jwt = await tokenPromise;
                 await handleToken(jwt, url);
             } finally {
-                unlisten();
+                unlistenSessionId();
+                unlistenToken();
+                unlistenError();
             }
         },
         [handleToken],

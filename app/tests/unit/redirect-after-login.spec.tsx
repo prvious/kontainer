@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { createMemoryHistory, createRootRouteWithContext, createRoute, createRouter, redirect, RouterProvider } from "@tanstack/react-router";
 import { AuthProvider } from "@/contexts/auth-context";
 import { useAuth } from "@/hooks/use-auth";
@@ -78,14 +79,26 @@ function TestApp({ initialPath }: { initialPath: string }) {
 }
 
 describe("Redirect After Login", () => {
+    let tokenCallback: ((event: { payload: { token: string } }) => void) | null = null;
+
     beforeEach(() => {
         vi.clearAllMocks();
+        tokenCallback = null;
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        vi.mocked(listen).mockImplementation(async (event: string, handler: any) => {
+            if (event === "auth://token") tokenCallback = handler;
+            return () => {};
+        });
 
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_profiles") return { profiles: [], activeProfileId: null };
             if (cmd === "parse_auth_token") return mockParsedToken;
             if (cmd === "save_profile") return undefined;
-            if (cmd === "auth_listen") return "fake.jwt.token";
+            if (cmd === "auth_listen") {
+                tokenCallback?.({ payload: { token: "fake.jwt.token" } });
+                return undefined;
+            }
             return undefined;
         });
     });
@@ -101,7 +114,7 @@ describe("Redirect After Login", () => {
         // Should be on login page
         expect(screen.getByTestId("location")).toHaveTextContent("login");
 
-        // Initiate login — auth_listen resolves immediately with token
+        // Initiate login — auth_listen delivers token via event
         await act(async () => {
             screen.getByText("Login").click();
         });

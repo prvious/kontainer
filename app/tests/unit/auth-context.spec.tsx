@@ -52,16 +52,20 @@ function TestConsumer() {
 
 describe("AuthProvider", () => {
     let sessionIdCallback: ((event: { payload: { session_id: string } }) => void) | null = null;
+    let tokenCallback: ((event: { payload: { token: string } }) => void) | null = null;
+    let errorCallback: ((event: { payload: { error: string } }) => void) | null = null;
 
     beforeEach(() => {
         vi.clearAllMocks();
         sessionIdCallback = null;
+        tokenCallback = null;
+        errorCallback = null;
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         vi.mocked(listen).mockImplementation(async (event: string, handler: any) => {
-            if (event === "auth://session-id") {
-                sessionIdCallback = handler;
-            }
+            if (event === "auth://session-id") sessionIdCallback = handler;
+            if (event === "auth://token") tokenCallback = handler;
+            if (event === "auth://error") errorCallback = handler;
             return () => {};
         });
 
@@ -93,14 +97,13 @@ describe("AuthProvider", () => {
     });
 
     it("login calls auth_listen and opens browser with session ID", async () => {
-        let resolveAuthListen: (token: string) => void;
-
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_profiles") return emptyProfiles;
             if (cmd === "auth_listen") {
-                return new Promise<string>((resolve) => {
-                    resolveAuthListen = resolve;
-                });
+                // Simulate: session ID arrives from background WS
+                sessionIdCallback?.({ payload: { session_id: "abc123" } });
+                // Don't deliver token yet
+                return undefined;
             }
             return undefined;
         });
@@ -113,17 +116,11 @@ describe("AuthProvider", () => {
         });
 
         expect(invoke).toHaveBeenCalledWith("auth_listen", { url: "http://localhost:8080" });
-
-        // Simulate session ID event from Rust
-        await act(async () => {
-            sessionIdCallback?.({ payload: { session_id: "abc123" } });
-        });
-
         expect(openUrl).toHaveBeenCalledWith("http://localhost:8080/auth/github?session=abc123");
 
-        // Clean up
+        // Clean up: deliver token so login() resolves
         await act(async () => {
-            resolveAuthListen!("fake.jwt.token");
+            tokenCallback?.({ payload: { token: "fake.jwt.token" } });
         });
     });
 
@@ -150,7 +147,11 @@ describe("AuthProvider", () => {
             if (cmd === "load_profiles") return savedProfile;
             if (cmd === "parse_auth_token") return mockParsedToken;
             if (cmd === "save_profile") return undefined;
-            if (cmd === "auth_listen") return "fake.jwt.token";
+            if (cmd === "auth_listen") {
+                // Background task delivers token immediately
+                tokenCallback?.({ payload: { token: "fake.jwt.token" } });
+                return undefined;
+            }
             return undefined;
         });
 
@@ -194,7 +195,10 @@ describe("AuthProvider", () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_profiles") return savedProfile;
             if (cmd === "parse_auth_token") return mockParsedToken;
-            if (cmd === "auth_listen") return "fake.jwt.token";
+            if (cmd === "auth_listen") {
+                tokenCallback?.({ payload: { token: "fake.jwt.token" } });
+                return undefined;
+            }
             if (cmd === "delete_session") {
                 callOrder.push("delete_session");
                 savedProfile.profiles = [];
@@ -230,7 +234,10 @@ describe("AuthProvider", () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_profiles") return emptyProfiles;
             if (cmd === "parse_auth_token") return mockParsedToken;
-            if (cmd === "auth_listen") return "fake.jwt.token";
+            if (cmd === "auth_listen") {
+                tokenCallback?.({ payload: { token: "fake.jwt.token" } });
+                return undefined;
+            }
             if (cmd === "delete_session") throw new Error("keychain error");
             if (cmd === "save_profile") return undefined;
             return undefined;
@@ -263,7 +270,10 @@ describe("AuthProvider", () => {
     it("handles parse_auth_token failure gracefully", async () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_profiles") return emptyProfiles;
-            if (cmd === "auth_listen") return "bad.token.here";
+            if (cmd === "auth_listen") {
+                tokenCallback?.({ payload: { token: "bad.token.here" } });
+                return undefined;
+            }
             if (cmd === "parse_auth_token") throw new Error("parse failed");
             return undefined;
         });
@@ -285,7 +295,11 @@ describe("AuthProvider", () => {
     it("rejects login promise on auth_listen error", async () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_profiles") return emptyProfiles;
-            if (cmd === "auth_listen") throw "session expired";
+            if (cmd === "auth_listen") {
+                // Background task emits error event
+                errorCallback?.({ payload: { error: "session expired" } });
+                return undefined;
+            }
             return undefined;
         });
 
