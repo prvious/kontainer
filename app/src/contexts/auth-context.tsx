@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import type { AuthUser, ParsedToken } from "@/types/auth";
 import type { ConnectionProfile, StoredProfiles } from "@/types/connection";
@@ -14,7 +15,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [profiles, setProfiles] = useState<ConnectionProfile[]>([]);
     const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
 
-    const wsRef = useRef<WebSocket | null>(null);
     const pendingLabelRef = useRef<string>("Default");
 
     const clearState = useCallback(() => {
@@ -158,13 +158,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         };
     }, []);
 
-    // Cleanup WS on unmount
-    useEffect(() => {
-        return () => {
-            wsRef.current?.close();
-        };
-    }, []);
-
     // Expiry timer
     useEffect(() => {
         const interval = setInterval(async () => {
@@ -202,63 +195,42 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }, [expiresAt, activeProfileId, clearState, applyProfile]);
 
     const login = useCallback(
-        (url: string, label?: string) => {
+        async (url: string, label?: string, provider?: string) => {
             pendingLabelRef.current = label || "Default";
-            return new Promise<void>((resolve, reject) => {
-                const wsUrl = url.replace(/^http/, "ws") + "/auth/listen";
-                const ws = new WebSocket(wsUrl);
-                wsRef.current = ws;
-                let settled = false;
+            const authProvider = provider || "github";
 
-                const timeout = setTimeout(
-                    () => {
-                        settled = true;
-                        ws.close();
-                        reject(new Error("Authentication timed out"));
-                    },
-                    10 * 60 * 1000,
-                );
-
-                ws.onmessage = (ev) => {
-                    const data = JSON.parse(ev.data);
-
-                    if (data.sessionId) {
-                        openUrl(`${url}/auth/github?session=${data.sessionId}`);
-                        return;
-                    }
-
-                    if (data.token) {
-                        settled = true;
-                        clearTimeout(timeout);
-                        ws.close();
-                        handleToken(data.token, url).then(resolve, reject);
-                        return;
-                    }
-
-                    if (data.error) {
-                        settled = true;
-                        clearTimeout(timeout);
-                        ws.close();
-                        reject(new Error(data.error));
-                    }
-                };
-
-                ws.onerror = () => {
-                    if (settled) return;
-                    settled = true;
-                    clearTimeout(timeout);
-                    reject(new Error("WebSocket connection failed"));
-                };
-
-                ws.onclose = (ev) => {
-                    if (settled) return;
-                    settled = true;
-                    clearTimeout(timeout);
-                    if (!ev.wasClean) {
-                        reject(new Error("WebSocket closed unexpectedly"));
-                    }
-                };
+            // Set up all event listeners BEFORE starting the WebSocket
+            const unlistenSessionId = await listen<{ sessionId: string }>("auth://session-id", (event) => {
+                openUrl(`${url}/auth/${authProvider}?session=${event.payload.sessionId}`);
             });
+
+            let resolveToken: (jwt: string) => void;
+            let rejectToken: (err: Error) => void;
+            const tokenPromise = new Promise<string>((resolve, reject) => {
+                resolveToken = resolve;
+                rejectToken = reject;
+            });
+
+            const unlistenToken = await listen<{ token: string }>("auth://token", (event) => {
+                resolveToken(event.payload.token);
+            });
+
+            const unlistenError = await listen<{ error: string }>("auth://error", (event) => {
+                rejectToken(new Error(event.payload.error));
+            });
+
+            try {
+                // Fire-and-forget: starts the background WebSocket
+                await invoke("auth_listen", { url });
+
+                // Wait for token or error event from the background task
+                const jwt = await tokenPromise;
+                await handleToken(jwt, url);
+            } finally {
+                unlistenSessionId();
+                unlistenToken();
+                unlistenError();
+            }
         },
         [handleToken],
     );

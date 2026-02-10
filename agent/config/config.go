@@ -16,6 +16,7 @@ type Config struct {
 	MetricsRetention   string
 	MetricsDBPath      string
 	GithubAllowedOrgs  string
+	GithubAllowedUsers string
 }
 
 func Load() *Config {
@@ -33,6 +34,7 @@ func Load() *Config {
 		MetricsRetention:   getEnv("DEVOPER_METRICS_RETENTION", "24h"),
 		MetricsDBPath:      getEnv("DEVOPER_METRICS_DB", "devoper-metrics.db"),
 		GithubAllowedOrgs:  getEnv("GITHUB_ALLOWED_ORGS", ""),
+		GithubAllowedUsers: getEnv("GITHUB_ALLOWED_USERS", ""),
 	}
 }
 

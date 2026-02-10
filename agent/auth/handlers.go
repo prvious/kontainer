@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"encoding/json"
 	"errors"
 	"log"
 	"net/http"
@@ -31,6 +32,13 @@ func NewAuthHandler(registry *providers.ProviderRegistry, sessions *SessionStore
 		jwtSecret: jwtSecret,
 		bridge:    bridge,
 	}
+}
+
+// ProvidersHandler returns the list of registered OAuth provider names.
+func (h *AuthHandler) ProvidersHandler(w http.ResponseWriter, r *http.Request) {
+	names := h.registry.Names()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string][]string{"providers": names})
 }
 
 // AuthListenHandler upgrades to WebSocket, creates a bridge session, sends the session ID,

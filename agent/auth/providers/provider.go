@@ -3,6 +3,7 @@ package providers
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"golang.org/x/oauth2"
 )
@@ -42,6 +43,15 @@ func NewProviderRegistry() *ProviderRegistry {
 
 func (r *ProviderRegistry) Register(p Provider) {
 	r.providers[p.Name()] = p
+}
+
+func (r *ProviderRegistry) Names() []string {
+	names := make([]string, 0, len(r.providers))
+	for name := range r.providers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func (r *ProviderRegistry) Get(name string) (Provider, error) {

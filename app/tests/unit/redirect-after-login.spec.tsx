@@ -1,8 +1,8 @@
-import { useEffect } from "react";
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
-import { createMemoryHistory, createRootRouteWithContext, createRoute, createRouter, RouterProvider } from "@tanstack/react-router";
+import { listen } from "@tauri-apps/api/event";
+import { createMemoryHistory, createRootRouteWithContext, createRoute, createRouter, redirect, RouterProvider } from "@tanstack/react-router";
 import { AuthProvider } from "@/contexts/auth-context";
 import { useAuth } from "@/hooks/use-auth";
 import type { AuthContextValue } from "@/contexts/auth-context-value";
@@ -19,41 +19,8 @@ const mockParsedToken: ParsedToken = {
     expiresAt: 9999999999,
 };
 
-class MockWebSocket {
-    static instances: MockWebSocket[] = [];
-    onmessage: ((ev: { data: string }) => void) | null = null;
-    onerror: (() => void) | null = null;
-    onclose: ((ev: { wasClean: boolean }) => void) | null = null;
-    url: string;
-    constructor(url: string) {
-        this.url = url;
-        MockWebSocket.instances.push(this);
-    }
-    close() {
-        this.onclose?.({ wasClean: true });
-    }
-    serverSend(data: object) {
-        this.onmessage?.({ data: JSON.stringify(data) });
-    }
-    static latest() {
-        return this.instances.at(-1)!;
-    }
-    static clear() {
-        this.instances = [];
-    }
-}
-
 function LoginComponent() {
-    const { user, login } = useAuth();
-    const navigate = Route_Login.useNavigate();
-    const { redirect } = Route_Login.useSearch();
-
-    useEffect(() => {
-        if (user) {
-            navigate({ to: redirect || "/" });
-        }
-    }, [user, redirect, navigate]);
-
+    const { login } = useAuth();
     return (
         <div>
             <span data-testid='location'>login</span>
@@ -70,7 +37,7 @@ function DashboardComponent() {
     return <span data-testid='location'>dashboard</span>;
 }
 
-// Create a test router
+// Create a test router with beforeLoad redirect (matches real login route)
 const rootRoute = createRootRouteWithContext<{ auth: AuthContextValue }>()({});
 
 const indexRoute = createRoute({
@@ -79,13 +46,18 @@ const indexRoute = createRoute({
     component: HomeComponent,
 });
 
-const Route_Login = createRoute({
+const loginRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/login",
     component: LoginComponent,
     validateSearch: (search: Record<string, unknown>) => ({
         redirect: (search.redirect as string) || undefined,
     }),
+    beforeLoad: ({ context, search }) => {
+        if (context.auth.user) {
+            throw redirect({ to: search.redirect || "/" });
+        }
+    },
 });
 
 const dashboardRoute = createRoute({
@@ -94,39 +66,41 @@ const dashboardRoute = createRoute({
     component: DashboardComponent,
 });
 
-const routeTree = rootRoute.addChildren([indexRoute, Route_Login, dashboardRoute]);
-
-function createTestRouter(initialPath: string) {
-    return createRouter({
-        routeTree,
-        context: { auth: undefined! },
-        history: createMemoryHistory({ initialEntries: [initialPath] }),
-    });
-}
+const routeTree = rootRoute.addChildren([indexRoute, loginRoute, dashboardRoute]);
 
 function TestApp({ initialPath }: { initialPath: string }) {
     const auth = useAuth();
-    const testRouter = createTestRouter(initialPath);
-    return <RouterProvider router={testRouter} context={{ auth }} />;
+    const testRouter = createRouter({
+        routeTree,
+        context: { auth },
+        history: createMemoryHistory({ initialEntries: [initialPath] }),
+    });
+    return <RouterProvider router={testRouter} />;
 }
 
 describe("Redirect After Login", () => {
+    let tokenCallback: ((event: { payload: { token: string } }) => void) | null = null;
+
     beforeEach(() => {
         vi.clearAllMocks();
-        MockWebSocket.clear();
-        vi.stubGlobal("WebSocket", MockWebSocket);
+        tokenCallback = null;
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        vi.mocked(listen).mockImplementation(async (event: string, handler: any) => {
+            if (event === "auth://token") tokenCallback = handler;
+            return () => {};
+        });
 
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_profiles") return { profiles: [], activeProfileId: null };
             if (cmd === "parse_auth_token") return mockParsedToken;
             if (cmd === "save_profile") return undefined;
-            if (cmd === "delete_session") return undefined;
+            if (cmd === "auth_listen") {
+                tokenCallback?.({ payload: { token: "fake.jwt.token" } });
+                return undefined;
+            }
             return undefined;
         });
-    });
-
-    afterEach(() => {
-        vi.unstubAllGlobals();
     });
 
     it("navigates to redirect param after authentication", async () => {
@@ -140,22 +114,12 @@ describe("Redirect After Login", () => {
         // Should be on login page
         expect(screen.getByTestId("location")).toHaveTextContent("login");
 
-        // Initiate login
+        // Initiate login — auth_listen delivers token via event
         await act(async () => {
             screen.getByText("Login").click();
         });
 
-        const ws = MockWebSocket.latest();
-
-        // Simulate WS auth flow
-        await act(async () => {
-            ws.serverSend({ sessionId: "abc" });
-        });
-        await act(async () => {
-            ws.serverSend({ token: "fake.jwt.token" });
-        });
-
-        // Should redirect to /dashboard
+        // Should redirect to /dashboard via beforeLoad guard
         expect(screen.getByTestId("location")).toHaveTextContent("dashboard");
     });
 
@@ -175,17 +139,7 @@ describe("Redirect After Login", () => {
             screen.getByText("Login").click();
         });
 
-        const ws = MockWebSocket.latest();
-
-        // Simulate WS auth flow
-        await act(async () => {
-            ws.serverSend({ sessionId: "abc" });
-        });
-        await act(async () => {
-            ws.serverSend({ token: "fake.jwt.token" });
-        });
-
-        // Should redirect to /
+        // Should redirect to / via beforeLoad guard
         expect(screen.getByTestId("location")).toHaveTextContent("home");
     });
 });

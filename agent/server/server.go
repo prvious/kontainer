@@ -67,6 +67,7 @@ func New(
 		fmt.Fprintf(w, `{"app":"dev.devoper.app"}`)
 	})
 
+	r.Get("/auth/providers", authHandler.ProvidersHandler)
 	r.Get("/auth/listen", authHandler.AuthListenHandler)
 	r.Get("/auth/{provider}", authHandler.RedirectHandler)
 	r.Get("/auth/{provider}/callback", authHandler.CallbackHandler)

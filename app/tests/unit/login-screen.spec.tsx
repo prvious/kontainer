@@ -1,37 +1,14 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { createMemoryHistory, createRootRouteWithContext, createRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { AuthProvider } from "@/contexts/auth-context";
 import { LoginScreen } from "@/components/login-screen";
 import { useAuth } from "@/hooks/use-auth";
 import type { AuthContextValue } from "@/contexts/auth-context-value";
-
-class MockWebSocket {
-    static instances: MockWebSocket[] = [];
-    onmessage: ((ev: { data: string }) => void) | null = null;
-    onerror: (() => void) | null = null;
-    onclose: ((ev: { wasClean: boolean }) => void) | null = null;
-    url: string;
-    constructor(url: string) {
-        this.url = url;
-        MockWebSocket.instances.push(this);
-    }
-    close() {
-        this.onclose?.({ wasClean: true });
-    }
-    serverSend(data: object) {
-        this.onmessage?.({ data: JSON.stringify(data) });
-    }
-    static latest() {
-        return this.instances.at(-1)!;
-    }
-    static clear() {
-        this.instances = [];
-    }
-}
 
 // Create a minimal test router that includes the /login route
 const rootRoute = createRootRouteWithContext<{ auth: AuthContextValue }>()({});
@@ -66,18 +43,13 @@ function TestWrapper() {
 describe("LoginScreen", () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        MockWebSocket.clear();
-        vi.stubGlobal("WebSocket", MockWebSocket);
 
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_profiles") return { profiles: [], activeProfileId: null };
             if (cmd === "ping_agent") return undefined;
+            if (cmd === "fetch_providers") return ["github"];
             return undefined;
         });
-    });
-
-    afterEach(() => {
-        vi.unstubAllGlobals();
     });
 
     async function renderLoginScreen() {
@@ -95,7 +67,13 @@ describe("LoginScreen", () => {
         expect(screen.getByText("devoper")).toBeInTheDocument();
     });
 
-    it("renders the agent URL input with default value", async () => {
+    it("renders the card title and description", async () => {
+        await renderLoginScreen();
+        expect(screen.getByText("Connect to Cluster")).toBeInTheDocument();
+        expect(screen.getByText("Enter your agent's URL to get started.")).toBeInTheDocument();
+    });
+
+    it("renders the cluster URL input with default value", async () => {
         await renderLoginScreen();
         const input = screen.getByPlaceholderText("http://localhost:8080");
         expect(input).toBeInTheDocument();
@@ -107,7 +85,7 @@ describe("LoginScreen", () => {
         expect(screen.getByRole("button", { name: /connect/i })).toBeInTheDocument();
     });
 
-    it("pings the agent and opens WebSocket on submit", async () => {
+    it("pings the agent on submit", async () => {
         await renderLoginScreen();
         const user = userEvent.setup();
 
@@ -115,48 +93,83 @@ describe("LoginScreen", () => {
         await user.click(button);
 
         expect(invoke).toHaveBeenCalledWith("ping_agent", { url: "http://localhost:8080" });
-
-        // After ping, a WebSocket should be opened
-        const ws = MockWebSocket.latest();
-        expect(ws.url).toBe("ws://localhost:8080/auth/listen");
-
-        // Simulate session ID → opens browser
-        await act(async () => {
-            ws.serverSend({ sessionId: "test-session" });
-        });
-
-        expect(openUrl).toHaveBeenCalledWith("http://localhost:8080/auth/github?session=test-session");
     });
 
-    it("allows changing the agent URL", async () => {
+    it("shows online status after successful ping", async () => {
         await renderLoginScreen();
         const user = userEvent.setup();
-
-        const input = screen.getByPlaceholderText("http://localhost:8080");
-        await user.clear(input);
-        await user.type(input, "http://myserver:9090");
-
-        expect(input).toHaveValue("http://myserver:9090");
-    });
-
-    it("strips trailing slashes from agent URL before login", async () => {
-        await renderLoginScreen();
-        const user = userEvent.setup();
-
-        const input = screen.getByPlaceholderText("http://localhost:8080");
-        await user.clear(input);
-        await user.type(input, "http://myserver:9090///");
 
         const button = screen.getByRole("button", { name: /connect/i });
         await user.click(button);
 
-        expect(invoke).toHaveBeenCalledWith("ping_agent", { url: "http://myserver:9090" });
-
-        const ws = MockWebSocket.latest();
-        expect(ws.url).toBe("ws://myserver:9090/auth/listen");
+        expect(screen.getByText("Cluster Online")).toBeInTheDocument();
     });
 
-    it("shows error and does not proceed when ping fails", async () => {
+    it("fetches providers after successful ping", async () => {
+        await renderLoginScreen();
+        const user = userEvent.setup();
+
+        const button = screen.getByRole("button", { name: /connect/i });
+        await user.click(button);
+
+        expect(invoke).toHaveBeenCalledWith("fetch_providers", { url: "http://localhost:8080" });
+    });
+
+    it("shows provider buttons when online", async () => {
+        await renderLoginScreen();
+        const user = userEvent.setup();
+
+        const button = screen.getByRole("button", { name: /connect/i });
+        await user.click(button);
+
+        expect(screen.getByRole("button", { name: /continue with github/i })).toBeInTheDocument();
+    });
+
+    it("calls auth_listen when provider button is clicked", async () => {
+        // Capture event callbacks
+        let sessionIdCallback: ((event: { payload: { sessionId: string } }) => void) | null = null;
+        let tokenCallback: ((event: { payload: { token: string } }) => void) | null = null;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        vi.mocked(listen).mockImplementation(async (event: string, handler: any) => {
+            if (event === "auth://session-id") sessionIdCallback = handler;
+            if (event === "auth://token") tokenCallback = handler;
+            return () => {};
+        });
+
+        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+            if (cmd === "load_profiles") return { profiles: [], activeProfileId: null };
+            if (cmd === "ping_agent") return undefined;
+            if (cmd === "fetch_providers") return ["github"];
+            if (cmd === "auth_listen") {
+                // Background task delivers session ID
+                sessionIdCallback?.({ payload: { sessionId: "test-session" } });
+                return undefined;
+            }
+            return undefined;
+        });
+
+        await renderLoginScreen();
+        const user = userEvent.setup();
+
+        const connectButton = screen.getByRole("button", { name: /connect/i });
+        await user.click(connectButton);
+
+        const githubButton = screen.getByRole("button", { name: /continue with github/i });
+        await user.click(githubButton);
+
+        // auth_listen should be called
+        expect(invoke).toHaveBeenCalledWith("auth_listen", { url: "http://localhost:8080" });
+
+        // session ID event fires synchronously in invoke mock → opens browser
+        expect(openUrl).toHaveBeenCalledWith("http://localhost:8080/auth/github?session=test-session");
+
+        // Clean up: deliver token so login() resolves
+        await act(async () => {
+            tokenCallback?.({ payload: { token: "fake-jwt" } });
+        });
+    });
+
+    it("shows error when ping fails", async () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_profiles") return { profiles: [], activeProfileId: null };
             if (cmd === "ping_agent") throw "Could not reach agent at http://localhost:8080";
@@ -170,10 +183,41 @@ describe("LoginScreen", () => {
         await user.click(button);
 
         expect(screen.getByText(/could not reach agent/i)).toBeInTheDocument();
-        expect(MockWebSocket.instances).toHaveLength(0);
     });
 
-    it("disables button while pinging", async () => {
+    it("resets status when URL changes", async () => {
+        await renderLoginScreen();
+        const user = userEvent.setup();
+
+        // Connect first
+        const button = screen.getByRole("button", { name: /connect/i });
+        await user.click(button);
+
+        expect(screen.getByText("Cluster Online")).toBeInTheDocument();
+
+        // Change URL — should reset
+        const input = screen.getByPlaceholderText("http://localhost:8080");
+        await user.type(input, "/new");
+
+        expect(screen.queryByText("Cluster Online")).not.toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /connect/i })).toBeInTheDocument();
+    });
+
+    it("strips trailing slashes from agent URL", async () => {
+        await renderLoginScreen();
+        const user = userEvent.setup();
+
+        const input = screen.getByPlaceholderText("http://localhost:8080");
+        await user.clear(input);
+        await user.type(input, "http://myserver:9090///");
+
+        const button = screen.getByRole("button", { name: /connect/i });
+        await user.click(button);
+
+        expect(invoke).toHaveBeenCalledWith("ping_agent", { url: "http://myserver:9090" });
+    });
+
+    it("disables button while connecting and shows reaching cluster text", async () => {
         let resolvePing: () => void;
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_profiles") return { profiles: [], activeProfileId: null };
@@ -182,6 +226,7 @@ describe("LoginScreen", () => {
                     resolvePing = resolve;
                 });
             }
+            if (cmd === "fetch_providers") return ["github"];
             return undefined;
         });
 
@@ -192,7 +237,7 @@ describe("LoginScreen", () => {
         await user.click(button);
 
         expect(button).toBeDisabled();
-        expect(button).toHaveTextContent("Connecting...");
+        expect(screen.getByText(/reaching cluster/i)).toBeInTheDocument();
 
         await act(async () => {
             resolvePing!();

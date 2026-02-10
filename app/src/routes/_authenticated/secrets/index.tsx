@@ -71,7 +71,8 @@ function SecretGenerator({ onUse }: { onUse: (value: string) => void }) {
         setCopied(false);
     }
 
-    function handleLengthChange(val: string) {
+    function handleLengthChange(val: string | null) {
+        if (!val) return;
         const n = Number(val);
         setLength(n);
         setPreview(generateSecret(n, { uppercase, digits, symbols }));

@@ -7,6 +7,7 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .invoke_handler(tauri::generate_handler![
+            actions::auth::auth_listen::auth_listen,
             actions::auth::parse_auth_token::parse_auth_token,
             actions::auth::save_session::save_session,
             actions::auth::load_session::load_session,
@@ -15,6 +16,7 @@ pub fn run() {
             actions::auth::save_profile::save_profile,
             actions::auth::delete_profile::delete_profile,
             actions::auth::set_active_profile::set_active_profile,
+            actions::agent::fetch_providers::fetch_providers,
             actions::agent::ping_agent::ping_agent,
             actions::agent::list_services::list_services,
             actions::agent::inspect_service::inspect_service,
