@@ -9,8 +9,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/clovismuneza/devoper/agent/cluster"
-	"github.com/clovismuneza/devoper/agent/storage"
+	"github.com/prvious/kontainer/agent/cluster"
+	"github.com/prvious/kontainer/agent/storage"
 	"github.com/go-chi/chi/v5"
 )
 

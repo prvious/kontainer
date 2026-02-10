@@ -6,7 +6,7 @@ export function Logo() {
                 <div className='h-1.5 w-4 rounded-sm bg-foreground/70' />
                 <div className='h-1.5 w-3 rounded-sm bg-foreground/40' />
             </div>
-            <span className='text-sm font-semibold tracking-tight'>devoper</span>
+            <span className='text-sm font-semibold tracking-tight'>kontainer</span>
         </div>
     );
 }

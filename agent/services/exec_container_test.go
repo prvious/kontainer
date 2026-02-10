@@ -16,9 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/clovismuneza/devoper/agent/auth"
-	"github.com/clovismuneza/devoper/agent/auth/providers"
-	"github.com/clovismuneza/devoper/agent/cluster"
+	"github.com/prvious/kontainer/agent/auth"
+	"github.com/prvious/kontainer/agent/auth/providers"
+	"github.com/prvious/kontainer/agent/cluster"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/go-chi/chi/v5"

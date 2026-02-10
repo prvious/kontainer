@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Devoper is a desktop app for managing containerized infrastructure (Docker Swarm, with Compose and Kubernetes planned). It consists of two components:
+Kontainer is a desktop app for managing containerized infrastructure (Docker Swarm, with Compose and Kubernetes planned). It consists of two components:
 
 - **Agent** — A Go (Chi) HTTP/WebSocket API deployed alongside the infrastructure, talks to the Docker socket
 - **Desktop App** — A Tauri (Rust + React + ShadcnUI + Tailwindcss) app that connects to one or more agents
@@ -399,14 +399,14 @@ go test ./...
 
 ### Multi-Node Cluster (Leader/Follower)
 
-The agent binary runs in two modes controlled by `DEVOPER_ROLE`:
+The agent binary runs in two modes controlled by `KONTAINER_ROLE`:
 
 - **Leader** — Full REST + WebSocket API. Handles auth, serves all `/api/*` routes, discovers and healthchecks follower agents. One per cluster.
-- **Follower** — Lightweight. Only exposes `/internal/health` and `/internal/info` behind a shared secret (`X-Devoper-Secret` header). Deployed as a global Swarm service across worker nodes.
+- **Follower** — Lightweight. Only exposes `/internal/health` and `/internal/info` behind a shared secret (`X-Kontainer-Secret` header). Deployed as a global Swarm service across worker nodes.
 
-**Discovery:** Leader finds followers by querying Docker Swarm tasks for the follower service name (`DEVOPER_FOLLOWER_SERVICE`), pings each task IP on `/internal/health` every 10s, and maintains an in-memory agent registry.
+**Discovery:** Leader finds followers by querying Docker Swarm tasks for the follower service name (`KONTAINER_FOLLOWER_SERVICE`), pings each task IP on `/internal/health` every 10s, and maintains an in-memory agent registry.
 
-**Dev mode:** Set `DEVOPER_DEV_FOLLOWERS` to a comma-separated list of static addresses instead of Swarm-based discovery.
+**Dev mode:** Set `KONTAINER_DEV_FOLLOWERS` to a comma-separated list of static addresses instead of Swarm-based discovery.
 
 Key files:
 - `agent/cluster/discovery.go` — Swarm-based follower discovery (production)

@@ -1,5 +1,5 @@
 {
-    "name": "devoper",
+    "name": "kontainer",
     "private": true,
     "scripts": {
         "dev": "./dev/setup.sh && goreman -f dev/Procfile start",

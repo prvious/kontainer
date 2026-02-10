@@ -29,7 +29,7 @@ func NewCollectNodeMetricsAction(dockerClient NodeMetricsDockerClient) *CollectN
 }
 
 func (a *CollectNodeMetricsAction) Execute(ctx context.Context) (NodeMetrics, error) {
-	if os.Getenv("DEVOPER_DEV") == "true" {
+	if os.Getenv("KONTAINER_DEV") == "true" {
 		return a.collectFromDocker(ctx)
 	}
 	return collectFromProc()

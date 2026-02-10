@@ -4,9 +4,9 @@ services:
     deploy:
       replicas: 1
       labels:
-        - devoper.enable=true
-        - devoper.http.routers.monitoring-dashboard.rule=Host(`monitoring.test`)
-        - devoper.http.services.monitoring-dashboard.loadbalancer.server.port=80
+        - kontainer.enable=true
+        - kontainer.http.routers.monitoring-dashboard.rule=Host(`monitoring.test`)
+        - kontainer.http.services.monitoring-dashboard.loadbalancer.server.port=80
         - prvious.ssl=true
       resources:
         limits:
@@ -16,7 +16,7 @@ services:
           cpus: "0.10"
           memory: 32M
     networks:
-      - devoper
+      - kontainer
 
   collector:
     image: traefik/whoami
@@ -30,9 +30,9 @@ services:
           cpus: "0.05"
           memory: 16M
     networks:
-      - devoper
+      - kontainer
 
 networks:
-  devoper:
+  kontainer:
     driver: overlay
     attachable: true

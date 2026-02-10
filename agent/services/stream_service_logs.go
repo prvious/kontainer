@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/clovismuneza/devoper/agent/auth"
+	"github.com/prvious/kontainer/agent/auth"
 	"github.com/docker/docker/api/types/container"
 	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"

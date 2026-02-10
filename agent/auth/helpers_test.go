@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/clovismuneza/devoper/agent/auth/providers"
+	"github.com/prvious/kontainer/agent/auth/providers"
 	"github.com/go-chi/chi/v5"
 	"golang.org/x/oauth2"
 )

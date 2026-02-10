@@ -10,16 +10,16 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/clovismuneza/devoper/agent/auth"
-	"github.com/clovismuneza/devoper/agent/auth/providers"
-	"github.com/clovismuneza/devoper/agent/cluster"
-	"github.com/clovismuneza/devoper/agent/config"
-	"github.com/clovismuneza/devoper/agent/images"
-	"github.com/clovismuneza/devoper/agent/metrics"
-	"github.com/clovismuneza/devoper/agent/server"
-	"github.com/clovismuneza/devoper/agent/services"
-	"github.com/clovismuneza/devoper/agent/settings"
-	"github.com/clovismuneza/devoper/agent/storage"
+	"github.com/prvious/kontainer/agent/auth"
+	"github.com/prvious/kontainer/agent/auth/providers"
+	"github.com/prvious/kontainer/agent/cluster"
+	"github.com/prvious/kontainer/agent/config"
+	"github.com/prvious/kontainer/agent/images"
+	"github.com/prvious/kontainer/agent/metrics"
+	"github.com/prvious/kontainer/agent/server"
+	"github.com/prvious/kontainer/agent/services"
+	"github.com/prvious/kontainer/agent/settings"
+	"github.com/prvious/kontainer/agent/storage"
 	"github.com/docker/docker/client"
 	"github.com/joho/godotenv"
 )
@@ -36,7 +36,7 @@ func main() {
 
 	cfg := config.Load()
 
-	log.Println("--- devoper agent config ---")
+	log.Println("--- kontainer agent config ---")
 	log.Printf("  role            : %s", cfg.Role)
 	log.Printf("  agent url       : %s", cfg.AgentURL)
 	log.Printf("  github client id: %s", mask(cfg.GithubClientID))
@@ -51,7 +51,7 @@ func main() {
 
 func startFollower(cfg *config.Config) {
 	if cfg.InternalSecret == "" {
-		log.Fatal("DEVOPER_INTERNAL_SECRET is required for follower mode")
+		log.Fatal("KONTAINER_INTERNAL_SECRET is required for follower mode")
 	}
 
 	hostname, _ := os.Hostname()

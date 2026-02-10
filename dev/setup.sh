@@ -7,35 +7,35 @@ echo "==> Starting DinD cluster..."
 docker compose -f "$SCRIPT_DIR/docker-compose.yml" up -d
 
 echo "==> Waiting for manager Docker daemon..."
-until docker exec devoper-cluster-manager-1 docker info >/dev/null 2>&1; do
+until docker exec kontainer-cluster-manager-1 docker info >/dev/null 2>&1; do
   sleep 1
 done
 
 echo "==> Waiting for worker-1 Docker daemon..."
-until docker exec devoper-cluster-worker-1-1 docker info >/dev/null 2>&1; do
+until docker exec kontainer-cluster-worker-1-1 docker info >/dev/null 2>&1; do
   sleep 1
 done
 
 echo "==> Waiting for worker-2 Docker daemon..."
-until docker exec devoper-cluster-worker-2-1 docker info >/dev/null 2>&1; do
+until docker exec kontainer-cluster-worker-2-1 docker info >/dev/null 2>&1; do
   sleep 1
 done
 
 echo "==> Initializing Swarm on manager..."
-MANAGER_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' devoper-cluster-manager-1)
-docker exec devoper-cluster-manager-1 docker swarm init --advertise-addr "$MANAGER_IP" 2>/dev/null || echo "  (already initialized)"
+MANAGER_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' kontainer-cluster-manager-1)
+docker exec kontainer-cluster-manager-1 docker swarm init --advertise-addr "$MANAGER_IP" 2>/dev/null || echo "  (already initialized)"
 
 echo "==> Getting join token..."
-JOIN_TOKEN=$(docker exec devoper-cluster-manager-1 docker swarm join-token -q worker)
+JOIN_TOKEN=$(docker exec kontainer-cluster-manager-1 docker swarm join-token -q worker)
 
 echo "==> Joining worker-1..."
-docker exec devoper-cluster-worker-1-1 docker swarm join --token "$JOIN_TOKEN" "$MANAGER_IP:2377" 2>/dev/null || echo "  (already joined)"
+docker exec kontainer-cluster-worker-1-1 docker swarm join --token "$JOIN_TOKEN" "$MANAGER_IP:2377" 2>/dev/null || echo "  (already joined)"
 
 echo "==> Joining worker-2..."
-docker exec devoper-cluster-worker-2-1 docker swarm join --token "$JOIN_TOKEN" "$MANAGER_IP:2377" 2>/dev/null || echo "  (already joined)"
+docker exec kontainer-cluster-worker-2-1 docker swarm join --token "$JOIN_TOKEN" "$MANAGER_IP:2377" 2>/dev/null || echo "  (already joined)"
 
 echo "==> Cluster nodes:"
-docker exec devoper-cluster-manager-1 docker node ls
+docker exec kontainer-cluster-manager-1 docker node ls
 
 echo ""
 echo "==> Deploying seed services..."

@@ -1,4 +1,4 @@
-leader:    cd agent && DOCKER_HOST=tcp://localhost:2375 PORT=8080 DEVOPER_ROLE=leader DEVOPER_INTERNAL_SECRET=dev-secret DEVOPER_DEV_FOLLOWERS=localhost:8081,localhost:8082 air
-follower1: cd agent && DOCKER_HOST=tcp://localhost:2376 PORT=8081 DEVOPER_ROLE=follower DEVOPER_INTERNAL_SECRET=dev-secret air
-follower2: cd agent && DOCKER_HOST=tcp://localhost:2378 PORT=8082 DEVOPER_ROLE=follower DEVOPER_INTERNAL_SECRET=dev-secret air
+leader:    cd agent && DOCKER_HOST=tcp://localhost:2375 PORT=8080 KONTAINER_ROLE=leader KONTAINER_INTERNAL_SECRET=dev-secret KONTAINER_DEV_FOLLOWERS=localhost:8081,localhost:8082 air
+follower1: cd agent && DOCKER_HOST=tcp://localhost:2376 PORT=8081 KONTAINER_ROLE=follower KONTAINER_INTERNAL_SECRET=dev-secret air
+follower2: cd agent && DOCKER_HOST=tcp://localhost:2378 PORT=8082 KONTAINER_ROLE=follower KONTAINER_INTERNAL_SECRET=dev-secret air
 app:       pnpm --filter app tauri dev

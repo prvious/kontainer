@@ -16,7 +16,7 @@ services:
           cpus: "0.10"
           memory: 32M
     networks:
-      - devoper
+      - kontainer
 
   api:
     image: traefik/whoami
@@ -35,7 +35,7 @@ services:
           cpus: "0.25"
           memory: 64M
     networks:
-      - devoper
+      - kontainer
 
   worker:
     image: traefik/whoami
@@ -49,9 +49,9 @@ services:
           cpus: "0.10"
           memory: 32M
     networks:
-      - devoper
+      - kontainer
 
 networks:
-  devoper:
+  kontainer:
     driver: overlay
     attachable: true

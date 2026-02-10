@@ -237,7 +237,7 @@ export function LoginScreen() {
 
                 {/* Help Text */}
                 <p className='mt-3 text-center text-xs text-muted-foreground'>
-                    Enter the URL of your devoper agent.{" "}
+                    Enter the URL of your Kontainer agent.{" "}
                     <a href='https://prvious.dev' target='_blank' rel='noopener noreferrer' className='underline underline-offset-2 hover:text-foreground'>
                         Need help? Check the setup guide.
                     </a>

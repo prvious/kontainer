@@ -24,7 +24,7 @@ pub async fn ping_agent(url: String) -> Result<(), String> {
         .map_err(|e| format!("Invalid response from agent: {e}"))?;
 
     match body.get("app") {
-        Some(app) if app == "dev.devoper.app" => Ok(()),
-        _ => Err("Not a valid devoper agent".to_string()),
+        Some(app) if app == "dev.kontainer.app" => Ok(()),
+        _ => Err("Not a valid Kontainer agent".to_string()),
     }
 }

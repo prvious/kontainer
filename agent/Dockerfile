@@ -37,15 +37,15 @@ RUN mkdir -p /data
 EXPOSE 8080
 
 # Run as non-root user
-RUN addgroup -g 1000 devoper && \
-    adduser -D -u 1000 -G devoper devoper && \
-    chown -R devoper:devoper /app /data
+RUN addgroup -g 1000 kontainer && \
+    adduser -D -u 1000 -G kontainer kontainer && \
+    chown -R kontainer:kontainer /app /data
 
-USER devoper
+USER kontainer
 
 # Set default environment variables
 ENV PORT=8080 \
-    DEVOPER_ROLE=leader \
-    DEVOPER_METRICS_DB=/data/devoper-metrics.db
+    KONTAINER_ROLE=leader \
+    KONTAINER_METRICS_DB=/data/kontainer-metrics.db
 
 ENTRYPOINT ["/app/agent"]

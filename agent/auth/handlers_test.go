@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/clovismuneza/devoper/agent/auth/providers"
+	"github.com/prvious/kontainer/agent/auth/providers"
 	"golang.org/x/oauth2"
 )
 

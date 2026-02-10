@@ -6,7 +6,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/clovismuneza/devoper/agent/storage"
+	"github.com/prvious/kontainer/agent/storage"
 )
 
 type GetSettingsAction struct {

@@ -64,7 +64,7 @@ describe("LoginScreen", () => {
 
     it("renders the logo wordmark", async () => {
         await renderLoginScreen();
-        expect(screen.getByText("devoper")).toBeInTheDocument();
+        expect(screen.getByText("kontainer")).toBeInTheDocument();
     });
 
     it("renders the card title and description", async () => {
