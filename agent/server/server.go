@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/clovismuneza/devoper/agent/auth"
-	"github.com/clovismuneza/devoper/agent/images"
-	"github.com/clovismuneza/devoper/agent/metrics"
-	"github.com/clovismuneza/devoper/agent/services"
-	"github.com/clovismuneza/devoper/agent/settings"
+	"github.com/prvious/kontainer/agent/auth"
+	"github.com/prvious/kontainer/agent/images"
+	"github.com/prvious/kontainer/agent/metrics"
+	"github.com/prvious/kontainer/agent/services"
+	"github.com/prvious/kontainer/agent/settings"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )
@@ -64,7 +64,7 @@ func New(
 
 	r.Get("/ping", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"app":"dev.devoper.app"}`)
+		fmt.Fprintf(w, `{"app":"dev.kontainer.app"}`)
 	})
 
 	r.Get("/auth/providers", authHandler.ProvidersHandler)

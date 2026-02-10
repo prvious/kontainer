@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/clovismuneza/devoper/agent/auth/providers"
+	"github.com/prvious/kontainer/agent/auth/providers"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -23,7 +23,7 @@ func CreateToken(secret string, user *providers.ProviderUser, ttl time.Duration)
 		RegisteredClaims: jwt.RegisteredClaims{
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
-			Issuer:    "devoper-agent",
+			Issuer:    "kontainer-agent",
 		},
 		UserID:    user.ID,
 		Name:      user.Name,

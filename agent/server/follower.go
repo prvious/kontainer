@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/clovismuneza/devoper/agent/cluster"
-	"github.com/clovismuneza/devoper/agent/images"
-	"github.com/clovismuneza/devoper/agent/services"
+	"github.com/prvious/kontainer/agent/cluster"
+	"github.com/prvious/kontainer/agent/images"
+	"github.com/prvious/kontainer/agent/services"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 )

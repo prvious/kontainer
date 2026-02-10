@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/clovismuneza/devoper/agent/cluster"
+	"github.com/prvious/kontainer/agent/cluster"
 )
 
 type ListAgentsAction struct {

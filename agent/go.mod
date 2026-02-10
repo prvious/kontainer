@@ -1,4 +1,4 @@
-module github.com/clovismuneza/devoper/agent
+module github.com/prvious/kontainer/agent
 
 go 1.25.1
 

@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/clovismuneza/devoper/agent/cluster"
+	"github.com/prvious/kontainer/agent/cluster"
 )
 
 func TestListAgentsHandler_ReturnsAgentsFromRegistry(t *testing.T) {

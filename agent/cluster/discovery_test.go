@@ -65,7 +65,7 @@ func TestDiscovery_DiscoverHealthyFollowers(t *testing.T) {
 	}
 
 	registry := NewRegistry()
-	d := NewDiscovery(mock, registry, "devoper-agent", "test-secret", port)
+	d := NewDiscovery(mock, registry, "kontainer-agent", "test-secret", port)
 	d.discover(context.Background())
 
 	agents := registry.All()
@@ -100,7 +100,7 @@ func TestDiscovery_UnreachableFollower(t *testing.T) {
 	}
 
 	registry := NewRegistry()
-	d := NewDiscovery(mock, registry, "devoper-agent", "test-secret", "99999")
+	d := NewDiscovery(mock, registry, "kontainer-agent", "test-secret", "99999")
 	d.discover(context.Background())
 
 	agents := registry.All()
@@ -131,7 +131,7 @@ func TestDiscovery_FiltersNonRunningTasks(t *testing.T) {
 	}
 
 	registry := NewRegistry()
-	d := NewDiscovery(mock, registry, "devoper-agent", "test-secret", "8080")
+	d := NewDiscovery(mock, registry, "kontainer-agent", "test-secret", "8080")
 	d.discover(context.Background())
 
 	agents := registry.All()

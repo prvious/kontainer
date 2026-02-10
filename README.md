@@ -1,8 +1,8 @@
-# Devoper
+# Kontainer
 
 A desktop app for managing Docker Swarm clusters. Self-hosted, lightweight, multi-node.
 
-**Website:** [devoper.dev](https://devoper.dev)
+**Website:** [kontainer.dev](https://kontainer.dev)
 
 ## Architecture
 
@@ -27,7 +27,7 @@ A desktop app for managing Docker Swarm clusters. Self-hosted, lightweight, mult
 
 **Leader agent** -- Full REST + WebSocket API. Handles auth, discovers followers via Swarm tasks, collects cluster-wide metrics, and maintains an in-memory registry of all agents. Healthchecks followers every 10s. Stores time-series node metrics in embedded SQLite with automatic retention-based pruning.
 
-**Follower agents** -- Lightweight. Expose `/internal/health`, `/internal/info`, `/internal/metrics`, and `/internal/exec/{containerID}` endpoints behind a shared secret (`X-Devoper-Secret`). Auto-discovered by the leader in production, or configured statically in dev via `DEVOPER_DEV_FOLLOWERS`.
+**Follower agents** -- Lightweight. Expose `/internal/health`, `/internal/info`, `/internal/metrics`, and `/internal/exec/{containerID}` endpoints behind a shared secret (`X-Kontainer-Secret`). Auto-discovered by the leader in production, or configured statically in dev via `KONTAINER_DEV_FOLLOWERS`.
 
 **Desktop app** -- Cross-platform (macOS, Linux, Windows). Connects to one or more leader agents, authenticates via OAuth through the system browser, communicates over Tauri IPC to Rust to HTTP/WebSocket to the agent. Supports multiple cluster profiles with instant switching.
 
@@ -114,9 +114,9 @@ A desktop app for managing Docker Swarm clusters. Self-hosted, lightweight, mult
 - Multi-profile session storage: each cluster connection is an independent profile
 
 ### Multi-Node Cluster Architecture
-- Leader/follower agent model controlled by `DEVOPER_ROLE` env var
-- Auto-discovery via Docker Swarm service tasks (`DEVOPER_FOLLOWER_SERVICE`)
-- Static follower list for development (`DEVOPER_DEV_FOLLOWERS`)
+- Leader/follower agent model controlled by `KONTAINER_ROLE` env var
+- Auto-discovery via Docker Swarm service tasks (`KONTAINER_FOLLOWER_SERVICE`)
+- Static follower list for development (`KONTAINER_DEV_FOLLOWERS`)
 - Internal healthchecks with shared secret authentication
 - Thread-safe in-memory agent registry with cluster-wide visibility
 - Agent listing API endpoint for the desktop app
@@ -141,27 +141,27 @@ The leader agent runs as a Swarm service with the Docker socket mounted:
 
 ```yaml
 services:
-  devoper-agent:
-    image: prvious/devoper-agent
+  kontainer-agent:
+    image: prvious/kontainer-agent
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
-      - DEVOPER_ROLE=leader
-      - DEVOPER_FOLLOWER_SERVICE=devoper-follower
+      - KONTAINER_ROLE=leader
+      - KONTAINER_FOLLOWER_SERVICE=kontainer-follower
 ```
 
 Follower agents deploy as a global service across worker nodes:
 
 ```yaml
 services:
-  devoper-follower:
-    image: prvious/devoper-agent
+  kontainer-follower:
+    image: prvious/kontainer-agent
     deploy:
       mode: global
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     environment:
-      - DEVOPER_ROLE=follower
+      - KONTAINER_ROLE=follower
 ```
 
 ## Access Control

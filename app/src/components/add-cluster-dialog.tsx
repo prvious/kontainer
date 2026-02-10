@@ -63,7 +63,7 @@ export function AddClusterDialog({ open, onOpenChange }: AddClusterDialogProps) 
             <DialogContent>
                 <DialogHeader>
                     <DialogTitle>Add cluster</DialogTitle>
-                    <DialogDescription>Connect to a new Devoper agent. You'll be redirected to authenticate.</DialogDescription>
+                    <DialogDescription>Connect to a new Kontainer agent. You'll be redirected to authenticate.</DialogDescription>
                 </DialogHeader>
 
                 <div className='grid gap-3'>

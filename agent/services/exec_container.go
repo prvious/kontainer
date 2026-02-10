@@ -10,8 +10,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/clovismuneza/devoper/agent/auth"
-	"github.com/clovismuneza/devoper/agent/cluster"
+	"github.com/prvious/kontainer/agent/auth"
+	"github.com/prvious/kontainer/agent/cluster"
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
 	"github.com/go-chi/chi/v5"
@@ -274,7 +274,7 @@ func sendCloseFrame(conn *websocket.Conn) {
 }
 
 // ExecContainerFollowerHandler handles exec WebSocket connections on followers.
-// Protected by internal auth middleware (X-Devoper-Secret).
+// Protected by internal auth middleware (X-Kontainer-Secret).
 type ExecContainerFollowerHandler struct {
 	client   DockerClient
 	upgrader websocket.Upgrader

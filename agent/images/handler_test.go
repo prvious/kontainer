@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/clovismuneza/devoper/agent/cluster"
+	"github.com/prvious/kontainer/agent/cluster"
 	"github.com/docker/docker/api/types/image"
 	"github.com/go-chi/chi/v5"
 )
@@ -75,7 +75,7 @@ func TestClusterImagesHandler_WithFollower(t *testing.T) {
 		},
 	}
 	followerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("X-Devoper-Secret") != "test-secret" {
+		if r.Header.Get("X-Kontainer-Secret") != "test-secret" {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}

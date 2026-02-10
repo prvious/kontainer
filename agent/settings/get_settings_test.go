@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/clovismuneza/devoper/agent/storage"
+	"github.com/prvious/kontainer/agent/storage"
 )
 
 func newTestStore(t *testing.T) *storage.SettingsStore {

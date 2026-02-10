@@ -1,4 +1,4 @@
-name: devoper-cluster
+name: kontainer-cluster
 
 services:
   manager:

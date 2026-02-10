@@ -33,7 +33,7 @@ func proxyWebSocket(clientConn *websocket.Conn, followerAddr, containerID, shell
 	dialURL := u + "?" + params.Encode()
 
 	header := http.Header{}
-	header.Set("X-Devoper-Secret", secret)
+	header.Set("X-Kontainer-Secret", secret)
 
 	followerConn, _, err := proxyDialer.Dial(dialURL, header)
 	if err != nil {

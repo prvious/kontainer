@@ -34,8 +34,8 @@ func TestCreateAndParseToken(t *testing.T) {
 	if claims.Provider != testUser.Provider {
 		t.Errorf("Provider = %q, want %q", claims.Provider, testUser.Provider)
 	}
-	if claims.Issuer != "devoper-agent" {
-		t.Errorf("Issuer = %q, want %q", claims.Issuer, "devoper-agent")
+	if claims.Issuer != "kontainer-agent" {
+		t.Errorf("Issuer = %q, want %q", claims.Issuer, "kontainer-agent")
 	}
 }
 

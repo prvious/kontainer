@@ -23,7 +23,7 @@ func TestCollectFromProc(t *testing.T) {
 }
 
 func TestCollectNodeMetrics_DevMode(t *testing.T) {
-	t.Setenv("DEVOPER_DEV", "true")
+	t.Setenv("KONTAINER_DEV", "true")
 
 	action := NewCollectNodeMetricsAction(nil)
 	_, err := action.Execute(context.Background())

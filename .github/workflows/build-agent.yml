@@ -22,7 +22,7 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: prvious/devoper-agent
+  IMAGE_NAME: prvious/kontainer-agent
 
 jobs:
   build:
@@ -59,7 +59,7 @@ jobs:
             # Fetch existing tags from GHCR via GitHub API
             RESPONSE=$(curl -s -w "\n%{http_code}" \
               -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-              "https://api.github.com/orgs/prvious/packages/container/devoper-agent/versions?per_page=100")
+              "https://api.github.com/orgs/prvious/packages/container/kontainer-agent/versions?per_page=100")
 
             HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
             BODY=$(echo "$RESPONSE" | sed '$d')

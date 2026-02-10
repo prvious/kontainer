@@ -4,7 +4,7 @@ import (
 	"net/http"
 )
 
-const InternalSecretHeader = "X-Devoper-Secret"
+const InternalSecretHeader = "X-Kontainer-Secret"
 
 func InternalAuth(secret string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
