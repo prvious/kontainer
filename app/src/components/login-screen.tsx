@@ -1,10 +1,13 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { getRouteApi, useNavigate } from "@tanstack/react-router";
 import { AlertTriangle, ArrowRight, CheckCircle2, Globe, Lock, Loader2, Shield, WifiOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Logo } from "@/components/logo";
 import { useAuth } from "@/hooks/use-auth";
+
+const routeApi = getRouteApi("/login");
 
 type ConnectionStatus = "idle" | "connecting" | "online" | "offline" | "error";
 
@@ -46,6 +49,8 @@ function GitHubIcon({ className }: { className?: string }) {
 
 export function LoginScreen() {
     const { login } = useAuth();
+    const navigate = useNavigate();
+    const { redirect: redirectTo } = routeApi.useSearch();
     const [agentUrl, setAgentUrl] = useState("http://localhost:8080");
     const [status, setStatus] = useState<ConnectionStatus>("idle");
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -95,6 +100,7 @@ export function LoginScreen() {
         setAuthenticatingProvider(provider);
         try {
             await login(url, undefined, provider);
+            navigate({ to: redirectTo || "/" });
         } catch (err) {
             setErrorMessage(err instanceof Error ? err.message : "Authentication failed");
             setAuthenticatingProvider(null);
