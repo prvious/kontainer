@@ -4,6 +4,8 @@ import { getRouteApi, useNavigate } from "@tanstack/react-router";
 import { AlertTriangle, ArrowRight, CheckCircle2, Globe, Lock, Loader2, Shield, WifiOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Logo } from "@/components/logo";
 import { useAuth } from "@/hooks/use-auth";
 
@@ -130,19 +132,19 @@ export function LoginScreen() {
                     <CardContent>
                         {/* URL Input */}
                         <form onSubmit={handleConnect}>
-                            <label htmlFor='cluster-url' className='mb-2 flex items-center gap-2 text-sm font-medium'>
+                            <Label htmlFor='cluster-url' className='mb-2'>
                                 <Globe className='h-4 w-4 text-muted-foreground' />
                                 Cluster URL
-                            </label>
+                            </Label>
                             <div className='relative'>
-                                <input
+                                <Input
                                     id='cluster-url'
                                     type='url'
                                     placeholder='http://localhost:8080'
                                     value={agentUrl}
                                     onChange={handleUrlChange}
                                     required
-                                    className='h-11 w-full rounded-lg border bg-background px-3 pr-10 font-mono text-sm transition-colors outline-none focus:border-ring focus:ring-1 focus:ring-ring'
+                                    className='h-11 pr-10 font-mono'
                                 />
                                 <div className='absolute top-1/2 right-3 -translate-y-1/2'>
                                     <StatusIcon className={`h-4 w-4 ${currentStatus.color} ${status === "connecting" ? "animate-spin" : ""}`} />
