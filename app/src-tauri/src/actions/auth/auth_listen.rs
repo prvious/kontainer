@@ -34,7 +34,11 @@ struct ErrorPayload {
 
 #[tauri::command]
 pub async fn auth_listen(app: tauri::AppHandle, url: String) -> Result<(), String> {
-    let ws_url = url.replace("http", "ws") + "/auth/listen";
+    let ws_url = if url.starts_with("https://") {
+        url.replacen("https://", "wss://", 1)
+    } else {
+        url.replacen("http://", "ws://", 1)
+    } + "/auth/listen";
 
     tauri::async_runtime::spawn(async move {
         if let Err(e) = connect_and_listen(&app, &ws_url).await {
