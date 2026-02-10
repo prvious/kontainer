@@ -51,7 +51,7 @@ function TestConsumer() {
 }
 
 describe("AuthProvider", () => {
-    let sessionIdCallback: ((event: { payload: { session_id: string } }) => void) | null = null;
+    let sessionIdCallback: ((event: { payload: { sessionId: string } }) => void) | null = null;
     let tokenCallback: ((event: { payload: { token: string } }) => void) | null = null;
     let errorCallback: ((event: { payload: { error: string } }) => void) | null = null;
 
@@ -101,7 +101,7 @@ describe("AuthProvider", () => {
             if (cmd === "load_profiles") return emptyProfiles;
             if (cmd === "auth_listen") {
                 // Simulate: session ID arrives from background WS
-                sessionIdCallback?.({ payload: { session_id: "abc123" } });
+                sessionIdCallback?.({ payload: { sessionId: "abc123" } });
                 // Don't deliver token yet
                 return undefined;
             }

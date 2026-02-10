@@ -200,8 +200,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             const authProvider = provider || "github";
 
             // Set up all event listeners BEFORE starting the WebSocket
-            const unlistenSessionId = await listen<{ session_id: string }>("auth://session-id", (event) => {
-                openUrl(`${url}/auth/${authProvider}?session=${event.payload.session_id}`);
+            const unlistenSessionId = await listen<{ sessionId: string }>("auth://session-id", (event) => {
+                openUrl(`${url}/auth/${authProvider}?session=${event.payload.sessionId}`);
             });
 
             let resolveToken: (jwt: string) => void;

@@ -15,16 +15,19 @@ struct WsMessage {
 }
 
 #[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 struct SessionIdPayload {
     session_id: String,
 }
 
 #[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 struct TokenPayload {
     token: String,
 }
 
 #[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 struct ErrorPayload {
     error: String,
 }

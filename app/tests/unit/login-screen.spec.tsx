@@ -127,7 +127,7 @@ describe("LoginScreen", () => {
 
     it("calls auth_listen when provider button is clicked", async () => {
         // Capture event callbacks
-        let sessionIdCallback: ((event: { payload: { session_id: string } }) => void) | null = null;
+        let sessionIdCallback: ((event: { payload: { sessionId: string } }) => void) | null = null;
         let tokenCallback: ((event: { payload: { token: string } }) => void) | null = null;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         vi.mocked(listen).mockImplementation(async (event: string, handler: any) => {
@@ -142,7 +142,7 @@ describe("LoginScreen", () => {
             if (cmd === "fetch_providers") return ["github"];
             if (cmd === "auth_listen") {
                 // Background task delivers session ID
-                sessionIdCallback?.({ payload: { session_id: "test-session" } });
+                sessionIdCallback?.({ payload: { sessionId: "test-session" } });
                 return undefined;
             }
             return undefined;
