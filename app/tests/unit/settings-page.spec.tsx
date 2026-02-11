@@ -1,65 +1,24 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { SettingsContext } from "@/contexts/settings-context-value";
 import type { SettingsContextValue } from "@/contexts/settings-context-value";
 
-// Unmock useSettings so the real hook reads from our test SettingsContext
 vi.unmock("@/hooks/use-settings");
-import { useSettings } from "@/hooks/use-settings";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
-const REFRESH_OPTIONS = [
-    { value: "3000", label: "3 seconds" },
-    { value: "5000", label: "5 seconds" },
-    { value: "10000", label: "10 seconds" },
-    { value: "30000", label: "30 seconds" },
-    { value: "false", label: "Off" },
-] as const;
+import { useAuth } from "@/hooks/use-auth";
+vi.mock("@/hooks/use-auth", () => ({
+    useAuth: vi.fn(),
+}));
 
-const SHELL_OPTIONS = [
-    { value: "auto", label: "Auto-detect" },
-    { value: "/bin/bash", label: "/bin/bash" },
-    { value: "/bin/sh", label: "/bin/sh" },
-    { value: "/bin/zsh", label: "/bin/zsh" },
-] as const;
-
-const FONT_SIZE_OPTIONS = [
-    { value: "11", label: "11" },
-    { value: "12", label: "12" },
-    { value: "13", label: "13" },
-    { value: "14", label: "14" },
-    { value: "15", label: "15" },
-    { value: "16", label: "16" },
-    { value: "18", label: "18" },
-    { value: "20", label: "20" },
-] as const;
-
-const SCROLLBACK_OPTIONS = [
-    { value: "500", label: "500" },
-    { value: "1000", label: "1,000" },
-    { value: "2500", label: "2,500" },
-    { value: "5000", label: "5,000" },
-    { value: "10000", label: "10,000" },
-] as const;
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { GeneralTab } from "@/components/settings/general-tab";
+import { AppearanceTab } from "@/components/settings/appearance-tab";
+import { TerminalTab } from "@/components/settings/terminal-tab";
+import { ConnectionTab } from "@/components/settings/connection-tab";
 
 function SettingsTestComponent() {
-    const { refreshInterval, setRefreshInterval, terminalDefaults, setTerminalDefaults } = useSettings();
-
-    const currentValue = refreshInterval === false ? "false" : String(refreshInterval);
-
-    function handleRefreshChange(value: string) {
-        if (value === "false") {
-            setRefreshInterval(false);
-        } else {
-            setRefreshInterval(Number(value));
-        }
-    }
-
     return (
         <div className='p-6'>
             <div className='mb-6'>
@@ -67,135 +26,27 @@ function SettingsTestComponent() {
                 <p className='mt-1 text-sm text-muted-foreground'>Application and cluster configuration</p>
             </div>
 
-            <div className='space-y-6'>
-                <Card>
-                    <CardHeader>
-                        <CardTitle>App Settings</CardTitle>
-                        <CardDescription>Configure how the desktop app behaves</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        <div className='flex items-center justify-between'>
-                            <div className='space-y-0.5'>
-                                <Label htmlFor='refresh-interval'>Refresh interval</Label>
-                                <p className='text-xs text-muted-foreground'>How often data is polled from the agent</p>
-                            </div>
-                            <Select value={currentValue} onValueChange={handleRefreshChange} items={REFRESH_OPTIONS}>
-                                <SelectTrigger id='refresh-interval' className='w-36'>
-                                    <SelectValue placeholder='Select interval' />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {REFRESH_OPTIONS.map((opt) => (
-                                        <SelectItem key={opt.value} value={opt.value}>
-                                            {opt.label}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                    </CardContent>
-                </Card>
+            <Tabs defaultValue='general'>
+                <TabsList>
+                    <TabsTrigger value='general'>General</TabsTrigger>
+                    <TabsTrigger value='appearance'>Appearance</TabsTrigger>
+                    <TabsTrigger value='terminal'>Terminal</TabsTrigger>
+                    <TabsTrigger value='connection'>Connection</TabsTrigger>
+                </TabsList>
 
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Terminal Defaults</CardTitle>
-                        <CardDescription>Default settings for terminal sessions</CardDescription>
-                    </CardHeader>
-                    <CardContent className='space-y-4'>
-                        <div className='flex items-center justify-between'>
-                            <div className='space-y-0.5'>
-                                <Label htmlFor='terminal-shell'>Default shell</Label>
-                                <p className='text-xs text-muted-foreground'>Fallback shell when none is specified</p>
-                            </div>
-                            <Select
-                                items={SHELL_OPTIONS}
-                                value={terminalDefaults.shell || "auto"}
-                                onValueChange={(v) => setTerminalDefaults({ shell: v === "auto" ? "" : v })}
-                            >
-                                <SelectTrigger id='terminal-shell' className='w-36'>
-                                    <SelectValue placeholder='Select shell' />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {SHELL_OPTIONS.map((opt) => (
-                                        <SelectItem key={opt.value} value={opt.value}>
-                                            {opt.label}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-
-                        <div className='flex items-center justify-between'>
-                            <div className='space-y-0.5'>
-                                <Label htmlFor='terminal-font-size'>Font size</Label>
-                                <p className='text-xs text-muted-foreground'>Terminal text size in pixels</p>
-                            </div>
-                            <Select
-                                items={FONT_SIZE_OPTIONS}
-                                value={String(terminalDefaults.fontSize)}
-                                onValueChange={(v) => setTerminalDefaults({ fontSize: Number(v) })}
-                            >
-                                <SelectTrigger id='terminal-font-size' className='w-36'>
-                                    <SelectValue placeholder='Select size' />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {FONT_SIZE_OPTIONS.map((opt) => (
-                                        <SelectItem key={opt.value} value={opt.value}>
-                                            {opt.label}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-
-                        <div className='flex items-center justify-between'>
-                            <div className='space-y-0.5'>
-                                <Label htmlFor='terminal-font-family'>Font family</Label>
-                                <p className='text-xs text-muted-foreground'>CSS font-family for the terminal</p>
-                            </div>
-                            <Input
-                                id='terminal-font-family'
-                                className='w-64'
-                                value={terminalDefaults.fontFamily}
-                                placeholder="'JetBrains Mono', monospace"
-                                onChange={(e) => setTerminalDefaults({ fontFamily: e.target.value })}
-                            />
-                        </div>
-
-                        <div className='flex items-center justify-between'>
-                            <div className='space-y-0.5'>
-                                <Label htmlFor='terminal-scrollback'>Scrollback buffer</Label>
-                                <p className='text-xs text-muted-foreground'>Number of lines kept in scroll history</p>
-                            </div>
-                            <Select
-                                items={SCROLLBACK_OPTIONS}
-                                value={String(terminalDefaults.scrollback)}
-                                onValueChange={(v) => setTerminalDefaults({ scrollback: Number(v) })}
-                            >
-                                <SelectTrigger id='terminal-scrollback' className='w-36'>
-                                    <SelectValue placeholder='Select size' />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {SCROLLBACK_OPTIONS.map((opt) => (
-                                        <SelectItem key={opt.value} value={opt.value}>
-                                            {opt.label}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                    </CardContent>
-                </Card>
-
-                <Card>
-                    <CardHeader>
-                        <CardTitle>Agent Settings</CardTitle>
-                        <CardDescription>Settings stored on the connected agent</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        <p className='text-sm text-muted-foreground'>No agent settings available yet.</p>
-                    </CardContent>
-                </Card>
-            </div>
+                <TabsContent value='general'>
+                    <GeneralTab />
+                </TabsContent>
+                <TabsContent value='appearance'>
+                    <AppearanceTab />
+                </TabsContent>
+                <TabsContent value='terminal'>
+                    <TerminalTab />
+                </TabsContent>
+                <TabsContent value='connection'>
+                    <ConnectionTab />
+                </TabsContent>
+            </Tabs>
         </div>
     );
 }
@@ -219,6 +70,34 @@ const mockSettings: SettingsContextValue = {
     },
     setTerminalDefaults: vi.fn(),
     isLoading: false,
+};
+
+const defaultAuthReturn = {
+    user: { id: "u1", name: "Test User", email: "test@example.com", avatarUrl: "", provider: "github" },
+    token: "test-token",
+    expiresAt: Math.floor(Date.now() / 1000) + 3600,
+    agentUrl: "https://agent.example.com",
+    isLoading: false,
+    profiles: [
+        {
+            id: "p1",
+            label: "Production",
+            agentUrl: "https://agent.example.com",
+            userId: "u1",
+            userName: "Test User",
+            userEmail: "test@example.com",
+            userAvatarUrl: "",
+            userProvider: "github",
+            token: "test-token",
+            expiresAt: Math.floor(Date.now() / 1000) + 3600,
+        },
+    ],
+    activeProfileId: "p1",
+    login: vi.fn(),
+    logout: vi.fn(),
+    switchProfile: vi.fn(),
+    removeProfile: vi.fn(),
+    updateProfile: vi.fn(),
 };
 
 function createTestRouter() {
@@ -252,6 +131,7 @@ function renderWithProviders(settingsOverrides: Partial<SettingsContextValue> = 
 describe("SettingsPage", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        vi.mocked(useAuth).mockReturnValue(defaultAuthReturn);
     });
 
     it("renders the page heading", async () => {
@@ -262,7 +142,18 @@ describe("SettingsPage", () => {
         });
     });
 
-    it("renders App Settings card", async () => {
+    it("renders all four tab triggers", async () => {
+        renderWithProviders();
+
+        await waitFor(() => {
+            expect(screen.getByText("General")).toBeInTheDocument();
+            expect(screen.getByRole("tab", { name: "Appearance" })).toBeInTheDocument();
+            expect(screen.getByText("Terminal")).toBeInTheDocument();
+            expect(screen.getByRole("tab", { name: "Connection" })).toBeInTheDocument();
+        });
+    });
+
+    it("shows General tab content by default", async () => {
         renderWithProviders();
 
         await waitFor(() => {
@@ -271,16 +162,7 @@ describe("SettingsPage", () => {
         });
     });
 
-    it("renders Agent Settings placeholder", async () => {
-        renderWithProviders();
-
-        await waitFor(() => {
-            expect(screen.getByText("Agent Settings")).toBeInTheDocument();
-            expect(screen.getByText("No agent settings available yet.")).toBeInTheDocument();
-        });
-    });
-
-    it("renders refresh interval label", async () => {
+    it("renders refresh interval label in General tab", async () => {
         renderWithProviders();
 
         await waitFor(() => {
@@ -320,9 +202,65 @@ describe("SettingsPage", () => {
             expect(screen.getByText("30 seconds")).toBeInTheDocument();
         });
     });
+});
 
-    it("renders Terminal Defaults card", async () => {
+async function waitForInitialRender() {
+    await waitFor(() => {
+        expect(screen.getByText("Settings")).toBeInTheDocument();
+    });
+}
+
+async function clickTab(name: string) {
+    await waitForInitialRender();
+    await act(async () => {
+        screen.getByRole("tab", { name }).click();
+    });
+}
+
+describe("SettingsPage - Appearance tab", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        vi.mocked(useAuth).mockReturnValue(defaultAuthReturn);
+    });
+
+    it("renders Appearance card when tab is clicked", async () => {
         renderWithProviders();
+        await clickTab("Appearance");
+
+        await waitFor(() => {
+            expect(screen.getByText("Customize how the app looks")).toBeInTheDocument();
+        });
+    });
+
+    it("shows font selector label", async () => {
+        renderWithProviders();
+        await clickTab("Appearance");
+
+        await waitFor(() => {
+            expect(screen.getByText("Font")).toBeInTheDocument();
+            expect(screen.getByText("The typeface used across the app UI")).toBeInTheDocument();
+        });
+    });
+
+    it("renders font select trigger", async () => {
+        renderWithProviders();
+        await clickTab("Appearance");
+
+        await waitFor(() => {
+            expect(screen.getByLabelText("Font")).toBeInTheDocument();
+        });
+    });
+});
+
+describe("SettingsPage - Terminal tab", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        vi.mocked(useAuth).mockReturnValue(defaultAuthReturn);
+    });
+
+    it("renders Terminal Defaults card when tab is clicked", async () => {
+        renderWithProviders();
+        await clickTab("Terminal");
 
         await waitFor(() => {
             expect(screen.getByText("Terminal Defaults")).toBeInTheDocument();
@@ -332,6 +270,7 @@ describe("SettingsPage", () => {
 
     it("shows default shell as Auto-detect", async () => {
         renderWithProviders();
+        await clickTab("Terminal");
 
         await waitFor(() => {
             expect(screen.getByText("Auto-detect")).toBeInTheDocument();
@@ -340,6 +279,7 @@ describe("SettingsPage", () => {
 
     it("shows default font size as 13", async () => {
         renderWithProviders();
+        await clickTab("Terminal");
 
         await waitFor(() => {
             expect(screen.getByText("13")).toBeInTheDocument();
@@ -348,9 +288,63 @@ describe("SettingsPage", () => {
 
     it("shows default scrollback as 1,000", async () => {
         renderWithProviders();
+        await clickTab("Terminal");
 
         await waitFor(() => {
             expect(screen.getByText("1,000")).toBeInTheDocument();
+        });
+    });
+});
+
+describe("SettingsPage - Connection tab", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        vi.mocked(useAuth).mockReturnValue(defaultAuthReturn);
+    });
+
+    it("renders Connection card when tab is clicked", async () => {
+        renderWithProviders();
+        await clickTab("Connection");
+
+        await waitFor(() => {
+            expect(screen.getByText("Manage the active agent connection")).toBeInTheDocument();
+        });
+    });
+
+    it("shows active profile label and agent URL", async () => {
+        renderWithProviders();
+        await clickTab("Connection");
+
+        await waitFor(() => {
+            const labelInput = screen.getByLabelText("Display name") as HTMLInputElement;
+            const urlInput = screen.getByLabelText("Agent URL") as HTMLInputElement;
+            expect(labelInput.value).toBe("Production");
+            expect(urlInput.value).toBe("https://agent.example.com");
+        });
+    });
+
+    it("shows no-connection message when no active profile", async () => {
+        vi.mocked(useAuth).mockReturnValue({
+            ...defaultAuthReturn,
+            profiles: [],
+            activeProfileId: null,
+        });
+
+        renderWithProviders();
+        await clickTab("Connection");
+
+        await waitFor(() => {
+            expect(screen.getByText("No active connection. Connect to a cluster first.")).toBeInTheDocument();
+        });
+    });
+
+    it("disables save button when no changes", async () => {
+        renderWithProviders();
+        await clickTab("Connection");
+
+        await waitFor(() => {
+            const saveButton = screen.getByRole("button", { name: "Save" });
+            expect(saveButton).toBeDisabled();
         });
     });
 });

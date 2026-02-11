@@ -9,6 +9,7 @@ export interface AuthContextValue extends AuthState {
     logout: () => Promise<void>;
     switchProfile: (profileId: string) => Promise<void>;
     removeProfile: (profileId: string) => Promise<void>;
+    updateProfile: (profileId: string, updates: Partial<Pick<ConnectionProfile, "label" | "agentUrl">>) => Promise<void>;
 }
 
 export const AuthContext = createContext<AuthContextValue | null>(null);

@@ -1,6 +1,9 @@
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { themes as availableThemes } from "@/lib/themes";
 import type { Scheme } from "@/lib/themes";
+import { fonts as availableFonts, DEFAULT_FONT_ID, getFontById } from "@/lib/fonts";
+import type { AppSettings } from "@/types/settings";
 import { AppearanceContext } from "@/contexts/appearance-context-value";
 
 const mq = window.matchMedia("(prefers-color-scheme: dark)");
@@ -14,7 +17,7 @@ function getSystemSnapshot(): "light" | "dark" {
     return mq.matches ? "dark" : "light";
 }
 
-function syncDOM(resolved: "light" | "dark", themeId: string) {
+function syncDOM(resolved: "light" | "dark", themeId: string, fontCssFamily: string) {
     const cl = document.documentElement.classList;
 
     if (resolved === "dark") {
@@ -30,6 +33,8 @@ function syncDOM(resolved: "light" | "dark", themeId: string) {
     if (themeId !== "default") {
         cl.add(`theme-${themeId}`);
     }
+
+    document.documentElement.style.setProperty("--font-sans", fontCssFamily);
 }
 
 export function AppearanceProvider({ children }: { children: React.ReactNode }) {
@@ -41,9 +46,23 @@ export function AppearanceProvider({ children }: { children: React.ReactNode }) 
         return localStorage.getItem("theme") ?? "default";
     });
 
+    const [font, setFontState] = useState(DEFAULT_FONT_ID);
+    const loadedFonts = useRef(new Set([DEFAULT_FONT_ID]));
+
     const systemScheme = useSyncExternalStore(subscribeToSystemScheme, getSystemSnapshot);
 
     const resolved: "light" | "dark" = scheme === "system" ? systemScheme : scheme;
+
+    // Load saved font from app settings on mount
+    useEffect(() => {
+        invoke<AppSettings>("load_app_settings")
+            .then((settings) => {
+                if (settings.font) {
+                    setFontState(settings.font);
+                }
+            })
+            .catch(() => {});
+    }, []);
 
     const setScheme = useCallback((next: Scheme) => {
         localStorage.setItem("scheme", next);
@@ -55,10 +74,39 @@ export function AppearanceProvider({ children }: { children: React.ReactNode }) 
         setThemeState(next);
     }, []);
 
-    // Sync DOM whenever resolved scheme or theme changes
+    const setFont = useCallback((nextFontId: string) => {
+        setFontState(nextFontId);
+        // Persist to app settings
+        invoke<AppSettings>("load_app_settings")
+            .then((current) => invoke("save_app_settings", { settings: { ...current, font: nextFontId } }))
+            .catch(() => {});
+    }, []);
+
+    // Load font CSS and sync DOM whenever font, scheme, or theme changes
     useEffect(() => {
-        syncDOM(resolved, theme);
-    }, [resolved, theme]);
+        const def = getFontById(font);
+
+        if (loadedFonts.current.has(font)) {
+            syncDOM(resolved, theme, def.cssFamily);
+            return;
+        }
+
+        let cancelled = false;
+        def.load()
+            .then(() => {
+                if (cancelled) return;
+                loadedFonts.current.add(font);
+                syncDOM(resolved, theme, def.cssFamily);
+            })
+            .catch(() => {
+                if (cancelled) return;
+                syncDOM(resolved, theme, def.cssFamily);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [font, resolved, theme]);
 
     const value = useMemo(
         () => ({
@@ -68,8 +116,12 @@ export function AppearanceProvider({ children }: { children: React.ReactNode }) 
             theme,
             setTheme,
             themes: availableThemes,
+            font,
+            setFont,
+            fonts: availableFonts,
+            isFontLoading: false,
         }),
-        [scheme, setScheme, resolved, theme, setTheme],
+        [scheme, setScheme, resolved, theme, setTheme, font, setFont],
     );
 
     return <AppearanceContext value={value}>{children}</AppearanceContext>;

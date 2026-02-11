@@ -10,6 +10,7 @@ pub mod list_configs;
 pub mod list_images;
 pub mod list_networks;
 pub mod list_node_metrics;
+pub mod list_node_tasks;
 pub mod list_nodes;
 pub mod list_secrets;
 pub mod list_service_tasks;
