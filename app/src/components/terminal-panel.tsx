@@ -76,7 +76,7 @@ export function TerminalPanel() {
             <Tabs value={activeSessionId ?? undefined} onValueChange={switchSession} className='flex min-h-0 flex-1 flex-col overflow-hidden'>
                 {/* Tab bar */}
                 <div className='flex items-center border-b border-white/10'>
-                    <TabsList variant='line' className='h-8 gap-0 overflow-x-auto bg-transparent px-1'>
+                    <TabsList className='h-8 gap-1 overflow-x-auto bg-transparent px-1.5'>
                         {sessions.map((session) => {
                             const name = session.target.containerName || session.target.containerId.slice(0, 12);
                             const sessionStatus = sessionStatuses[session.id] ?? "disconnected";
@@ -84,7 +84,7 @@ export function TerminalPanel() {
                                 <TabsTrigger
                                     key={session.id}
                                     value={session.id}
-                                    className='group/tab h-7 max-w-[180px] gap-1.5 rounded-none border-none px-2 text-xs text-white/60 data-active:bg-white/5 data-active:text-white'
+                                    className='group/tab h-7 max-w-[180px] gap-1.5 rounded-t-lg border-none px-3 text-xs text-white/40 transition-colors hover:text-white/60 data-active:bg-white/10 data-active:text-white'
                                 >
                                     <span className={`size-1.5 shrink-0 rounded-full ${statusDotColors[sessionStatus]}`} />
                                     <span className='truncate'>{name}</span>

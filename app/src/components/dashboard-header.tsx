@@ -1,11 +1,12 @@
 import { useMatches } from "@tanstack/react-router";
-import { Bell, ChevronRight, Moon, Plus, Search, Sun } from "lucide-react";
+import { Bell, ChevronRight, Moon, Search, Sun } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/hooks/use-auth";
 import { useAppearance } from "@/hooks/use-appearance";
+import { useCommandPalette } from "@/hooks/use-command-palette";
 import { router } from "@/router";
 import { LogOut } from "lucide-react";
 
@@ -35,6 +36,7 @@ const routeLabels: Record<string, string> = {
 export function DashboardHeader() {
     const { user, logout, profiles, activeProfileId } = useAuth();
     const { resolvedScheme, setScheme } = useAppearance();
+    const { setOpen } = useCommandPalette();
     const matches = useMatches();
     const activeProfile = profiles.find((p) => p.id === activeProfileId);
 
@@ -52,41 +54,21 @@ export function DashboardHeader() {
                 <span className='font-medium'>{currentLabel}</span>
             </div>
 
-            {/* Spacer */}
-            <div className='flex-1' />
-
-            {/* Search */}
-            <div className='relative'>
-                <Search className='absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground' />
-                <Input placeholder='Search...' className='h-8 w-56 rounded-md bg-background pl-9 text-sm' readOnly />
-                <kbd className='absolute top-1/2 right-2 -translate-y-1/2 rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground'>
-                    ⌘K
-                </kbd>
+            {/* Search — centered */}
+            <div className='flex flex-1 justify-center'>
+                <div className='relative w-full max-w-md cursor-pointer' onClick={() => setOpen(true)}>
+                    <Search className='absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground' />
+                    <Input placeholder='Search...' className='pointer-events-none h-8 w-full rounded-md bg-background pl-9 text-sm' readOnly tabIndex={-1} />
+                    <kbd className='absolute top-1/2 right-2 -translate-y-1/2 rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground'>
+                        ⌘K
+                    </kbd>
+                </div>
             </div>
 
             {/* Notification Bell */}
             <Button variant='ghost' size='sm' className='relative size-8 p-0'>
                 <Bell className='size-4' />
                 <span className='absolute top-1 right-1.5 size-1.5 rounded-full bg-primary' />
-            </Button>
-
-            {/* New Service Button */}
-            <Button size='sm' className='h-8 gap-1.5'>
-                <Plus className='size-3.5' />
-                New Service
-            </Button>
-
-            {/* Disconnect Button */}
-            <Button
-                variant='ghost'
-                size='sm'
-                className='size-8 p-0 text-muted-foreground hover:text-destructive'
-                title='Disconnect'
-                onClick={() => {
-                    void logout().then(() => router.navigate({ to: "/login", search: { redirect: undefined } }));
-                }}
-            >
-                <LogOut className='size-4' />
             </Button>
 
             {/* User Avatar with Dropdown */}

@@ -409,6 +409,7 @@ The agent binary runs in two modes controlled by `KONTAINER_ROLE`:
 **Dev mode:** Set `KONTAINER_DEV_FOLLOWERS` to a comma-separated list of static addresses instead of Swarm-based discovery.
 
 Key files:
+
 - `agent/cluster/discovery.go` — Swarm-based follower discovery (production)
 - `agent/cluster/dev_discovery.go` — Static follower list (development)
 - `agent/cluster/registry.go` — Thread-safe in-memory agent registry
@@ -479,7 +480,7 @@ try {
 - **Styling:** Tailwind CSS 4 utility classes, shadcn/ui components
 - **Types:** Strict TypeScript (`strict: true` in tsconfig), define interfaces in `src/types/`
 - **Formatting:** This project uses oxfmt, Use `pnpm fmt` before committing
-- **Quality Checks:** Always run `pnpm run lint` and `pnpm fmt` after finishing all tasks in a session
+- **Quality Checks:** Always run `pnpm types`, `pnpm run lint` and `pnpm fmt` after finishing all tasks in a session
 
 ### Rust
 

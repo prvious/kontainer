@@ -265,6 +265,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
     }, []);
 
+    const updateProfile = useCallback(
+        async (profileId: string, updates: Partial<Pick<ConnectionProfile, "label" | "agentUrl">>) => {
+            const profile = profiles.find((p) => p.id === profileId);
+            if (!profile) return;
+
+            const updated = { ...profile, ...updates };
+
+            await invoke("save_profile", {
+                input: {
+                    id: updated.id,
+                    label: updated.label,
+                    agentUrl: updated.agentUrl,
+                    userId: updated.userId,
+                    userName: updated.userName,
+                    userEmail: updated.userEmail,
+                    userAvatarUrl: updated.userAvatarUrl,
+                    userProvider: updated.userProvider,
+                    token: updated.token,
+                    expiresAt: updated.expiresAt,
+                },
+            });
+
+            const data = await invoke<StoredProfiles>("load_profiles");
+            setProfiles(data.profiles);
+            setActiveProfileId(data.activeProfileId);
+
+            // Update local agentUrl if the active profile was changed
+            if (profileId === activeProfileId && updates.agentUrl) {
+                setAgentUrl(updates.agentUrl);
+            }
+        },
+        [profiles, activeProfileId],
+    );
+
     return (
         <AuthContext
             value={{
@@ -279,6 +313,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 logout,
                 switchProfile,
                 removeProfile,
+                updateProfile,
             }}
         >
             {children}

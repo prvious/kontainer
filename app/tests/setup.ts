@@ -31,3 +31,22 @@ vi.mock("@/hooks/use-settings", () => ({
         isLoading: false,
     }),
 }));
+
+// Mock useAppearance so components using AppearanceProvider work in tests
+vi.mock("@/hooks/use-appearance", () => ({
+    useAppearance: () => ({
+        scheme: "system",
+        setScheme: vi.fn(),
+        resolvedScheme: "light",
+        theme: "default",
+        setTheme: vi.fn(),
+        themes: [{ id: "default", label: "Default" }],
+        font: "figtree",
+        setFont: vi.fn(),
+        fonts: [
+            { id: "figtree", label: "Figtree", cssFamily: '"Figtree Variable", sans-serif', load: vi.fn() },
+            { id: "inter", label: "Inter", cssFamily: '"Inter Variable", sans-serif', load: vi.fn() },
+        ],
+        isFontLoading: false,
+    }),
+}));

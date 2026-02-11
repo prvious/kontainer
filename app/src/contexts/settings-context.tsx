@@ -60,6 +60,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
                 terminalFontSize: td.fontSize === DEFAULT_TERMINAL.fontSize ? null : td.fontSize,
                 terminalFontFamily: td.fontFamily === DEFAULT_TERMINAL.fontFamily ? null : td.fontFamily,
                 terminalScrollback: td.scrollback === DEFAULT_TERMINAL.scrollback ? null : td.scrollback,
+                font: null,
             } satisfies AppSettings,
         }).catch((err) => console.error("Failed to save app settings:", err));
     }, []);
