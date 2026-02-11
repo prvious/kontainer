@@ -134,9 +134,8 @@ describe("NodeActions", () => {
         });
     });
 
-    it("calls update_node_availability when clicking Drain", async () => {
+    it("opens drain dialog when clicking Drain", async () => {
         const user = userEvent.setup();
-        vi.mocked(invoke).mockResolvedValue({ availability: "drain" });
 
         renderNodeActions(activeWorker);
 
@@ -148,13 +147,9 @@ describe("NodeActions", () => {
 
         await user.click(screen.getByText("Drain"));
 
+        // Should open the drain dialog
         await waitFor(() => {
-            expect(invoke).toHaveBeenCalledWith("update_node_availability", {
-                url: "http://localhost:8080",
-                token: "test-jwt",
-                nodeId: "node1",
-                availability: "drain",
-            });
+            expect(screen.getByText("Drain Node: worker-1")).toBeInTheDocument();
         });
     });
 

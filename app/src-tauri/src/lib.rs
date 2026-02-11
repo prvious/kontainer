@@ -27,6 +27,7 @@ pub fn run() {
             actions::agent::list_networks::list_networks,
             actions::agent::list_volumes::list_volumes,
             actions::agent::list_nodes::list_nodes,
+            actions::agent::list_node_tasks::list_node_tasks,
             actions::agent::list_task_stats::list_task_stats,
             actions::agent::scale_service::scale_service,
             actions::agent::restart_service::restart_service,

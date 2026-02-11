@@ -26,6 +26,7 @@ func New(
 	listServiceTasksHandler *services.ListServiceTasksHandler,
 	inspectTaskHandler *services.InspectTaskHandler,
 	listNodesHandler *services.ListNodesHandler,
+	listNodeTasksHandler *services.ListNodeTasksHandler,
 	listTaskStatsHandler *services.ListTaskStatsHandler,
 	streamLogsHandler *services.StreamServiceLogsHandler,
 	streamTaskLogsHandler *services.StreamTaskLogsHandler,
@@ -92,6 +93,7 @@ func New(
 			r.Method("GET", "/stacks", listStacksHandler)
 			r.Method("DELETE", "/stacks/{stackName}", removeStackHandler)
 			r.Method("GET", "/nodes", listNodesHandler)
+			r.Method("GET", "/nodes/{nodeID}/tasks", listNodeTasksHandler)
 			r.Method("GET", "/task-stats", listTaskStatsHandler)
 			r.Method("GET", "/networks", listNetworksHandler)
 			r.Method("GET", "/volumes", listVolumesHandler)
