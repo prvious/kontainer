@@ -14,52 +14,46 @@ import (
 
 func TestListTasksHandler_Success(t *testing.T) {
 	now := time.Now()
-	mock := &MockDockerClient{
-		TaskListFunc: func(ctx context.Context, options types.TaskListOptions) ([]swarm.Task, error) {
-			return []swarm.Task{
-				{
-					ID:        "task1",
-					ServiceID: "svc1",
-					NodeID:    "node1",
-					Slot:      1,
-					Status: swarm.TaskStatus{
-						State:     swarm.TaskStateRunning,
-						Timestamp: now,
-						ContainerStatus: &swarm.ContainerStatus{
-							ContainerID: "container1",
-							ExitCode:    0,
-						},
-					},
-					DesiredState: swarm.TaskStateRunning,
-					Spec: swarm.TaskSpec{
-						ContainerSpec: &swarm.ContainerSpec{
-							Image: "nginx:latest",
-						},
+	mock := &mockDockerClient{
+		tasks: []swarm.Task{
+			{
+				ID:        "task1",
+				ServiceID: "svc1",
+				NodeID:    "node1",
+				Slot:      1,
+				Status: swarm.TaskStatus{
+					State:     swarm.TaskStateRunning,
+					Timestamp: now,
+					ContainerStatus: &swarm.ContainerStatus{
+						ContainerID: "container1",
+						ExitCode:    0,
 					},
 				},
-			}, nil
+				DesiredState: swarm.TaskStateRunning,
+				Spec: swarm.TaskSpec{
+					ContainerSpec: &swarm.ContainerSpec{
+						Image: "nginx:latest",
+					},
+				},
+			},
 		},
-		NodeListFunc: func(ctx context.Context, options types.NodeListOptions) ([]swarm.Node, error) {
-			return []swarm.Node{
-				{
-					ID: "node1",
-					Description: swarm.NodeDescription{
-						Hostname: "worker-1",
-					},
+		nodes: []swarm.Node{
+			{
+				ID: "node1",
+				Description: swarm.NodeDescription{
+					Hostname: "worker-1",
 				},
-			}, nil
+			},
 		},
-		ServiceListFunc: func(ctx context.Context, options types.ServiceListOptions) ([]swarm.Service, error) {
-			return []swarm.Service{
-				{
-					ID: "svc1",
-					Spec: swarm.ServiceSpec{
-						Annotations: swarm.Annotations{
-							Name: "web",
-						},
+		services: []swarm.Service{
+			{
+				ID: "svc1",
+				Spec: swarm.ServiceSpec{
+					Annotations: swarm.Annotations{
+						Name: "web",
 					},
 				},
-			}, nil
+			},
 		},
 	}
 
@@ -105,16 +99,10 @@ func TestListTasksHandler_Success(t *testing.T) {
 }
 
 func TestListTasksHandler_EmptyList(t *testing.T) {
-	mock := &MockDockerClient{
-		TaskListFunc: func(ctx context.Context, options types.TaskListOptions) ([]swarm.Task, error) {
-			return []swarm.Task{}, nil
-		},
-		NodeListFunc: func(ctx context.Context, options types.NodeListOptions) ([]swarm.Node, error) {
-			return []swarm.Node{}, nil
-		},
-		ServiceListFunc: func(ctx context.Context, options types.ServiceListOptions) ([]swarm.Service, error) {
-			return []swarm.Service{}, nil
-		},
+	mock := &mockDockerClient{
+		tasks:    []swarm.Task{},
+		nodes:    []swarm.Node{},
+		services: []swarm.Service{},
 	}
 
 	action := NewListTasksAction(mock)
