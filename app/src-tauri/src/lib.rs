@@ -29,6 +29,7 @@ pub fn run() {
             actions::agent::list_nodes::list_nodes,
             actions::agent::list_node_tasks::list_node_tasks,
             actions::agent::list_task_stats::list_task_stats,
+            actions::agent::list_tasks::list_tasks,
             actions::agent::scale_service::scale_service,
             actions::agent::restart_service::restart_service,
             actions::agent::rollback_service::rollback_service,

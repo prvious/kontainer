@@ -28,6 +28,7 @@ func New(
 	listNodesHandler *services.ListNodesHandler,
 	listNodeTasksHandler *services.ListNodeTasksHandler,
 	listTaskStatsHandler *services.ListTaskStatsHandler,
+	listTasksHandler *services.ListTasksHandler,
 	streamLogsHandler *services.StreamServiceLogsHandler,
 	streamTaskLogsHandler *services.StreamTaskLogsHandler,
 	listNetworksHandler *services.ListNetworksHandler,
@@ -89,6 +90,7 @@ func New(
 			r.Method("POST", "/services/{serviceID}/restart", restartServiceHandler)
 			r.Method("POST", "/services/{serviceID}/rollback", rollbackServiceHandler)
 			r.Method("GET", "/services/{serviceID}/tasks", listServiceTasksHandler)
+			r.Method("GET", "/tasks", listTasksHandler)
 			r.Method("GET", "/tasks/{taskID}", inspectTaskHandler)
 			r.Method("GET", "/stacks", listStacksHandler)
 			r.Method("DELETE", "/stacks/{stackName}", removeStackHandler)
