@@ -7,38 +7,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Activity, AlertCircle, ArrowUpRight, Search } from "lucide-react";
 import { useState } from "react";
+import { formatRelativeTime, getStateColor } from "@/lib/task-utils";
 import type { TaskItem } from "@/types/tasks";
-
-function formatRelativeTime(iso: string): string {
-    const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-    if (seconds < 60) return "just now";
-    const minutes = Math.floor(seconds / 60);
-    if (minutes < 60) return `${minutes}m ago`;
-    const hours = Math.floor(minutes / 60);
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(hours / 24);
-    return `${days}d ago`;
-}
-
-function getStateColor(state: string): string {
-    switch (state.toLowerCase()) {
-        case "running":
-            return "bg-success";
-        case "failed":
-        case "rejected":
-            return "bg-destructive";
-        case "complete":
-        case "shutdown":
-            return "bg-muted-foreground";
-        case "preparing":
-        case "pending":
-        case "assigned":
-        case "accepted":
-            return "bg-warning";
-        default:
-            return "bg-muted-foreground";
-    }
-}
 
 function TasksTable({ tasks }: { tasks: TaskItem[] }) {
     return (

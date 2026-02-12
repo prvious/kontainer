@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { AuthContext } from "@/contexts/auth-context-value";
 import { SettingsContext } from "@/contexts/settings-context-value";
+import { formatRelativeTime, getStateColor } from "@/lib/task-utils";
 import type { AuthContextValue } from "@/contexts/auth-context-value";
 import type { SettingsContextValue } from "@/contexts/settings-context-value";
 import type { TaskItem } from "@/types/tasks";
@@ -281,76 +282,44 @@ describe("TasksPage", () => {
     });
 });
 
-describe("formatRelativeTime helper", () => {
+describe("formatRelativeTime", () => {
     it("formats time correctly", () => {
         const now = Date.now();
 
         // Test "just now"
         const justNow = new Date(now - 30000).toISOString(); // 30 seconds ago
-        expect(formatRelativeTimeHelper(justNow)).toBe("just now");
+        expect(formatRelativeTime(justNow)).toBe("just now");
 
         // Test minutes
         const minutesAgo = new Date(now - 120000).toISOString(); // 2 minutes ago
-        expect(formatRelativeTimeHelper(minutesAgo)).toBe("2m ago");
+        expect(formatRelativeTime(minutesAgo)).toBe("2m ago");
 
         // Test hours
         const hoursAgo = new Date(now - 7200000).toISOString(); // 2 hours ago
-        expect(formatRelativeTimeHelper(hoursAgo)).toBe("2h ago");
+        expect(formatRelativeTime(hoursAgo)).toBe("2h ago");
 
         // Test days
         const daysAgo = new Date(now - 172800000).toISOString(); // 2 days ago
-        expect(formatRelativeTimeHelper(daysAgo)).toBe("2d ago");
+        expect(formatRelativeTime(daysAgo)).toBe("2d ago");
     });
 });
 
-describe("getStateColor helper", () => {
+describe("getStateColor", () => {
     it("returns correct colors for states", () => {
-        expect(getStateColorHelper("running")).toBe("bg-success");
-        expect(getStateColorHelper("failed")).toBe("bg-destructive");
-        expect(getStateColorHelper("rejected")).toBe("bg-destructive");
-        expect(getStateColorHelper("complete")).toBe("bg-muted-foreground");
-        expect(getStateColorHelper("shutdown")).toBe("bg-muted-foreground");
-        expect(getStateColorHelper("preparing")).toBe("bg-warning");
-        expect(getStateColorHelper("pending")).toBe("bg-warning");
-        expect(getStateColorHelper("assigned")).toBe("bg-warning");
-        expect(getStateColorHelper("accepted")).toBe("bg-warning");
-        expect(getStateColorHelper("unknown")).toBe("bg-muted-foreground");
+        expect(getStateColor("running")).toBe("bg-success");
+        expect(getStateColor("failed")).toBe("bg-destructive");
+        expect(getStateColor("rejected")).toBe("bg-destructive");
+        expect(getStateColor("complete")).toBe("bg-muted-foreground");
+        expect(getStateColor("shutdown")).toBe("bg-muted-foreground");
+        expect(getStateColor("preparing")).toBe("bg-warning");
+        expect(getStateColor("pending")).toBe("bg-warning");
+        expect(getStateColor("assigned")).toBe("bg-warning");
+        expect(getStateColor("accepted")).toBe("bg-warning");
+        expect(getStateColor("unknown")).toBe("bg-muted-foreground");
     });
 
     it("handles case insensitivity", () => {
-        expect(getStateColorHelper("RUNNING")).toBe("bg-success");
-        expect(getStateColorHelper("Failed")).toBe("bg-destructive");
+        expect(getStateColor("RUNNING")).toBe("bg-success");
+        expect(getStateColor("Failed")).toBe("bg-destructive");
     });
 });
-
-// Helper functions extracted for testing
-function formatRelativeTimeHelper(iso: string): string {
-    const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-    if (seconds < 60) return "just now";
-    const minutes = Math.floor(seconds / 60);
-    if (minutes < 60) return `${minutes}m ago`;
-    const hours = Math.floor(minutes / 60);
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(hours / 24);
-    return `${days}d ago`;
-}
-
-function getStateColorHelper(state: string): string {
-    switch (state.toLowerCase()) {
-        case "running":
-            return "bg-success";
-        case "failed":
-        case "rejected":
-            return "bg-destructive";
-        case "complete":
-        case "shutdown":
-            return "bg-muted-foreground";
-        case "preparing":
-        case "pending":
-        case "assigned":
-        case "accepted":
-            return "bg-warning";
-        default:
-            return "bg-muted-foreground";
-    }
-}

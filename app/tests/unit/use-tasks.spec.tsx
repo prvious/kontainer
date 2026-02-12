@@ -134,19 +134,6 @@ describe("useTasks", () => {
         expect(invoke).not.toHaveBeenCalled();
     });
 
-    it("uses correct query key", async () => {
-        vi.mocked(invoke).mockResolvedValue({ tasks: sampleTasks });
-
-        const { result } = renderHookWithProviders();
-
-        await waitFor(() => {
-            expect(result.current.isSuccess).toBe(true);
-        });
-
-        // Verify the query key is ["tasks"]
-        expect(result.current.data).toBeDefined();
-    });
-
     it("respects refresh interval from settings", async () => {
         vi.mocked(invoke).mockResolvedValue({ tasks: sampleTasks });
 

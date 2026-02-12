@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"sort"
+	"strings"
 
 	"github.com/docker/docker/api/types"
 )
@@ -44,7 +45,9 @@ func (a *ListTasksAction) Execute(ctx context.Context) ([]TaskItem, error) {
 	// Resolve node names
 	nodeNames := make(map[string]string)
 	nodes, err := a.client.NodeList(ctx, types.NodeListOptions{})
-	if err == nil {
+	if err != nil {
+		log.Printf("list tasks: failed to resolve node names: %v", err)
+	} else {
 		for _, n := range nodes {
 			name := n.Description.Hostname
 			if name == "" {
@@ -57,7 +60,9 @@ func (a *ListTasksAction) Execute(ctx context.Context) ([]TaskItem, error) {
 	// Resolve service names
 	serviceNames := make(map[string]string)
 	services, err := a.client.ServiceList(ctx, types.ServiceListOptions{})
-	if err == nil {
+	if err != nil {
+		log.Printf("list tasks: failed to resolve service names: %v", err)
+	} else {
 		for _, s := range services {
 			serviceNames[s.ID] = s.Spec.Name
 		}
@@ -97,17 +102,7 @@ func (a *ListTasksAction) Execute(ctx context.Context) ([]TaskItem, error) {
 
 		image := ""
 		if t.Spec.ContainerSpec != nil {
-			image = t.Spec.ContainerSpec.Image
-			// Extract image name without digest for readability
-			if idx := len(image); idx > 0 {
-				// Remove @sha256:... suffix if present
-				for i := 0; i < len(image); i++ {
-					if image[i] == '@' {
-						image = image[:i]
-						break
-					}
-				}
-			}
+			image = strings.SplitN(t.Spec.ContainerSpec.Image, "@", 2)[0]
 		}
 
 		items = append(items, TaskItem{
