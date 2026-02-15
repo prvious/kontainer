@@ -33,6 +33,7 @@ import { useTerminal } from "@/hooks/use-terminal";
 import { useAppearance } from "@/hooks/use-appearance";
 import { useAuth } from "@/hooks/use-auth";
 import type { ServiceItem } from "@/types/services";
+import { router } from "@/router";
 
 type PalettePage = { kind: "root" } | { kind: "service-actions"; service: ServiceItem } | { kind: "container-select"; service: ServiceItem };
 
@@ -140,7 +141,9 @@ export function CommandPalette() {
                 label: "Disconnect",
                 icon: <LogOut className='size-4' />,
                 action: () => {
-                    void logout().then(() => navigate({ to: "/login" }));
+                    void logout().then(() => {
+                        router.invalidate().finally(() => navigate({ to: "/login", search: { redirect: undefined } }));
+                    });
                     close();
                 },
                 category: "Quick Actions",
@@ -441,7 +444,7 @@ export function CommandPalette() {
                                         <button
                                             key={cmd.id}
                                             data-selected={isSelected || undefined}
-                                            className='flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-accent data-[selected]:bg-accent'
+                                            className='flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm hover:bg-accent data-selected:bg-accent'
                                             onClick={cmd.action}
                                             onMouseEnter={() => setSelectedIndex(idx)}
                                         >

@@ -3,10 +3,14 @@ import { invoke } from "@tauri-apps/api/core";
 import { RouterProvider } from "@tanstack/react-router";
 import { AuthProvider } from "@/contexts/auth-context";
 import { useAuth } from "@/hooks/use-auth";
+import { useNativeBehavior } from "@/hooks/use-native-behavior";
 import { router } from "@/router";
+import { createRoot } from "react-dom/client";
+import "./app.css";
 
 function InnerApp() {
     const auth = useAuth();
+    useNativeBehavior();
 
     useEffect(() => {
         if (!auth.isLoading) {
@@ -29,4 +33,4 @@ export function App() {
     );
 }
 
-export default App;
+createRoot(document.getElementById("root")!).render(<App />);

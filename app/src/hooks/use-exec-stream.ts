@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
-import type { Terminal } from "@xterm/xterm";
+import type { Terminal } from "ghostty-web";
 
 export type ExecStatus = "disconnected" | "connecting" | "connected" | "error" | "exited";
 

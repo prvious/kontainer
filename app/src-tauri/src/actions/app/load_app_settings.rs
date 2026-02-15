@@ -10,6 +10,7 @@ pub struct AppSettings {
     pub terminal_font_family: Option<String>,
     pub terminal_scrollback: Option<u32>,
     pub font: Option<String>,
+    pub scheme: Option<String>,
 }
 
 impl Default for AppSettings {
@@ -21,6 +22,7 @@ impl Default for AppSettings {
             terminal_font_family: None,
             terminal_scrollback: None,
             font: None,
+            scheme: None,
         }
     }
 }

@@ -1,21 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import type { Theme } from "@tauri-apps/api/window";
 import { themes as availableThemes } from "@/lib/themes";
 import type { Scheme } from "@/lib/themes";
 import { fonts as availableFonts, DEFAULT_FONT_ID, getFontById } from "@/lib/fonts";
 import type { AppSettings } from "@/types/settings";
 import { AppearanceContext } from "@/contexts/appearance-context-value";
-
-const mq = window.matchMedia("(prefers-color-scheme: dark)");
-
-function subscribeToSystemScheme(callback: () => void) {
-    mq.addEventListener("change", callback);
-    return () => mq.removeEventListener("change", callback);
-}
-
-function getSystemSnapshot(): "light" | "dark" {
-    return mq.matches ? "dark" : "light";
-}
 
 function syncDOM(resolved: "light" | "dark", themeId: string, fontCssFamily: string) {
     const cl = document.documentElement.classList;
@@ -38,39 +29,71 @@ function syncDOM(resolved: "light" | "dark", themeId: string, fontCssFamily: str
 }
 
 export function AppearanceProvider({ children }: { children: React.ReactNode }) {
-    const [scheme, setSchemeState] = useState<Scheme>(() => {
-        return (localStorage.getItem("scheme") as Scheme) ?? "system";
-    });
-
-    const [theme, setThemeState] = useState(() => {
-        return localStorage.getItem("theme") ?? "default";
-    });
-
+    const [scheme, setSchemeState] = useState<Scheme>("system");
+    const [osTheme, setOsTheme] = useState<"light" | "dark">("light");
+    const [theme, setThemeState] = useState("default");
     const [font, setFontState] = useState(DEFAULT_FONT_ID);
     const loadedFonts = useRef(new Set([DEFAULT_FONT_ID]));
+    const [ready, setReady] = useState(false);
 
-    const systemScheme = useSyncExternalStore(subscribeToSystemScheme, getSystemSnapshot);
+    const resolved: "light" | "dark" = scheme === "system" ? osTheme : scheme;
 
-    const resolved: "light" | "dark" = scheme === "system" ? systemScheme : scheme;
-
-    // Load saved font from app settings on mount
+    // Load saved settings on mount and detect OS theme
     useEffect(() => {
+        (async () => {
+            let savedScheme: Scheme | null = null;
+            let savedFont: string | null = null;
+
+            try {
+                const settings = await invoke<AppSettings>("load_app_settings");
+                savedScheme = (settings.scheme as Scheme) ?? null;
+                savedFont = settings.font ?? null;
+            } catch {
+                // ignore — use defaults
+            }
+
+            try {
+                const currentOsTheme = await getCurrentWindow().theme();
+                setOsTheme(currentOsTheme === "dark" ? "dark" : "light");
+            } catch {
+                // ignore — keep "light" default
+            }
+
+            if (savedScheme) setSchemeState(savedScheme);
+            if (savedFont) setFontState(savedFont);
+            setReady(true);
+        })();
+    }, []);
+
+    // Listen to OS theme changes via Tauri's native API
+    useEffect(() => {
+        const promise = getCurrentWindow().onThemeChanged(({ payload }: { payload: Theme }) => {
+            setOsTheme(payload === "dark" ? "dark" : "light");
+        });
+
+        return () => {
+            promise.then((unlisten) => unlisten()).catch(() => {});
+        };
+    }, []);
+
+    // Sync native window title bar theme
+    useEffect(() => {
+        if (!ready) return;
+        const nativeTheme = scheme === "system" ? null : scheme;
+        getCurrentWindow()
+            .setTheme(nativeTheme)
+            .catch(() => {});
+    }, [ready, scheme]);
+
+    const setScheme = useCallback((next: Scheme) => {
+        setSchemeState(next);
+        // Persist to app settings
         invoke<AppSettings>("load_app_settings")
-            .then((settings) => {
-                if (settings.font) {
-                    setFontState(settings.font);
-                }
-            })
+            .then((current) => invoke("save_app_settings", { settings: { ...current, scheme: next } }))
             .catch(() => {});
     }, []);
 
-    const setScheme = useCallback((next: Scheme) => {
-        localStorage.setItem("scheme", next);
-        setSchemeState(next);
-    }, []);
-
     const setTheme = useCallback((next: string) => {
-        localStorage.setItem("theme", next);
         setThemeState(next);
     }, []);
 
@@ -82,8 +105,10 @@ export function AppearanceProvider({ children }: { children: React.ReactNode }) 
             .catch(() => {});
     }, []);
 
-    // Load font CSS and sync DOM whenever font, scheme, or theme changes
+    // Load font CSS and sync DOM whenever font, resolved scheme, or theme changes
     useEffect(() => {
+        if (!ready) return;
+
         const def = getFontById(font);
 
         if (loadedFonts.current.has(font)) {
@@ -106,7 +131,7 @@ export function AppearanceProvider({ children }: { children: React.ReactNode }) 
         return () => {
             cancelled = true;
         };
-    }, [font, resolved, theme]);
+    }, [font, resolved, theme, ready]);
 
     const value = useMemo(
         () => ({

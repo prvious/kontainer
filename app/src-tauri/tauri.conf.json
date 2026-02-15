@@ -10,6 +10,7 @@
         "frontendDist": "../dist"
     },
     "app": {
+        "macOSPrivateApi": true,
         "windows": [
             {
                 "label": "main",
@@ -18,7 +19,16 @@
                 "height": 900,
                 "minWidth": 900,
                 "minHeight": 650,
-                "visible": false
+                "visible": false,
+                "decorations": true,
+                "transparent": true,
+                "titleBarStyle": "Overlay",
+                "hiddenTitle": true,
+                "trafficLightPosition": { "x": 13, "y": 20 },
+                "windowEffects": {
+                    "effects": ["sidebar"],
+                    "state": "followsWindowActiveState"
+                }
             },
             {
                 "label": "splashscreen",

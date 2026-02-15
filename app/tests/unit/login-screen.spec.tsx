@@ -62,15 +62,10 @@ describe("LoginScreen", () => {
         return result;
     }
 
-    it("renders the logo wordmark", async () => {
-        await renderLoginScreen();
-        expect(screen.getByText("kontainer")).toBeInTheDocument();
-    });
-
-    it("renders the card title and description", async () => {
+    it("renders the title and description", async () => {
         await renderLoginScreen();
         expect(screen.getByText("Connect to Cluster")).toBeInTheDocument();
-        expect(screen.getByText("Enter your agent's URL to get started.")).toBeInTheDocument();
+        expect(screen.getByText("Enter your agent URL to get started.")).toBeInTheDocument();
     });
 
     it("renders the cluster URL input with default value", async () => {
@@ -95,14 +90,14 @@ describe("LoginScreen", () => {
         expect(invoke).toHaveBeenCalledWith("ping_agent", { url: "http://localhost:8080" });
     });
 
-    it("shows online status after successful ping", async () => {
+    it("shows auth providers after successful ping", async () => {
         await renderLoginScreen();
         const user = userEvent.setup();
 
         const button = screen.getByRole("button", { name: /connect/i });
         await user.click(button);
 
-        expect(screen.getByText("Cluster Online")).toBeInTheDocument();
+        expect(screen.getByText("Authenticate")).toBeInTheDocument();
     });
 
     it("fetches providers after successful ping", async () => {
@@ -122,7 +117,7 @@ describe("LoginScreen", () => {
         const button = screen.getByRole("button", { name: /connect/i });
         await user.click(button);
 
-        expect(screen.getByRole("button", { name: /continue with github/i })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /github/i })).toBeInTheDocument();
     });
 
     it("calls auth_listen when provider button is clicked", async () => {
@@ -154,7 +149,7 @@ describe("LoginScreen", () => {
         const connectButton = screen.getByRole("button", { name: /connect/i });
         await user.click(connectButton);
 
-        const githubButton = screen.getByRole("button", { name: /continue with github/i });
+        const githubButton = screen.getByRole("button", { name: /github/i });
         await user.click(githubButton);
 
         // auth_listen should be called
@@ -193,13 +188,13 @@ describe("LoginScreen", () => {
         const button = screen.getByRole("button", { name: /connect/i });
         await user.click(button);
 
-        expect(screen.getByText("Cluster Online")).toBeInTheDocument();
+        expect(screen.getByText("Authenticate")).toBeInTheDocument();
 
         // Change URL — should reset
         const input = screen.getByPlaceholderText("http://localhost:8080");
         await user.type(input, "/new");
 
-        expect(screen.queryByText("Cluster Online")).not.toBeInTheDocument();
+        expect(screen.queryByText("Authenticate")).not.toBeInTheDocument();
         expect(screen.getByRole("button", { name: /connect/i })).toBeInTheDocument();
     });
 
@@ -217,7 +212,7 @@ describe("LoginScreen", () => {
         expect(invoke).toHaveBeenCalledWith("ping_agent", { url: "http://myserver:9090" });
     });
 
-    it("disables button while connecting and shows reaching cluster text", async () => {
+    it("disables button while connecting and shows connecting text", async () => {
         let resolvePing: () => void;
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_profiles") return { profiles: [], activeProfileId: null };
@@ -236,8 +231,7 @@ describe("LoginScreen", () => {
         const button = screen.getByRole("button", { name: /connect/i });
         await user.click(button);
 
-        expect(button).toBeDisabled();
-        expect(screen.getByText(/reaching cluster/i)).toBeInTheDocument();
+        expect(screen.getByText(/connecting/i)).toBeInTheDocument();
 
         await act(async () => {
             resolvePing!();

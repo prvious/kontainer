@@ -1,12 +1,10 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
-import { AlertTriangle, ArrowRight, CheckCircle2, Globe, Lock, Loader2, Shield, WifiOff } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Globe, Loader2, Shield, WifiOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Logo } from "@/components/logo";
 import { useAuth } from "@/hooks/use-auth";
 
 const routeApi = getRouteApi("/login");
@@ -17,27 +15,22 @@ const statusConfig = {
     idle: {
         icon: Globe,
         color: "text-muted-foreground",
-        bg: "bg-muted",
     },
     connecting: {
         icon: Loader2,
-        color: "text-chart-2",
-        bg: "bg-chart-2/10",
+        color: "text-primary",
     },
     online: {
         icon: CheckCircle2,
         color: "text-success",
-        bg: "bg-success/10",
     },
     offline: {
         icon: WifiOff,
         color: "text-destructive",
-        bg: "bg-destructive/10",
     },
     error: {
         icon: AlertTriangle,
         color: "text-warning",
-        bg: "bg-warning/10",
     },
 } as const;
 
@@ -113,144 +106,97 @@ export function LoginScreen() {
     const StatusIcon = currentStatus.icon;
 
     return (
-        <div className='relative flex min-h-screen flex-col items-center justify-center px-4'>
-            {/* Grid background */}
-            <div className='absolute inset-0 bg-[linear-gradient(rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-size-[64px_64px]' />
+        <div className='flex h-screen p-2 pt-10'>
+            <div data-tauri-drag-region className='grain flex flex-1 flex-col items-center justify-center overflow-hidden rounded-xl bg-background shadow-sm'>
+                <div className='w-full max-w-sm px-6'>
+                    <h1 className='text-lg font-semibold'>Connect to Cluster</h1>
+                    <p className='mt-1 text-sm text-muted-foreground'>Enter your agent URL to get started.</p>
 
-            <div className='relative z-10 flex w-full max-w-md flex-col items-center'>
-                {/* Logo */}
-                <div className='mb-10'>
-                    <Logo />
-                </div>
-
-                {/* Card */}
-                <Card className='w-full'>
-                    <CardHeader>
-                        <CardTitle>Connect to Cluster</CardTitle>
-                        <CardDescription>Enter your agent's URL to get started.</CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                        {/* URL Input */}
-                        <form onSubmit={handleConnect}>
-                            <Label htmlFor='cluster-url' className='mb-2'>
-                                <Globe className='h-4 w-4 text-muted-foreground' />
-                                Cluster URL
-                            </Label>
-                            <div className='relative'>
-                                <Input
-                                    id='cluster-url'
-                                    type='url'
-                                    placeholder='http://localhost:8080'
-                                    value={agentUrl}
-                                    onChange={handleUrlChange}
-                                    required
-                                    className='h-11 pr-10 font-mono'
-                                />
-                                <div className='absolute top-1/2 right-3 -translate-y-1/2'>
-                                    <StatusIcon className={`h-4 w-4 ${currentStatus.color} ${status === "connecting" ? "animate-spin" : ""}`} />
-                                </div>
+                    <form onSubmit={handleConnect} className='mt-6'>
+                        <Label htmlFor='cluster-url' className='mb-2'>
+                            Agent URL
+                        </Label>
+                        <div className='relative'>
+                            <Input
+                                id='cluster-url'
+                                type='url'
+                                placeholder='http://localhost:8080'
+                                value={agentUrl}
+                                onChange={handleUrlChange}
+                                required
+                                className='h-9 pr-9 font-mono text-sm'
+                            />
+                            <div className='absolute top-1/2 right-3 -translate-y-1/2'>
+                                <StatusIcon className={`size-3.5 ${currentStatus.color} ${status === "connecting" ? "animate-spin" : ""}`} />
                             </div>
-                            <p className='mt-2 text-xs text-muted-foreground'>The public endpoint of your Swarm manager node</p>
+                        </div>
 
-                            {/* Connect / Retry Button */}
-                            {status !== "online" && (
-                                <Button type='submit' disabled={status === "connecting"} size='default' className='mt-4 w-full'>
-                                    {status === "connecting" ? (
-                                        <>
-                                            <Loader2 className='h-4 w-4 animate-spin' />
-                                            Reaching cluster...
-                                        </>
-                                    ) : status === "offline" || status === "error" ? (
-                                        "Retry Connection"
-                                    ) : (
-                                        "Connect"
-                                    )}
-                                </Button>
-                            )}
-                        </form>
-
-                        {/* Status Banner */}
-                        {(status === "online" || status === "offline" || status === "error") && (
-                            <div className={`mt-4 flex items-center gap-3 rounded-lg p-3 ${currentStatus.bg}`}>
-                                <StatusIcon className={`h-5 w-5 shrink-0 ${currentStatus.color}`} />
-                                <div className='min-w-0 flex-1'>
-                                    {status === "online" ? (
-                                        <p className={`text-sm font-medium ${currentStatus.color}`}>Cluster Online</p>
-                                    ) : (
-                                        <p className={`font-mono text-xs break-all ${currentStatus.color}`}>{errorMessage}</p>
-                                    )}
-                                </div>
-                            </div>
+                        {/* Error message */}
+                        {(status === "offline" || status === "error") && errorMessage && (
+                            <p className={`mt-2 text-xs ${currentStatus.color}`}>{errorMessage}</p>
                         )}
 
-                        {/* Auth Provider Buttons */}
-                        {status === "online" && providers.length > 0 && (
-                            <div className='mt-6'>
-                                <div className='relative flex items-center gap-4'>
-                                    <div className='h-px flex-1 bg-border' />
-                                    <span className='text-xs text-muted-foreground'>authenticate to continue</span>
-                                    <div className='h-px flex-1 bg-border' />
-                                </div>
-
-                                <div className='mt-4 flex flex-col gap-2'>
-                                    {providers.map((provider) => {
-                                        const isAuthenticating = authenticatingProvider === provider;
-                                        const isDisabled = authenticatingProvider !== null;
-                                        const ProviderIcon = provider === "github" ? GitHubIcon : Shield;
-
-                                        return (
-                                            <Button
-                                                key={provider}
-                                                type='button'
-                                                variant='outline'
-                                                size='lg'
-                                                disabled={isDisabled}
-                                                onClick={() => handleProviderClick(provider)}
-                                                className='w-full'
-                                            >
-                                                {isAuthenticating ? (
-                                                    <>
-                                                        <Loader2 className='h-4 w-4 animate-spin' />
-                                                        Authenticating...
-                                                    </>
-                                                ) : (
-                                                    <>
-                                                        <ProviderIcon className='h-4 w-4' />
-                                                        Continue with {provider.charAt(0).toUpperCase() + provider.slice(1)}
-                                                        <ArrowRight className='ml-auto h-4 w-4 text-muted-foreground' />
-                                                    </>
-                                                )}
-                                            </Button>
-                                        );
-                                    })}
-                                </div>
-                            </div>
+                        {/* Connect / Retry Button */}
+                        {status !== "online" && (
+                            <Button type='submit' disabled={status === "connecting"} size='sm' className='mt-3 w-full'>
+                                {status === "connecting" ? (
+                                    <>
+                                        <Loader2 className='size-3.5 animate-spin' />
+                                        Connecting...
+                                    </>
+                                ) : status === "offline" || status === "error" ? (
+                                    "Retry"
+                                ) : (
+                                    "Connect"
+                                )}
+                            </Button>
                         )}
-                    </CardContent>
-                </Card>
+                    </form>
 
-                {/* TLS hint */}
-                <div className='mt-3 flex items-center justify-center gap-1.5 text-xs text-muted-foreground'>
-                    <Lock className='h-3 w-3' />
-                    <span>TLS encrypted</span>
+                    {/* Auth Providers */}
+                    {status === "online" && providers.length > 0 && (
+                        <div className='mt-6'>
+                            <div className='flex items-center gap-3'>
+                                <div className='h-px flex-1 bg-border' />
+                                <span className='text-xs text-muted-foreground'>Authenticate</span>
+                                <div className='h-px flex-1 bg-border' />
+                            </div>
+
+                            <div className='mt-3 flex flex-col gap-2'>
+                                {providers.map((provider) => {
+                                    const isAuthenticating = authenticatingProvider === provider;
+                                    const isDisabled = authenticatingProvider !== null;
+                                    const ProviderIcon = provider === "github" ? GitHubIcon : Shield;
+
+                                    return (
+                                        <Button
+                                            key={provider}
+                                            type='button'
+                                            variant='outline'
+                                            size='sm'
+                                            disabled={isDisabled}
+                                            onClick={() => handleProviderClick(provider)}
+                                            className='w-full'
+                                        >
+                                            {isAuthenticating ? (
+                                                <>
+                                                    <Loader2 className='size-3.5 animate-spin' />
+                                                    Authenticating...
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <ProviderIcon className='size-4' />
+                                                    {provider.charAt(0).toUpperCase() + provider.slice(1)}
+                                                </>
+                                            )}
+                                        </Button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
                 </div>
-
-                {/* Help Text */}
-                <p className='mt-3 text-center text-xs text-muted-foreground'>
-                    Enter the URL of your Kontainer agent.{" "}
-                    <a href='https://prvious.dev' target='_blank' rel='noopener noreferrer' className='underline underline-offset-2 hover:text-foreground'>
-                        Need help? Check the setup guide.
-                    </a>
-                </p>
             </div>
-
-            {/* Footer */}
-            <p className='absolute bottom-6 text-xs text-muted-foreground'>
-                End-to-end encrypted &middot; Built by{" "}
-                <a href='https://prvious.dev' target='_blank' rel='noopener noreferrer' className='underline underline-offset-2 hover:text-foreground'>
-                    prvious.dev
-                </a>
-            </p>
         </div>
     );
 }

@@ -5,26 +5,50 @@ import { useServices } from "@/hooks/use-services";
 import { useNodes } from "@/hooks/use-nodes";
 import { useStacks } from "@/hooks/use-stacks";
 import { useTaskStats } from "@/hooks/use-task-stats";
-import { useClusterMetrics } from "@/hooks/use-cluster-metrics";
+
 import { useImages } from "@/hooks/use-images";
 import { useSecrets } from "@/hooks/use-secrets";
 import { useConfigs } from "@/hooks/use-configs";
 
-const mainNav = [
-    { label: "Overview", to: "/" as const, icon: LayoutDashboard },
-    { label: "Nodes", to: "/nodes" as const, icon: Server, countKey: "nodes" as const },
-    { label: "Stacks", to: "/stacks" as const, icon: Layers, countKey: "stacks" as const },
-    { label: "Services", to: "/services" as const, icon: Activity, countKey: "services" as const },
-    { label: "Containers", to: "/tasks" as const, icon: Box, countKey: "tasks" as const },
-    { label: "Networking", to: "/networks" as const, icon: Globe },
-    { label: "Volumes", to: "/volumes" as const, icon: Database },
-    { label: "Images", to: "/images" as const, icon: HardDrive, countKey: "images" as const },
-    { label: "Secrets", to: "/secrets" as const, icon: KeyRound, countKey: "secrets" as const },
-    { label: "Configs", to: "/configs" as const, icon: FileText, countKey: "configs" as const },
-    { label: "Logs", to: "/logs" as const, icon: Terminal },
-];
+type NavItem = { label: string; to: string; icon: typeof LayoutDashboard; countKey?: string };
+type NavSection = { heading?: string; items: NavItem[] };
 
-const bottomNav = [{ label: "Settings", to: "/settings" as const, icon: Settings }];
+const navSections: NavSection[] = [
+    {
+        heading: "Cluster",
+        items: [
+            { label: "Overview", to: "/" as const, icon: LayoutDashboard },
+            { label: "Nodes", to: "/nodes" as const, icon: Server, countKey: "nodes" as const },
+        ],
+    },
+    {
+        heading: "Workloads",
+        items: [
+            { label: "Stacks", to: "/stacks" as const, icon: Layers, countKey: "stacks" as const },
+            { label: "Services", to: "/services" as const, icon: Activity, countKey: "services" as const },
+            { label: "Containers", to: "/tasks" as const, icon: Box, countKey: "tasks" as const },
+        ],
+    },
+    {
+        heading: "Infrastructure",
+        items: [
+            { label: "Networks", to: "/networks" as const, icon: Globe },
+            { label: "Volumes", to: "/volumes" as const, icon: Database },
+            { label: "Images", to: "/images" as const, icon: HardDrive, countKey: "images" as const },
+        ],
+    },
+    {
+        heading: "Configuration",
+        items: [
+            { label: "Secrets", to: "/secrets" as const, icon: KeyRound, countKey: "secrets" as const },
+            { label: "Configs", to: "/configs" as const, icon: FileText, countKey: "configs" as const },
+        ],
+    },
+    {
+        heading: "Observability",
+        items: [{ label: "Logs", to: "/logs" as const, icon: Terminal }],
+    },
+];
 
 export function SidebarNav() {
     const matches = useMatches();
@@ -34,7 +58,6 @@ export function SidebarNav() {
     const { data: nodes } = useNodes();
     const { data: stacks } = useStacks();
     const { data: taskStats } = useTaskStats();
-    const { data: metricsData } = useClusterMetrics();
     const { data: imagesData } = useImages();
     const { data: secrets } = useSecrets();
     const { data: configs } = useConfigs();
@@ -54,94 +77,66 @@ export function SidebarNav() {
         return currentPath.startsWith(to);
     }
 
-    // Compute resource usage for footer gauge
-    const agents = metricsData?.agents ?? [];
-    let resourcePct = 0;
-    if (agents.length > 0) {
-        const avgCpu = agents.reduce((sum, a) => sum + a.node.cpuPercent, 0) / agents.length;
-        const totalMemUsed = agents.reduce((sum, a) => sum + a.node.memoryUsed, 0);
-        const totalMemTotal = agents.reduce((sum, a) => sum + a.node.memoryTotal, 0);
-        const memPct = totalMemTotal > 0 ? (totalMemUsed / totalMemTotal) * 100 : 0;
-        resourcePct = Math.round((avgCpu + memPct) / 2);
-    }
-
     return (
-        <aside className='flex w-60 shrink-0 flex-col border-r border-border bg-card'>
-            {/* Cluster Switcher */}
-            <div className='border-b border-border p-3'>
-                <ClusterSwitcher />
-            </div>
-
+        <aside data-tauri-drag-region className='flex w-60 shrink-0 flex-col bg-sidebar pt-(--titlebar-inset)'>
             {/* Main Navigation */}
             <nav className='flex-1 overflow-y-auto px-3 py-3'>
-                <div className='space-y-0.5'>
-                    {mainNav.map((item) => {
-                        const active = isActive(item.to);
-                        const count = item.countKey ? counts[item.countKey] : undefined;
+                <div className='space-y-4'>
+                    {navSections.map((section) => (
+                        <div key={section.heading}>
+                            {section.heading && (
+                                <p className='mb-1 px-3 text-[11px] font-semibold tracking-wider text-sidebar-foreground/40 uppercase'>{section.heading}</p>
+                            )}
+                            <div className='space-y-0.5'>
+                                {section.items.map((item) => {
+                                    const active = isActive(item.to);
+                                    const count = item.countKey ? counts[item.countKey] : undefined;
 
-                        return (
-                            <Link
-                                key={item.to}
-                                to={item.to}
-                                className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                                    active ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground'
-                                }`}
-                            >
-                                <item.icon className='size-4' />
-                                <span className='flex-1'>{item.label}</span>
-                                {count !== undefined && count > 0 && (
-                                    <span
-                                        className={`rounded-full px-1.5 py-0.5 font-mono text-[10px] leading-none ${
-                                            active ? 'bg-primary/20 text-primary' : 'bg-muted text-muted-foreground'
-                                        }`}
-                                    >
-                                        {count}
-                                    </span>
-                                )}
-                            </Link>
-                        );
-                    })}
+                                    return (
+                                        <Link
+                                            key={item.to}
+                                            to={item.to}
+                                            className={`flex items-center gap-3 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                                                active
+                                                    ? 'bg-sidebar-accent text-sidebar-primary'
+                                                    : 'text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground'
+                                            }`}
+                                        >
+                                            <item.icon className='size-4' />
+                                            <span className='flex-1'>{item.label}</span>
+                                            {count !== undefined && count > 0 && (
+                                                <span
+                                                    className={`rounded-full px-1.5 py-0.5 font-mono text-[10px] leading-none ${
+                                                        active ? 'bg-sidebar-primary/20 text-sidebar-primary' : 'bg-sidebar-accent text-sidebar-foreground/60'
+                                                    }`}
+                                                >
+                                                    {count}
+                                                </span>
+                                            )}
+                                        </Link>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    ))}
                 </div>
             </nav>
 
-            {/* Bottom Navigation */}
-            <div className='border-t border-border px-3 py-3'>
-                <div className='space-y-0.5'>
-                    {bottomNav.map((item) => {
-                        const active = isActive(item.to);
-                        return (
-                            <Link
-                                key={item.to}
-                                to={item.to}
-                                className={`flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                                    active ? 'bg-primary/10 text-primary' : 'text-muted-foreground hover:bg-accent hover:text-foreground'
-                                }`}
-                            >
-                                <item.icon className='size-4' />
-                                <span>{item.label}</span>
-                            </Link>
-                        );
-                    })}
-                </div>
+            {/* Bottom: Settings + Cluster Switcher */}
+            <div className='space-y-0.5 px-3 pb-3'>
+                <Link
+                    to='/settings'
+                    className={`flex items-center gap-3 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                        isActive("/settings")
+                            ? 'bg-sidebar-accent text-sidebar-primary'
+                            : 'text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground'
+                    }`}
+                >
+                    <Settings className='size-4' />
+                    <span>Settings</span>
+                </Link>
+                <ClusterSwitcher />
             </div>
-
-            {/* Resource Usage Footer */}
-            {agents.length > 0 && (
-                <div className='border-t border-border px-4 py-3'>
-                    <div className='flex items-center justify-between text-[11px] text-muted-foreground'>
-                        <span>Resource Usage</span>
-                        <span className='font-mono'>{resourcePct}%</span>
-                    </div>
-                    <div className='mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted'>
-                        <div
-                            className={`h-full rounded-full transition-all ${
-                                resourcePct > 80 ? "bg-destructive" : resourcePct > 60 ? "bg-warning" : "bg-primary"
-                            }`}
-                            style={{ width: `${Math.min(resourcePct, 100)}%` }}
-                        />
-                    </div>
-                </div>
-            )}
         </aside>
     );
 }

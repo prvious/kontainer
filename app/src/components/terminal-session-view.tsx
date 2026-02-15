@@ -1,13 +1,11 @@
 import { useCallback, useEffect, useRef } from "react";
-import { Terminal } from "@xterm/xterm";
-import { FitAddon } from "@xterm/addon-fit";
+import { Terminal, FitAddon, init as initGhostty } from "ghostty-web";
 import { useExecStream } from "@/hooks/use-exec-stream";
 import { useSettings } from "@/hooks/use-settings";
 import { Button } from "@/components/ui/button";
 import { RotateCw } from "lucide-react";
 import type { ExecTarget } from "@/contexts/terminal-context-value";
 import type { ExecStatus } from "@/hooks/use-exec-stream";
-import "@xterm/xterm/css/xterm.css";
 
 interface TerminalSessionViewProps {
     target: ExecTarget;
@@ -38,71 +36,81 @@ export function TerminalSessionView({ target, onStatusChange }: TerminalSessionV
 
     // Initialize terminal
     useEffect(() => {
+        const ghosttyReady = initGhostty();
+
         if (!termContainerRef.current) return;
+        const container = termContainerRef.current;
+        let cancelled = false;
+        let observer: ResizeObserver | null = null;
+        let term: Terminal | null = null;
 
-        // Clear leftover DOM nodes — xterm's dispose() does not remove them
-        termContainerRef.current.replaceChildren();
+        ghosttyReady.then(() => {
+            if (cancelled) return;
 
-        const term = new Terminal({
-            cursorBlink: true,
-            fontSize: terminalDefaults.fontSize,
-            fontFamily: terminalDefaults.fontFamily,
-            scrollback: terminalDefaults.scrollback,
-            theme: {
-                background: "#1a1b26",
-                foreground: "#c0caf5",
-                cursor: "#c0caf5",
-                selectionBackground: "#33467c",
-                black: "#15161e",
-                red: "#f7768e",
-                green: "#9ece6a",
-                yellow: "#e0af68",
-                blue: "#7aa2f7",
-                magenta: "#bb9af7",
-                cyan: "#7dcfff",
-                white: "#a9b1d6",
-                brightBlack: "#414868",
-                brightRed: "#f7768e",
-                brightGreen: "#9ece6a",
-                brightYellow: "#e0af68",
-                brightBlue: "#7aa2f7",
-                brightMagenta: "#bb9af7",
-                brightCyan: "#7dcfff",
-                brightWhite: "#c0caf5",
-            },
-        });
+            container.replaceChildren();
 
-        const fitAddon = new FitAddon();
-        term.loadAddon(fitAddon);
-        term.open(termContainerRef.current);
+            term = new Terminal({
+                cursorBlink: true,
+                fontSize: terminalDefaults.fontSize,
+                fontFamily: terminalDefaults.fontFamily,
+                scrollback: terminalDefaults.scrollback,
+                theme: {
+                    background: "#1a1b26",
+                    foreground: "#c0caf5",
+                    cursor: "#c0caf5",
+                    selectionBackground: "#33467c",
+                    black: "#15161e",
+                    red: "#f7768e",
+                    green: "#9ece6a",
+                    yellow: "#e0af68",
+                    blue: "#7aa2f7",
+                    magenta: "#bb9af7",
+                    cyan: "#7dcfff",
+                    white: "#a9b1d6",
+                    brightBlack: "#414868",
+                    brightRed: "#f7768e",
+                    brightGreen: "#9ece6a",
+                    brightYellow: "#e0af68",
+                    brightBlue: "#7aa2f7",
+                    brightMagenta: "#bb9af7",
+                    brightCyan: "#7dcfff",
+                    brightWhite: "#c0caf5",
+                },
+            });
 
-        requestAnimationFrame(() => {
-            fitAddon.fit();
-        });
+            const fitAddon = new FitAddon();
+            term.loadAddon(fitAddon);
+            term.open(container);
 
-        term.onData((data) => sendInput(data));
-
-        terminalRef.current = term;
-        fitAddonRef.current = fitAddon;
-        attachTerminal(term);
-
-        const cols = term.cols;
-        const rows = term.rows;
-        connect(cols, rows);
-
-        // ResizeObserver — also fires when panel transitions from hidden to visible
-        const observer = new ResizeObserver(() => {
             requestAnimationFrame(() => {
                 fitAddon.fit();
-                sendResize(term.cols, term.rows);
             });
+
+            term.onData((data) => sendInput(data));
+
+            terminalRef.current = term;
+            fitAddonRef.current = fitAddon;
+            attachTerminal(term);
+
+            const cols = term.cols;
+            const rows = term.rows;
+            connect(cols, rows);
+
+            // ResizeObserver — also fires when panel transitions from hidden to visible
+            observer = new ResizeObserver(() => {
+                requestAnimationFrame(() => {
+                    fitAddon.fit();
+                    sendResize(term!.cols, term!.rows);
+                });
+            });
+            observer.observe(container);
         });
-        observer.observe(termContainerRef.current);
 
         return () => {
-            observer.disconnect();
+            cancelled = true;
+            observer?.disconnect();
             disconnect();
-            term.dispose();
+            term?.dispose();
             terminalRef.current = null;
             fitAddonRef.current = null;
         };

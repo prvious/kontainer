@@ -6,6 +6,15 @@ vi.mock("@tauri-apps/api/core", () => ({
     invoke: vi.fn(),
 }));
 
+// Mock @tauri-apps/api/window
+vi.mock("@tauri-apps/api/window", () => ({
+    getCurrentWindow: () => ({
+        theme: vi.fn(() => Promise.resolve("light")),
+        setTheme: vi.fn(() => Promise.resolve()),
+        onThemeChanged: vi.fn(() => Promise.resolve(() => {})),
+    }),
+}));
+
 // Mock @tauri-apps/api/event
 vi.mock("@tauri-apps/api/event", () => ({
     listen: vi.fn(() => Promise.resolve(() => {})),

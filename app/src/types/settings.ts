@@ -5,6 +5,7 @@ export interface AppSettings {
     terminalFontFamily: string | null;
     terminalScrollback: number | null;
     font: string | null;
+    scheme: string | null;
 }
 
 export interface AgentSettings {

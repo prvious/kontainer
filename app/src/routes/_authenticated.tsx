@@ -21,13 +21,15 @@ function AuthenticatedLayout() {
     return (
         <TerminalProvider>
             <CommandPaletteProvider>
-                <div className='flex h-screen overflow-hidden bg-background'>
+                <div className='flex h-screen overflow-hidden p-2 pl-0'>
                     <SidebarNav />
                     <div className='flex flex-1 flex-col overflow-hidden'>
                         <DashboardHeader />
-                        <main className='flex-1 overflow-y-auto'>
-                            <Outlet />
-                        </main>
+                        <div className='grain flex flex-1 flex-col overflow-hidden rounded-xl bg-background shadow-sm'>
+                            <main className='flex-1 overflow-y-auto'>
+                                <Outlet />
+                            </main>
+                        </div>
                     </div>
                 </div>
                 <CommandPalette />
