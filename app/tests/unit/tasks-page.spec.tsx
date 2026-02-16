@@ -165,7 +165,7 @@ describe("TasksPage", () => {
         renderWithProviders();
 
         await waitFor(() => {
-            expect(screen.getByText("3 tasks")).toBeInTheDocument();
+            expect(screen.getByText("3")).toBeInTheDocument();
         });
     });
 
@@ -180,8 +180,6 @@ describe("TasksPage", () => {
         await waitFor(() => {
             expect(screen.getByText("No tasks found")).toBeInTheDocument();
         });
-
-        expect(screen.getByText("Deployment tasks and operations will appear here")).toBeInTheDocument();
     });
 
     it("shows error state when fetch fails", async () => {
@@ -210,7 +208,7 @@ describe("TasksPage", () => {
             expect(screen.getByText("web")).toBeInTheDocument();
         });
 
-        const searchInput = screen.getByPlaceholderText("Search tasks...");
+        const searchInput = screen.getByPlaceholderText("Filter tasks...");
         await user.type(searchInput, "api");
 
         // Should show only the api task
@@ -232,14 +230,12 @@ describe("TasksPage", () => {
             expect(screen.getByText("web")).toBeInTheDocument();
         });
 
-        const searchInput = screen.getByPlaceholderText("Search tasks...");
+        const searchInput = screen.getByPlaceholderText("Filter tasks...");
         await user.type(searchInput, "nonexistent");
 
         await waitFor(() => {
-            expect(screen.getByText("No tasks match your search")).toBeInTheDocument();
+            expect(screen.getByText("No tasks match your filter")).toBeInTheDocument();
         });
-
-        expect(screen.getByText("Try a different search term")).toBeInTheDocument();
     });
 
     it("renders state badges with correct colors", async () => {

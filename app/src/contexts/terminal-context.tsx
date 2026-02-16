@@ -6,8 +6,10 @@ import type { ExecTarget, TerminalSession } from "@/contexts/terminal-context-va
 export function TerminalProvider({ children }: { children: React.ReactNode }) {
     const [sessions, setSessions] = useState<TerminalSession[]>([]);
     const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+    const [isMinimized, setMinimized] = useState(false);
 
     const openExec = useCallback((target: ExecTarget) => {
+        setMinimized(false);
         setSessions((prev) => {
             const existing = prev.find((s) => s.target.containerId === target.containerId);
             if (existing) {
@@ -43,7 +45,9 @@ export function TerminalProvider({ children }: { children: React.ReactNode }) {
     const hasAnySessions = sessions.length > 0;
 
     return (
-        <TerminalContext value={{ sessions, activeSessionId, openExec, closeSession, closeAllSessions, switchSession, hasAnySessions }}>
+        <TerminalContext
+            value={{ sessions, activeSessionId, openExec, closeSession, closeAllSessions, switchSession, hasAnySessions, isMinimized, setMinimized }}
+        >
             {children}
             {hasAnySessions && <TerminalPanel />}
         </TerminalContext>

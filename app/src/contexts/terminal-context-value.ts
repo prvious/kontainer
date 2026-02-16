@@ -22,6 +22,8 @@ export interface TerminalContextValue {
     closeAllSessions: () => void;
     switchSession: (sessionId: string) => void;
     hasAnySessions: boolean;
+    isMinimized: boolean;
+    setMinimized: (minimized: boolean) => void;
 }
 
 export const TerminalContext = createContext<TerminalContextValue | null>(null);

@@ -1,6 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useStacks } from "@/hooks/use-stacks";
-import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -22,13 +21,13 @@ function formatRelativeTime(iso: string): string {
 
 function HealthDot({ stack }: { stack: StackItem }) {
     const healthy = stack.runningReplicas >= stack.desiredReplicas && stack.desiredReplicas > 0;
-    return <span className={`size-2 rounded-full ${healthy ? "bg-success" : 'animate-pulse-dot bg-destructive'}`} />;
+    return <span className={`size-1.5 rounded-full ${healthy ? "bg-success" : 'animate-pulse-dot bg-destructive'}`} />;
 }
 
 function ReplicasBadge({ stack }: { stack: StackItem }) {
     const healthy = stack.runningReplicas === stack.desiredReplicas && stack.desiredReplicas > 0;
     return (
-        <Badge variant={healthy ? "default" : "destructive"} className='font-mono'>
+        <Badge variant={healthy ? "default" : "destructive"} className='h-4 px-1.5 font-mono text-[10px]'>
             {stack.runningReplicas}/{stack.desiredReplicas}
         </Badge>
     );
@@ -38,39 +37,39 @@ function StacksTable({ stacks }: { stacks: StackItem[] }) {
     return (
         <Table>
             <TableHeader>
-                <TableRow>
-                    <TableHead className='w-8' />
-                    <TableHead>Stack</TableHead>
-                    <TableHead>Services</TableHead>
-                    <TableHead>Replicas</TableHead>
-                    <TableHead className='text-right'>Updated</TableHead>
+                <TableRow className='bg-muted/40 hover:bg-muted/40'>
+                    <TableHead className='h-7 w-6 pr-0 pl-3' />
+                    <TableHead className='h-7 text-[11px]'>Stack</TableHead>
+                    <TableHead className='h-7 text-[11px]'>Services</TableHead>
+                    <TableHead className='h-7 text-[11px]'>Replicas</TableHead>
+                    <TableHead className='h-7 text-right text-[11px]'>Updated</TableHead>
                 </TableRow>
             </TableHeader>
             <TableBody>
                 {stacks.map((stack) => (
                     <TableRow key={stack.name} className='group'>
-                        <TableCell>
+                        <TableCell className='py-1.5 pr-0 pl-3'>
                             <HealthDot stack={stack} />
                         </TableCell>
-                        <TableCell>
+                        <TableCell className='py-1.5'>
                             <Link
                                 to='/stacks/$stackName'
                                 params={{ stackName: stack.name }}
-                                className='inline-flex items-center gap-1.5 font-medium hover:underline'
+                                className='inline-flex items-center gap-1 text-xs font-medium hover:underline'
                             >
-                                <Layers className='size-3.5 text-muted-foreground' />
+                                <Layers className='size-3 text-muted-foreground' />
                                 {stack.name}
                                 <ArrowUpRight className='size-3 opacity-0 transition-opacity group-hover:opacity-100' />
                             </Link>
                         </TableCell>
-                        <TableCell>
-                            <span className='font-mono text-sm'>{stack.services}</span>
+                        <TableCell className='py-1.5'>
+                            <span className='font-mono text-[11px]'>{stack.services}</span>
                         </TableCell>
-                        <TableCell>
+                        <TableCell className='py-1.5'>
                             <ReplicasBadge stack={stack} />
                         </TableCell>
-                        <TableCell className='text-right'>
-                            <span className='text-xs text-muted-foreground'>{formatRelativeTime(stack.updatedAt)}</span>
+                        <TableCell className='py-1.5 text-right'>
+                            <span className='font-mono text-[11px] text-muted-foreground'>{formatRelativeTime(stack.updatedAt)}</span>
                         </TableCell>
                     </TableRow>
                 ))}
@@ -81,21 +80,23 @@ function StacksTable({ stacks }: { stacks: StackItem[] }) {
 
 function LoadingSkeleton() {
     return (
-        <div className='p-6'>
-            <Card>
-                <CardContent className='p-0'>
-                    <div className='space-y-0'>
-                        {[1, 2, 3].map((i) => (
-                            <div key={i} className='flex items-center gap-4 border-b px-4 py-3 last:border-0'>
-                                <Skeleton className='size-2 rounded-full' />
-                                <Skeleton className='h-4 w-32' />
-                                <Skeleton className='h-4 w-12' />
-                                <Skeleton className='ml-auto h-5 w-16' />
-                            </div>
-                        ))}
+        <div className='flex flex-col'>
+            <div className='flex h-10 items-center gap-3 border-b border-border px-3'>
+                <Skeleton className='h-4 w-14' />
+                <Skeleton className='h-4 w-8 rounded-full' />
+                <div className='flex-1' />
+                <Skeleton className='h-6 w-40' />
+            </div>
+            <div className='space-y-0'>
+                {[1, 2, 3].map((i) => (
+                    <div key={i} className='flex items-center gap-3 border-b border-border px-3 py-2 last:border-0'>
+                        <Skeleton className='size-1.5 rounded-full' />
+                        <Skeleton className='h-3 w-28' />
+                        <Skeleton className='h-3 w-8' />
+                        <Skeleton className='ml-auto h-4 w-12 rounded-full' />
                     </div>
-                </CardContent>
-            </Card>
+                ))}
+            </div>
         </div>
     );
 }
@@ -112,37 +113,39 @@ function StacksPage() {
 
     if (error) {
         return (
-            <div className='flex flex-col items-center justify-center gap-2 py-12 text-sm text-destructive'>
-                <AlertCircle className='size-5' />
+            <div className='flex flex-col items-center justify-center gap-2 py-12 text-xs text-destructive'>
+                <AlertCircle className='size-4' />
                 <p>Failed to load stacks</p>
             </div>
         );
     }
 
     return (
-        <div className='p-6'>
-            <div className='mb-6 flex items-center justify-between'>
-                <div>
-                    <h1 className='text-xl font-semibold tracking-tight'>Stacks</h1>
-                    <p className='mt-1 text-sm text-muted-foreground'>{stacks?.length ?? 0} stacks</p>
-                </div>
+        <div className='flex h-full flex-col'>
+            <div className='flex h-10 shrink-0 items-center gap-3 border-b border-border px-3'>
+                <h1 className='text-xs font-semibold'>Stacks</h1>
+                <span className='rounded-md bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground'>{stacks?.length ?? 0}</span>
+                <div className='flex-1' />
                 <div className='relative'>
-                    <Search className='absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground' />
-                    <Input placeholder='Search stacks...' value={search} onChange={(e) => setSearch(e.target.value)} className='h-8 w-56 pl-8 text-sm' />
+                    <Search className='absolute top-1/2 left-2 size-3 -translate-y-1/2 text-muted-foreground' />
+                    <Input
+                        placeholder='Filter stacks...'
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        className='h-6 w-48 rounded-sm border-border bg-transparent pl-7 text-[11px] focus-visible:ring-1'
+                    />
                 </div>
             </div>
-            {filtered.length === 0 ? (
-                <div className='flex flex-col items-center justify-center gap-2 py-12 text-sm text-muted-foreground'>
-                    <Layers className='size-5' />
-                    <p>{search ? "No stacks match your search" : "No stacks found"}</p>
-                </div>
-            ) : (
-                <Card>
-                    <CardContent className='p-0'>
-                        <StacksTable stacks={filtered} />
-                    </CardContent>
-                </Card>
-            )}
+            <div className='flex-1 overflow-y-auto'>
+                {filtered.length === 0 ? (
+                    <div className='flex flex-col items-center justify-center gap-1.5 py-12 text-xs text-muted-foreground'>
+                        <Layers className='size-4' />
+                        <p>{search ? "No stacks match your filter" : "No stacks found"}</p>
+                    </div>
+                ) : (
+                    <StacksTable stacks={filtered} />
+                )}
+            </div>
         </div>
     );
 }

@@ -55,26 +55,26 @@ export function TerminalSessionView({ target, onStatusChange }: TerminalSessionV
                 fontFamily: terminalDefaults.fontFamily,
                 scrollback: terminalDefaults.scrollback,
                 theme: {
-                    background: "#1a1b26",
-                    foreground: "#c0caf5",
-                    cursor: "#c0caf5",
-                    selectionBackground: "#33467c",
-                    black: "#15161e",
-                    red: "#f7768e",
-                    green: "#9ece6a",
-                    yellow: "#e0af68",
-                    blue: "#7aa2f7",
-                    magenta: "#bb9af7",
-                    cyan: "#7dcfff",
-                    white: "#a9b1d6",
-                    brightBlack: "#414868",
-                    brightRed: "#f7768e",
-                    brightGreen: "#9ece6a",
-                    brightYellow: "#e0af68",
-                    brightBlue: "#7aa2f7",
-                    brightMagenta: "#bb9af7",
-                    brightCyan: "#7dcfff",
-                    brightWhite: "#c0caf5",
+                    background: "#08090b",
+                    foreground: "#e0e0e0",
+                    cursor: "#e0e0e0",
+                    selectionBackground: "#3a3b46",
+                    black: "#18191f",
+                    red: "#e5706b",
+                    green: "#8fbf6a",
+                    yellow: "#d4a855",
+                    blue: "#6b9ef7",
+                    magenta: "#b08def",
+                    cyan: "#6bc4d6",
+                    white: "#c8c8c8",
+                    brightBlack: "#4a4b56",
+                    brightRed: "#f08a85",
+                    brightGreen: "#a3d47e",
+                    brightYellow: "#e0be6f",
+                    brightBlue: "#85b4f7",
+                    brightMagenta: "#c4a7f5",
+                    brightCyan: "#85d8ea",
+                    brightWhite: "#eeeeee",
                 },
             });
 
@@ -130,7 +130,7 @@ export function TerminalSessionView({ target, onStatusChange }: TerminalSessionV
         <div className='relative size-full'>
             <div ref={termContainerRef} className='size-full p-1' />
             {showReconnect && (
-                <div className='absolute inset-0 flex items-center justify-center bg-[#1a1b26]/80'>
+                <div className='absolute inset-0 flex items-center justify-center bg-[#08090b]/80'>
                     <Button
                         variant='outline'
                         size='sm'

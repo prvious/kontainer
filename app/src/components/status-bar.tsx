@@ -1,10 +1,11 @@
 import { useNavigate } from "@tanstack/react-router";
-import { Server, ListChecks, Cpu, MemoryStick } from "lucide-react";
+import { Server, ListChecks, Cpu, MemoryStick, Terminal, ChevronUp, X } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAuth } from "@/hooks/use-auth";
 import { useNodes } from "@/hooks/use-nodes";
 import { useTaskStats } from "@/hooks/use-task-stats";
 import { useClusterMetrics } from "@/hooks/use-cluster-metrics";
+import { useTerminal } from "@/hooks/use-terminal";
 
 function resourceColor(pct: number): string {
     if (pct > 90) return "text-destructive";
@@ -48,6 +49,9 @@ export function StatusBar() {
     const cpuColor = avgCpu !== null ? resourceColor(avgCpu) : "";
     const memColor = avgMem !== null ? resourceColor(avgMem) : "";
 
+    const { sessions, activeSessionId, isMinimized, setMinimized, switchSession, closeSession } = useTerminal();
+    const showSessionPills = sessions.length > 0;
+
     function taskColorClass(): string {
         if (taskDanger) return "text-destructive";
         if (taskWarning) return "text-warning";
@@ -56,7 +60,57 @@ export function StatusBar() {
 
     return (
         <TooltipProvider>
-            <div className='flex h-7 shrink-0 items-center gap-1.5 border-t border-border bg-card px-3 text-xs text-muted-foreground'>
+            <div className='flex h-7 shrink-0 items-center gap-1.5 border-t border-border px-3 text-xs text-foreground'>
+                {/* Minimized terminal sessions */}
+                {showSessionPills && (
+                    <>
+                        <div className='flex items-center gap-1'>
+                            {sessions.map((session) => {
+                                const name = session.target.containerName || session.target.containerId.slice(0, 12);
+                                const isActive = session.id === activeSessionId;
+                                return (
+                                    <button
+                                        key={session.id}
+                                        className={`group flex items-center gap-1 rounded-md px-1.5 py-0.5 transition-colors hover:bg-accent hover:text-foreground ${isActive ? 'bg-accent text-foreground' : "text-muted-foreground"}`}
+                                        onClick={() => {
+                                            switchSession(session.id);
+                                            setMinimized(false);
+                                        }}
+                                    >
+                                        <Terminal className='size-3' />
+                                        <span className='max-w-[80px] truncate'>{name}</span>
+                                        <span
+                                            className='shrink-0 rounded p-0.5 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-muted'
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                closeSession(session.id);
+                                            }}
+                                            role='button'
+                                            tabIndex={0}
+                                        >
+                                            <X className='size-2.5' />
+                                        </span>
+                                    </button>
+                                );
+                            })}
+                            {isMinimized && (
+                                <button
+                                    className='rounded-md p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
+                                    onClick={() => setMinimized(false)}
+                                    title='Expand terminal'
+                                >
+                                    <ChevronUp className='size-3.5' />
+                                </button>
+                            )}
+                        </div>
+
+                        <span className='h-3 w-px bg-border' />
+                    </>
+                )}
+
+                {/* Spacer */}
+                <div className='flex-1' />
+
                 {/* Cluster name */}
                 <div className='flex items-center gap-1.5'>
                     <span className='animate-pulse-dot size-1.5 shrink-0 rounded-full bg-primary' />
@@ -103,8 +157,7 @@ export function StatusBar() {
                     <TooltipContent>View tasks</TooltipContent>
                 </Tooltip>
 
-                {/* Spacer */}
-                <div className='flex-1' />
+                <span className='h-3 w-px bg-border' />
 
                 {/* CPU */}
                 <Tooltip>

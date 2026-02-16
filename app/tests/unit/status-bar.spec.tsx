@@ -10,6 +10,7 @@ import type { NodeItem } from "@/types/nodes";
 import type { TaskStats } from "@/types/task-stats";
 import type { ClusterMetricsResponse } from "@/types/metrics";
 import { StatusBar } from "@/components/status-bar";
+import { TerminalProvider } from "@/contexts/terminal-context";
 
 function createTestQueryClient() {
     return new QueryClient({
@@ -177,7 +178,9 @@ function renderWithProviders(authOverrides: Partial<AuthContextValue> = {}) {
     return render(
         <AuthContext value={auth}>
             <QueryClientProvider client={queryClient}>
-                <RouterProvider router={router} />
+                <TerminalProvider>
+                    <RouterProvider router={router} />
+                </TerminalProvider>
             </QueryClientProvider>
         </AuthContext>,
     );
@@ -383,7 +386,9 @@ describe("StatusBar", () => {
         render(
             <AuthContext value={auth}>
                 <QueryClientProvider client={queryClient}>
-                    <RouterProvider router={router} />
+                    <TerminalProvider>
+                        <RouterProvider router={router} />
+                    </TerminalProvider>
                 </QueryClientProvider>
             </AuthContext>,
         );
@@ -430,7 +435,9 @@ describe("StatusBar", () => {
         render(
             <AuthContext value={auth}>
                 <QueryClientProvider client={queryClient}>
-                    <RouterProvider router={router} />
+                    <TerminalProvider>
+                        <RouterProvider router={router} />
+                    </TerminalProvider>
                 </QueryClientProvider>
             </AuthContext>,
         );
