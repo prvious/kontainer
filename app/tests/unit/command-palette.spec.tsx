@@ -138,6 +138,8 @@ function renderPalette(paletteOverrides: Partial<CommandPaletteContextValue> = {
     const paletteCtx: CommandPaletteContextValue = {
         open: true,
         setOpen: mockSetOpen,
+        initialSearch: "",
+        setInitialSearch: vi.fn(),
         ...paletteOverrides,
     };
     const router = createTestRouter();

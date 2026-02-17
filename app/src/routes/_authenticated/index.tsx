@@ -5,10 +5,8 @@ import { useTaskStats } from "@/hooks/use-task-stats";
 import { useClusterMetrics } from "@/hooks/use-cluster-metrics";
 import { StatsCards } from "@/components/dashboard/stats-cards";
 import { ResourceCharts } from "@/components/dashboard/resource-charts";
-import { ContainerTable } from "@/components/dashboard/container-table";
-import { ServicesList } from "@/components/dashboard/services-list";
-import { StacksList } from "@/components/dashboard/stacks-list";
-import { useStacks } from "@/hooks/use-stacks";
+import { ServiceHealthGrid } from "@/components/dashboard/service-health-grid";
+import { ActivityFeed } from "@/components/dashboard/activity-feed";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AlertTriangle, RefreshCw } from "lucide-react";
@@ -53,7 +51,6 @@ function DashboardPage() {
     const { data: nodes, isLoading: nodesLoading, error: nodesError } = useNodes();
     const { data: taskStats, isLoading: taskStatsLoading, error: taskStatsError } = useTaskStats();
     const { data: metricsData } = useClusterMetrics();
-    const { data: stacks } = useStacks();
 
     const isLoading = servicesLoading || nodesLoading || taskStatsLoading;
     const error = servicesError || nodesError || taskStatsError;
@@ -75,7 +72,6 @@ function DashboardPage() {
     const serviceItems = services ?? [];
     const nodeItems = nodes ?? [];
     const stats = taskStats ?? { total: 0, running: 0, failed: 0, preparing: 0, complete: 0, desiredRunning: 0 };
-    const stackItems = stacks ?? [];
     const agents = metricsData?.agents ?? [];
     const history = metricsData?.history ?? [];
     const lastUpdate = dataUpdatedAt ? new Date(dataUpdatedAt).toLocaleTimeString() : "";
@@ -100,21 +96,18 @@ function DashboardPage() {
             </div>
 
             {/* Stats Cards */}
-            <StatsCards nodes={nodeItems} agents={agents} />
+            <StatsCards nodes={nodeItems} agents={agents} taskStats={stats} />
 
             {/* Resource Charts */}
             <ResourceCharts agents={agents} history={history} />
 
-            {/* Container Table */}
-            <ContainerTable agents={agents} taskStats={taskStats ?? null} />
-
-            {/* Services + Stacks */}
+            {/* Service Health + Activity Feed */}
             <div className='grid gap-4 lg:grid-cols-5'>
                 <div className='lg:col-span-3'>
-                    <ServicesList services={serviceItems} />
+                    <ServiceHealthGrid services={serviceItems} />
                 </div>
                 <div className='lg:col-span-2'>
-                    <StacksList stacks={stackItems} />
+                    <ActivityFeed />
                 </div>
             </div>
         </div>

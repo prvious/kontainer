@@ -11,6 +11,7 @@ import type { TaskStats } from "@/types/task-stats";
 import type { ClusterMetricsResponse } from "@/types/metrics";
 import { StatusBar } from "@/components/status-bar";
 import { TerminalProvider } from "@/contexts/terminal-context";
+import { CommandPaletteProvider } from "@/contexts/command-palette-context";
 
 function createTestQueryClient() {
     return new QueryClient({
@@ -178,9 +179,11 @@ function renderWithProviders(authOverrides: Partial<AuthContextValue> = {}) {
     return render(
         <AuthContext value={auth}>
             <QueryClientProvider client={queryClient}>
-                <TerminalProvider>
-                    <RouterProvider router={router} />
-                </TerminalProvider>
+                <CommandPaletteProvider>
+                    <TerminalProvider>
+                        <RouterProvider router={router} />
+                    </TerminalProvider>
+                </CommandPaletteProvider>
             </QueryClientProvider>
         </AuthContext>,
     );
@@ -386,9 +389,11 @@ describe("StatusBar", () => {
         render(
             <AuthContext value={auth}>
                 <QueryClientProvider client={queryClient}>
-                    <TerminalProvider>
-                        <RouterProvider router={router} />
-                    </TerminalProvider>
+                    <CommandPaletteProvider>
+                        <TerminalProvider>
+                            <RouterProvider router={router} />
+                        </TerminalProvider>
+                    </CommandPaletteProvider>
                 </QueryClientProvider>
             </AuthContext>,
         );
@@ -435,9 +440,11 @@ describe("StatusBar", () => {
         render(
             <AuthContext value={auth}>
                 <QueryClientProvider client={queryClient}>
-                    <TerminalProvider>
-                        <RouterProvider router={router} />
-                    </TerminalProvider>
+                    <CommandPaletteProvider>
+                        <TerminalProvider>
+                            <RouterProvider router={router} />
+                        </TerminalProvider>
+                    </CommandPaletteProvider>
                 </QueryClientProvider>
             </AuthContext>,
         );

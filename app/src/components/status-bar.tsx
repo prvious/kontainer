@@ -1,11 +1,12 @@
 import { useNavigate } from "@tanstack/react-router";
-import { Server, ListChecks, Cpu, MemoryStick, Terminal, ChevronUp, X } from "lucide-react";
+import { Server, ListChecks, Cpu, MemoryStick, Terminal, ChevronUp, X, Command } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAuth } from "@/hooks/use-auth";
 import { useNodes } from "@/hooks/use-nodes";
 import { useTaskStats } from "@/hooks/use-task-stats";
 import { useClusterMetrics } from "@/hooks/use-cluster-metrics";
 import { useTerminal } from "@/hooks/use-terminal";
+import { useCommandPalette } from "@/hooks/use-command-palette";
 
 function resourceColor(pct: number): string {
     if (pct > 90) return "text-destructive";
@@ -19,6 +20,7 @@ export function StatusBar() {
     const { data: nodes, isLoading: nodesLoading } = useNodes();
     const { data: taskStats, isLoading: taskStatsLoading } = useTaskStats();
     const { data: metrics, isLoading: metricsLoading } = useClusterMetrics();
+    const { setOpen, setInitialSearch } = useCommandPalette();
 
     const activeProfile = profiles.find((p) => p.id === activeProfileId);
     const clusterName = activeProfile?.label ?? "--";
@@ -60,9 +62,9 @@ export function StatusBar() {
 
     return (
         <TooltipProvider>
-            <div className='flex h-7 shrink-0 items-center gap-1.5 border-t border-border px-3 text-xs text-foreground'>
-                {/* Minimized terminal sessions */}
-                {showSessionPills && (
+            <div className='flex h-7 shrink-0 items-center gap-1.5 border-0 border-border px-3 text-xs text-foreground'>
+                {/* Terminal sessions or hint */}
+                {showSessionPills ? (
                     <>
                         <div className='flex items-center gap-1'>
                             {sessions.map((session) => {
@@ -106,6 +108,20 @@ export function StatusBar() {
 
                         <span className='h-3 w-px bg-border' />
                     </>
+                ) : (
+                    <button
+                        className='flex items-center gap-1.5 hover:text-foreground'
+                        onClick={() => {
+                            setInitialSearch("terminal");
+                            setOpen(true);
+                        }}
+                    >
+                        <Terminal className='size-3' />
+                        <span>Terminal</span>
+                        <kbd className='flex items-center gap-0.5 rounded border border-border bg-muted px-1 py-px text-[10px] leading-none text-muted-foreground'>
+                            <Command className='size-2.5' />T
+                        </kbd>
+                    </button>
                 )}
 
                 {/* Spacer */}

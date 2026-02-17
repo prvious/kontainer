@@ -47,7 +47,7 @@ interface CommandItem {
 }
 
 export function CommandPalette() {
-    const { open, setOpen } = useCommandPalette();
+    const { open, setOpen, initialSearch, setInitialSearch } = useCommandPalette();
     const navigate = useNavigate();
     const queryClient = useQueryClient();
     const { resolvedScheme, setScheme } = useAppearance();
@@ -73,23 +73,29 @@ export function CommandPalette() {
     // Reset state when dialog opens/closes
     useEffect(() => {
         if (open) {
-            setSearch("");
+            setSearch(initialSearch);
             setPages([{ kind: "root" }]);
             setSelectedIndex(0);
+            if (initialSearch) setInitialSearch("");
         }
-    }, [open]);
+    }, [open, initialSearch, setInitialSearch]);
 
-    // Global ⌘K / Ctrl+K listener
+    // Global ⌘K / Ctrl+K and ⌘T / Ctrl+T listener
     useEffect(() => {
         function handleKeyDown(e: KeyboardEvent) {
             if ((e.metaKey || e.ctrlKey) && e.key === "k") {
                 e.preventDefault();
                 setOpen(!open);
             }
+            if ((e.metaKey || e.ctrlKey) && e.key === "t") {
+                e.preventDefault();
+                setInitialSearch("terminal");
+                setOpen(true);
+            }
         }
         document.addEventListener("keydown", handleKeyDown);
         return () => document.removeEventListener("keydown", handleKeyDown);
-    }, [open, setOpen]);
+    }, [open, setOpen, setInitialSearch]);
 
     const close = useCallback(() => {
         setOpen(false);
