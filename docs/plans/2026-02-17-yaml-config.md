@@ -4,7 +4,7 @@
 
 **Goal:** Replace all environment variable configuration in the Go agent with a single `kontainer.yml` YAML config file.
 
-**Architecture:** Rewrite `config/config.go` to parse YAML with `gopkg.in/yaml.v3`, resolve `_file` secret references, and validate at startup. Update `main.go` to accept a `--config` flag (default: `./kontainer.yml`). Remove `godotenv` dependency entirely. Thread `Config.Dev` into the metrics action instead of reading `KONTAINER_DEV` from env.
+**Architecture:** Rewrite `config/config.go` to parse YAML with `gopkg.in/yaml.v3`, resolve `file:` prefixed secret references and `${ENV_VAR}` placeholders via a single `resolveValue` function, and validate at startup. Update `main.go` to accept a `--config` flag (default: `./kontainer.yml`). Remove `godotenv` dependency entirely. Thread `Config.Dev` into the metrics action instead of reading `KONTAINER_DEV` from env.
 
 **Tech Stack:** Go stdlib (`flag`, `os`, `strings`), `gopkg.in/yaml.v3`
 
@@ -172,31 +172,55 @@ metrics:
 	}
 }
 
-func TestResolveSecretFromFile(t *testing.T) {
+func TestResolveValue_FilePrefix(t *testing.T) {
 	dir := t.TempDir()
 	secretFile := filepath.Join(dir, "jwt-secret")
 	os.WriteFile(secretFile, []byte("  file-secret-value\n"), 0644)
 
-	configYAML := `jwt_secret_file: ` + secretFile + "\n"
-	configPath := filepath.Join(dir, "kontainer.yml")
-	os.WriteFile(configPath, []byte(configYAML), 0644)
-
-	cfg, err := Load(configPath)
+	result, err := resolveValue("file:" + secretFile)
 	if err != nil {
-		t.Fatalf("Load error: %v", err)
+		t.Fatalf("resolveValue error: %v", err)
 	}
-
-	if cfg.JWTSecret != "file-secret-value" {
-		t.Errorf("JWTSecret = %q, want %q", cfg.JWTSecret, "file-secret-value")
+	if result != "file-secret-value" {
+		t.Errorf("resolveValue = %q, want %q", result, "file-secret-value")
 	}
 }
 
-func TestResolveSecretFromFile_PrecedenceOverInline(t *testing.T) {
+func TestResolveValue_FilePrefix_MissingFile(t *testing.T) {
+	_, err := resolveValue("file:/nonexistent/path/secret")
+	if err == nil {
+		t.Error("expected error for missing secret file")
+	}
+}
+
+func TestResolveValue_EnvVar(t *testing.T) {
+	t.Setenv("TEST_KONTAINER_SECRET", "env-secret-value")
+
+	result, err := resolveValue("${TEST_KONTAINER_SECRET}")
+	if err != nil {
+		t.Fatalf("resolveValue error: %v", err)
+	}
+	if result != "env-secret-value" {
+		t.Errorf("resolveValue = %q, want %q", result, "env-secret-value")
+	}
+}
+
+func TestResolveValue_PlainLiteral(t *testing.T) {
+	result, err := resolveValue("plain-value")
+	if err != nil {
+		t.Fatalf("resolveValue error: %v", err)
+	}
+	if result != "plain-value" {
+		t.Errorf("resolveValue = %q, want %q", result, "plain-value")
+	}
+}
+
+func TestLoad_FilePrefix_JWTSecret(t *testing.T) {
 	dir := t.TempDir()
 	secretFile := filepath.Join(dir, "jwt-secret")
-	os.WriteFile(secretFile, []byte("from-file"), 0644)
+	os.WriteFile(secretFile, []byte("  from-file\n"), 0644)
 
-	configYAML := "jwt_secret: inline-value\njwt_secret_file: " + secretFile + "\n"
+	configYAML := "jwt_secret: file:" + secretFile + "\n"
 	configPath := filepath.Join(dir, "kontainer.yml")
 	os.WriteFile(configPath, []byte(configYAML), 0644)
 
@@ -206,11 +230,29 @@ func TestResolveSecretFromFile_PrecedenceOverInline(t *testing.T) {
 	}
 
 	if cfg.JWTSecret != "from-file" {
-		t.Errorf("JWTSecret = %q, want %q (file should take precedence)", cfg.JWTSecret, "from-file")
+		t.Errorf("JWTSecret = %q, want %q", cfg.JWTSecret, "from-file")
 	}
 }
 
-func TestResolveSecretFromFile_AllSecretFields(t *testing.T) {
+func TestLoad_EnvVar_JWTSecret(t *testing.T) {
+	t.Setenv("TEST_JWT_SECRET", "env-jwt-value")
+
+	dir := t.TempDir()
+	configYAML := "jwt_secret: ${TEST_JWT_SECRET}\n"
+	configPath := filepath.Join(dir, "kontainer.yml")
+	os.WriteFile(configPath, []byte(configYAML), 0644)
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load error: %v", err)
+	}
+
+	if cfg.JWTSecret != "env-jwt-value" {
+		t.Errorf("JWTSecret = %q, want %q", cfg.JWTSecret, "env-jwt-value")
+	}
+}
+
+func TestLoad_AllSecretFields_FilePrefix(t *testing.T) {
 	dir := t.TempDir()
 
 	writeSecret := func(name, value string) string {
@@ -225,12 +267,12 @@ func TestResolveSecretFromFile_AllSecretFields(t *testing.T) {
 	internalFile := writeSecret("internal", "internal-val")
 
 	configYAML := `
-jwt_secret_file: ` + jwtFile + `
+jwt_secret: file:` + jwtFile + `
 github:
-  client_id_file: ` + clientIDFile + `
-  client_secret_file: ` + clientSecretFile + `
+  client_id: file:` + clientIDFile + `
+  client_secret: file:` + clientSecretFile + `
 cluster:
-  internal_secret_file: ` + internalFile + `
+  internal_secret: file:` + internalFile + `
 `
 	configPath := filepath.Join(dir, "kontainer.yml")
 	os.WriteFile(configPath, []byte(configYAML), 0644)
@@ -254,9 +296,9 @@ cluster:
 	}
 }
 
-func TestResolveSecretFromFile_MissingFile(t *testing.T) {
+func TestLoad_FilePrefix_MissingFile_Error(t *testing.T) {
 	dir := t.TempDir()
-	configYAML := "jwt_secret_file: /nonexistent/path/secret\n"
+	configYAML := "jwt_secret: file:/nonexistent/path/secret\n"
 	configPath := filepath.Join(dir, "kontainer.yml")
 	os.WriteFile(configPath, []byte(configYAML), 0644)
 
@@ -276,7 +318,7 @@ func TestLoad_FileNotFound(t *testing.T) {
 
 **Step 2: Run tests to verify they fail**
 
-Run: `go test -C /Users/clovismuneza/Apps/kontainer/agent ./config/...`
+Run: `go test -C agent ./config/...`
 Expected: FAIL — `Load` signature doesn't match yet.
 
 **Step 3: Rewrite config.go**
@@ -295,19 +337,16 @@ import (
 )
 
 type GitHubConfig struct {
-	ClientID         string   `yaml:"client_id"`
-	ClientIDFile     string   `yaml:"client_id_file"`
-	ClientSecret     string   `yaml:"client_secret"`
-	ClientSecretFile string   `yaml:"client_secret_file"`
-	AllowedUsers     []string `yaml:"allowed_users"`
-	AllowedOrgs      []string `yaml:"allowed_orgs"`
+	ClientID     string   `yaml:"client_id"`
+	ClientSecret string   `yaml:"client_secret"`
+	AllowedUsers []string `yaml:"allowed_users"`
+	AllowedOrgs  []string `yaml:"allowed_orgs"`
 }
 
 type ClusterConfig struct {
-	InternalSecret     string   `yaml:"internal_secret"`
-	InternalSecretFile string   `yaml:"internal_secret_file"`
-	FollowerService    string   `yaml:"follower_service"`
-	DevFollowers       []string `yaml:"dev_followers"`
+	InternalSecret  string   `yaml:"internal_secret"`
+	FollowerService string   `yaml:"follower_service"`
+	DevFollowers    []string `yaml:"dev_followers"`
 }
 
 type MetricsConfig struct {
@@ -321,8 +360,7 @@ type Config struct {
 	AgentURL string `yaml:"agent_url"`
 	Role     string `yaml:"role"`
 
-	JWTSecret     string `yaml:"jwt_secret"`
-	JWTSecretFile string `yaml:"jwt_secret_file"`
+	JWTSecret string `yaml:"jwt_secret"`
 
 	GitHub  GitHubConfig  `yaml:"github"`
 	Cluster ClusterConfig `yaml:"cluster"`
@@ -331,7 +369,7 @@ type Config struct {
 }
 
 // Load reads a YAML config file and returns a Config with defaults applied
-// and _file secret references resolved.
+// and secret references resolved (file: prefix and ${ENV_VAR} expansion).
 func Load(path string) (*Config, error) {
 	cfg := &Config{
 		Port:     "8080",
@@ -363,32 +401,36 @@ func Load(path string) (*Config, error) {
 	return cfg, nil
 }
 
-// resolveSecrets reads _file references and populates the corresponding
-// secret fields. File content takes precedence over inline values.
-func resolveSecrets(cfg *Config) error {
-	resolve := func(value *string, filePath string, name string) error {
-		if filePath == "" {
-			return nil
-		}
-		data, err := os.ReadFile(filePath)
+// resolveValue resolves a config string value using one of three methods:
+//   - "file:/path/to/file" → reads the file and trims whitespace
+//   - "${ENV_VAR}" → expands environment variables via os.ExpandEnv
+//   - "plain-value" → returned as-is
+func resolveValue(val string) (string, error) {
+	if strings.HasPrefix(val, "file:") {
+		data, err := os.ReadFile(strings.TrimPrefix(val, "file:"))
 		if err != nil {
-			return fmt.Errorf("reading %s from %q: %w", name, filePath, err)
+			return "", fmt.Errorf("reading secret from %q: %w", val, err)
 		}
-		*value = strings.TrimSpace(string(data))
-		return nil
+		return strings.TrimSpace(string(data)), nil
 	}
+	return os.ExpandEnv(val), nil
+}
 
-	if err := resolve(&cfg.JWTSecret, cfg.JWTSecretFile, "jwt_secret_file"); err != nil {
-		return err
+// resolveSecrets calls resolveValue on all sensitive string fields.
+func resolveSecrets(cfg *Config) error {
+	var err error
+
+	if cfg.JWTSecret, err = resolveValue(cfg.JWTSecret); err != nil {
+		return fmt.Errorf("jwt_secret: %w", err)
 	}
-	if err := resolve(&cfg.GitHub.ClientID, cfg.GitHub.ClientIDFile, "github.client_id_file"); err != nil {
-		return err
+	if cfg.GitHub.ClientID, err = resolveValue(cfg.GitHub.ClientID); err != nil {
+		return fmt.Errorf("github.client_id: %w", err)
 	}
-	if err := resolve(&cfg.GitHub.ClientSecret, cfg.GitHub.ClientSecretFile, "github.client_secret_file"); err != nil {
-		return err
+	if cfg.GitHub.ClientSecret, err = resolveValue(cfg.GitHub.ClientSecret); err != nil {
+		return fmt.Errorf("github.client_secret: %w", err)
 	}
-	if err := resolve(&cfg.Cluster.InternalSecret, cfg.Cluster.InternalSecretFile, "cluster.internal_secret_file"); err != nil {
-		return err
+	if cfg.Cluster.InternalSecret, err = resolveValue(cfg.Cluster.InternalSecret); err != nil {
+		return fmt.Errorf("cluster.internal_secret: %w", err)
 	}
 
 	return nil
@@ -397,14 +439,14 @@ func resolveSecrets(cfg *Config) error {
 
 **Step 4: Run tests to verify they pass**
 
-Run: `go test -C /Users/clovismuneza/Apps/kontainer/agent ./config/... -v`
+Run: `go test -C agent ./config/... -v`
 Expected: All PASS.
 
 **Step 5: Commit**
 
 ```bash
 git add agent/config/config.go agent/config/config_test.go
-git commit -m "feat: rewrite config to load from YAML with _file secret resolution"
+git commit -m "feat: rewrite config to load from YAML with file: prefix and env var expansion"
 ```
 
 ---
@@ -751,7 +793,7 @@ func startLeader(cfg *config.Config) {
 
 **Step 2: Verify build**
 
-Run: `go -C /Users/clovismuneza/Apps/kontainer/agent build ./...`
+Run: `go -C agent build ./...`
 Expected: Fails — `NewCollectNodeMetricsAction` signature doesn't match yet (needs `dev bool` param). We'll fix that in Task 4.
 
 **Step 3: Commit**
@@ -800,7 +842,7 @@ func TestCollectNodeMetrics_NonDevMode(t *testing.T) {
 
 **Step 2: Run tests to verify they fail**
 
-Run: `go test -C /Users/clovismuneza/Apps/kontainer/agent ./metrics/... -v`
+Run: `go test -C agent ./metrics/... -v`
 Expected: FAIL — constructor signature doesn't match.
 
 **Step 3: Update collect_node_metrics.go**
@@ -854,12 +896,12 @@ func (a *CollectNodeMetricsAction) Execute(ctx context.Context) (NodeMetrics, er
 
 **Step 4: Run tests**
 
-Run: `go test -C /Users/clovismuneza/Apps/kontainer/agent ./metrics/... -v`
+Run: `go test -C agent ./metrics/... -v`
 Expected: All PASS.
 
 **Step 5: Verify full build**
 
-Run: `go -C /Users/clovismuneza/Apps/kontainer/agent build ./...`
+Run: `go -C agent build ./...`
 Expected: SUCCESS — all compilation errors resolved.
 
 **Step 6: Commit**
@@ -887,17 +929,17 @@ Delete the test for the removed function.
 
 **Step 3: Run tests**
 
-Run: `go test -C /Users/clovismuneza/Apps/kontainer/agent ./cluster/... -v`
+Run: `go test -C agent ./cluster/... -v`
 Expected: All remaining tests PASS.
 
 **Step 4: Verify full build**
 
-Run: `go -C /Users/clovismuneza/Apps/kontainer/agent build ./...`
+Run: `go -C agent build ./...`
 Expected: SUCCESS.
 
 **Step 5: Run full test suite**
 
-Run: `go test -C /Users/clovismuneza/Apps/kontainer/agent ./...`
+Run: `go test -C agent ./...`
 Expected: All PASS.
 
 **Step 6: Commit**
@@ -924,6 +966,11 @@ git commit -m "refactor: remove ParseDevFollowers, dev_followers is now a native
 # Kontainer Agent Configuration
 # Copy to kontainer.yml and adjust for your environment.
 # Run: ./agent --config kontainer.yml
+#
+# Value resolution:
+#   file:/run/secrets/x  → reads the file (Docker secrets, production)
+#   ${ENV_VAR}           → expands environment variable (development)
+#   plain-value          → used as-is (non-sensitive values)
 
 # Core
 port: "8080"
@@ -931,21 +978,18 @@ agent_url: http://localhost:8080
 role: leader                            # "leader" or "follower"
 
 # Auth — used by leader only
-jwt_secret: your-secret-here
-# jwt_secret_file: /run/secrets/jwt_secret
+jwt_secret: file:/run/secrets/jwt_secret
+# jwt_secret: ${JWT_SECRET}            # alternative: env var for dev
 
 github:
-  client_id: ""
-  # client_id_file: /run/secrets/github_client_id
-  client_secret: ""
-  # client_secret_file: /run/secrets/github_client_secret
+  client_id: your-github-client-id     # non-sensitive, literal is fine
+  client_secret: file:/run/secrets/github_client_secret
   allowed_users: []                     # e.g. [alice, bob]
   allowed_orgs: []                      # e.g. [myorg]
 
 # Cluster
 cluster:
-  internal_secret: ""
-  # internal_secret_file: /run/secrets/internal_secret
+  internal_secret: file:/run/secrets/internal_secret
   follower_service: kontainer-agent     # Swarm service name for follower discovery
   dev_followers: []                     # e.g. [localhost:8081, localhost:8082]
 
@@ -961,18 +1005,16 @@ dev: false                              # true = use Docker API for metrics inst
 
 **Step 2: Create agent/kontainer.yml for dev**
 
-Copy the content from the existing `.env` values:
-
 ```yaml
 port: "8080"
 agent_url: http://localhost:8080
 role: leader
-jwt_secret: your-secret-here
+jwt_secret: ${JWT_SECRET}
 dev: true
 
 github:
-  client_id: ""
-  client_secret: ""
+  client_id: ${GITHUB_CLIENT_ID}
+  client_secret: ${GITHUB_CLIENT_SECRET}
 
 cluster:
   internal_secret: dev-secret
@@ -1082,8 +1124,12 @@ Create `dev/leader.yml`:
 port: "8080"
 agent_url: http://localhost:8080
 role: leader
-jwt_secret: dev-jwt-secret
+jwt_secret: ${JWT_SECRET}
 dev: true
+
+github:
+  client_id: ${GITHUB_CLIENT_ID}
+  client_secret: ${GITHUB_CLIENT_SECRET}
 
 cluster:
   internal_secret: dev-secret
@@ -1094,28 +1140,6 @@ metrics:
   retention: 24h
   db_path: kontainer-metrics.db
 ```
-
-Create `dev/follower.yml`:
-```yaml
-role: follower
-dev: true
-
-cluster:
-  internal_secret: dev-secret
-```
-
-**Step 2: Update Procfile**
-
-```
-leader:    cd agent && DOCKER_HOST=tcp://localhost:2375 air -- --config ../dev/leader.yml
-follower1: cd agent && DOCKER_HOST=tcp://localhost:2376 air -- --config ../dev/follower.yml
-follower2: cd agent && DOCKER_HOST=tcp://localhost:2378 air -- --config ../dev/follower.yml
-app:       pnpm --filter app tauri dev
-```
-
-Note: `DOCKER_HOST` remains as env var — it's a Docker client env var, not our config. The `--` tells air to pass the flag to the binary.
-
-Follower config uses port default (8080), but needs different ports. Since we need different ports per follower, create `dev/follower1.yml` and `dev/follower2.yml` instead:
 
 Create `dev/follower1.yml`:
 ```yaml
@@ -1137,7 +1161,8 @@ cluster:
   internal_secret: dev-secret
 ```
 
-Updated Procfile:
+**Step 2: Update Procfile**
+
 ```
 leader:    cd agent && DOCKER_HOST=tcp://localhost:2375 air -- --config ../dev/leader.yml
 follower1: cd agent && DOCKER_HOST=tcp://localhost:2376 air -- --config ../dev/follower1.yml
@@ -1145,11 +1170,12 @@ follower2: cd agent && DOCKER_HOST=tcp://localhost:2378 air -- --config ../dev/f
 app:       pnpm --filter app tauri dev
 ```
 
+Note: `DOCKER_HOST` remains as env var — it's a Docker client env var, not our config. The `--` tells air to pass the flag to the binary.
+
 **Step 3: Commit**
 
 ```bash
 git add dev/leader.yml dev/follower1.yml dev/follower2.yml dev/Procfile
-git rm -f dev/follower.yml 2>/dev/null; true
 git commit -m "feat: update dev/Procfile to use YAML config files"
 ```
 
@@ -1162,7 +1188,7 @@ git commit -m "feat: update dev/Procfile to use YAML config files"
 
 **Step 1: Update deployment section**
 
-Replace the deployment and access control sections with YAML config examples using Docker configs/secrets:
+Replace the deployment and access control sections with YAML config examples using Docker configs/secrets and the `file:` prefix syntax:
 
 ````markdown
 ## Deployment
@@ -1203,13 +1229,13 @@ Example `kontainer-leader.yml`:
 ```yaml
 role: leader
 agent_url: https://agent.example.com
-jwt_secret_file: /run/secrets/jwt_secret
+jwt_secret: file:/run/secrets/jwt_secret
 github:
   client_id: your-github-client-id
-  client_secret_file: /run/secrets/github_client_secret
+  client_secret: file:/run/secrets/github_client_secret
   allowed_users: [alice, bob]
 cluster:
-  internal_secret_file: /run/secrets/internal_secret
+  internal_secret: file:/run/secrets/internal_secret
   follower_service: kontainer-follower
 ```
 
@@ -1243,7 +1269,7 @@ Example `kontainer-follower.yml`:
 ```yaml
 role: follower
 cluster:
-  internal_secret_file: /run/secrets/internal_secret
+  internal_secret: file:/run/secrets/internal_secret
 ```
 
 ## Access Control
@@ -1272,7 +1298,7 @@ Non-matching users receive a `403 Forbidden` response during the OAuth callback.
 
 ```bash
 git add README.md
-git commit -m "docs: update deployment examples to use YAML config with Docker secrets"
+git commit -m "docs: update deployment examples to use YAML config with file: prefix syntax"
 ```
 
 ---
@@ -1304,12 +1330,12 @@ git commit -m "docs: update CLAUDE.md config references from env vars to YAML"
 
 **Step 1: Run full Go test suite**
 
-Run: `go test -C /Users/clovismuneza/Apps/kontainer/agent ./... -v`
+Run: `go test -C agent ./... -v`
 Expected: All PASS.
 
 **Step 2: Verify build**
 
-Run: `go -C /Users/clovismuneza/Apps/kontainer/agent build -o /dev/null .`
+Run: `go -C agent build -o /dev/null .`
 Expected: SUCCESS.
 
 **Step 3: Verify no env var references remain**
