@@ -89,8 +89,15 @@ export function CommandPalette() {
             }
             if ((e.metaKey || e.ctrlKey) && e.key === "t") {
                 e.preventDefault();
-                setInitialSearch("terminal");
-                setOpen(true);
+                if (open) {
+                    // Palette already open — apply filter directly
+                    setPages([{ kind: "root" }]);
+                    setSearch("terminal");
+                    setSelectedIndex(0);
+                } else {
+                    setInitialSearch("terminal");
+                    setOpen(true);
+                }
             }
         }
         document.addEventListener("keydown", handleKeyDown);
@@ -226,6 +233,20 @@ export function CommandPalette() {
                             close();
                         },
                         category: "Nodes",
+                    });
+                }
+            }
+
+            // Terminal (dynamic — one exec entry per service)
+            if (services) {
+                for (const svc of services) {
+                    items.push({
+                        id: `terminal-${svc.id}`,
+                        label: `Open terminal in ${svc.name}`,
+                        description: `${svc.replicasRunning}/${svc.replicasDesired} replicas running`,
+                        icon: <Terminal className='size-4' />,
+                        action: () => pushPage({ kind: "container-select", service: svc }),
+                        category: "Terminal",
                     });
                 }
             }
@@ -459,7 +480,7 @@ export function CommandPalette() {
                                                 <span>{cmd.label}</span>
                                                 {cmd.description && <span className='ml-2 text-xs text-muted-foreground'>{cmd.description}</span>}
                                             </span>
-                                            {cmd.id.startsWith("svc-") && currentPage.kind === "root" && (
+                                            {(cmd.id.startsWith("svc-") || cmd.id.startsWith("terminal-")) && currentPage.kind === "root" && (
                                                 <ArrowRight className='size-3 shrink-0 text-muted-foreground' />
                                             )}
                                         </button>
