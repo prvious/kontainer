@@ -20,6 +20,7 @@ import (
 	"github.com/prvious/kontainer/agent/server"
 	"github.com/prvious/kontainer/agent/services"
 	"github.com/prvious/kontainer/agent/settings"
+	"github.com/prvious/kontainer/agent/setup"
 	"github.com/prvious/kontainer/agent/storage"
 )
 
@@ -43,8 +44,6 @@ func main() {
 	log.Printf("  config file     : %s", *configPath)
 	log.Printf("  role            : %s", cfg.Role)
 	log.Printf("  agent url       : %s", cfg.AgentURL)
-	log.Printf("  github client id: %s", mask(cfg.GitHub.ClientID))
-	log.Printf("  jwt secret      : %s", mask(cfg.JWTSecret))
 
 	if cfg.Role == cluster.RoleFollower {
 		startFollower(cfg)
@@ -110,27 +109,95 @@ func startFollower(cfg *config.Config) {
 }
 
 func startLeader(cfg *config.Config) {
-	if cfg.GitHub.ClientID == "" || cfg.GitHub.ClientSecret == "" {
-		log.Println("  ⚠ github.client_id or github.client_secret is empty — OAuth will not work")
+	appConfigStore, err := storage.NewAppConfigStore("kontainer-app.db")
+	if err != nil {
+		log.Fatalf("Failed to open app config store: %v", err)
 	}
-	if cfg.JWTSecret == "" {
-		log.Println("  ⚠ jwt_secret is empty — auth tokens will not be signed")
+	defer appConfigStore.Close()
+
+	if !appConfigStore.IsSetupComplete() {
+		startSetupMode(cfg, appConfigStore)
+		return
 	}
 
-	if len(cfg.GitHub.AllowedOrgs) > 0 {
-		log.Printf("  GitHub org allowlist: %v", cfg.GitHub.AllowedOrgs)
+	startNormalMode(cfg, appConfigStore)
+}
+
+func startSetupMode(cfg *config.Config, appConfigStore *storage.AppConfigStore) {
+	setupToken := setup.GetSetupToken()
+
+	log.Println("===================================")
+	log.Println("  SETUP REQUIRED")
+	log.Println("===================================")
+	log.Printf("  Agent URL    : %s", cfg.AgentURL)
+	log.Printf("  Setup Token  : %s", setupToken)
+	log.Println("")
+	log.Println("  Use this token in the Kontainer")
+	log.Println("  desktop app to complete setup.")
+	log.Println("===================================")
+
+	setupHandlers := setup.NewSetupHandlers(appConfigStore, cfg.AgentURL)
+	setupRouter := server.NewSetupRouter(setupHandlers, setupToken)
+	swappable := server.NewSwappableHandler(setupRouter)
+
+	srv := &http.Server{Addr: ":" + cfg.Port, Handler: swappable}
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		<-sigCh
+		log.Println("shutting down...")
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		srv.Shutdown(ctx)
+	}()
+
+	log.Printf("  listening on    : %s (leader — setup mode)", srv.Addr)
+	log.Println("----------------------------")
+
+	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+		log.Fatalf("server error: %v", err)
 	}
-	if len(cfg.GitHub.AllowedUsers) > 0 {
-		log.Printf("  GitHub user allowlist: %v", cfg.GitHub.AllowedUsers)
+}
+
+func startNormalMode(cfg *config.Config, appConfigStore *storage.AppConfigStore) {
+	// Read credentials from app config store
+	jwtSecret, _, err := appConfigStore.Get("jwt_secret")
+	if err != nil {
+		log.Fatalf("Failed to read jwt_secret from app config: %v", err)
+	}
+	if jwtSecret == "" {
+		log.Fatal("jwt_secret is not set in app config — run setup again")
+	}
+
+	clientID, _, err := appConfigStore.Get("github_client_id")
+	if err != nil {
+		log.Fatalf("Failed to read github_client_id from app config: %v", err)
+	}
+
+	clientSecret, _, err := appConfigStore.Get("github_client_secret")
+	if err != nil {
+		log.Fatalf("Failed to read github_client_secret from app config: %v", err)
+	}
+
+	org, _, err := appConfigStore.Get("github_org")
+	if err != nil {
+		log.Fatalf("Failed to read github_org from app config: %v", err)
+	}
+
+	log.Printf("  github client id: %s", mask(clientID))
+	log.Printf("  jwt secret      : %s", mask(jwtSecret))
+	if org != "" {
+		log.Printf("  github org      : %s", org)
 	}
 
 	registry := providers.NewProviderRegistry()
 	registry.Register(providers.NewGitHubProvider(
-		cfg.GitHub.ClientID,
-		cfg.GitHub.ClientSecret,
+		clientID,
+		clientSecret,
 		cfg.AgentURL+"/auth/github/callback",
-		cfg.GitHub.AllowedOrgs,
-		cfg.GitHub.AllowedUsers,
+		org,
 	))
 
 	dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
@@ -227,13 +294,13 @@ func startLeader(cfg *config.Config) {
 	inspectConfigAction := services.NewInspectConfigAction(dockerClient)
 	inspectConfigHandler := services.NewInspectConfigHandler(inspectConfigAction)
 
-	streamLogsHandler := services.NewStreamServiceLogsHandler(dockerClient, cfg.JWTSecret)
-	streamTaskLogsHandler := services.NewStreamTaskLogsHandler(dockerClient, cfg.JWTSecret)
+	streamLogsHandler := services.NewStreamServiceLogsHandler(dockerClient, jwtSecret)
+	streamTaskLogsHandler := services.NewStreamTaskLogsHandler(dockerClient, jwtSecret)
 
 	sessions := auth.NewSessionStore()
 	bridge := auth.NewAuthBridge()
-	authHandler := auth.NewAuthHandler(registry, sessions, cfg.JWTSecret, bridge)
-	jwtMiddleware := auth.JWTMiddleware(cfg.JWTSecret)
+	authHandler := auth.NewAuthHandler(registry, sessions, jwtSecret, bridge)
+	jwtMiddleware := auth.JWTMiddleware(jwtSecret)
 
 	clusterRegistry := cluster.NewRegistry()
 	selfInfo := cluster.NewAgentInfo("", hostname, cfg.AgentURL, cluster.RoleLeader, "healthy")
@@ -241,7 +308,7 @@ func startLeader(cfg *config.Config) {
 	listAgentsAction := services.NewListAgentsAction(clusterRegistry, selfInfo)
 	listAgentsHandler := services.NewListAgentsHandler(listAgentsAction)
 
-	execHandler := services.NewExecContainerHandler(dockerClient, cfg.JWTSecret, clusterRegistry, leaderNodeID, cfg.Cluster.InternalSecret)
+	execHandler := services.NewExecContainerHandler(dockerClient, jwtSecret, clusterRegistry, leaderNodeID, cfg.Cluster.InternalSecret)
 
 	interval, err := time.ParseDuration(cfg.Metrics.Interval)
 	if err != nil {
