@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -240,6 +241,28 @@ cluster:
 	}
 	if cfg.Cluster.InternalSecret != "internal-val" {
 		t.Errorf("Cluster.InternalSecret = %q", cfg.Cluster.InternalSecret)
+	}
+}
+
+func TestResolveValue_UnsetEnvVar_Error(t *testing.T) {
+	_, err := resolveValue("${TOTALLY_UNSET_VAR_FOR_TEST}")
+	if err == nil {
+		t.Error("expected error for unset env var")
+	}
+	if !strings.Contains(err.Error(), "TOTALLY_UNSET_VAR_FOR_TEST") {
+		t.Errorf("error should mention the missing var, got: %v", err)
+	}
+}
+
+func TestLoad_UnsetEnvVar_JWTSecret_Error(t *testing.T) {
+	dir := t.TempDir()
+	configYAML := "jwt_secret: ${TOTALLY_UNSET_JWT_SECRET_FOR_TEST}\n"
+	configPath := filepath.Join(dir, "kontainer.yml")
+	os.WriteFile(configPath, []byte(configYAML), 0644)
+
+	_, err := Load(configPath)
+	if err == nil {
+		t.Error("expected error for unset env var in jwt_secret")
 	}
 }
 

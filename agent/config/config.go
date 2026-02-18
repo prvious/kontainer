@@ -75,7 +75,7 @@ func Load(path string) (*Config, error) {
 
 // resolveValue resolves a config string value using one of three methods:
 //   - "file:/path/to/file" → reads the file and trims whitespace
-//   - "${ENV_VAR}" → expands environment variables via os.ExpandEnv
+//   - "${ENV_VAR}" → expands environment variables (errors if any referenced var is unset)
 //   - "plain-value" → returned as-is
 func resolveValue(val string) (string, error) {
 	if strings.HasPrefix(val, "file:") {
@@ -85,7 +85,20 @@ func resolveValue(val string) (string, error) {
 		}
 		return strings.TrimSpace(string(data)), nil
 	}
-	return os.ExpandEnv(val), nil
+
+	var missing []string
+	resolved := os.Expand(val, func(key string) string {
+		v, ok := os.LookupEnv(key)
+		if !ok {
+			missing = append(missing, key)
+			return ""
+		}
+		return v
+	})
+	if len(missing) > 0 {
+		return "", fmt.Errorf("unset environment variable(s): %s", strings.Join(missing, ", "))
+	}
+	return resolved, nil
 }
 
 // resolveSecrets calls resolveValue on all sensitive string fields.

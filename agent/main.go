@@ -31,7 +31,7 @@ func mask(s string) string {
 }
 
 func main() {
-	configPath := flag.String("config", "/etc/kontainer/kontainer.yml", "path to config file")
+	configPath := flag.String("config", "kontainer.yml", "path to config file")
 	flag.Parse()
 
 	cfg, err := config.Load(*configPath)
