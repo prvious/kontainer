@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
@@ -47,7 +47,7 @@ interface CommandItem {
 }
 
 export function CommandPalette() {
-    const { open, setOpen } = useCommandPalette();
+    const { open, setOpen, initialSearch, setInitialSearch } = useCommandPalette();
     const navigate = useNavigate();
     const queryClient = useQueryClient();
     const { resolvedScheme, setScheme } = useAppearance();
@@ -58,6 +58,7 @@ export function CommandPalette() {
     const [pages, setPages] = useState<PalettePage[]>([{ kind: "root" }]);
     const [selectedIndex, setSelectedIndex] = useState(0);
     const inputRef = useRef<HTMLInputElement>(null);
+    const prevOpenRef: RefObject<boolean> = useRef(false);
 
     const currentPage = pages[pages.length - 1];
 
@@ -70,26 +71,40 @@ export function CommandPalette() {
     const serviceIdForTasks = currentPage.kind === "container-select" ? currentPage.service.id : "";
     const { data: tasks } = useServiceTasks(serviceIdForTasks);
 
-    // Reset state when dialog opens/closes
+    // Reset state only on closed → open transition
     useEffect(() => {
-        if (open) {
-            setSearch("");
+        if (open && !prevOpenRef.current) {
+            setSearch(initialSearch);
             setPages([{ kind: "root" }]);
             setSelectedIndex(0);
+            if (initialSearch) setInitialSearch("");
         }
-    }, [open]);
+        prevOpenRef.current = open;
+    }, [open, initialSearch, setInitialSearch]);
 
-    // Global ⌘K / Ctrl+K listener
+    // Global ⌘K / Ctrl+K and ⌘T / Ctrl+T listener
     useEffect(() => {
         function handleKeyDown(e: KeyboardEvent) {
             if ((e.metaKey || e.ctrlKey) && e.key === "k") {
                 e.preventDefault();
                 setOpen(!open);
             }
+            if ((e.metaKey || e.ctrlKey) && e.key === "t") {
+                e.preventDefault();
+                if (open) {
+                    // Palette already open — apply filter directly
+                    setPages([{ kind: "root" }]);
+                    setSearch("terminal");
+                    setSelectedIndex(0);
+                } else {
+                    setInitialSearch("terminal");
+                    setOpen(true);
+                }
+            }
         }
         document.addEventListener("keydown", handleKeyDown);
         return () => document.removeEventListener("keydown", handleKeyDown);
-    }, [open, setOpen]);
+    }, [open, setOpen, setInitialSearch]);
 
     const close = useCallback(() => {
         setOpen(false);
@@ -220,6 +235,20 @@ export function CommandPalette() {
                             close();
                         },
                         category: "Nodes",
+                    });
+                }
+            }
+
+            // Terminal (dynamic — one exec entry per service)
+            if (services) {
+                for (const svc of services) {
+                    items.push({
+                        id: `terminal-${svc.id}`,
+                        label: `Open terminal in ${svc.name}`,
+                        description: `${svc.replicasRunning}/${svc.replicasDesired} replicas running`,
+                        icon: <Terminal className='size-4' />,
+                        action: () => pushPage({ kind: "container-select", service: svc }),
+                        category: "Terminal",
                     });
                 }
             }
@@ -453,7 +482,7 @@ export function CommandPalette() {
                                                 <span>{cmd.label}</span>
                                                 {cmd.description && <span className='ml-2 text-xs text-muted-foreground'>{cmd.description}</span>}
                                             </span>
-                                            {cmd.id.startsWith("svc-") && currentPage.kind === "root" && (
+                                            {(cmd.id.startsWith("svc-") || cmd.id.startsWith("terminal-")) && currentPage.kind === "root" && (
                                                 <ArrowRight className='size-3 shrink-0 text-muted-foreground' />
                                             )}
                                         </button>

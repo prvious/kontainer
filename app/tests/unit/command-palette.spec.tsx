@@ -138,6 +138,8 @@ function renderPalette(paletteOverrides: Partial<CommandPaletteContextValue> = {
     const paletteCtx: CommandPaletteContextValue = {
         open: true,
         setOpen: mockSetOpen,
+        initialSearch: "",
+        setInitialSearch: vi.fn(),
         ...paletteOverrides,
     };
     const router = createTestRouter();
@@ -209,6 +211,35 @@ describe("CommandPalette", () => {
         await waitFor(() => {
             expect(screen.getByText("web-app")).toBeInTheDocument();
             expect(screen.getByText("api-server")).toBeInTheDocument();
+        });
+    });
+
+    it("shows terminal exec entries for each service at root level", async () => {
+        renderPalette();
+
+        await waitFor(() => {
+            expect(screen.getByText("Terminal")).toBeInTheDocument();
+            expect(screen.getByText("Open terminal in web-app")).toBeInTheDocument();
+            expect(screen.getByText("Open terminal in api-server")).toBeInTheDocument();
+        });
+    });
+
+    it("filters to terminal entries when searching 'terminal'", async () => {
+        renderPalette();
+
+        await waitFor(() => {
+            expect(screen.getByPlaceholderText("Type a command or search...")).toBeInTheDocument();
+        });
+
+        const input = screen.getByPlaceholderText("Type a command or search...");
+        await act(async () => {
+            fireEvent.change(input, { target: { value: "terminal" } });
+        });
+
+        await waitFor(() => {
+            expect(screen.getByText("Open terminal in web-app")).toBeInTheDocument();
+            expect(screen.getByText("Open terminal in api-server")).toBeInTheDocument();
+            expect(screen.queryByText("Overview")).not.toBeInTheDocument();
         });
     });
 
@@ -379,6 +410,25 @@ describe("CommandPalette - Drill-down", () => {
             containerName: "web-app",
         });
         expect(mockSetOpen).toHaveBeenCalledWith(false);
+    });
+
+    it("goes directly to container-select from root terminal entry", async () => {
+        vi.mocked(useServiceTasks).mockReturnValue({ data: testTasks } as ReturnType<typeof useServiceTasks>);
+
+        renderPalette();
+
+        await waitFor(() => {
+            expect(screen.getByText("Open terminal in web-app")).toBeInTheDocument();
+        });
+
+        await act(async () => {
+            screen.getByText("Open terminal in web-app").closest("button")!.click();
+        });
+
+        await waitFor(() => {
+            expect(screen.getByText("Slot 1 on node-1")).toBeInTheDocument();
+            expect(screen.getByText("Slot 2 on node-1")).toBeInTheDocument();
+        });
     });
 
     it("navigates back with Backspace on empty search", async () => {
