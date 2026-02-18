@@ -1,0 +1,38 @@
+# Kontainer Agent Configuration
+# Copy to kontainer.yml and adjust for your environment.
+# Run: ./agent --config kontainer.yml
+#
+# Value resolution:
+#   file:/run/secrets/x  → reads the file (Docker secrets, production)
+#   ${ENV_VAR}           → expands environment variable (development)
+#   plain-value          → used as-is (non-sensitive values)
+
+# Core
+port: "8080"
+agent_url: http://localhost:8080
+role: leader                            # "leader" or "follower"
+
+# Auth — used by leader only
+jwt_secret: file:/run/secrets/jwt_secret
+# jwt_secret: ${JWT_SECRET}            # alternative: env var for dev
+
+github:
+  client_id: your-github-client-id     # non-sensitive, literal is fine
+  client_secret: file:/run/secrets/github_client_secret
+  allowed_users: []                     # e.g. [alice, bob]
+  allowed_orgs: []                      # e.g. [myorg]
+
+# Cluster
+cluster:
+  internal_secret: file:/run/secrets/internal_secret
+  follower_service: kontainer-agent     # Swarm service name for follower discovery
+  dev_followers: []                     # e.g. [localhost:8081, localhost:8082]
+
+# Metrics — used by leader only
+metrics:
+  interval: 30s
+  retention: 24h
+  db_path: kontainer-metrics.db
+
+# Development
+dev: false                              # true = use Docker API for metrics instead of /proc

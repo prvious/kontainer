@@ -9,31 +9,6 @@ import (
 	"testing"
 )
 
-func TestParseDevFollowers(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected []string
-	}{
-		{"", nil},
-		{"localhost:8081", []string{"localhost:8081"}},
-		{"localhost:8081,localhost:8082", []string{"localhost:8081", "localhost:8082"}},
-		{" localhost:8081 , localhost:8082 ", []string{"localhost:8081", "localhost:8082"}},
-		{"localhost:8081,,localhost:8082", []string{"localhost:8081", "localhost:8082"}},
-	}
-	for _, tt := range tests {
-		result := ParseDevFollowers(tt.input)
-		if len(result) != len(tt.expected) {
-			t.Errorf("ParseDevFollowers(%q) = %v, want %v", tt.input, result, tt.expected)
-			continue
-		}
-		for i := range result {
-			if result[i] != tt.expected[i] {
-				t.Errorf("ParseDevFollowers(%q)[%d] = %q, want %q", tt.input, i, result[i], tt.expected[i])
-			}
-		}
-	}
-}
-
 func TestDevDiscovery_DiscoverHealthyFollowers(t *testing.T) {
 	server1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get(InternalSecretHeader) != "dev-secret" {

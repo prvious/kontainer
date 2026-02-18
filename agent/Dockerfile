@@ -30,22 +30,19 @@ WORKDIR /app
 # Copy binary from builder
 COPY --from=builder /build/agent /app/agent
 
-# Create directory for SQLite database (leader only)
-RUN mkdir -p /data
+# Create directories for data and config
+RUN mkdir -p /data /etc/kontainer
 
-# Expose default port
+# Copy example config as default
+COPY --from=builder /build/kontainer.example.yml /etc/kontainer/kontainer.yml
+
 EXPOSE 8080
 
 # Run as non-root user
 RUN addgroup -g 1000 kontainer && \
     adduser -D -u 1000 -G kontainer kontainer && \
-    chown -R kontainer:kontainer /app /data
+    chown -R kontainer:kontainer /app /data /etc/kontainer
 
 USER kontainer
 
-# Set default environment variables
-ENV PORT=8080 \
-    KONTAINER_ROLE=leader \
-    KONTAINER_METRICS_DB=/data/kontainer-metrics.db
-
-ENTRYPOINT ["/app/agent"]
+ENTRYPOINT ["/app/agent", "--config", "/etc/kontainer/kontainer.yml"]

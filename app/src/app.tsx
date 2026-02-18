@@ -4,6 +4,7 @@ import { RouterProvider } from "@tanstack/react-router";
 import { AuthProvider } from "@/contexts/auth-context";
 import { useAuth } from "@/hooks/use-auth";
 import { useNativeBehavior } from "@/hooks/use-native-behavior";
+import { setAuthErrorHandler } from "@/lib/query-client";
 import { router } from "@/router";
 import { createRoot } from "react-dom/client";
 import "./app.css";
@@ -17,6 +18,13 @@ function InnerApp() {
             invoke("close_splashscreen");
         }
     }, [auth.isLoading]);
+
+    useEffect(() => {
+        setAuthErrorHandler(() => {
+            auth.logout().then(() => router.navigate({ to: "/login", search: { redirect: undefined } }));
+        });
+        return () => setAuthErrorHandler(null);
+    }, [auth.logout]);
 
     if (auth.isLoading) {
         return null;

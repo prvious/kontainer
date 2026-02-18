@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strings"
 	"time"
 )
 
@@ -27,22 +26,6 @@ func NewDevDiscovery(addresses []string, internalSecret string, registry *Regist
 		registry:       registry,
 		interval:       5 * time.Second,
 	}
-}
-
-// ParseDevFollowers splits a comma-separated list of "host:port" addresses.
-func ParseDevFollowers(s string) []string {
-	if s == "" {
-		return nil
-	}
-	parts := strings.Split(s, ",")
-	addrs := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			addrs = append(addrs, p)
-		}
-	}
-	return addrs
 }
 
 func (d *DevDiscovery) Start(ctx context.Context) {

@@ -19,17 +19,18 @@ type NodeMetricsDockerClient interface {
 
 type CollectNodeMetricsAction struct {
 	dockerClient NodeMetricsDockerClient
+	devMode      bool
 }
 
-func NewCollectNodeMetricsAction(dockerClient NodeMetricsDockerClient) *CollectNodeMetricsAction {
+func NewCollectNodeMetricsAction(dockerClient NodeMetricsDockerClient, devMode bool) *CollectNodeMetricsAction {
 	if _, err := os.Stat("/host/proc"); err == nil {
 		os.Setenv("HOST_PROC", "/host/proc")
 	}
-	return &CollectNodeMetricsAction{dockerClient: dockerClient}
+	return &CollectNodeMetricsAction{dockerClient: dockerClient, devMode: devMode}
 }
 
 func (a *CollectNodeMetricsAction) Execute(ctx context.Context) (NodeMetrics, error) {
-	if os.Getenv("KONTAINER_DEV") == "true" {
+	if a.devMode {
 		return a.collectFromDocker(ctx)
 	}
 	return collectFromProc()

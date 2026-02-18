@@ -28,3 +28,6 @@ agent/tmp/
 .env
 .example
 .automaker
+*.db
+*.db-shm
+*.db-wal

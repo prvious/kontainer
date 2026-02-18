@@ -137,7 +137,9 @@ A desktop app for managing Docker Swarm clusters. Self-hosted, lightweight, mult
 
 ## Deployment
 
-The leader agent runs as a Swarm service with the Docker socket mounted:
+The agent reads configuration from a YAML file (default: `/etc/kontainer/kontainer.yml` inside the container). Secrets can reference Docker secrets via the `file:` prefix.
+
+**Leader service with Docker configs and secrets:**
 
 ```yaml
 services:
@@ -145,12 +147,43 @@ services:
     image: prvious/kontainer-agent
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    environment:
-      - KONTAINER_ROLE=leader
-      - KONTAINER_FOLLOWER_SERVICE=kontainer-follower
+    configs:
+      - source: kontainer-config
+        target: /etc/kontainer/kontainer.yml
+    secrets:
+      - jwt_secret
+      - github_client_secret
+      - internal_secret
+
+configs:
+  kontainer-config:
+    file: ./kontainer-leader.yml
+
+secrets:
+  jwt_secret:
+    external: true
+  github_client_secret:
+    external: true
+  internal_secret:
+    external: true
 ```
 
-Follower agents deploy as a global service across worker nodes:
+Example `kontainer-leader.yml`:
+
+```yaml
+role: leader
+agent_url: https://agent.example.com
+jwt_secret: file:/run/secrets/jwt_secret
+github:
+  client_id: your-github-client-id
+  client_secret: file:/run/secrets/github_client_secret
+  allowed_users: [alice, bob]
+cluster:
+  internal_secret: file:/run/secrets/internal_secret
+  follower_service: kontainer-follower
+```
+
+**Follower service (global, across worker nodes):**
 
 ```yaml
 services:
@@ -160,8 +193,27 @@ services:
       mode: global
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    environment:
-      - KONTAINER_ROLE=follower
+    configs:
+      - source: kontainer-follower-config
+        target: /etc/kontainer/kontainer.yml
+    secrets:
+      - internal_secret
+
+configs:
+  kontainer-follower-config:
+    file: ./kontainer-follower.yml
+
+secrets:
+  internal_secret:
+    external: true
+```
+
+Example `kontainer-follower.yml`:
+
+```yaml
+role: follower
+cluster:
+  internal_secret: file:/run/secrets/internal_secret
 ```
 
 ## Access Control
@@ -169,21 +221,21 @@ services:
 Login can optionally be restricted by GitHub username and/or organization membership:
 
 ```yaml
-environment:
-  - GITHUB_ALLOWED_USERS=alice,bob
-  - GITHUB_ALLOWED_ORGS=my-org,my-other-org
+github:
+  allowed_users: [alice, bob]
+  allowed_orgs: [my-org, my-other-org]
 ```
 
-Both variables are **comma-separated** lists and matching is **case-insensitive**.
+Matching is **case-insensitive**.
 
-| `GITHUB_ALLOWED_USERS` | `GITHUB_ALLOWED_ORGS` | Who can log in |
+| `allowed_users` | `allowed_orgs` | Who can log in |
 |---|---|---|
 | unset | unset | All GitHub users (default) |
 | set | unset | Only listed usernames |
 | unset | set | Only members of listed orgs |
 | set | set | Only listed usernames **who are also** members of listed orgs |
 
-- `GITHUB_ALLOWED_ORGS` requires the `read:org` OAuth scope (added automatically when configured)
+- `allowed_orgs` requires the `read:org` OAuth scope (added automatically when configured)
 
 Non-matching users receive a `403 Forbidden` response during the OAuth callback.
 

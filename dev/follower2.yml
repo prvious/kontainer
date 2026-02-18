@@ -1,0 +1,6 @@
+port: "8082"
+role: follower
+dev: true
+
+cluster:
+  internal_secret: dev-secret
