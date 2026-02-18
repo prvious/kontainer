@@ -1,3 +1,4 @@
+pub mod check_auth;
 pub mod create_config;
 pub mod create_secret;
 pub mod fetch_providers;

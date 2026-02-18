@@ -18,6 +18,7 @@ pub fn run() {
             actions::auth::set_active_profile::set_active_profile,
             actions::agent::fetch_providers::fetch_providers,
             actions::agent::ping_agent::ping_agent,
+            actions::agent::check_auth::check_auth,
             actions::agent::setup_verify_token::setup_verify_token,
             actions::agent::setup_github_connect::setup_github_connect,
             actions::agent::setup_complete::setup_complete,
