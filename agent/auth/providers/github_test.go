@@ -10,74 +10,67 @@ import (
 	"golang.org/x/oauth2"
 )
 
-func TestCheckOrgMembership_Match(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode([]githubOrg{
-			{Login: "acme-corp"},
-			{Login: "other-org"},
-		})
-	}))
-	defer srv.Close()
+func TestNewGitHubProvider_Scopes(t *testing.T) {
+	p := NewGitHubProvider("id", "secret", "http://localhost/callback", "my-org")
+	scopes := p.config.Scopes
 
-	p := &GitHubProvider{
-		allowedOrgs: []string{"acme-corp"},
-	}
-
-	client := srv.Client()
-	// Override the URL by wrapping the transport
-	originalTransport := client.Transport
-	client.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
-		req.URL.Scheme = "http"
-		req.URL.Host = srv.Listener.Addr().String()
-		if originalTransport != nil {
-			return originalTransport.RoundTrip(req)
+	found := false
+	for _, s := range scopes {
+		if s == "read:org" {
+			found = true
+			break
 		}
-		return http.DefaultTransport.RoundTrip(req)
-	})
-
-	err := p.checkOrgMembership(client)
-	if err != nil {
-		t.Fatalf("expected nil, got %v", err)
+	}
+	if !found {
+		t.Errorf("expected read:org scope when org is non-empty, got %v", scopes)
 	}
 }
 
-func TestCheckOrgMembership_CaseInsensitive(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode([]githubOrg{
-			{Login: "Acme-Corp"},
-		})
-	}))
-	defer srv.Close()
+func TestNewGitHubProvider_ScopesNoOrg(t *testing.T) {
+	p := NewGitHubProvider("id", "secret", "http://localhost/callback", "")
+	scopes := p.config.Scopes
 
-	p := &GitHubProvider{
-		allowedOrgs: []string{"acme-corp"},
-	}
-
-	client := testClientWithServer(srv)
-
-	err := p.checkOrgMembership(client)
-	if err != nil {
-		t.Fatalf("expected nil (case-insensitive match), got %v", err)
+	for _, s := range scopes {
+		if s == "read:org" {
+			t.Errorf("did not expect read:org scope when org is empty, got %v", scopes)
+			break
+		}
 	}
 }
 
-func TestCheckOrgMembership_NoMatch(t *testing.T) {
+func TestCheckAccess_NoOrg(t *testing.T) {
+	p := &GitHubProvider{}
+	err := p.checkAccess(http.DefaultClient, "anyone")
+	if err != nil {
+		t.Fatalf("expected nil when org is empty, got %v", err)
+	}
+}
+
+func TestCheckAccess_Member(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode([]githubOrg{
-			{Login: "unrelated-org"},
-		})
+		w.WriteHeader(http.StatusNoContent) // 204 = member
 	}))
 	defer srv.Close()
 
-	p := &GitHubProvider{
-		allowedOrgs: []string{"acme-corp"},
+	p := &GitHubProvider{org: "acme-corp"}
+
+	err := p.checkAccess(testClientWithServer(srv), "alice")
+	if err != nil {
+		t.Fatalf("expected nil for 204 response, got %v", err)
 	}
+}
 
-	client := testClientWithServer(srv)
+func TestCheckAccess_NotMember(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound) // 404 = not a member
+	}))
+	defer srv.Close()
 
-	err := p.checkOrgMembership(client)
+	p := &GitHubProvider{org: "acme-corp"}
+
+	err := p.checkAccess(testClientWithServer(srv), "charlie")
 	if err == nil {
-		t.Fatal("expected error, got nil")
+		t.Fatal("expected error for 404 response, got nil")
 	}
 
 	var accessErr *AccessDeniedError
@@ -86,31 +79,48 @@ func TestCheckOrgMembership_NoMatch(t *testing.T) {
 	}
 }
 
-func TestCheckOrgMembership_APIError(t *testing.T) {
+func TestCheckAccess_APIError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
+		w.WriteHeader(http.StatusInternalServerError) // 500
 	}))
 	defer srv.Close()
 
-	p := &GitHubProvider{
-		allowedOrgs: []string{"acme-corp"},
-	}
+	p := &GitHubProvider{org: "acme-corp"}
 
-	client := testClientWithServer(srv)
-
-	err := p.checkOrgMembership(client)
+	err := p.checkAccess(testClientWithServer(srv), "alice")
 	if err == nil {
-		t.Fatal("expected error, got nil")
+		t.Fatal("expected error for 500 response, got nil")
 	}
 
-	// Should be a regular error, not AccessDeniedError
+	// Should be an AccessDeniedError (any non-204 is "not a member")
 	var accessErr *AccessDeniedError
-	if isAccessDenied(err, &accessErr) {
-		t.Fatal("expected regular error, not AccessDeniedError")
+	if !isAccessDenied(err, &accessErr) {
+		t.Fatalf("expected AccessDeniedError, got %T: %v", err, err)
 	}
 }
 
-func TestFetchUser_SkipsOrgCheckWhenNoAllowedOrgs(t *testing.T) {
+func TestCheckAccess_CorrectURL(t *testing.T) {
+	var requestedPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestedPath = r.URL.Path
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	p := &GitHubProvider{org: "acme-corp"}
+
+	err := p.checkAccess(testClientWithServer(srv), "alice")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expected := "/orgs/acme-corp/members/alice"
+	if requestedPath != expected {
+		t.Errorf("expected request path %q, got %q", expected, requestedPath)
+	}
+}
+
+func TestFetchUser_SkipsOrgCheckWhenNoOrg(t *testing.T) {
 	profileCalled := false
 	emailsCalled := false
 	orgsCalled := false
@@ -128,9 +138,8 @@ func TestFetchUser_SkipsOrgCheckWhenNoAllowedOrgs(t *testing.T) {
 		case "/user/emails":
 			emailsCalled = true
 			json.NewEncoder(w).Encode([]githubEmail{})
-		case "/user/orgs":
+		default:
 			orgsCalled = true
-			json.NewEncoder(w).Encode([]githubOrg{})
 		}
 	}))
 	defer srv.Close()
@@ -141,11 +150,9 @@ func TestFetchUser_SkipsOrgCheckWhenNoAllowedOrgs(t *testing.T) {
 				TokenURL: srv.URL + "/token",
 			},
 		},
-		allowedOrgs:  nil, // no org restriction
-		allowedUsers: nil, // no user restriction
+		org: "", // no org restriction
 	}
 
-	// Create a token with a transport that redirects to the test server
 	token := &oauth2.Token{AccessToken: "test-token"}
 	ctx := context.WithValue(context.Background(), oauth2.HTTPClient, testClientWithServer(srv))
 
@@ -158,148 +165,65 @@ func TestFetchUser_SkipsOrgCheckWhenNoAllowedOrgs(t *testing.T) {
 		t.Error("expected profile endpoint to be called")
 	}
 	if emailsCalled {
-		// Email should not be called since profile has an email
-		t.Error("did not expect emails endpoint to be called")
+		t.Error("did not expect emails endpoint to be called when profile has email")
 	}
 	if orgsCalled {
-		t.Error("did not expect orgs endpoint to be called when allowedOrgs is empty")
+		t.Error("did not expect org check when org is empty")
 	}
 	if user.Name != "Test User" {
 		t.Errorf("expected name 'Test User', got %q", user.Name)
 	}
 }
 
-func TestNewGitHubProvider_ScopesWithOrgs(t *testing.T) {
-	p := NewGitHubProvider("id", "secret", "http://localhost/callback", []string{"my-org"}, nil)
-	scopes := p.config.Scopes
+func TestFetchUser_WithOrg(t *testing.T) {
+	profileCalled := false
+	orgCheckCalled := false
 
-	found := false
-	for _, s := range scopes {
-		if s == "read:org" {
-			found = true
-			break
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/user":
+			profileCalled = true
+			json.NewEncoder(w).Encode(githubProfile{
+				ID:    42,
+				Login: "testuser",
+				Name:  "Test User",
+				Email: "test@example.com",
+			})
+		case "/orgs/acme-corp/members/testuser":
+			orgCheckCalled = true
+			w.WriteHeader(http.StatusNoContent) // 204 = member
 		}
-	}
-	if !found {
-		t.Errorf("expected read:org scope when allowedOrgs is set, got %v", scopes)
-	}
-}
-
-func TestNewGitHubProvider_ScopesWithoutOrgs(t *testing.T) {
-	p := NewGitHubProvider("id", "secret", "http://localhost/callback", nil, nil)
-	scopes := p.config.Scopes
-
-	for _, s := range scopes {
-		if s == "read:org" {
-			t.Errorf("did not expect read:org scope when allowedOrgs is empty, got %v", scopes)
-			break
-		}
-	}
-}
-
-func TestCheckAccess_NeitherSet(t *testing.T) {
-	p := &GitHubProvider{}
-	err := p.checkAccess(http.DefaultClient, "anyone")
-	if err != nil {
-		t.Fatalf("expected nil, got %v", err)
-	}
-}
-
-func TestCheckAccess_OnlyUsers_Match(t *testing.T) {
-	p := &GitHubProvider{
-		allowedUsers: []string{"alice", "bob"},
-	}
-	err := p.checkAccess(http.DefaultClient, "alice")
-	if err != nil {
-		t.Fatalf("expected nil, got %v", err)
-	}
-}
-
-func TestCheckAccess_OnlyUsers_NoMatch(t *testing.T) {
-	p := &GitHubProvider{
-		allowedUsers: []string{"alice", "bob"},
-	}
-	err := p.checkAccess(http.DefaultClient, "charlie")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	var accessErr *AccessDeniedError
-	if !isAccessDenied(err, &accessErr) {
-		t.Fatalf("expected AccessDeniedError, got %T: %v", err, err)
-	}
-}
-
-func TestCheckAccess_OnlyUsers_CaseInsensitive(t *testing.T) {
-	p := &GitHubProvider{
-		allowedUsers: []string{"Alice"},
-	}
-	err := p.checkAccess(http.DefaultClient, "aLiCe")
-	if err != nil {
-		t.Fatalf("expected nil (case-insensitive match), got %v", err)
-	}
-}
-
-func TestCheckAccess_BothSet_Match(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode([]githubOrg{{Login: "acme-corp"}})
 	}))
 	defer srv.Close()
 
 	p := &GitHubProvider{
-		allowedUsers: []string{"alice"},
-		allowedOrgs:  []string{"acme-corp"},
+		config: &oauth2.Config{
+			Endpoint: oauth2.Endpoint{
+				TokenURL: srv.URL + "/token",
+			},
+		},
+		org: "acme-corp",
 	}
 
-	err := p.checkAccess(testClientWithServer(srv), "alice")
+	token := &oauth2.Token{AccessToken: "test-token"}
+	ctx := context.WithValue(context.Background(), oauth2.HTTPClient, testClientWithServer(srv))
+
+	user, err := p.FetchUser(ctx, token)
 	if err != nil {
-		t.Fatalf("expected nil, got %v", err)
-	}
-}
-
-func TestCheckAccess_BothSet_UserMatchOrgNoMatch(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode([]githubOrg{{Login: "other-org"}})
-	}))
-	defer srv.Close()
-
-	p := &GitHubProvider{
-		allowedUsers: []string{"alice"},
-		allowedOrgs:  []string{"acme-corp"},
+		t.Fatalf("FetchUser failed: %v", err)
 	}
 
-	err := p.checkAccess(testClientWithServer(srv), "alice")
-	if err == nil {
-		t.Fatal("expected error, got nil")
+	if !profileCalled {
+		t.Error("expected profile endpoint to be called")
 	}
-	var accessErr *AccessDeniedError
-	if !isAccessDenied(err, &accessErr) {
-		t.Fatalf("expected AccessDeniedError, got %T: %v", err, err)
+	if !orgCheckCalled {
+		t.Error("expected org membership check to be called")
 	}
-}
-
-func TestCheckAccess_BothSet_UserNoMatch(t *testing.T) {
-	orgsCalled := false
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		orgsCalled = true
-		json.NewEncoder(w).Encode([]githubOrg{{Login: "acme-corp"}})
-	}))
-	defer srv.Close()
-
-	p := &GitHubProvider{
-		allowedUsers: []string{"alice"},
-		allowedOrgs:  []string{"acme-corp"},
+	if user.ID != "42" {
+		t.Errorf("expected user ID '42', got %q", user.ID)
 	}
-
-	err := p.checkAccess(testClientWithServer(srv), "charlie")
-	if err == nil {
-		t.Fatal("expected error, got nil")
-	}
-	var accessErr *AccessDeniedError
-	if !isAccessDenied(err, &accessErr) {
-		t.Fatalf("expected AccessDeniedError, got %T: %v", err, err)
-	}
-	if orgsCalled {
-		t.Error("did not expect org check when user does not match")
+	if user.Name != "Test User" {
+		t.Errorf("expected name 'Test User', got %q", user.Name)
 	}
 }
 
