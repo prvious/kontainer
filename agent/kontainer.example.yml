@@ -12,16 +12,6 @@ port: "8080"
 agent_url: http://localhost:8080
 role: leader                            # "leader" or "follower"
 
-# Auth — used by leader only
-jwt_secret: file:/run/secrets/jwt_secret
-# jwt_secret: ${JWT_SECRET}            # alternative: env var for dev
-
-github:
-  client_id: your-github-client-id     # non-sensitive, literal is fine
-  client_secret: file:/run/secrets/github_client_secret
-  allowed_users: []                     # e.g. [alice, bob]
-  allowed_orgs: []                      # e.g. [myorg]
-
 # Cluster
 cluster:
   internal_secret: file:/run/secrets/internal_secret
