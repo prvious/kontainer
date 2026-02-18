@@ -16,6 +16,7 @@ import (
 func New(
 	authHandler *auth.AuthHandler,
 	jwtMiddleware func(http.Handler) http.Handler,
+	meHandler *auth.MeHandler,
 	listServicesHandler *services.ListServicesHandler,
 	inspectServiceHandler *services.InspectServiceHandler,
 	scaleServiceHandler *services.ScaleServiceHandler,
@@ -84,6 +85,7 @@ func New(
 		// REST routes — JWT middleware via Authorization header
 		r.Group(func(r chi.Router) {
 			r.Use(jwtMiddleware)
+			r.Method("GET", "/me", meHandler)
 			r.Method("GET", "/services", listServicesHandler)
 			r.Method("GET", "/services/{serviceID}", inspectServiceHandler)
 			r.Method("PATCH", "/services/{serviceID}", scaleServiceHandler)
