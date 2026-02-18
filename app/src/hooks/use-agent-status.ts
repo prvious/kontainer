@@ -6,7 +6,9 @@ const POLL_INTERVAL = 15_000;
 
 export function useAgentStatus(agentUrl: string | null, token: string | null, onAuthFailure: () => void) {
     const onAuthFailureRef = useRef(onAuthFailure);
-    onAuthFailureRef.current = onAuthFailure;
+    useEffect(() => {
+        onAuthFailureRef.current = onAuthFailure;
+    }, [onAuthFailure]);
 
     const query = useQuery({
         queryKey: ["agent-status", agentUrl],

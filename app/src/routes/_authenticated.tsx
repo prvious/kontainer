@@ -32,7 +32,7 @@ function AuthenticatedLayout() {
         <TerminalProvider>
             <CommandPaletteProvider>
                 <div className='flex h-screen flex-col overflow-hidden'>
-                    <div className='flex flex-1 overflow-hidden p-2 pl-0 pb-0'>
+                    <div className='flex flex-1 overflow-hidden p-2 pb-0 pl-0'>
                         <SidebarNav />
                         <div className='flex flex-1 flex-col overflow-hidden'>
                             <DashboardHeader />

@@ -9,8 +9,8 @@ function TestConsumer() {
     const { user, isLoading } = useAuth();
     return (
         <div>
-            <span data-testid="user">{user ? user.name : "none"}</span>
-            <span data-testid="isLoading">{isLoading ? "true" : "false"}</span>
+            <span data-testid='user'>{user ? user.name : "none"}</span>
+            <span data-testid='isLoading'>{isLoading ? "true" : "false"}</span>
         </div>
     );
 }
