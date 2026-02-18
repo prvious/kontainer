@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
+import { SetupWizard } from "@/components/setup-wizard";
 
 const routeApi = getRouteApi("/login");
 
@@ -51,6 +52,7 @@ export function LoginScreen() {
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [providers, setProviders] = useState<string[]>([]);
     const [authenticatingProvider, setAuthenticatingProvider] = useState<string | null>(null);
+    const [setupRequired, setSetupRequired] = useState(false);
 
     function handleUrlChange(e: React.ChangeEvent<HTMLInputElement>) {
         setAgentUrl(e.target.value);
@@ -72,7 +74,11 @@ export function LoginScreen() {
         setAuthenticatingProvider(null);
 
         try {
-            await invoke("ping_agent", { url });
+            const pingResult = await invoke<{ app: string; status: string }>("ping_agent", { url });
+            if (pingResult.status === "setup_required") {
+                setSetupRequired(true);
+                return;
+            }
         } catch (err) {
             setStatus("offline");
             setErrorMessage(typeof err === "string" ? err : "Could not reach the cluster");
@@ -104,6 +110,32 @@ export function LoginScreen() {
 
     const currentStatus = statusConfig[status];
     const StatusIcon = currentStatus.icon;
+
+    if (setupRequired) {
+        return (
+            <SetupWizard
+                agentUrl={agentUrl.replace(/\/+$/, "")}
+                onComplete={async () => {
+                    setSetupRequired(false);
+                    const url = agentUrl.replace(/\/+$/, "");
+                    try {
+                        const result = await invoke<string[]>("fetch_providers", { url });
+                        setProviders(result);
+                        setStatus("online");
+                        if (result.length > 0) {
+                            handleProviderClick(result[0]);
+                        }
+                    } catch {
+                        setStatus("online");
+                    }
+                }}
+                onBack={() => {
+                    setSetupRequired(false);
+                    setStatus("idle");
+                }}
+            />
+        );
+    }
 
     return (
         <div className='flex h-screen p-2 pt-10'>
