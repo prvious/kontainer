@@ -213,7 +213,7 @@ export function StatsCards({ nodes, agents, taskStats }: StatsCardsProps) {
     return (
         <div className='rounded-xl border border-border bg-card/50 p-4'>
             {/* Cards grid */}
-            <div className='grid grid-cols-1 border-b border-border sm:grid-cols-2 lg:grid-cols-4'>
+            <div className='grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4'>
                 {stats.map((stat, i) => (
                     <StatCard key={stat.label} stat={stat} delay={i * 50} borderClass={statBorders[i] ?? ""} />
                 ))}
@@ -227,7 +227,7 @@ export function StatsCards({ nodes, agents, taskStats }: StatsCardsProps) {
                         className='overflow-hidden transition-all duration-300 ease-in-out'
                         style={{ maxHeight: expanded ? `${panelHeight}px` : "0px", opacity: expanded ? 1 : 0 }}
                     >
-                        <div ref={panelRef} className='py-4'>
+                        <div ref={panelRef} className='py-4 border-t mt-4'>
                             <NodeBreakdownPanel stats={stats} />
                         </div>
                     </div>
@@ -237,7 +237,7 @@ export function StatsCards({ nodes, agents, taskStats }: StatsCardsProps) {
                         onClick={() => setExpanded(!expanded)}
                         className='flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-border py-3 mt-4 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
                     >
-                        <ChevronDown className='size-3 transition-transform duration-300' style={{ transform: expanded ? "rotate(180deg)" : "rotate(0deg)" }} />
+                        <ChevronDown className='size-4 transition-transform duration-300' style={{ transform: expanded ? "rotate(180deg)" : "rotate(0deg)" }} />
                         {expanded ? "Hide" : "Show"} per-node breakdown
                     </button>
                 </>
