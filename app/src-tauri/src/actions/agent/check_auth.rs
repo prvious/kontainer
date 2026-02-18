@@ -31,8 +31,9 @@ pub async fn check_auth(url: String, token: String) -> Result<CheckAuthResponse,
         .await
         .map_err(|e| format!("Could not reach agent at {url}: {e}"))?;
 
-    if response.status().as_u16() == 401 {
-        return Err("401".to_string());
+    let status = response.status().as_u16();
+    if status == 401 || status == 403 {
+        return Err("auth_failed".to_string());
     }
 
     if !response.status().is_success() {

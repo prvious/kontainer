@@ -19,7 +19,7 @@ export function useAgentStatus(agentUrl: string | null, token: string | null, on
     });
 
     useEffect(() => {
-        if (query.error && String(query.error) === "401") {
+        if (query.error && String(query.error) === "auth_failed") {
             onAuthFailureRef.current();
         }
     }, [query.error]);

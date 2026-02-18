@@ -35,8 +35,8 @@ describe("useAgentStatus", () => {
         expect(onAuthFailure).not.toHaveBeenCalled();
     });
 
-    it("calls onAuthFailure on 401 error", async () => {
-        vi.mocked(invoke).mockRejectedValue("401");
+    it("calls onAuthFailure on auth_failed error (401)", async () => {
+        vi.mocked(invoke).mockRejectedValue("auth_failed");
 
         const onAuthFailure = vi.fn();
         renderHook(() => useAgentStatus("http://localhost:8080", "expired-jwt", onAuthFailure), { wrapper: createWrapper() });
@@ -46,7 +46,7 @@ describe("useAgentStatus", () => {
         });
     });
 
-    it("does NOT call onAuthFailure on non-401 errors", async () => {
+    it("does NOT call onAuthFailure on non-auth errors", async () => {
         vi.mocked(invoke).mockRejectedValue("Could not reach agent at http://localhost:8080: timeout");
 
         const onAuthFailure = vi.fn();
