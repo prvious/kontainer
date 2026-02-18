@@ -66,7 +66,7 @@ func New(
 
 	r.Get("/ping", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"app":"dev.kontainer.app"}`)
+		fmt.Fprintf(w, `{"app":"dev.kontainer.app","status":"ok"}`)
 	})
 
 	r.Get("/auth/providers", authHandler.ProvidersHandler)
