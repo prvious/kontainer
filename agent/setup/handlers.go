@@ -180,13 +180,13 @@ func (h *SetupHandlers) CallbackHandler(w http.ResponseWriter, r *http.Request) 
 
 	// Store all credentials
 	err = h.store.SetAll(map[string]string{
-		"github_app_id":        strconv.Itoa(ghResp.ID),
-		"github_client_id":     ghResp.ClientID,
-		"github_client_secret": ghResp.ClientSecret,
-		"github_private_key":   ghResp.PEM,
+		"github_app_id":         strconv.Itoa(ghResp.ID),
+		"github_client_id":      ghResp.ClientID,
+		"github_client_secret":  ghResp.ClientSecret,
+		"github_private_key":    ghResp.PEM,
 		"github_webhook_secret": ghResp.WebhookSecret,
-		"github_org":           ghResp.Owner.Login,
-		"jwt_secret":           jwtSecret,
+		"github_org":            ghResp.Owner.Login,
+		"jwt_secret":            jwtSecret,
 	})
 	if err != nil {
 		renderError(w, http.StatusInternalServerError, "Failed to store GitHub App credentials.")

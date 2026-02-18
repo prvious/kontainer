@@ -123,7 +123,11 @@ export function SetupWizard({ agentUrl, onComplete, onBack }: SetupWizardProps) 
                                 {i > 0 && <div className='h-px w-4 bg-border' />}
                                 <div
                                     className={`flex size-6 items-center justify-center rounded-full text-xs font-medium ${
-                                        step === s ? "bg-primary text-primary-foreground" : currentStepIndex > i ? "bg-primary/20 text-primary" : "bg-muted text-muted-foreground"
+                                        step === s
+                                            ? 'bg-primary text-primary-foreground'
+                                            : currentStepIndex > i
+                                              ? 'bg-primary/20 text-primary'
+                                              : 'bg-muted text-muted-foreground'
                                     }`}
                                 >
                                     {currentStepIndex > i ? <CheckCircle2 className='size-3.5' /> : i + 1}
@@ -140,7 +144,15 @@ export function SetupWizard({ agentUrl, onComplete, onBack }: SetupWizardProps) 
                                 Setup Token
                             </Label>
                             <div className='relative'>
-                                <Input id='setup-token' type='text' placeholder='ktsetup_...' value={setupToken} onChange={(e) => setSetupToken(e.target.value)} required className='h-9 pr-9 font-mono text-sm' />
+                                <Input
+                                    id='setup-token'
+                                    type='text'
+                                    placeholder='ktsetup_...'
+                                    value={setupToken}
+                                    onChange={(e) => setSetupToken(e.target.value)}
+                                    required
+                                    className='h-9 pr-9 font-mono text-sm'
+                                />
                                 <div className='absolute top-1/2 right-3 -translate-y-1/2'>
                                     <Key className='size-3.5 text-muted-foreground' />
                                 </div>
