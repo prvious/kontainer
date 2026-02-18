@@ -158,42 +158,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         };
     }, []);
 
-    // Expiry timer
-    useEffect(() => {
-        const interval = setInterval(async () => {
-            if (expiresAt !== null && expiresAt <= Math.floor(Date.now() / 1000)) {
-                if (activeProfileId) {
-                    try {
-                        await invoke("delete_profile", { profileId: activeProfileId });
-                    } catch {
-                        // ignore
-                    }
-                }
-                clearState();
-
-                // Reload profiles, switch to another if available
-                try {
-                    const data = await invoke<StoredProfiles>("load_profiles");
-                    setProfiles(data.profiles);
-                    setActiveProfileId(data.activeProfileId);
-
-                    if (data.profiles.length > 0) {
-                        const next = data.profiles[0];
-                        await invoke("set_active_profile", { profileId: next.id });
-                        applyProfile(next);
-                    } else {
-                        setActiveProfileId(null);
-                    }
-                } catch {
-                    setProfiles([]);
-                    setActiveProfileId(null);
-                }
-            }
-        }, 30_000);
-
-        return () => clearInterval(interval);
-    }, [expiresAt, activeProfileId, clearState, applyProfile]);
-
     const login = useCallback(
         async (url: string, label?: string, provider?: string) => {
             pendingLabelRef.current = label || "Default";
