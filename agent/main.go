@@ -2,14 +2,15 @@ package main
 
 import (
 	"context"
+	"flag"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
+	"github.com/docker/docker/client"
 	"github.com/prvious/kontainer/agent/auth"
 	"github.com/prvious/kontainer/agent/auth/providers"
 	"github.com/prvious/kontainer/agent/cluster"
@@ -20,8 +21,6 @@ import (
 	"github.com/prvious/kontainer/agent/services"
 	"github.com/prvious/kontainer/agent/settings"
 	"github.com/prvious/kontainer/agent/storage"
-	"github.com/docker/docker/client"
-	"github.com/joho/godotenv"
 )
 
 func mask(s string) string {
@@ -32,14 +31,19 @@ func mask(s string) string {
 }
 
 func main() {
-	_ = godotenv.Load()
+	configPath := flag.String("config", "/etc/kontainer/kontainer.yml", "path to config file")
+	flag.Parse()
 
-	cfg := config.Load()
+	cfg, err := config.Load(*configPath)
+	if err != nil {
+		log.Fatalf("failed to load config: %v", err)
+	}
 
 	log.Println("--- kontainer agent config ---")
+	log.Printf("  config file     : %s", *configPath)
 	log.Printf("  role            : %s", cfg.Role)
 	log.Printf("  agent url       : %s", cfg.AgentURL)
-	log.Printf("  github client id: %s", mask(cfg.GithubClientID))
+	log.Printf("  github client id: %s", mask(cfg.GitHub.ClientID))
 	log.Printf("  jwt secret      : %s", mask(cfg.JWTSecret))
 
 	if cfg.Role == cluster.RoleFollower {
@@ -50,26 +54,24 @@ func main() {
 }
 
 func startFollower(cfg *config.Config) {
-	if cfg.InternalSecret == "" {
-		log.Fatal("KONTAINER_INTERNAL_SECRET is required for follower mode")
+	if cfg.Cluster.InternalSecret == "" {
+		log.Fatal("cluster.internal_secret is required for follower mode")
 	}
 
 	hostname, _ := os.Hostname()
-	nodeID := os.Getenv("DOCKER_NODE_ID")
 
 	dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		log.Fatalf("Failed to create Docker client: %v", err)
 	}
 
-	if nodeID == "" {
-		info, err := dockerClient.Info(context.Background())
-		if err == nil && info.Swarm.NodeID != "" {
-			nodeID = info.Swarm.NodeID
-		}
+	nodeID := ""
+	info, err := dockerClient.Info(context.Background())
+	if err == nil && info.Swarm.NodeID != "" {
+		nodeID = info.Swarm.NodeID
 	}
 
-	nodeAction := metrics.NewCollectNodeMetricsAction(dockerClient)
+	nodeAction := metrics.NewCollectNodeMetricsAction(dockerClient, cfg.Dev)
 	containerAction := metrics.NewCollectContainerMetricsAction(dockerClient)
 	metricsHandler := metrics.NewInternalMetricsHandler(nodeAction, containerAction, nodeID, hostname)
 
@@ -84,18 +86,16 @@ func startFollower(cfg *config.Config) {
 	internalPruneImagesHandler := images.NewInternalPruneImagesHandler(dockerClient)
 
 	execFollowerHandler := services.NewExecContainerFollowerHandler(dockerClient)
-	handler := server.NewFollower(identity, cfg.InternalSecret, metricsHandler, execFollowerHandler, internalImagesHandler, internalRemoveImageHandler, internalPruneImagesHandler)
+	handler := server.NewFollower(identity, cfg.Cluster.InternalSecret, metricsHandler, execFollowerHandler, internalImagesHandler, internalRemoveImageHandler, internalPruneImagesHandler)
 
 	srv := &http.Server{Addr: ":" + cfg.Port, Handler: handler}
 
-	// Graceful shutdown on SIGINT/SIGTERM
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
 		<-sigCh
 		log.Println("shutting down...")
-
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		srv.Shutdown(ctx)
@@ -110,44 +110,27 @@ func startFollower(cfg *config.Config) {
 }
 
 func startLeader(cfg *config.Config) {
-	if cfg.GithubClientID == "" || cfg.GithubClientSecret == "" {
-		log.Println("  ⚠ GITHUB_CLIENT_ID or GITHUB_CLIENT_SECRET is empty — OAuth will not work")
+	if cfg.GitHub.ClientID == "" || cfg.GitHub.ClientSecret == "" {
+		log.Println("  ⚠ github.client_id or github.client_secret is empty — OAuth will not work")
 	}
 	if cfg.JWTSecret == "" {
-		log.Println("  ⚠ JWT_SECRET is empty — auth tokens will not be signed")
+		log.Println("  ⚠ jwt_secret is empty — auth tokens will not be signed")
 	}
 
-	var allowedOrgs []string
-	if cfg.GithubAllowedOrgs != "" {
-		for _, org := range strings.Split(cfg.GithubAllowedOrgs, ",") {
-			if o := strings.TrimSpace(org); o != "" {
-				allowedOrgs = append(allowedOrgs, o)
-			}
-		}
+	if len(cfg.GitHub.AllowedOrgs) > 0 {
+		log.Printf("  GitHub org allowlist: %v", cfg.GitHub.AllowedOrgs)
 	}
-	if len(allowedOrgs) > 0 {
-		log.Printf("  GitHub org allowlist: %v", allowedOrgs)
-	}
-
-	var allowedUsers []string
-	if cfg.GithubAllowedUsers != "" {
-		for _, user := range strings.Split(cfg.GithubAllowedUsers, ",") {
-			if u := strings.TrimSpace(user); u != "" {
-				allowedUsers = append(allowedUsers, u)
-			}
-		}
-	}
-	if len(allowedUsers) > 0 {
-		log.Printf("  GitHub user allowlist: %v", allowedUsers)
+	if len(cfg.GitHub.AllowedUsers) > 0 {
+		log.Printf("  GitHub user allowlist: %v", cfg.GitHub.AllowedUsers)
 	}
 
 	registry := providers.NewProviderRegistry()
 	registry.Register(providers.NewGitHubProvider(
-		cfg.GithubClientID,
-		cfg.GithubClientSecret,
+		cfg.GitHub.ClientID,
+		cfg.GitHub.ClientSecret,
 		cfg.AgentURL+"/auth/github/callback",
-		allowedOrgs,
-		allowedUsers,
+		cfg.GitHub.AllowedOrgs,
+		cfg.GitHub.AllowedUsers,
 	))
 
 	dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
@@ -157,14 +140,12 @@ func startLeader(cfg *config.Config) {
 
 	hostname, _ := os.Hostname()
 
-	nodeAction := metrics.NewCollectNodeMetricsAction(dockerClient)
+	nodeAction := metrics.NewCollectNodeMetricsAction(dockerClient, cfg.Dev)
 	containerAction := metrics.NewCollectContainerMetricsAction(dockerClient)
-	leaderNodeID := os.Getenv("DOCKER_NODE_ID")
-	if leaderNodeID == "" {
-		info, err := dockerClient.Info(context.Background())
-		if err == nil && info.Swarm.NodeID != "" {
-			leaderNodeID = info.Swarm.NodeID
-		}
+	leaderNodeID := ""
+	info, err := dockerClient.Info(context.Background())
+	if err == nil && info.Swarm.NodeID != "" {
+		leaderNodeID = info.Swarm.NodeID
 	}
 	internalMetricsHandler := metrics.NewInternalMetricsHandler(nodeAction, containerAction, leaderNodeID, hostname)
 
@@ -254,62 +235,57 @@ func startLeader(cfg *config.Config) {
 	authHandler := auth.NewAuthHandler(registry, sessions, cfg.JWTSecret, bridge)
 	jwtMiddleware := auth.JWTMiddleware(cfg.JWTSecret)
 
-	// Cluster setup
 	clusterRegistry := cluster.NewRegistry()
 	selfInfo := cluster.NewAgentInfo("", hostname, cfg.AgentURL, cluster.RoleLeader, "healthy")
 
 	listAgentsAction := services.NewListAgentsAction(clusterRegistry, selfInfo)
 	listAgentsHandler := services.NewListAgentsHandler(listAgentsAction)
 
-	execHandler := services.NewExecContainerHandler(dockerClient, cfg.JWTSecret, clusterRegistry, leaderNodeID, cfg.InternalSecret)
+	execHandler := services.NewExecContainerHandler(dockerClient, cfg.JWTSecret, clusterRegistry, leaderNodeID, cfg.Cluster.InternalSecret)
 
-	// Metrics storage and background collector
-	interval, err := time.ParseDuration(cfg.MetricsInterval)
+	interval, err := time.ParseDuration(cfg.Metrics.Interval)
 	if err != nil {
 		interval = 30 * time.Second
 	}
-	retention, err := time.ParseDuration(cfg.MetricsRetention)
+	retention, err := time.ParseDuration(cfg.Metrics.Retention)
 	if err != nil {
 		retention = 24 * time.Hour
 	}
 
-	metricsStore, err := storage.NewMetricsStore(cfg.MetricsDBPath, retention)
+	metricsStore, err := storage.NewMetricsStore(cfg.Metrics.DBPath, retention)
 	if err != nil {
 		log.Fatalf("Failed to create metrics store: %v", err)
 	}
 
-	settingsStore, err := storage.NewSettingsStore(cfg.MetricsDBPath)
+	settingsStore, err := storage.NewSettingsStore(cfg.Metrics.DBPath)
 	if err != nil {
 		log.Fatalf("Failed to create settings store: %v", err)
 	}
 
-	collector := metrics.NewMetricsCollector(internalMetricsHandler, clusterRegistry, cfg.InternalSecret, metricsStore, interval)
+	collector := metrics.NewMetricsCollector(internalMetricsHandler, clusterRegistry, cfg.Cluster.InternalSecret, metricsStore, interval)
 	collector.Start(context.Background())
 
-	clusterMetricsHandler := metrics.NewClusterMetricsHandler(internalMetricsHandler, clusterRegistry, cfg.InternalSecret, metricsStore)
-	nodeMetricsHandler := metrics.NewNodeMetricsHandler(internalMetricsHandler, clusterRegistry, cfg.InternalSecret)
+	clusterMetricsHandler := metrics.NewClusterMetricsHandler(internalMetricsHandler, clusterRegistry, cfg.Cluster.InternalSecret, metricsStore)
+	nodeMetricsHandler := metrics.NewNodeMetricsHandler(internalMetricsHandler, clusterRegistry, cfg.Cluster.InternalSecret)
 
 	listImagesAction := images.NewListImagesAction(dockerClient)
 	leaderImagesHandler := images.NewInternalImagesHandler(listImagesAction, leaderNodeID, hostname)
-	clusterImagesHandler := images.NewClusterImagesHandler(leaderImagesHandler, clusterRegistry, cfg.InternalSecret)
-	removeImageHandler := images.NewRemoveImageHandler(dockerClient, clusterRegistry, leaderNodeID, cfg.InternalSecret)
-	pruneImagesHandler := images.NewPruneImagesHandler(dockerClient, clusterRegistry, leaderNodeID, cfg.InternalSecret)
+	clusterImagesHandler := images.NewClusterImagesHandler(leaderImagesHandler, clusterRegistry, cfg.Cluster.InternalSecret)
+	removeImageHandler := images.NewRemoveImageHandler(dockerClient, clusterRegistry, leaderNodeID, cfg.Cluster.InternalSecret)
+	pruneImagesHandler := images.NewPruneImagesHandler(dockerClient, clusterRegistry, leaderNodeID, cfg.Cluster.InternalSecret)
 
 	getSettingsAction := settings.NewGetSettingsAction(settingsStore)
 	getSettingsHandler := settings.NewGetSettingsHandler(getSettingsAction)
 	updateSettingsAction := settings.NewUpdateSettingsAction(settingsStore)
 	updateSettingsHandler := settings.NewUpdateSettingsHandler(updateSettingsAction, getSettingsAction)
 
-	// Start follower discovery
-	if addrs := cluster.ParseDevFollowers(cfg.DevFollowers); len(addrs) > 0 {
-		// Dev mode: ping static localhost addresses
-		log.Printf("  dev followers   : %s", cfg.DevFollowers)
-		devDiscovery := cluster.NewDevDiscovery(addrs, cfg.InternalSecret, clusterRegistry)
+	if len(cfg.Cluster.DevFollowers) > 0 {
+		log.Printf("  dev followers   : %v", cfg.Cluster.DevFollowers)
+		devDiscovery := cluster.NewDevDiscovery(cfg.Cluster.DevFollowers, cfg.Cluster.InternalSecret, clusterRegistry)
 		devDiscovery.Start(context.Background())
 		defer devDiscovery.Stop()
-	} else if cfg.InternalSecret != "" {
-		// Production: discover followers via Swarm API
-		discovery := cluster.NewDiscovery(dockerClient, clusterRegistry, cfg.FollowerService, cfg.InternalSecret, cfg.Port)
+	} else if cfg.Cluster.InternalSecret != "" {
+		discovery := cluster.NewDiscovery(dockerClient, clusterRegistry, cfg.Cluster.FollowerService, cfg.Cluster.InternalSecret, cfg.Port)
 		discovery.Start(context.Background())
 		defer discovery.Stop()
 	}
@@ -318,14 +294,12 @@ func startLeader(cfg *config.Config) {
 
 	srv := &http.Server{Addr: ":" + cfg.Port, Handler: handler}
 
-	// Graceful shutdown on SIGINT/SIGTERM
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
 		<-sigCh
 		log.Println("shutting down...")
-
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		srv.Shutdown(ctx)
@@ -338,7 +312,6 @@ func startLeader(cfg *config.Config) {
 		log.Fatalf("server error: %v", err)
 	}
 
-	// Cleanup in correct order: stop collector before closing stores
 	collector.Stop()
 	settingsStore.Close()
 	metricsStore.Close()
