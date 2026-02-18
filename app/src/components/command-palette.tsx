@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
@@ -58,6 +58,7 @@ export function CommandPalette() {
     const [pages, setPages] = useState<PalettePage[]>([{ kind: "root" }]);
     const [selectedIndex, setSelectedIndex] = useState(0);
     const inputRef = useRef<HTMLInputElement>(null);
+    const prevOpenRef: RefObject<boolean> = useRef(false);
 
     const currentPage = pages[pages.length - 1];
 
@@ -70,14 +71,15 @@ export function CommandPalette() {
     const serviceIdForTasks = currentPage.kind === "container-select" ? currentPage.service.id : "";
     const { data: tasks } = useServiceTasks(serviceIdForTasks);
 
-    // Reset state when dialog opens/closes
+    // Reset state only on closed → open transition
     useEffect(() => {
-        if (open) {
+        if (open && !prevOpenRef.current) {
             setSearch(initialSearch);
             setPages([{ kind: "root" }]);
             setSelectedIndex(0);
             if (initialSearch) setInitialSearch("");
         }
+        prevOpenRef.current = open;
     }, [open, initialSearch, setInitialSearch]);
 
     // Global ⌘K / Ctrl+K and ⌘T / Ctrl+T listener
