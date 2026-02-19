@@ -56,6 +56,56 @@ describe("SetupWizard", () => {
         expect(screen.getByRole("button", { name: /connect github/i })).toBeInTheDocument();
     });
 
+    it("passes org to setup_github_connect when provided", async () => {
+        vi.mocked(invoke)
+            .mockResolvedValueOnce({ step: "pending" }) // verify token
+            .mockResolvedValueOnce({ setupUrl: "http://localhost:8080/setup/github/start?token=abc" }); // github connect
+
+        render(<SetupWizard {...defaultProps} />);
+        const user = userEvent.setup();
+
+        // Enter token and verify
+        const input = screen.getByLabelText("Setup Token");
+        await user.type(input, "ktsetup_abc123");
+        await user.click(screen.getByRole("button", { name: "Verify" }));
+        await act(async () => {});
+
+        // Enter org and connect
+        const orgInput = screen.getByLabelText(/organization/i);
+        await user.type(orgInput, "my-org");
+        await user.click(screen.getByRole("button", { name: /connect github/i }));
+        await act(async () => {});
+
+        expect(invoke).toHaveBeenCalledWith("setup_github_connect", {
+            url: "http://localhost:8080",
+            token: "ktsetup_abc123",
+            org: "my-org",
+        });
+    });
+
+    it("passes null org when field is empty", async () => {
+        vi.mocked(invoke)
+            .mockResolvedValueOnce({ step: "pending" }) // verify token
+            .mockResolvedValueOnce({ setupUrl: "http://localhost:8080/setup/github/start?token=abc" }); // github connect
+
+        render(<SetupWizard {...defaultProps} />);
+        const user = userEvent.setup();
+
+        const input = screen.getByLabelText("Setup Token");
+        await user.type(input, "ktsetup_abc123");
+        await user.click(screen.getByRole("button", { name: "Verify" }));
+        await act(async () => {});
+
+        await user.click(screen.getByRole("button", { name: /connect github/i }));
+        await act(async () => {});
+
+        expect(invoke).toHaveBeenCalledWith("setup_github_connect", {
+            url: "http://localhost:8080",
+            token: "ktsetup_abc123",
+            org: null,
+        });
+    });
+
     it("resumes at confirm step if github already connected", async () => {
         vi.mocked(invoke).mockResolvedValueOnce({ step: "github_connected" });
 

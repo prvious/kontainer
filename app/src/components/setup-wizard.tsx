@@ -21,6 +21,7 @@ export function SetupWizard({ agentUrl, onComplete, onBack }: SetupWizardProps) 
     const [setupToken, setSetupToken] = useState("");
     const [error, setError] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
+    const [githubOrg, setGithubOrg] = useState("");
     const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     useEffect(() => {
@@ -60,6 +61,7 @@ export function SetupWizard({ agentUrl, onComplete, onBack }: SetupWizardProps) 
             const result = await invoke<{ setupUrl: string }>("setup_github_connect", {
                 url: agentUrl,
                 token: setupToken,
+                org: githubOrg.trim() || null,
             });
 
             await openUrl(result.setupUrl);
@@ -174,7 +176,21 @@ export function SetupWizard({ agentUrl, onComplete, onBack }: SetupWizardProps) 
                     {/* Step 2: GitHub */}
                     {step === "github" && (
                         <div className='mt-6'>
-                            <p className='mb-4 text-sm text-muted-foreground'>Connect a GitHub organization to manage access to this agent.</p>
+                            <p className='mb-4 text-sm text-muted-foreground'>Connect a GitHub account or organization to manage access to this agent.</p>
+                            <div className='mb-4'>
+                                <Label htmlFor='github-org' className='mb-2'>
+                                    Organization <span className='text-muted-foreground'>(optional)</span>
+                                </Label>
+                                <Input
+                                    id='github-org'
+                                    type='text'
+                                    placeholder='Leave blank for personal account'
+                                    value={githubOrg}
+                                    onChange={(e) => setGithubOrg(e.target.value)}
+                                    disabled={isLoading}
+                                    className='h-9 font-mono text-sm'
+                                />
+                            </div>
                             {error && <p className='mb-2 text-xs text-destructive'>{error}</p>}
                             <Button type='button' variant='outline' size='sm' disabled={isLoading} onClick={handleConnectGithub} className='w-full'>
                                 {isLoading ? (

@@ -24,7 +24,7 @@ func newTestStore(t *testing.T) *storage.AppConfigStore {
 
 func TestStatusHandler_Pending(t *testing.T) {
 	store := newTestStore(t)
-	h := NewSetupHandlers(store, "https://agent.example.com")
+	h := NewSetupHandlers(store, "https://agent.example.com", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/setup/status", nil)
 	rec := httptest.NewRecorder()
@@ -49,7 +49,7 @@ func TestStatusHandler_GithubConnected(t *testing.T) {
 	if err := store.Set("github_app_id", "12345"); err != nil {
 		t.Fatal(err)
 	}
-	h := NewSetupHandlers(store, "https://agent.example.com")
+	h := NewSetupHandlers(store, "https://agent.example.com", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/setup/status", nil)
 	rec := httptest.NewRecorder()
@@ -74,7 +74,7 @@ func TestStatusHandler_Complete(t *testing.T) {
 	if err := store.Set("setup_complete", "true"); err != nil {
 		t.Fatal(err)
 	}
-	h := NewSetupHandlers(store, "https://agent.example.com")
+	h := NewSetupHandlers(store, "https://agent.example.com", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/setup/status", nil)
 	rec := httptest.NewRecorder()
@@ -96,7 +96,7 @@ func TestStatusHandler_Complete(t *testing.T) {
 
 func TestManifestHandler(t *testing.T) {
 	store := newTestStore(t)
-	h := NewSetupHandlers(store, "https://agent.example.com")
+	h := NewSetupHandlers(store, "https://agent.example.com", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/setup/github/manifest", nil)
 	rec := httptest.NewRecorder()
@@ -130,7 +130,7 @@ func TestManifestHandler(t *testing.T) {
 
 func TestStartHandler_InvalidToken(t *testing.T) {
 	store := newTestStore(t)
-	h := NewSetupHandlers(store, "https://agent.example.com")
+	h := NewSetupHandlers(store, "https://agent.example.com", nil)
 
 	// First call ManifestHandler to generate a valid state
 	manifestReq := httptest.NewRequest(http.MethodGet, "/setup/github/manifest", nil)
@@ -150,7 +150,7 @@ func TestStartHandler_InvalidToken(t *testing.T) {
 
 func TestStartHandler_NoState(t *testing.T) {
 	store := newTestStore(t)
-	h := NewSetupHandlers(store, "https://agent.example.com")
+	h := NewSetupHandlers(store, "https://agent.example.com", nil)
 
 	// Call StartHandler without ever calling ManifestHandler (no state stored)
 	req := httptest.NewRequest(http.MethodGet, "/setup/github/start?token=some-token", nil)
@@ -165,7 +165,7 @@ func TestStartHandler_NoState(t *testing.T) {
 
 func TestCallbackHandler_MissingCode(t *testing.T) {
 	store := newTestStore(t)
-	h := NewSetupHandlers(store, "https://agent.example.com")
+	h := NewSetupHandlers(store, "https://agent.example.com", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/setup/github/callback", nil)
 	rec := httptest.NewRecorder()
@@ -179,7 +179,7 @@ func TestCallbackHandler_MissingCode(t *testing.T) {
 
 func TestCompleteHandler_NoGitHub(t *testing.T) {
 	store := newTestStore(t)
-	h := NewSetupHandlers(store, "https://agent.example.com")
+	h := NewSetupHandlers(store, "https://agent.example.com", nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/setup/complete", nil)
 	rec := httptest.NewRecorder()
@@ -204,7 +204,7 @@ func TestCompleteHandler_Success(t *testing.T) {
 	if err := store.Set("github_app_id", "12345"); err != nil {
 		t.Fatal(err)
 	}
-	h := NewSetupHandlers(store, "https://agent.example.com")
+	h := NewSetupHandlers(store, "https://agent.example.com", nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/setup/complete", nil)
 	rec := httptest.NewRecorder()

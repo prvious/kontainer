@@ -15,19 +15,22 @@ import (
 
 // SetupHandlers holds the HTTP handlers for the setup flow.
 type SetupHandlers struct {
-	store    *storage.AppConfigStore
-	agentURL string
+	store      *storage.AppConfigStore
+	agentURL   string
+	onComplete func() // called after setup_complete is set
 
 	mu    sync.Mutex
 	state string // CSRF state for the GitHub App manifest flow
 	token string // one-time token for the start page
+	org   string // optional GitHub org for app creation
 }
 
 // NewSetupHandlers creates a new SetupHandlers instance.
-func NewSetupHandlers(store *storage.AppConfigStore, agentURL string) *SetupHandlers {
+func NewSetupHandlers(store *storage.AppConfigStore, agentURL string, onComplete func()) *SetupHandlers {
 	return &SetupHandlers{
-		store:    store,
-		agentURL: agentURL,
+		store:      store,
+		agentURL:   agentURL,
+		onComplete: onComplete,
 	}
 }
 
@@ -56,12 +59,19 @@ func (h *SetupHandlers) StatusHandler(w http.ResponseWriter, r *http.Request) {
 // ManifestHandler generates a CSRF state and one-time token, then returns a setupUrl
 // pointing to /setup/github/start?token=...
 func (h *SetupHandlers) ManifestHandler(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Org string `json:"org"`
+	}
+	// Body is optional — no org means personal account
+	_ = json.NewDecoder(r.Body).Decode(&body)
+
 	state := generateRandomHex(16)
 	token := generateRandomHex(16)
 
 	h.mu.Lock()
 	h.state = state
 	h.token = token
+	h.org = body.Org
 	h.mu.Unlock()
 
 	setupURL := fmt.Sprintf("%s/setup/github/start?token=%s", h.agentURL, token)
@@ -76,6 +86,7 @@ func (h *SetupHandlers) StartHandler(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()
 	storedState := h.state
 	storedToken := h.token
+	storedOrg := h.org
 	h.mu.Unlock()
 
 	if storedState == "" || storedToken == "" {
@@ -88,15 +99,21 @@ func (h *SetupHandlers) StartHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	appName := "Kontainer"
+	if storedOrg != "" {
+		appName = fmt.Sprintf("Kontainer (%s)", storedOrg)
+	}
+
 	manifest := map[string]interface{}{
-		"name":          "Kontainer",
+		"name":          appName,
 		"url":           h.agentURL,
-		"callback_urls": []string{h.agentURL + "/setup/github/callback"},
+		"callback_urls": []string{h.agentURL + "/auth/github/callback"},
 		"redirect_url":  h.agentURL + "/setup/github/callback",
 		"setup_url":     h.agentURL + "/setup/github/callback",
 		"public":        false,
 		"default_permissions": map[string]string{
-			"members": "read",
+			"members":         "read",
+			"email_addresses": "read",
 		},
 		"default_events": []string{},
 	}
@@ -112,7 +129,12 @@ func (h *SetupHandlers) StartHandler(w http.ResponseWriter, r *http.Request) {
 	h.token = ""
 	h.mu.Unlock()
 
-	githubURL := fmt.Sprintf("https://github.com/settings/apps/new?state=%s", storedState)
+	var githubURL string
+	if storedOrg != "" {
+		githubURL = fmt.Sprintf("https://github.com/organizations/%s/settings/apps/new?state=%s", storedOrg, storedState)
+	} else {
+		githubURL = fmt.Sprintf("https://github.com/settings/apps/new?state=%s", storedState)
+	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
@@ -129,9 +151,25 @@ func (h *SetupHandlers) StartHandler(w http.ResponseWriter, r *http.Request) {
 </html>`, githubURL, htmlEscapeJSON(string(manifestJSON)))
 }
 
-// CallbackHandler handles the GitHub callback after the user creates the GitHub App.
-// It exchanges the code for app credentials and stores them.
+// CallbackHandler handles two GitHub redirects:
+// 1. After manifest creation: exchanges code for credentials, then redirects to install page
+// 2. After app installation: shows success page (setup_action param present)
 func (h *SetupHandlers) CallbackHandler(w http.ResponseWriter, r *http.Request) {
+	// Post-install redirect — GitHub sends setup_action after the user installs the app
+	if r.URL.Query().Get("setup_action") != "" {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, `<!DOCTYPE html>
+<html>
+<head><title>Kontainer Setup</title></head>
+<body>
+<h1>GitHub App Installed!</h1>
+<p>Return to the Kontainer app to complete setup.</p>
+</body>
+</html>`)
+		return
+	}
+
 	code := r.URL.Query().Get("code")
 	if code == "" {
 		w.Header().Set("Content-Type", "application/json")
@@ -162,6 +200,7 @@ func (h *SetupHandlers) CallbackHandler(w http.ResponseWriter, r *http.Request) 
 
 	var ghResp struct {
 		ID            int    `json:"id"`
+		Slug          string `json:"slug"`
 		ClientID      string `json:"client_id"`
 		ClientSecret  string `json:"client_secret"`
 		PEM           string `json:"pem"`
@@ -198,16 +237,9 @@ func (h *SetupHandlers) CallbackHandler(w http.ResponseWriter, r *http.Request) 
 	h.state = ""
 	h.mu.Unlock()
 
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprint(w, `<!DOCTYPE html>
-<html>
-<head><title>Kontainer Setup</title></head>
-<body>
-<h1>GitHub App Connected!</h1>
-<p>Return to the Kontainer app to complete setup.</p>
-</body>
-</html>`)
+	// Redirect to the GitHub App installation page
+	installURL := fmt.Sprintf("https://github.com/apps/%s/installations/new", ghResp.Slug)
+	http.Redirect(w, r, installURL, http.StatusFound)
 }
 
 // CompleteHandler verifies GitHub credentials exist, sets setup_complete = true,
@@ -230,6 +262,11 @@ func (h *SetupHandlers) CompleteHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "complete"})
+
+	// Trigger mode switch after responding
+	if h.onComplete != nil {
+		go h.onComplete()
+	}
 }
 
 // writeJSON writes a JSON response with the given status code and payload.

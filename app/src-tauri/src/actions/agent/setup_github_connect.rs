@@ -8,15 +8,25 @@ pub struct ManifestResponse {
 }
 
 #[tauri::command]
-pub async fn setup_github_connect(url: String, token: String) -> Result<ManifestResponse, String> {
+pub async fn setup_github_connect(
+    url: String,
+    token: String,
+    org: Option<String>,
+) -> Result<ManifestResponse, String> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
         .build()
         .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
 
-    let response = client
+    let mut request = client
         .post(format!("{url}/setup/github/manifest"))
-        .header("X-Kontainer-Setup-Token", &token)
+        .header("X-Kontainer-Setup-Token", &token);
+
+    if let Some(ref org) = org {
+        request = request.json(&serde_json::json!({ "org": org }));
+    }
+
+    let response = request
         .send()
         .await
         .map_err(|e| format!("Could not reach agent at {url}: {e}"))?;

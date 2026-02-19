@@ -115,19 +115,9 @@ export function LoginScreen() {
         return (
             <SetupWizard
                 agentUrl={agentUrl.replace(/\/+$/, "")}
-                onComplete={async () => {
+                onComplete={() => {
                     setSetupRequired(false);
-                    const url = agentUrl.replace(/\/+$/, "");
-                    try {
-                        const result = await invoke<string[]>("fetch_providers", { url });
-                        setProviders(result);
-                        setStatus("online");
-                        if (result.length > 0) {
-                            handleProviderClick(result[0]);
-                        }
-                    } catch {
-                        setStatus("online");
-                    }
+                    setStatus("idle");
                 }}
                 onBack={() => {
                     setSetupRequired(false);

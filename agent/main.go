@@ -70,7 +70,7 @@ func startFollower(cfg *config.Config) {
 		nodeID = info.Swarm.NodeID
 	}
 
-	nodeAction := metrics.NewCollectNodeMetricsAction(dockerClient, cfg.Dev)
+	nodeAction := metrics.NewCollectNodeMetricsAction()
 	containerAction := metrics.NewCollectContainerMetricsAction(dockerClient)
 	metricsHandler := metrics.NewInternalMetricsHandler(nodeAction, containerAction, nodeID, hostname)
 
@@ -136,9 +136,16 @@ func startSetupMode(cfg *config.Config, appConfigStore *storage.AppConfigStore) 
 	log.Println("  desktop app to complete setup.")
 	log.Println("===================================")
 
-	setupHandlers := setup.NewSetupHandlers(appConfigStore, cfg.AgentURL)
+	swappable := server.NewSwappableHandler(http.NotFoundHandler())
+
+	setupHandlers := setup.NewSetupHandlers(appConfigStore, cfg.AgentURL, func() {
+		log.Println("Setup complete — switching to normal mode...")
+		normalRouter := buildNormalRouter(cfg, appConfigStore)
+		swappable.Swap(normalRouter)
+		log.Println("Normal mode active.")
+	})
 	setupRouter := server.NewSetupRouter(setupHandlers, setupToken)
-	swappable := server.NewSwappableHandler(setupRouter)
+	swappable.Swap(setupRouter)
 
 	srv := &http.Server{Addr: ":" + cfg.Port, Handler: swappable}
 
@@ -162,6 +169,30 @@ func startSetupMode(cfg *config.Config, appConfigStore *storage.AppConfigStore) 
 }
 
 func startNormalMode(cfg *config.Config, appConfigStore *storage.AppConfigStore) {
+	handler := buildNormalRouter(cfg, appConfigStore)
+
+	srv := &http.Server{Addr: ":" + cfg.Port, Handler: handler}
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		<-sigCh
+		log.Println("shutting down...")
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		srv.Shutdown(ctx)
+	}()
+
+	log.Printf("  listening on    : %s (leader)", srv.Addr)
+	log.Println("----------------------------")
+
+	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+		log.Fatalf("server error: %v", err)
+	}
+}
+
+func buildNormalRouter(cfg *config.Config, appConfigStore *storage.AppConfigStore) http.Handler {
 	// Read credentials from app config store
 	jwtSecret, _, err := appConfigStore.Get("jwt_secret")
 	if err != nil {
@@ -207,7 +238,7 @@ func startNormalMode(cfg *config.Config, appConfigStore *storage.AppConfigStore)
 
 	hostname, _ := os.Hostname()
 
-	nodeAction := metrics.NewCollectNodeMetricsAction(dockerClient, cfg.Dev)
+	nodeAction := metrics.NewCollectNodeMetricsAction()
 	containerAction := metrics.NewCollectContainerMetricsAction(dockerClient)
 	leaderNodeID := ""
 	info, err := dockerClient.Info(context.Background())
@@ -351,36 +382,10 @@ func startNormalMode(cfg *config.Config, appConfigStore *storage.AppConfigStore)
 		log.Printf("  dev followers   : %v", cfg.Cluster.DevFollowers)
 		devDiscovery := cluster.NewDevDiscovery(cfg.Cluster.DevFollowers, cfg.Cluster.InternalSecret, clusterRegistry)
 		devDiscovery.Start(context.Background())
-		defer devDiscovery.Stop()
 	} else if cfg.Cluster.InternalSecret != "" {
 		discovery := cluster.NewDiscovery(dockerClient, clusterRegistry, cfg.Cluster.FollowerService, cfg.Cluster.InternalSecret, cfg.Port)
 		discovery.Start(context.Background())
-		defer discovery.Stop()
 	}
 
-	handler := server.New(authHandler, jwtMiddleware, meHandler, listServicesHandler, inspectServiceHandler, scaleServiceHandler, restartServiceHandler, rollbackServiceHandler, listStacksHandler, removeStackHandler, listServiceTasksHandler, inspectTaskHandler, listNodesHandler, listNodeTasksHandler, listTaskStatsHandler, listTasksHandler, streamLogsHandler, streamTaskLogsHandler, listNetworksHandler, listVolumesHandler, updateServiceEnvHandler, updateServiceImageHandler, updateNodeAvailabilityHandler, updateNodeRoleHandler, listSecretsHandler, createSecretHandler, removeSecretHandler, listConfigsHandler, createConfigHandler, removeConfigHandler, inspectConfigHandler, listAgentsHandler, execHandler, clusterMetricsHandler, nodeMetricsHandler, clusterImagesHandler, removeImageHandler, pruneImagesHandler, getSettingsHandler, updateSettingsHandler)
-
-	srv := &http.Server{Addr: ":" + cfg.Port, Handler: handler}
-
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-
-	go func() {
-		<-sigCh
-		log.Println("shutting down...")
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		srv.Shutdown(ctx)
-	}()
-
-	log.Printf("  listening on    : %s (leader)", srv.Addr)
-	log.Println("----------------------------")
-
-	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
-		log.Fatalf("server error: %v", err)
-	}
-
-	collector.Stop()
-	settingsStore.Close()
-	metricsStore.Close()
+	return server.New(authHandler, jwtMiddleware, meHandler, listServicesHandler, inspectServiceHandler, scaleServiceHandler, restartServiceHandler, rollbackServiceHandler, listStacksHandler, removeStackHandler, listServiceTasksHandler, inspectTaskHandler, listNodesHandler, listNodeTasksHandler, listTaskStatsHandler, listTasksHandler, streamLogsHandler, streamTaskLogsHandler, listNetworksHandler, listVolumesHandler, updateServiceEnvHandler, updateServiceImageHandler, updateNodeAvailabilityHandler, updateNodeRoleHandler, listSecretsHandler, createSecretHandler, removeSecretHandler, listConfigsHandler, createConfigHandler, removeConfigHandler, inspectConfigHandler, listAgentsHandler, execHandler, clusterMetricsHandler, nodeMetricsHandler, clusterImagesHandler, removeImageHandler, pruneImagesHandler, getSettingsHandler, updateSettingsHandler)
 }
