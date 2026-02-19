@@ -52,7 +52,7 @@ func (h *InternalMetricsHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 }
 
 func (h *InternalMetricsHandler) Collect(ctx context.Context) (AgentMetricsSnapshot, error) {
-	nodeMetrics, err := h.nodeAction.Execute(ctx)
+	nodeMetrics, err := h.nodeAction.Execute()
 	if err != nil {
 		return AgentMetricsSnapshot{}, fmt.Errorf("node metrics: %w", err)
 	}

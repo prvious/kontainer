@@ -71,7 +71,7 @@ func startFollower(cfg *config.Config) {
 		nodeID = info.Swarm.NodeID
 	}
 
-	nodeAction := metrics.NewCollectNodeMetricsAction(dockerClient, cfg.Dev)
+	nodeAction := metrics.NewCollectNodeMetricsAction()
 	containerAction := metrics.NewCollectContainerMetricsAction(dockerClient)
 	metricsHandler := metrics.NewInternalMetricsHandler(nodeAction, containerAction, nodeID, hostname)
 
@@ -140,7 +140,7 @@ func startLeader(cfg *config.Config) {
 
 	hostname, _ := os.Hostname()
 
-	nodeAction := metrics.NewCollectNodeMetricsAction(dockerClient, cfg.Dev)
+	nodeAction := metrics.NewCollectNodeMetricsAction()
 	containerAction := metrics.NewCollectContainerMetricsAction(dockerClient)
 	leaderNodeID := ""
 	info, err := dockerClient.Info(context.Background())
