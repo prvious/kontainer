@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { SettingsContext } from "@/contexts/settings-context-value";
@@ -12,41 +12,24 @@ vi.mock("@/hooks/use-auth", () => ({
     useAuth: vi.fn(),
 }));
 
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { GeneralTab } from "@/components/settings/general-tab";
-import { AppearanceTab } from "@/components/settings/appearance-tab";
-import { TerminalTab } from "@/components/settings/terminal-tab";
-import { ConnectionTab } from "@/components/settings/connection-tab";
+import { GeneralSection } from "@/components/settings/general-tab";
+import { AppearanceSection } from "@/components/settings/appearance-tab";
+import { TerminalSection } from "@/components/settings/terminal-tab";
+import { ConnectionSection } from "@/components/settings/connection-tab";
 
 function SettingsTestComponent() {
     return (
-        <div className='p-6'>
-            <div className='mb-6'>
+        <div className='mx-auto max-w-2xl px-6 py-6'>
+            <div className='mb-8'>
                 <h1 className='text-xl font-semibold tracking-tight'>Settings</h1>
                 <p className='mt-1 text-sm text-muted-foreground'>Application and cluster configuration</p>
             </div>
-
-            <Tabs defaultValue='general'>
-                <TabsList>
-                    <TabsTrigger value='general'>General</TabsTrigger>
-                    <TabsTrigger value='appearance'>Appearance</TabsTrigger>
-                    <TabsTrigger value='terminal'>Terminal</TabsTrigger>
-                    <TabsTrigger value='connection'>Connection</TabsTrigger>
-                </TabsList>
-
-                <TabsContent value='general'>
-                    <GeneralTab />
-                </TabsContent>
-                <TabsContent value='appearance'>
-                    <AppearanceTab />
-                </TabsContent>
-                <TabsContent value='terminal'>
-                    <TerminalTab />
-                </TabsContent>
-                <TabsContent value='connection'>
-                    <ConnectionTab />
-                </TabsContent>
-            </Tabs>
+            <div className='space-y-8'>
+                <GeneralSection />
+                <AppearanceSection />
+                <TerminalSection />
+                <ConnectionSection />
+            </div>
         </div>
     );
 }
@@ -142,27 +125,18 @@ describe("SettingsPage", () => {
         });
     });
 
-    it("renders all four tab triggers", async () => {
+    it("renders all section headings", async () => {
         renderWithProviders();
 
         await waitFor(() => {
             expect(screen.getByText("General")).toBeInTheDocument();
-            expect(screen.getByRole("tab", { name: "Appearance" })).toBeInTheDocument();
+            expect(screen.getByText("Appearance")).toBeInTheDocument();
             expect(screen.getByText("Terminal")).toBeInTheDocument();
-            expect(screen.getByRole("tab", { name: "Connection" })).toBeInTheDocument();
+            expect(screen.getByText("Connection")).toBeInTheDocument();
         });
     });
 
-    it("shows General tab content by default", async () => {
-        renderWithProviders();
-
-        await waitFor(() => {
-            expect(screen.getByText("App Settings")).toBeInTheDocument();
-            expect(screen.getByText("Configure how the desktop app behaves")).toBeInTheDocument();
-        });
-    });
-
-    it("renders refresh interval label in General tab", async () => {
+    it("renders refresh interval label in General section", async () => {
         renderWithProviders();
 
         await waitFor(() => {
@@ -204,37 +178,14 @@ describe("SettingsPage", () => {
     });
 });
 
-async function waitForInitialRender() {
-    await waitFor(() => {
-        expect(screen.getByText("Settings")).toBeInTheDocument();
-    });
-}
-
-async function clickTab(name: string) {
-    await waitForInitialRender();
-    await act(async () => {
-        screen.getByRole("tab", { name }).click();
-    });
-}
-
-describe("SettingsPage - Appearance tab", () => {
+describe("SettingsPage - Appearance section", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         vi.mocked(useAuth).mockReturnValue(defaultAuthReturn);
     });
 
-    it("renders Appearance card when tab is clicked", async () => {
-        renderWithProviders();
-        await clickTab("Appearance");
-
-        await waitFor(() => {
-            expect(screen.getByText("Customize how the app looks")).toBeInTheDocument();
-        });
-    });
-
     it("shows font selector label", async () => {
         renderWithProviders();
-        await clickTab("Appearance");
 
         await waitFor(() => {
             expect(screen.getByText("Font")).toBeInTheDocument();
@@ -244,7 +195,6 @@ describe("SettingsPage - Appearance tab", () => {
 
     it("renders font select trigger", async () => {
         renderWithProviders();
-        await clickTab("Appearance");
 
         await waitFor(() => {
             expect(screen.getByLabelText("Font")).toBeInTheDocument();
@@ -252,25 +202,14 @@ describe("SettingsPage - Appearance tab", () => {
     });
 });
 
-describe("SettingsPage - Terminal tab", () => {
+describe("SettingsPage - Terminal section", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         vi.mocked(useAuth).mockReturnValue(defaultAuthReturn);
     });
 
-    it("renders Terminal Defaults card when tab is clicked", async () => {
-        renderWithProviders();
-        await clickTab("Terminal");
-
-        await waitFor(() => {
-            expect(screen.getByText("Terminal Defaults")).toBeInTheDocument();
-            expect(screen.getByText("Default settings for terminal sessions")).toBeInTheDocument();
-        });
-    });
-
     it("shows default shell as Auto-detect", async () => {
         renderWithProviders();
-        await clickTab("Terminal");
 
         await waitFor(() => {
             expect(screen.getByText("Auto-detect")).toBeInTheDocument();
@@ -279,7 +218,6 @@ describe("SettingsPage - Terminal tab", () => {
 
     it("shows default font size as 13", async () => {
         renderWithProviders();
-        await clickTab("Terminal");
 
         await waitFor(() => {
             expect(screen.getByText("13")).toBeInTheDocument();
@@ -288,7 +226,6 @@ describe("SettingsPage - Terminal tab", () => {
 
     it("shows default scrollback as 1,000", async () => {
         renderWithProviders();
-        await clickTab("Terminal");
 
         await waitFor(() => {
             expect(screen.getByText("1,000")).toBeInTheDocument();
@@ -296,24 +233,14 @@ describe("SettingsPage - Terminal tab", () => {
     });
 });
 
-describe("SettingsPage - Connection tab", () => {
+describe("SettingsPage - Connection section", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         vi.mocked(useAuth).mockReturnValue(defaultAuthReturn);
     });
 
-    it("renders Connection card when tab is clicked", async () => {
-        renderWithProviders();
-        await clickTab("Connection");
-
-        await waitFor(() => {
-            expect(screen.getByText("Manage the active agent connection")).toBeInTheDocument();
-        });
-    });
-
     it("shows active profile label and agent URL", async () => {
         renderWithProviders();
-        await clickTab("Connection");
 
         await waitFor(() => {
             const labelInput = screen.getByLabelText("Display name") as HTMLInputElement;
@@ -331,7 +258,6 @@ describe("SettingsPage - Connection tab", () => {
         });
 
         renderWithProviders();
-        await clickTab("Connection");
 
         await waitFor(() => {
             expect(screen.getByText("No active connection. Connect to a cluster first.")).toBeInTheDocument();
@@ -340,7 +266,6 @@ describe("SettingsPage - Connection tab", () => {
 
     it("disables save button when no changes", async () => {
         renderWithProviders();
-        await clickTab("Connection");
 
         await waitFor(() => {
             const saveButton = screen.getByRole("button", { name: "Save" });
