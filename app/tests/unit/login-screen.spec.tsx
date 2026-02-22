@@ -46,7 +46,7 @@ describe("LoginScreen", () => {
 
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_profiles") return { profiles: [], activeProfileId: null };
-            if (cmd === "ping_agent") return undefined;
+            if (cmd === "ping_agent") return { app: "dev.kontainer.app", status: "ok" };
             if (cmd === "fetch_providers") return ["github"];
             return undefined;
         });
@@ -133,7 +133,7 @@ describe("LoginScreen", () => {
 
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_profiles") return { profiles: [], activeProfileId: null };
-            if (cmd === "ping_agent") return undefined;
+            if (cmd === "ping_agent") return { app: "dev.kontainer.app", status: "ok" };
             if (cmd === "fetch_providers") return ["github"];
             if (cmd === "auth_listen") {
                 // Background task delivers session ID
@@ -217,8 +217,8 @@ describe("LoginScreen", () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_profiles") return { profiles: [], activeProfileId: null };
             if (cmd === "ping_agent") {
-                return new Promise<void>((resolve) => {
-                    resolvePing = resolve;
+                return new Promise((resolve) => {
+                    resolvePing = () => resolve({ app: "dev.kontainer.app", status: "ok" });
                 });
             }
             if (cmd === "fetch_providers") return ["github"];

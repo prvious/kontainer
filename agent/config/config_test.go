@@ -50,14 +50,7 @@ func TestLoadFromYAML_FullConfig(t *testing.T) {
 port: "9090"
 agent_url: https://agent.example.com
 role: follower
-jwt_secret: my-jwt-secret
 dev: true
-
-github:
-  client_id: gh-id
-  client_secret: gh-secret
-  allowed_users: [alice, bob]
-  allowed_orgs: [myorg]
 
 cluster:
   internal_secret: cluster-secret
@@ -85,23 +78,8 @@ metrics:
 	if cfg.Role != "follower" {
 		t.Errorf("Role = %q", cfg.Role)
 	}
-	if cfg.JWTSecret != "my-jwt-secret" {
-		t.Errorf("JWTSecret = %q", cfg.JWTSecret)
-	}
 	if cfg.Dev != true {
 		t.Errorf("Dev = %v", cfg.Dev)
-	}
-	if cfg.GitHub.ClientID != "gh-id" {
-		t.Errorf("GitHub.ClientID = %q", cfg.GitHub.ClientID)
-	}
-	if cfg.GitHub.ClientSecret != "gh-secret" {
-		t.Errorf("GitHub.ClientSecret = %q", cfg.GitHub.ClientSecret)
-	}
-	if len(cfg.GitHub.AllowedUsers) != 2 || cfg.GitHub.AllowedUsers[0] != "alice" {
-		t.Errorf("GitHub.AllowedUsers = %v", cfg.GitHub.AllowedUsers)
-	}
-	if len(cfg.GitHub.AllowedOrgs) != 1 || cfg.GitHub.AllowedOrgs[0] != "myorg" {
-		t.Errorf("GitHub.AllowedOrgs = %v", cfg.GitHub.AllowedOrgs)
 	}
 	if cfg.Cluster.InternalSecret != "cluster-secret" {
 		t.Errorf("Cluster.InternalSecret = %q", cfg.Cluster.InternalSecret)
@@ -163,12 +141,12 @@ func TestResolveValue_PlainLiteral(t *testing.T) {
 	}
 }
 
-func TestLoad_FilePrefix_JWTSecret(t *testing.T) {
+func TestLoad_FilePrefix_InternalSecret(t *testing.T) {
 	dir := t.TempDir()
-	secretFile := filepath.Join(dir, "jwt-secret")
+	secretFile := filepath.Join(dir, "internal-secret")
 	os.WriteFile(secretFile, []byte("  from-file\n"), 0644)
 
-	configYAML := "jwt_secret: file:" + secretFile + "\n"
+	configYAML := "cluster:\n  internal_secret: file:" + secretFile + "\n"
 	configPath := filepath.Join(dir, "kontainer.yml")
 	os.WriteFile(configPath, []byte(configYAML), 0644)
 
@@ -177,16 +155,16 @@ func TestLoad_FilePrefix_JWTSecret(t *testing.T) {
 		t.Fatalf("Load error: %v", err)
 	}
 
-	if cfg.JWTSecret != "from-file" {
-		t.Errorf("JWTSecret = %q, want %q", cfg.JWTSecret, "from-file")
+	if cfg.Cluster.InternalSecret != "from-file" {
+		t.Errorf("Cluster.InternalSecret = %q, want %q", cfg.Cluster.InternalSecret, "from-file")
 	}
 }
 
-func TestLoad_EnvVar_JWTSecret(t *testing.T) {
-	t.Setenv("TEST_JWT_SECRET", "env-jwt-value")
+func TestLoad_EnvVar_InternalSecret(t *testing.T) {
+	t.Setenv("TEST_INTERNAL_SECRET", "env-internal-value")
 
 	dir := t.TempDir()
-	configYAML := "jwt_secret: ${TEST_JWT_SECRET}\n"
+	configYAML := "cluster:\n  internal_secret: ${TEST_INTERNAL_SECRET}\n"
 	configPath := filepath.Join(dir, "kontainer.yml")
 	os.WriteFile(configPath, []byte(configYAML), 0644)
 
@@ -195,52 +173,8 @@ func TestLoad_EnvVar_JWTSecret(t *testing.T) {
 		t.Fatalf("Load error: %v", err)
 	}
 
-	if cfg.JWTSecret != "env-jwt-value" {
-		t.Errorf("JWTSecret = %q, want %q", cfg.JWTSecret, "env-jwt-value")
-	}
-}
-
-func TestLoad_AllSecretFields_FilePrefix(t *testing.T) {
-	dir := t.TempDir()
-
-	writeSecret := func(name, value string) string {
-		p := filepath.Join(dir, name)
-		os.WriteFile(p, []byte(value), 0644)
-		return p
-	}
-
-	jwtFile := writeSecret("jwt", "jwt-val")
-	clientIDFile := writeSecret("client-id", "id-val")
-	clientSecretFile := writeSecret("client-secret", "secret-val")
-	internalFile := writeSecret("internal", "internal-val")
-
-	configYAML := `
-jwt_secret: file:` + jwtFile + `
-github:
-  client_id: file:` + clientIDFile + `
-  client_secret: file:` + clientSecretFile + `
-cluster:
-  internal_secret: file:` + internalFile + `
-`
-	configPath := filepath.Join(dir, "kontainer.yml")
-	os.WriteFile(configPath, []byte(configYAML), 0644)
-
-	cfg, err := Load(configPath)
-	if err != nil {
-		t.Fatalf("Load error: %v", err)
-	}
-
-	if cfg.JWTSecret != "jwt-val" {
-		t.Errorf("JWTSecret = %q", cfg.JWTSecret)
-	}
-	if cfg.GitHub.ClientID != "id-val" {
-		t.Errorf("GitHub.ClientID = %q", cfg.GitHub.ClientID)
-	}
-	if cfg.GitHub.ClientSecret != "secret-val" {
-		t.Errorf("GitHub.ClientSecret = %q", cfg.GitHub.ClientSecret)
-	}
-	if cfg.Cluster.InternalSecret != "internal-val" {
-		t.Errorf("Cluster.InternalSecret = %q", cfg.Cluster.InternalSecret)
+	if cfg.Cluster.InternalSecret != "env-internal-value" {
+		t.Errorf("Cluster.InternalSecret = %q, want %q", cfg.Cluster.InternalSecret, "env-internal-value")
 	}
 }
 
@@ -254,21 +188,21 @@ func TestResolveValue_UnsetEnvVar_Error(t *testing.T) {
 	}
 }
 
-func TestLoad_UnsetEnvVar_JWTSecret_Error(t *testing.T) {
+func TestLoad_UnsetEnvVar_InternalSecret_Error(t *testing.T) {
 	dir := t.TempDir()
-	configYAML := "jwt_secret: ${TOTALLY_UNSET_JWT_SECRET_FOR_TEST}\n"
+	configYAML := "cluster:\n  internal_secret: ${TOTALLY_UNSET_INTERNAL_SECRET_FOR_TEST}\n"
 	configPath := filepath.Join(dir, "kontainer.yml")
 	os.WriteFile(configPath, []byte(configYAML), 0644)
 
 	_, err := Load(configPath)
 	if err == nil {
-		t.Error("expected error for unset env var in jwt_secret")
+		t.Error("expected error for unset env var in internal_secret")
 	}
 }
 
 func TestLoad_FilePrefix_MissingFile_Error(t *testing.T) {
 	dir := t.TempDir()
-	configYAML := "jwt_secret: file:/nonexistent/path/secret\n"
+	configYAML := "cluster:\n  internal_secret: file:/nonexistent/path/secret\n"
 	configPath := filepath.Join(dir, "kontainer.yml")
 	os.WriteFile(configPath, []byte(configYAML), 0644)
 

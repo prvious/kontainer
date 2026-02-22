@@ -8,13 +8,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-type GitHubConfig struct {
-	ClientID     string   `yaml:"client_id"`
-	ClientSecret string   `yaml:"client_secret"`
-	AllowedUsers []string `yaml:"allowed_users"`
-	AllowedOrgs  []string `yaml:"allowed_orgs"`
-}
-
 type ClusterConfig struct {
 	InternalSecret  string   `yaml:"internal_secret"`
 	FollowerService string   `yaml:"follower_service"`
@@ -32,9 +25,6 @@ type Config struct {
 	AgentURL string `yaml:"agent_url"`
 	Role     string `yaml:"role"`
 
-	JWTSecret string `yaml:"jwt_secret"`
-
-	GitHub  GitHubConfig  `yaml:"github"`
 	Cluster ClusterConfig `yaml:"cluster"`
 	Metrics MetricsConfig `yaml:"metrics"`
 	Dev     bool          `yaml:"dev"`
@@ -105,15 +95,6 @@ func resolveValue(val string) (string, error) {
 func resolveSecrets(cfg *Config) error {
 	var err error
 
-	if cfg.JWTSecret, err = resolveValue(cfg.JWTSecret); err != nil {
-		return fmt.Errorf("jwt_secret: %w", err)
-	}
-	if cfg.GitHub.ClientID, err = resolveValue(cfg.GitHub.ClientID); err != nil {
-		return fmt.Errorf("github.client_id: %w", err)
-	}
-	if cfg.GitHub.ClientSecret, err = resolveValue(cfg.GitHub.ClientSecret); err != nil {
-		return fmt.Errorf("github.client_secret: %w", err)
-	}
 	if cfg.Cluster.InternalSecret, err = resolveValue(cfg.Cluster.InternalSecret); err != nil {
 		return fmt.Errorf("cluster.internal_secret: %w", err)
 	}

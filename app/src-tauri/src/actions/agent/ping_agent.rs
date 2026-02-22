@@ -1,8 +1,15 @@
-use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PingResponse {
+    pub app: String,
+    pub status: String,
+}
+
 #[tauri::command]
-pub async fn ping_agent(url: String) -> Result<(), String> {
+pub async fn ping_agent(url: String) -> Result<PingResponse, String> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(5))
         .build()
@@ -18,13 +25,14 @@ pub async fn ping_agent(url: String) -> Result<(), String> {
         return Err(format!("Agent responded with status {}", response.status()));
     }
 
-    let body: HashMap<String, String> = response
+    let body: PingResponse = response
         .json()
         .await
         .map_err(|e| format!("Invalid response from agent: {e}"))?;
 
-    match body.get("app") {
-        Some(app) if app == "dev.kontainer.app" => Ok(()),
-        _ => Err("Not a valid Kontainer agent".to_string()),
+    if body.app != "dev.kontainer.app" {
+        return Err("Not a valid Kontainer agent".to_string());
     }
+
+    Ok(body)
 }
