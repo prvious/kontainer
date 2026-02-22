@@ -6,6 +6,7 @@
         "dev:app": "pnpm --filter app tauri dev",
         "dev:agent": "cd agent && air",
         "dev:cluster": "./dev/setup.sh",
+        "reset": "./dev/teardown.sh && rm -f agent/*.db agent/*.db-wal agent/*.db-shm",
         "down": "./dev/teardown.sh",
         "dev:cluster:rm": "./dev/teardown.sh",
         "dev:cluster:seed": "./dev/seed-services.sh",

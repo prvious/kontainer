@@ -113,7 +113,7 @@ func (h *SetupHandlers) StartHandler(w http.ResponseWriter, r *http.Request) {
 		"public":        false,
 		"default_permissions": map[string]string{
 			"members":         "read",
-			"email_addresses": "read",
+			"emails": "read",
 		},
 		"default_events": []string{},
 	}
