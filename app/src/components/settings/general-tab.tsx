@@ -1,4 +1,3 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useSettings } from "@/hooks/use-settings";
@@ -11,7 +10,7 @@ const REFRESH_OPTIONS = [
     { value: "false", label: "Off" },
 ] as const;
 
-export function GeneralTab() {
+export function GeneralSection() {
     const { refreshInterval, setRefreshInterval } = useSettings();
 
     const currentValue = refreshInterval === false ? "false" : String(refreshInterval);
@@ -26,31 +25,26 @@ export function GeneralTab() {
     }
 
     return (
-        <Card>
-            <CardHeader>
-                <CardTitle>App Settings</CardTitle>
-                <CardDescription>Configure how the desktop app behaves</CardDescription>
-            </CardHeader>
-            <CardContent>
-                <div className='flex items-center justify-between'>
-                    <div className='space-y-0.5'>
-                        <Label htmlFor='refresh-interval'>Refresh interval</Label>
-                        <p className='text-xs text-muted-foreground'>How often data is polled from the agent</p>
-                    </div>
-                    <Select value={currentValue} onValueChange={handleRefreshChange} items={REFRESH_OPTIONS}>
-                        <SelectTrigger id='refresh-interval' className='w-36'>
-                            <SelectValue placeholder='Select interval' />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {REFRESH_OPTIONS.map((opt) => (
-                                <SelectItem key={opt.value} value={opt.value}>
-                                    {opt.label}
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
+        <section>
+            <h2 className='mb-3 border-b border-border pb-2 font-mono text-xs tracking-widest text-muted-foreground uppercase'>General</h2>
+            <div className='flex items-center justify-between py-3'>
+                <div className='space-y-0.5'>
+                    <Label htmlFor='refresh-interval'>Refresh interval</Label>
+                    <p className='text-xs text-muted-foreground'>How often data is polled from the agent</p>
                 </div>
-            </CardContent>
-        </Card>
+                <Select value={currentValue} onValueChange={handleRefreshChange} items={REFRESH_OPTIONS}>
+                    <SelectTrigger id='refresh-interval' className='w-36'>
+                        <SelectValue placeholder='Select interval' />
+                    </SelectTrigger>
+                    <SelectContent>
+                        {REFRESH_OPTIONS.map((opt) => (
+                            <SelectItem key={opt.value} value={opt.value}>
+                                {opt.label}
+                            </SelectItem>
+                        ))}
+                    </SelectContent>
+                </Select>
+            </div>
+        </section>
     );
 }

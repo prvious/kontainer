@@ -1,4 +1,3 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -30,17 +29,14 @@ const SCROLLBACK_OPTIONS = [
     { value: "10000", label: "10,000" },
 ] as const;
 
-export function TerminalTab() {
+export function TerminalSection() {
     const { terminalDefaults, setTerminalDefaults } = useSettings();
 
     return (
-        <Card>
-            <CardHeader>
-                <CardTitle>Terminal Defaults</CardTitle>
-                <CardDescription>Default settings for terminal sessions</CardDescription>
-            </CardHeader>
-            <CardContent className='space-y-4'>
-                <div className='flex items-center justify-between'>
+        <section>
+            <h2 className='mb-3 border-b border-border pb-2 font-mono text-xs tracking-widest text-muted-foreground uppercase'>Terminal</h2>
+            <div className='divide-y divide-border/50'>
+                <div className='flex items-center justify-between py-3'>
                     <div className='space-y-0.5'>
                         <Label htmlFor='terminal-shell'>Default shell</Label>
                         <p className='text-xs text-muted-foreground'>Fallback shell when none is specified</p>
@@ -63,7 +59,7 @@ export function TerminalTab() {
                     </Select>
                 </div>
 
-                <div className='flex items-center justify-between'>
+                <div className='flex items-center justify-between py-3'>
                     <div className='space-y-0.5'>
                         <Label htmlFor='terminal-font-size'>Font size</Label>
                         <p className='text-xs text-muted-foreground'>Terminal text size in pixels</p>
@@ -86,7 +82,7 @@ export function TerminalTab() {
                     </Select>
                 </div>
 
-                <div className='flex items-center justify-between'>
+                <div className='flex items-center justify-between py-3'>
                     <div className='space-y-0.5'>
                         <Label htmlFor='terminal-font-family'>Font family</Label>
                         <p className='text-xs text-muted-foreground'>CSS font-family for the terminal</p>
@@ -100,7 +96,7 @@ export function TerminalTab() {
                     />
                 </div>
 
-                <div className='flex items-center justify-between'>
+                <div className='flex items-center justify-between py-3'>
                     <div className='space-y-0.5'>
                         <Label htmlFor='terminal-scrollback'>Scrollback buffer</Label>
                         <p className='text-xs text-muted-foreground'>Number of lines kept in scroll history</p>
@@ -122,7 +118,7 @@ export function TerminalTab() {
                         </SelectContent>
                     </Select>
                 </div>
-            </CardContent>
-        </Card>
+            </div>
+        </section>
     );
 }

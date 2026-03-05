@@ -1,11 +1,10 @@
 import { useEffect, useState } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
 
-export function ConnectionTab() {
+export function ConnectionSection() {
     const { profiles, activeProfileId, updateProfile } = useAuth();
     const activeProfile = profiles.find((p) => p.id === activeProfileId);
 
@@ -20,15 +19,10 @@ export function ConnectionTab() {
 
     if (!activeProfile) {
         return (
-            <Card>
-                <CardHeader>
-                    <CardTitle>Connection</CardTitle>
-                    <CardDescription>Manage the active agent connection</CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <p className='text-sm text-muted-foreground'>No active connection. Connect to a cluster first.</p>
-                </CardContent>
-            </Card>
+            <section>
+                <h2 className='mb-3 border-b border-border pb-2 font-mono text-xs tracking-widest text-muted-foreground uppercase'>Connection</h2>
+                <p className='py-3 text-sm text-muted-foreground'>No active connection. Connect to a cluster first.</p>
+            </section>
         );
     }
 
@@ -47,13 +41,10 @@ export function ConnectionTab() {
     }
 
     return (
-        <Card>
-            <CardHeader>
-                <CardTitle>Connection</CardTitle>
-                <CardDescription>Manage the active agent connection</CardDescription>
-            </CardHeader>
-            <CardContent className='space-y-4'>
-                <div className='flex items-center justify-between'>
+        <section>
+            <h2 className='mb-3 border-b border-border pb-2 font-mono text-xs tracking-widest text-muted-foreground uppercase'>Connection</h2>
+            <div className='divide-y divide-border/50'>
+                <div className='flex items-center justify-between py-3'>
                     <div className='space-y-0.5'>
                         <Label htmlFor='profile-label'>Display name</Label>
                         <p className='text-xs text-muted-foreground'>A friendly name for this cluster</p>
@@ -61,7 +52,7 @@ export function ConnectionTab() {
                     <Input id='profile-label' className='w-64' value={label} placeholder='e.g. Production' onChange={(e) => setLabel(e.target.value)} />
                 </div>
 
-                <div className='flex items-center justify-between'>
+                <div className='flex items-center justify-between py-3'>
                     <div className='space-y-0.5'>
                         <Label htmlFor='agent-url'>Agent URL</Label>
                         <p className='text-xs text-muted-foreground'>Endpoint for this cluster&apos;s agent</p>
@@ -74,13 +65,13 @@ export function ConnectionTab() {
                         onChange={(e) => setAgentUrl(e.target.value)}
                     />
                 </div>
+            </div>
 
-                <div className='flex justify-end'>
-                    <Button size='sm' disabled={!hasChanges || saving} onClick={handleSave}>
-                        {saving ? "Saving..." : "Save"}
-                    </Button>
-                </div>
-            </CardContent>
-        </Card>
+            <div className='flex justify-end pt-3'>
+                <Button size='sm' disabled={!hasChanges || saving} onClick={handleSave}>
+                    {saving ? "Saving..." : "Save"}
+                </Button>
+            </div>
+        </section>
     );
 }
