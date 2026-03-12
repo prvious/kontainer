@@ -111,19 +111,21 @@ func init() {
             "user": map[string]any{
                 "driver":   "jwt",
                 "provider": "user",
+                "ttl":      1440, // 24 hours in minutes
+                // "secret" is loaded dynamically from DB by AuthServiceProvider.Boot()
+                // via facades.Config().Add("auth.guards.user.secret", value)
             },
         },
         "providers": map[string]any{
             "user": map[string]any{
                 "driver": "orm",
-                "model":  "User",
             },
         },
     })
 }
 ```
 
-**Verify:** Check Goravel docs/source for the exact model reference syntax. It may need `models.User{}` as a struct instance instead of the string `"User"`. If so, import `"github.com/prvious/kontainer/server/app/models"` and use `"model": models.User{}`.
+**Note:** Per Goravel v1.16 docs, the ORM user provider just needs `"driver": "orm"` — no explicit model reference needed. Goravel resolves the User model via the guard's provider name.
 
 - [ ] **Step 3: Verify JWT config**
 
@@ -132,7 +134,7 @@ Read `server/config/jwt.go` (may be in `config/auth.go` or separate). Ensure:
 ```go
 config.Add("jwt", map[string]any{
     "secret":      config.Env("JWT_SECRET", ""),
-    "ttl":         1440,  // 24 hours in minutes
+    "ttl":         1440,  // 24 hours in minutes (fallback, overridden per-guard)
     "refresh_ttl": 0,     // no refresh tokens
 })
 ```
@@ -610,12 +612,21 @@ type sessionEntry struct {
 type SessionStore struct {
     mu      sync.Mutex
     entries map[string]sessionEntry
+    done    chan struct{}
 }
 
 func NewSessionStore() *SessionStore {
-    s := &SessionStore{entries: make(map[string]sessionEntry)}
+    s := &SessionStore{
+        entries: make(map[string]sessionEntry),
+        done:    make(chan struct{}),
+    }
     go s.cleanup()
     return s
+}
+
+// Close stops the background cleanup goroutine to prevent goroutine leaks.
+func (s *SessionStore) Close() {
+    close(s.done)
 }
 
 // Generate creates a random state token bound to a bridge session ID.
@@ -655,14 +666,19 @@ func (s *SessionStore) cleanup() {
     ticker := time.NewTicker(time.Minute)
     defer ticker.Stop()
 
-    for range ticker.C {
-        s.mu.Lock()
-        for token, entry := range s.entries {
-            if time.Since(entry.createdAt) >= sessionTTL {
-                delete(s.entries, token)
+    for {
+        select {
+        case <-ticker.C:
+            s.mu.Lock()
+            for token, entry := range s.entries {
+                if time.Since(entry.createdAt) >= sessionTTL {
+                    delete(s.entries, token)
+                }
             }
+            s.mu.Unlock()
+        case <-s.done:
+            return
         }
-        s.mu.Unlock()
     }
 }
 ```
@@ -939,35 +955,18 @@ func NewUpsertUserAction() *UpsertUserAction {
 func (a *UpsertUserAction) Execute(providerUser *providers.ProviderUser) (*models.User, error) {
     var user models.User
 
-    err := facades.Orm().Query().
-        Where("provider", providerUser.Provider).
-        Where("provider_id", providerUser.ID).
-        FirstOrNew(&user)
-    if err != nil {
-        return nil, err
-    }
-
-    user.Provider = providerUser.Provider
-    user.ProviderID = providerUser.ID
-    user.Name = providerUser.Name
-    user.Email = providerUser.Email
-    user.AvatarURL = providerUser.AvatarURL
-
-    if user.ID == 0 {
-        err = facades.Orm().Query().Create(&user)
-    } else {
-        err = facades.Orm().Query().Save(&user)
-    }
-
+    // UpdateOrCreate: search by provider+provider_id, upsert name/email/avatar.
+    // This handles both new and returning users in a single call.
+    err := facades.Orm().Query().UpdateOrCreate(&user,
+        models.User{Provider: providerUser.Provider, ProviderID: providerUser.ID}, // search conditions
+        models.User{Name: providerUser.Name, Email: providerUser.Email, AvatarURL: providerUser.AvatarURL}, // values to set
+    )
     if err != nil {
         return nil, err
     }
 
     return &user, nil
 }
-```
-
-**Verify:** Check Goravel ORM docs for `FirstOrNew` syntax. It may be `FirstOrCreate` or require different arguments. Adjust accordingly. The key pattern: find by provider+provider_id, create if not found, update fields either way.
 
 - [ ] **Step 3: Commit**
 
@@ -992,7 +991,7 @@ The auth service provider:
 1. **Register:** Binds ProviderRegistry, SessionStore, AuthBridge as singletons
 2. **Boot:** Reads JWT secret from `app_configs` table and overrides Goravel config, then registers GitHub OAuth provider using stored credentials
 
-**Critical architecture decision:** The JWT secret is stored in the `app_configs` DB table (set during setup flow). At boot time, the auth service provider reads it and calls `facades.Config().Add("jwt.secret", value)` so Goravel's auth facade uses the correct secret. If setup isn't complete yet, the provider skips this (auth will be inactive anyway since setup middleware blocks all `/api/*` routes).
+**Critical architecture decision:** The JWT secret is stored in the `app_configs` DB table (set during setup flow). At boot time, the auth service provider reads it and sets it on the guard via `facades.Config().Add("auth.guards.user.secret", value)`. Since Goravel v1.16, each JWT guard supports its own `secret`, `ttl`, and `refresh_ttl` — per-guard config takes precedence over the global `jwt.secret` fallback. This is the cleanest approach. If setup isn't complete yet, the provider skips this (auth will be inactive anyway since setup middleware blocks all `/api/*` routes).
 
 - [ ] **Step 1: Create the auth service provider**
 
@@ -1028,10 +1027,12 @@ func (r *AuthServiceProvider) Register(app foundation.Application) {
 
 func (r *AuthServiceProvider) Boot(app foundation.Application) {
     r.loadJWTSecretFromDB()
-    r.registerOAuthProviders()
+    r.registerOAuthProviders(app)
 }
 
-// loadJWTSecretFromDB reads the jwt_secret from app_configs and sets it in Goravel config.
+// loadJWTSecretFromDB reads the jwt_secret from app_configs and sets it on the JWT guard.
+// Since Goravel v1.16, each JWT guard supports its own secret/ttl/refresh_ttl.
+// Per-guard config takes precedence over the global jwt.secret fallback.
 // If setup is not complete (no jwt_secret), this is a no-op.
 func (r *AuthServiceProvider) loadJWTSecretFromDB() {
     var appConfig models.AppConfig
@@ -1041,12 +1042,14 @@ func (r *AuthServiceProvider) loadJWTSecretFromDB() {
         return
     }
 
-    facades.Config().Add("jwt.secret", appConfig.Value)
-    facades.Log().Info("JWT secret loaded from app_configs")
+    // Set secret on the "user" guard (per-guard config, Goravel v1.16+)
+    facades.Config().Add("auth.guards.user.secret", appConfig.Value)
+    facades.Log().Info("JWT secret loaded from app_configs into user guard")
 }
 
 // registerOAuthProviders reads GitHub OAuth credentials from app_configs and registers the provider.
-func (r *AuthServiceProvider) registerOAuthProviders() {
+// Note: `app` is passed from Boot() to access the service container for Make() calls.
+func (r *AuthServiceProvider) registerOAuthProviders(app foundation.Application) {
     registry, err := app.Make("auth.provider_registry")
     if err != nil {
         facades.Log().Errorf("Failed to resolve provider registry: %v", err)
@@ -1085,20 +1088,6 @@ func (r *AuthServiceProvider) registerOAuthProviders() {
 ```
 
 **Important:** The `app.Make()` call in `Boot()` requires that `Register()` has already run. Goravel guarantees this — all providers `Register()` first, then all `Boot()`. Verify this pattern compiles by checking the `foundation.Application` interface for `Make()` or `MakeAs()`.
-
-**Note:** The `registerOAuthProviders` method above references `app` which isn't in scope. Fix: store the app reference or use `facades.App()` if available. Alternatively, resolve from the container in Boot. Adjust based on Goravel's actual API:
-
-```go
-func (r *AuthServiceProvider) Boot(app foundation.Application) {
-    r.loadJWTSecretFromDB()
-    r.registerOAuthProviders(app)
-}
-
-func (r *AuthServiceProvider) registerOAuthProviders(app foundation.Application) {
-    instance, err := app.Make("auth.provider_registry")
-    // ...
-}
-```
 
 - [ ] **Step 2: Register the provider in bootstrap**
 
@@ -1537,7 +1526,7 @@ func JWT() contractshttp.Middleware {
             return
         }
 
-        // facades.Auth().Parse() handles "Bearer " prefix stripping
+        // Per Goravel docs: "The token can be parsed normally with or without the Bearer prefix"
         _, err := facades.Auth(ctx).Parse(token)
         if err != nil {
             ctx.Response().Json(nethttp.StatusUnauthorized, http.Json{
@@ -1893,6 +1882,7 @@ package middleware
 
 import (
     "strings"
+    "sync/atomic"
     nethttp "net/http"
 
     contractshttp "github.com/goravel/framework/contracts/http"
@@ -1901,6 +1891,16 @@ import (
 
     "github.com/prvious/kontainer/server/app/models"
 )
+
+// setupComplete caches the setup completion state.
+// Once setup completes, it stays true forever (no restart needed).
+// This avoids a DB query on every request after setup is done.
+var setupComplete atomic.Bool
+
+// MarkSetupComplete should be called by CompleteSetupAction after writing setup_complete to DB.
+func MarkSetupComplete() {
+    setupComplete.Store(true)
+}
 
 // SetupGuard is a global middleware that blocks non-setup routes when setup is incomplete.
 // Replaces the SwappableHandler pattern from the old agent.
@@ -1914,8 +1914,15 @@ func SetupGuard() contractshttp.Middleware {
             return
         }
 
-        // Check if setup is complete
+        // Fast path: cached setup complete
+        if setupComplete.Load() {
+            ctx.Request().Next()
+            return
+        }
+
+        // Slow path: check DB (only during setup phase, low traffic)
         if isSetupComplete() {
+            setupComplete.Store(true)
             ctx.Request().Next()
             return
         }
@@ -1935,9 +1942,6 @@ func isSetupComplete() bool {
     }
     return config.Value == "true"
 }
-```
-
-**Performance note:** This queries the DB on every request when setup is incomplete. Once setup completes, we can cache the result. For now, this is fine — the setup phase is brief and low-traffic. A future optimization would be to cache the result in memory and invalidate on setup completion.
 
 - [ ] **Step 2: Create the setup token middleware**
 
@@ -2135,8 +2139,15 @@ func (a *ExchangeCodeAction) Execute(code string) (*GitHubAppCredentials, error)
     }
 
     for key, value := range configs {
-        appConfig := models.AppConfig{Key: key, Value: value}
-        if err := facades.Orm().Query().Save(&appConfig); err != nil {
+        var appConfig models.AppConfig
+        // UpdateOrCreate: search by Key, set/update Value.
+        // This handles both insert (new key) and update (existing key) correctly,
+        // which is critical because AppConfig uses a string primary key (Key)
+        // and Save() would always attempt UPDATE for non-zero PKs.
+        if err := facades.Orm().Query().UpdateOrCreate(&appConfig,
+            models.AppConfig{Key: key},
+            models.AppConfig{Value: value},
+        ); err != nil {
             return nil, fmt.Errorf("failed to store %s: %w", key, err)
         }
     }
@@ -2173,6 +2184,7 @@ import (
 
     "github.com/goravel/framework/facades"
 
+    "github.com/prvious/kontainer/server/app/http/middleware"
     "github.com/prvious/kontainer/server/app/models"
 )
 
@@ -2190,25 +2202,36 @@ func (a *CompleteSetupAction) Execute() error {
         return fmt.Errorf("GitHub App not connected — complete the GitHub setup first")
     }
 
-    // Set setup_complete flag
-    complete := models.AppConfig{Key: "setup_complete", Value: "true"}
-    if err := facades.Orm().Query().Save(&complete); err != nil {
+    // Set setup_complete flag using UpdateOrCreate (AppConfig has string PK)
+    var complete models.AppConfig
+    if err := facades.Orm().Query().UpdateOrCreate(&complete,
+        models.AppConfig{Key: "setup_complete"},
+        models.AppConfig{Value: "true"},
+    ); err != nil {
         return fmt.Errorf("failed to complete setup: %w", err)
     }
 
-    // Load JWT secret into Goravel config so auth works immediately (no restart needed)
+    // Update in-memory cache so SetupGuard stops querying DB
+    middleware.MarkSetupComplete()
+
+    // Load JWT secret into per-guard config so auth works immediately (no restart needed)
     var jwtConfig models.AppConfig
     if err := facades.Orm().Query().Where("key", "jwt_secret").First(&jwtConfig); err == nil && jwtConfig.Value != "" {
-        facades.Config().Add("jwt.secret", jwtConfig.Value)
-        facades.Log().Info("JWT secret loaded — auth system now active")
+        facades.Config().Add("auth.guards.user.secret", jwtConfig.Value)
+        facades.Log().Info("JWT secret loaded into user guard — auth system now active")
     }
 
     return nil
 }
 ```
 
-**Key design decision:** After completing setup, `CompleteSetupAction` loads the JWT secret into Goravel config immediately via `facades.Config().Add()`. This means:
-- The setup guard middleware will start letting requests through (since `setup_complete = true` in DB)
+**Key design decision:** After completing setup, `CompleteSetupAction`:
+1. Writes `setup_complete = true` to DB via `UpdateOrCreate` (handles string PK correctly)
+2. Calls `middleware.MarkSetupComplete()` to update the in-memory `atomic.Bool` cache
+3. Loads JWT secret into the per-guard config via `facades.Config().Add("auth.guards.user.secret", value)`
+
+This means:
+- The setup guard middleware immediately stops blocking requests (cached, no DB query)
 - The auth system (JWT parsing/issuing) works without restarting the server
 - This replaces the old SwappableHandler `onComplete` callback that rebuilt the entire router
 
