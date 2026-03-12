@@ -159,15 +159,20 @@ func (a *CollectContainerMetricsAction) Execute(ctx context.Context) ([]Containe
 
 	result := make([]ContainerMetrics, 0, len(stats))
 	for _, s := range stats {
+		// NOTE: ContainerStats (PR5) has ServiceID, MemUsage, MemLimit — not ServiceName,
+		// MemoryUsed, MemoryLimit, MemoryPercent, or CreatedAt. Compute MemoryPercent locally.
+		memPct := 0.0
+		if s.MemLimit > 0 {
+			memPct = float64(s.MemUsage) / float64(s.MemLimit) * 100.0
+		}
 		result = append(result, ContainerMetrics{
 			ContainerID:   s.ContainerID,
 			Name:          s.Name,
-			ServiceName:   s.ServiceName,
+			ServiceName:   s.ServiceID, // ServiceID used as fallback — see cross-plan note below
 			CPUPercent:    s.CPUPercent,
-			MemoryUsed:    s.MemoryUsed,
-			MemoryLimit:   s.MemoryLimit,
-			MemoryPercent: s.MemoryPercent,
-			CreatedAt:     s.CreatedAt,
+			MemoryUsed:    uint64(s.MemUsage),
+			MemoryLimit:   uint64(s.MemLimit),
+			MemoryPercent: memPct,
 		})
 	}
 	return result, nil
@@ -175,6 +180,10 @@ func (a *CollectContainerMetricsAction) Execute(ctx context.Context) ([]Containe
 ```
 
 **Note:** The `Orchestrator.TaskStats()` method (from PR 5) wraps the Docker container list + stats calls and returns `[]ContainerStats` domain types. The action maps these to the API response type.
+
+**Cross-plan dependency (PR5):** If `ContainerStats` needs `ServiceName`, add it to the domain type in `orchestrator.go`. Currently `ContainerStats` only has `ServiceID` (not `ServiceName`), `MemUsage`/`MemLimit` (int64, not uint64), no `MemoryPercent`, and no `CreatedAt`. The code above uses `ServiceID` as a fallback for `ServiceName` and computes `MemoryPercent` locally. If the human-readable service name is needed, either:
+1. Add `ServiceName string` to `ContainerStats` in PR5's `orchestrator.go` and resolve it during `TaskStats()` collection, or
+2. Perform a separate `orchestrator.ListServices()` lookup in this action to map `ServiceID` -> `ServiceName`.
 
 - [ ] **Step 2: Commit**
 
@@ -195,9 +204,12 @@ Shared types used by collector, handlers, and gRPC.
 ```go
 package metrics
 
+import "time"
+
 // AgentMetricsSnapshot is the complete metrics snapshot for a single agent.
+// NOTE: Timestamp is time.Time (not string) to match the NodeMetric model (PR2).
 type AgentMetricsSnapshot struct {
-	Timestamp  string             `json:"timestamp"`
+	Timestamp  time.Time          `json:"timestamp"`
 	NodeID     string             `json:"nodeId"`
 	Hostname   string             `json:"hostname"`
 	Node       NodeMetrics        `json:"node"`
@@ -302,7 +314,7 @@ func (a *CollectAndStoreAction) collectLocal(ctx context.Context) (AgentMetricsS
 	}
 
 	return AgentMetricsSnapshot{
-		Timestamp:  time.Now().UTC().Format(time.RFC3339),
+		Timestamp:  time.Now().UTC(),
 		NodeID:     a.nodeID,
 		Hostname:   a.hostname,
 		Node:       nodeMetrics,
@@ -324,9 +336,13 @@ func (a *CollectAndStoreAction) fetchFollowerMetrics(ctx context.Context, addres
 		return AgentMetricsSnapshot{}, err
 	}
 
-	// Convert gRPC response to snapshot
+	// Convert gRPC response to snapshot (parse string timestamp to time.Time)
+	ts, err := time.Parse(time.RFC3339, resp.Timestamp)
+	if err != nil {
+		ts = time.Now().UTC()
+	}
 	snapshot := AgentMetricsSnapshot{
-		Timestamp: resp.Timestamp,
+		Timestamp: ts,
 		NodeID:    resp.NodeId,
 		Hostname:  resp.Hostname,
 		Node: NodeMetrics{
@@ -410,7 +426,8 @@ func NewPruneMetricsAction(retention time.Duration) *PruneMetricsAction {
 }
 
 func (a *PruneMetricsAction) Execute() error {
-	cutoff := time.Now().Add(-a.retention).UTC().Format(time.RFC3339)
+	// Compare time.Time directly — NodeMetric.Timestamp is time.Time, not a string.
+	cutoff := time.Now().Add(-a.retention).UTC()
 	_, err := facades.Orm().Query().Where("timestamp < ?", cutoff).Delete(&models.NodeMetric{})
 	return err
 }
@@ -476,7 +493,7 @@ func (a *GetClusterMetricsAction) Execute(ctx context.Context, rangeDuration tim
 	localNode, _ := a.nodeAction.Execute()
 	localContainers, _ := a.containerAction.Execute(ctx)
 	localSnapshot := AgentMetricsSnapshot{
-		Timestamp:  time.Now().UTC().Format(time.RFC3339),
+		Timestamp:  time.Now().UTC(),
 		NodeID:     a.nodeID,
 		Hostname:   a.hostname,
 		Node:       localNode,
@@ -486,7 +503,15 @@ func (a *GetClusterMetricsAction) Execute(ctx context.Context, rangeDuration tim
 	agents := []AgentMetricsSnapshot{localSnapshot}
 
 	// Fan out to followers for real-time snapshots
-	collector := &CollectAndStoreAction{pool: a.pool}
+	// Reuse CollectAndStoreAction for its fetchFollowerMetrics helper — all required fields must be set.
+	collector := &CollectAndStoreAction{
+		nodeAction:      a.nodeAction,
+		containerAction: a.containerAction,
+		registry:        a.registry,
+		pool:            a.pool,
+		nodeID:          a.nodeID,
+		hostname:        a.hostname,
+	}
 	for _, follower := range a.registry.All() {
 		snapshot, err := collector.fetchFollowerMetrics(ctx, follower.Address)
 		if err != nil {
@@ -496,8 +521,8 @@ func (a *GetClusterMetricsAction) Execute(ctx context.Context, rangeDuration tim
 		agents = append(agents, snapshot)
 	}
 
-	// Query history from DB
-	since := time.Now().Add(-rangeDuration).UTC().Format(time.RFC3339)
+	// Query history from DB — use time.Time directly (matches NodeMetric.Timestamp type).
+	since := time.Now().Add(-rangeDuration).UTC()
 	var metrics []models.NodeMetric
 	if err := facades.Orm().Query().Where("timestamp >= ?", since).OrderBy("timestamp", "asc").Get(&metrics); err != nil {
 		facades.Log().Errorf("cluster metrics: history query error: %v", err)
@@ -941,6 +966,8 @@ func (a *GetSettingsAction) Execute() (map[string]string, error) {
 package settings
 
 import (
+	"fmt"
+
 	"github.com/goravel/framework/facades"
 	"github.com/prvious/kontainer/server/app/models"
 )
@@ -952,27 +979,22 @@ func NewUpdateSettingsAction() *UpdateSettingsAction {
 }
 
 func (a *UpdateSettingsAction) Execute(settings map[string]string) error {
+	// Process ALL keys before returning errors — do not bail on the first failure.
+	var errs []error
 	for key, value := range settings {
-		var existing models.Setting
-		err := facades.Orm().Query().Where("key", key).First(&existing)
-		if err != nil {
-			// Create new
-			return facades.Orm().Query().Create(&models.Setting{Key: key, Value: value})
+		var setting models.Setting
+		if err := facades.Orm().Query().UpdateOrCreate(&setting,
+			models.Setting{Key: key},
+			models.Setting{Value: value},
+		); err != nil {
+			errs = append(errs, fmt.Errorf("failed to save %s: %w", key, err))
 		}
-		// Update existing
-		existing.Value = value
-		if _, err := facades.Orm().Query().Where("key", key).Update(&existing); err != nil {
-			return err
-		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("settings update errors: %v", errs)
 	}
 	return nil
 }
-```
-
-**Note:** Goravel ORM supports `UpdateOrCreate` which simplifies this. Check Goravel ORM docs for the exact API:
-
-```go
-facades.Orm().Query().UpdateOrCreate(&models.Setting{}, models.Setting{Key: key}, models.Setting{Value: value})
 ```
 
 - [ ] **Step 3: Create controllers**

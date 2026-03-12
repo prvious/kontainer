@@ -33,7 +33,7 @@ Shared utilities for all WS endpoints.
 **Files:**
 - Create: `server/app/services/websocket/upgrader.go`
 
-- [ ] **Step 1: Create upgrader with JWT auth**
+- [ ] **Step 1: Create upgrader helper**
 
 ```go
 package websocket
@@ -41,7 +41,6 @@ package websocket
 import (
 	"net/http"
 
-	"github.com/goravel/framework/facades"
 	gorillaWs "github.com/gorilla/websocket"
 )
 
@@ -49,22 +48,9 @@ import (
 var Upgrader = gorillaWs.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
-
-// ValidateTokenFromQuery extracts and validates the JWT from the "token" query param.
-// Returns nil error if valid.
-func ValidateTokenFromQuery(r *http.Request) error {
-	tokenStr := r.URL.Query().Get("token")
-	if tokenStr == "" {
-		return fmt.Errorf("missing token")
-	}
-
-	// Use Goravel's auth facade to parse the token
-	_, err := facades.Auth().Parse(tokenStr)
-	return err
-}
 ```
 
-**Note:** `facades.Auth().Parse(token)` validates the JWT using Goravel's auth system (configured JWT guard). This replaces the manual `auth.ParseToken(jwtSecret, token)` call.
+**Note:** JWT validation is NOT done in the raw WS handler because `facades.Auth(ctx)` requires a Goravel `http.Context`, which raw `net/http` handlers don't have. Instead, JWT validation happens in the Goravel controller wrappers (see Task 7) which have access to `ctx`. The controller validates the token from the query param via `facades.Auth(ctx).Parse(token)` **before** delegating to the raw WS handler.
 
 - [ ] **Step 2: Commit**
 
@@ -216,16 +202,10 @@ func NewServiceLogsHandler(orchestrator docker.Orchestrator) *ServiceLogsHandler
 }
 
 // ServeHTTP is registered as a raw net/http handler.
+// JWT auth is validated by the Goravel controller wrapper before this is called.
 func (h *ServiceLogsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if err := ValidateTokenFromQuery(r); err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	// Extract serviceID from Goravel route context.
-	// Since this is registered as a raw handler, we need the route param
-	// from the URL path. The path format is /api/services/{serviceID}/logs.
-	serviceID := extractRouteParam(r, "serviceID")
+	// serviceID is injected into request context by the Goravel controller wrapper
+	serviceID, _ := r.Context().Value("serviceID").(string)
 	if serviceID == "" {
 		http.Error(w, "missing serviceID", http.StatusBadRequest)
 		return
@@ -246,7 +226,7 @@ func (h *ServiceLogsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	logsReader, err := h.orchestrator.StreamServiceLogs(r.Context(), serviceID, docker.LogOptions{
+	logsReader, err := h.orchestrator.StreamServiceLogs(r.Context(), serviceID, docker.LogStreamOptions{
 		Stdout:     stdout,
 		Stderr:     stderr,
 		Follow:     true,
@@ -263,13 +243,22 @@ func (h *ServiceLogsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-**Note:** `extractRouteParam` is a helper that reads the route parameter. When using Goravel's raw handler registration, route params may come from the Goravel context or need to be parsed from the URL path. Implementation depends on how we register the handler — either via Goravel's route `.Any()` with a wrapper, or via direct Chi-compatible registration.
+**Note:** Route param extraction and JWT validation are handled by the Goravel controller wrapper (see Task 7). The controller extracts `serviceID` via `ctx.Request().Route("serviceID")`, validates the JWT token via `facades.Auth(ctx).Parse(token)`, and injects both into the request context before calling `ServeHTTP`.
 
-**Preferred approach:** Register the handler via a Goravel controller wrapper:
+**Controller wrapper pattern:**
 
 ```go
-// In the controller
+// In the controller — validates JWT and extracts route param before delegating
 func (c *ServiceLogsWsController) Handle(ctx http.Context) http.Response {
+	// Validate JWT from query param (requires Goravel http.Context)
+	token := ctx.Request().Query("token", "")
+	if token == "" {
+		return ctx.Response().Json(401, http.Json{"error": "missing token"})
+	}
+	if _, err := facades.Auth(ctx).Parse(token); err != nil {
+		return ctx.Response().Json(401, http.Json{"error": "invalid token"})
+	}
+
 	serviceID := ctx.Request().Route("serviceID")
 
 	w := ctx.Response().Writer()
@@ -283,7 +272,7 @@ func (c *ServiceLogsWsController) Handle(ctx http.Context) http.Response {
 }
 ```
 
-This approach accesses Goravel route params cleanly and passes them to the raw handler.
+This approach validates the JWT using `facades.Auth(ctx)` (which requires a Goravel `http.Context`), extracts route params cleanly, and passes them to the raw WS handler via request context.
 
 - [ ] **Step 2: Commit**
 
@@ -321,13 +310,10 @@ func NewTaskLogsHandler(orchestrator docker.Orchestrator) *TaskLogsHandler {
 	return &TaskLogsHandler{orchestrator: orchestrator}
 }
 
+// JWT auth is validated by the Goravel controller wrapper before this is called.
 func (h *TaskLogsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if err := ValidateTokenFromQuery(r); err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	taskID := r.Context().Value("taskID").(string)
+	// taskID is injected into request context by the Goravel controller wrapper
+	taskID, _ := r.Context().Value("taskID").(string)
 	if taskID == "" {
 		http.Error(w, "missing taskID", http.StatusBadRequest)
 		return
@@ -348,7 +334,7 @@ func (h *TaskLogsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	logsReader, err := h.orchestrator.StreamTaskLogs(r.Context(), taskID, docker.LogOptions{
+	logsReader, err := h.orchestrator.StreamTaskLogs(r.Context(), taskID, docker.LogStreamOptions{
 		Stdout:     stdout,
 		Stderr:     stderr,
 		Follow:     true,
@@ -612,13 +598,10 @@ func NewExecHandler(
 	}
 }
 
+// JWT auth is validated by the Goravel controller wrapper before this is called.
 func (h *ExecHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if err := ValidateTokenFromQuery(r); err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	containerID := r.Context().Value("containerID").(string)
+	// containerID is injected into request context by the Goravel controller wrapper
+	containerID, _ := r.Context().Value("containerID").(string)
 	if containerID == "" {
 		http.Error(w, "missing containerID", http.StatusBadRequest)
 		return
@@ -815,7 +798,11 @@ Register the three WS endpoints in Goravel routes. Since these are raw `net/http
 
 - [ ] **Step 1: Create WS controller wrappers**
 
-These sit in the controllers directory and bridge Goravel's context to the raw handlers:
+These sit in the controllers directory and bridge Goravel's context to the raw handlers. Each wrapper:
+1. Validates the JWT token from the `?token=` query param using `facades.Auth(ctx).Parse(token)` (requires Goravel `http.Context`)
+2. Extracts route params via `ctx.Request().Route()`
+3. Injects the params into the `net/http` request context
+4. Delegates to the raw WS handler
 
 ```go
 // server/app/http/controllers/websocket/logs_controller.go
@@ -826,6 +813,7 @@ import (
 	goHttp "net/http"
 
 	"github.com/goravel/framework/contracts/http"
+	"github.com/goravel/framework/facades"
 	ws "github.com/prvious/kontainer/server/app/services/websocket"
 )
 
@@ -838,6 +826,16 @@ func NewServiceLogsController(handler *ws.ServiceLogsHandler) *ServiceLogsContro
 }
 
 func (c *ServiceLogsController) Handle(ctx http.Context) http.Response {
+	// Validate JWT from query param (facades.Auth requires Goravel context)
+	token := ctx.Request().Query("token", "")
+	if token == "" {
+		return ctx.Response().Json(goHttp.StatusUnauthorized, http.Json{"error": "missing token"})
+	}
+	if _, err := facades.Auth(ctx).Parse(token); err != nil {
+		return ctx.Response().Json(goHttp.StatusUnauthorized, http.Json{"error": "invalid token"})
+	}
+
+	// Extract route param and pass to raw handler via request context
 	serviceID := ctx.Request().Route("serviceID")
 	w := ctx.Response().Writer().(goHttp.ResponseWriter)
 	r := ctx.Request().Origin().WithContext(
@@ -848,7 +846,63 @@ func (c *ServiceLogsController) Handle(ctx http.Context) http.Response {
 }
 ```
 
-Same pattern for TaskLogsController and ExecController (passing `taskID` / `containerID` respectively).
+Same pattern for TaskLogsController and ExecController (passing `taskID` / `containerID` respectively):
+
+```go
+// server/app/http/controllers/websocket/task_logs_controller.go
+type TaskLogsController struct {
+	handler *ws.TaskLogsHandler
+}
+
+func NewTaskLogsController(handler *ws.TaskLogsHandler) *TaskLogsController {
+	return &TaskLogsController{handler: handler}
+}
+
+func (c *TaskLogsController) Handle(ctx http.Context) http.Response {
+	token := ctx.Request().Query("token", "")
+	if token == "" {
+		return ctx.Response().Json(goHttp.StatusUnauthorized, http.Json{"error": "missing token"})
+	}
+	if _, err := facades.Auth(ctx).Parse(token); err != nil {
+		return ctx.Response().Json(goHttp.StatusUnauthorized, http.Json{"error": "invalid token"})
+	}
+
+	taskID := ctx.Request().Route("taskID")
+	w := ctx.Response().Writer().(goHttp.ResponseWriter)
+	r := ctx.Request().Origin().WithContext(
+		context.WithValue(ctx.Request().Origin().Context(), "taskID", taskID),
+	)
+	c.handler.ServeHTTP(w, r)
+	return nil
+}
+
+// server/app/http/controllers/websocket/exec_controller.go
+type ExecController struct {
+	handler *ws.ExecHandler
+}
+
+func NewExecController(handler *ws.ExecHandler) *ExecController {
+	return &ExecController{handler: handler}
+}
+
+func (c *ExecController) Handle(ctx http.Context) http.Response {
+	token := ctx.Request().Query("token", "")
+	if token == "" {
+		return ctx.Response().Json(goHttp.StatusUnauthorized, http.Json{"error": "missing token"})
+	}
+	if _, err := facades.Auth(ctx).Parse(token); err != nil {
+		return ctx.Response().Json(goHttp.StatusUnauthorized, http.Json{"error": "invalid token"})
+	}
+
+	containerID := ctx.Request().Route("containerID")
+	w := ctx.Response().Writer().(goHttp.ResponseWriter)
+	r := ctx.Request().Origin().WithContext(
+		context.WithValue(ctx.Request().Origin().Context(), "containerID", containerID),
+	)
+	c.handler.ServeHTTP(w, r)
+	return nil
+}
+```
 
 - [ ] **Step 2: Add WS routes outside JWT middleware group**
 

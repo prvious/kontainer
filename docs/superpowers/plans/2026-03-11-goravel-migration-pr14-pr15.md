@@ -121,46 +121,91 @@ git commit -m "feat: add ping endpoint"
 
 Implements the core bootstrap logic that determines what servers to start based on `AGENT_ROLE` config.
 
-**Leader mode:** HTTP server + gRPC client pool + scheduled tasks (discovery, metrics).
+**Leader mode:** HTTP server + gRPC server + scheduled tasks (discovery, metrics).
 **Follower mode:** gRPC server only (no HTTP, no scheduled tasks, no JWT).
 
-This uses Goravel's Runner interface (from service providers) and the scheduler.
+This uses Goravel's idiomatic Runner interface. Servers (HTTP, gRPC, Schedule) are started via Runners registered in service providers. Each Runner's `ShouldRun()` method controls whether it starts based on role. The `main.go` only calls `bootstrap.Boot()` — Goravel handles the rest.
 
 **Files:**
-- Create or modify: `server/main.go`
+- Modify: `server/bootstrap/app.go`
 - Create: `server/bootstrap/runners.go`
+- Modify: `server/main.go`
 
-- [ ] **Step 1: Create runner implementations**
+- [ ] **Step 1: Update bootstrap/app.go with routing and gRPC interceptors**
+
+```go
+// In bootstrap/app.go
+package bootstrap
+
+import (
+	"github.com/goravel/framework/foundation"
+	contractsfoundation "github.com/goravel/framework/contracts/foundation"
+	"google.golang.org/grpc"
+
+	"github.com/prvious/kontainer/server/config"
+	"github.com/prvious/kontainer/server/routes"
+	"github.com/prvious/kontainer/server/app/grpc/interceptors"
+)
+
+func Boot() contractsfoundation.Application {
+	return foundation.Setup().
+		WithProviders(Providers).
+		WithConfig(config.Boot).
+		WithRouting(func() {
+			routes.Auth()
+			routes.Api()
+			routes.Setup()
+			routes.Grpc() // registers gRPC service on facades.Grpc().Server()
+		}).
+		WithGrpcServerInterceptors(func() []grpc.UnaryServerInterceptor {
+			return []grpc.UnaryServerInterceptor{
+				interceptors.SharedSecret,
+			}
+		}).
+		Create()
+}
+```
+
+- [ ] **Step 2: Create runner implementations**
+
+The Runner approach uses `ShouldRun()` to conditionally start services based on role. Goravel's built-in HTTP RouteRunner and gRPC runner are configured via these custom runners.
+
+- The **gRPC runner** always runs (both leader and follower need it).
+- The **HTTP RouteRunner** only runs on leader (controlled via `ShouldRun()`).
+- The **Schedule runner** only runs on leader.
 
 ```go
 package bootstrap
 
 import (
+	"os"
+
 	"github.com/goravel/framework/facades"
 )
 
-// LeaderRunner starts the HTTP server and scheduled tasks.
-type LeaderRunner struct{}
+// HttpRunner conditionally starts the HTTP server (leader only).
+// Note: Uses os.Getenv("AGENT_ROLE") because ShouldRun() may be called
+// before facades are bootstrapped. At runtime, this maps to config key
+// "cluster.role" (from config/cluster.go).
+type HttpRunner struct{}
 
-func (r *LeaderRunner) ShouldRun() bool {
-	return facades.Config().GetString("agent.role", "leader") == "leader"
+func (r *HttpRunner) ShouldRun() bool {
+	role := os.Getenv("AGENT_ROLE")
+	if role == "" {
+		role = "leader"
+	}
+	return role == "leader"
 }
 
-func (r *LeaderRunner) Run() error {
-	// Start the scheduler in background
-	go facades.Schedule().Run()
-
-	facades.Log().Infof("Starting leader: HTTP on :%s", facades.Config().GetString("app.port", "8080"))
-
-	// HTTP server is started by Goravel's default HTTP runner.
-	// This runner is for additional leader-specific initialization.
-	return nil
+func (r *HttpRunner) Run() error {
+	facades.Log().Infof("Starting HTTP server on :%s", facades.Config().GetString("app.port", "8080"))
+	return facades.Route().Run()
 }
 
-func (r *LeaderRunner) Shutdown() error {
-	facades.Log().Info("Leader shutting down")
+func (r *HttpRunner) Shutdown() error {
+	facades.Log().Info("HTTP server shutting down")
 
-	// Close gRPC pool
+	// Close gRPC client pool (leader uses this for follower communication)
 	pool := facades.App().Make("cluster.pool")
 	if pool != nil {
 		pool.(*cluster.GrpcPool).CloseAll()
@@ -169,117 +214,56 @@ func (r *LeaderRunner) Shutdown() error {
 	return nil
 }
 
-// FollowerRunner starts only the gRPC server.
-type FollowerRunner struct{}
+// ScheduleRunner conditionally starts scheduled tasks (leader only).
+type ScheduleRunner struct{}
 
-func (r *FollowerRunner) ShouldRun() bool {
-	return facades.Config().GetString("agent.role") == "follower"
+func (r *ScheduleRunner) ShouldRun() bool {
+	role := os.Getenv("AGENT_ROLE")
+	if role == "" {
+		role = "leader"
+	}
+	return role == "leader"
 }
 
-func (r *FollowerRunner) Run() error {
-	facades.Log().Infof("Starting follower: gRPC on :%s", facades.Config().GetString("grpc.port", "9001"))
-	// gRPC server is started by Goravel's gRPC runner via the GrpcServiceProvider.
+func (r *ScheduleRunner) Run() error {
+	facades.Log().Info("Starting scheduler")
+	go facades.Schedule().Run()
 	return nil
 }
 
-func (r *FollowerRunner) Shutdown() error {
-	facades.Log().Info("Follower shutting down")
+func (r *ScheduleRunner) Shutdown() error {
 	return nil
 }
 ```
 
-**Note:** The actual runner pattern depends on how Goravel's bootstrap works. The key insight is:
+**Note:** The gRPC server runner is already provided by the `GrpcServiceProvider` (from PR 6) and always runs for both roles. No custom runner is needed for gRPC — it is started automatically when `routes.Grpc()` is registered via `WithRouting`.
 
-1. Goravel's HTTP server runner is already configured by default.
-2. For followers, we need to **skip** the HTTP server and only run gRPC.
-3. The `GrpcServiceProvider` (from PR 6) registers the gRPC server as a Runner via `Runners()`.
-4. The main bootstrap conditionally registers providers based on role.
+- [ ] **Step 3: Update main.go to be minimal**
 
-A simpler approach for role-based bootstrap in `main.go`:
-
-```go
-func main() {
-    app := bootstrap.Boot()
-
-    role := facades.Config().GetString("agent.role", "leader")
-
-    if role == "leader" {
-        // Start scheduler
-        go facades.Schedule().Run()
-        // Start HTTP server (Goravel default)
-        facades.Route().Run()
-    } else {
-        // Follower: only gRPC
-        facades.Grpc().Run()
-    }
-}
-```
-
-- [ ] **Step 2: Update main.go with role-based startup**
+With the Runner pattern, `main.go` does not contain any conditional startup logic. Goravel handles everything via the runners registered in service providers.
 
 ```go
 package main
 
-import (
-	"os"
-	"os/signal"
-	"syscall"
-
-	"github.com/goravel/framework/facades"
-	"github.com/prvious/kontainer/server/bootstrap"
-)
+import "github.com/prvious/kontainer/server/bootstrap"
 
 func main() {
 	bootstrap.Boot()
-
-	role := facades.Config().GetString("agent.role", "leader")
-	facades.Log().Infof("Starting kontainer agent in %s mode", role)
-
-	if role == "leader" {
-		go facades.Schedule().Run()
-
-		// Run HTTP server (blocks)
-		if err := facades.Route().Run(); err != nil {
-			facades.Log().Errorf("HTTP server error: %v", err)
-			os.Exit(1)
-		}
-	} else {
-		// Follower: gRPC only
-		if err := facades.Grpc().Run(); err != nil {
-			facades.Log().Errorf("gRPC server error: %v", err)
-			os.Exit(1)
-		}
-	}
-
-	// Graceful shutdown
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-
-	facades.Log().Info("Shutting down...")
 }
 ```
 
-**Note:** The actual shutdown and server blocking pattern depends on Goravel's HTTP/gRPC server API. `facades.Route().Run()` likely blocks. If both HTTP and gRPC need to run on the leader, start gRPC in a goroutine:
-
-```go
-if role == "leader" {
-    go facades.Grpc().Run() // gRPC for internal communication
-    go facades.Schedule().Run()
-    facades.Route().Run() // HTTP blocks
-}
-```
-
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-cd server && git add main.go bootstrap/runners.go
-git commit -m "feat: implement role-based bootstrap (leader vs follower)"
+cd server && git add main.go bootstrap/app.go bootstrap/runners.go
+git commit -m "feat: implement role-based bootstrap using Goravel Runner pattern"
 ```
 
 ### Task 4: Conditional Provider Registration
 
 Followers don't need auth, API, or scheduling providers. Optimize by conditionally registering providers based on role.
+
+> **Warning:** `facades.Config()` is NOT available during `init()` or in functions called at init time (e.g., provider registration), because facades are not bootstrapped yet. Use `os.Getenv()` for any role checks during provider registration. Alternatively, register all providers unconditionally and let each provider's `Runner.ShouldRun()` handle the conditional logic (preferred approach).
 
 **Files:**
 - Modify: `server/config/app.go`
@@ -287,8 +271,15 @@ Followers don't need auth, API, or scheduling providers. Optimize by conditional
 - [ ] **Step 1: Update provider list**
 
 ```go
+import "os"
+
 func providers() []foundation.ServiceProvider {
-    role := facades.Config().GetString("agent.role", "leader")
+    // Use os.Getenv() for role check during provider registration.
+    // facades.Config() is NOT available during init().
+    role := os.Getenv("AGENT_ROLE")
+    if role == "" {
+        role = "leader"
+    }
 
     // Common providers (both leader and follower)
     common := []foundation.ServiceProvider{
@@ -310,6 +301,8 @@ func providers() []foundation.ServiceProvider {
 }
 ```
 
+> **Alternative (preferred):** Register all providers unconditionally, and let each provider's `Runner.ShouldRun()` decide whether to actually start. This avoids the `os.Getenv()` workaround entirely and keeps provider registration simple.
+
 - [ ] **Step 2: Commit**
 
 ```bash
@@ -317,9 +310,37 @@ cd server && git add config/app.go
 git commit -m "feat: conditionally register providers based on agent role"
 ```
 
-### Task 5: Remove Old Agent Directory
+### Task 5: Verification (Before Removing Old Agent)
 
-Now that the new `/server` directory is complete, remove the old `/agent` directory.
+Verify the new `/server` agent has full feature parity with the old `/agent` before deleting anything.
+
+- [ ] **Step 1: Verify server builds**
+
+```bash
+cd server && go build ./...
+```
+
+- [ ] **Step 2: Verify no dangling imports**
+
+```bash
+cd server && go vet ./...
+```
+
+- [ ] **Step 3: Run server tests**
+
+```bash
+cd server && go test ./...
+```
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add -A && git commit -m "chore: verify new server builds and passes all checks"
+```
+
+### Task 6: Remove Old Agent Directory
+
+**Important:** Only remove `/agent` AFTER all end-to-end verification steps in Task 5 pass. The verification must confirm feature parity before the old code is deleted.
 
 **Files:**
 - Delete: `/agent/` (entire directory)
@@ -354,26 +375,6 @@ Update any build scripts in `package.json`:
 Update the repository structure section and development commands to reference `/server` instead of `/agent`.
 
 - [ ] **Step 4: Commit**
-
-```bash
-git add -A && git commit -m "chore: remove old agent directory, update build scripts"
-```
-
-### Task 6: Final Verification
-
-- [ ] **Step 1: Verify server builds**
-
-```bash
-cd server && go build ./...
-```
-
-- [ ] **Step 2: Verify no dangling imports**
-
-```bash
-cd server && go vet ./...
-```
-
-- [ ] **Step 3: Final commit**
 
 ```bash
 git add -A && git commit -m "feat: complete PR 14 — health, ping, role-based bootstrap, cleanup"

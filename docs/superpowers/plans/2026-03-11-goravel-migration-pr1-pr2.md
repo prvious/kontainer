@@ -76,6 +76,18 @@ cd /Users/clovismuneza/Apps/kontainer/server
 go mod tidy
 ```
 
+- [ ] **Step 3a: Fix go.mod module path**
+
+The `goravel new` command sets the module to the directory name (`server`). Fix it to match our import convention:
+
+```bash
+cd /Users/clovismuneza/Apps/kontainer/server
+sed -i '' 's|^module server$|module github.com/prvious/kontainer/server|' go.mod
+# Also fix any internal imports that reference "server/" to "github.com/prvious/kontainer/server/"
+find . -name "*.go" -exec sed -i '' 's|"server/|"github.com/prvious/kontainer/server/|g' {} +
+go mod tidy
+```
+
 - [ ] **Step 4: Generate app key**
 
 ```bash
@@ -903,6 +915,8 @@ func (r *M<timestamp>CreateNodeMetricsTable) Down() error {
 
 Create `server/app/models/node_metric.go`:
 
+**Cross-plan dependency (PR12):** The metrics collection actions in PR12 write to these fields. All types must stay consistent — use `time.Time` for Timestamp, `float64` for percentages, `uint64` for byte counts.
+
 ```go
 package models
 
@@ -915,11 +929,11 @@ type NodeMetric struct {
     Hostname    string    `gorm:"not null"`
     CPUs        int       `gorm:"column:cpus"`
     CPUPercent  float64   `gorm:"column:cpu_pct"`
-    MemUsed     int64     `gorm:"column:mem_used"`
-    MemTotal    int64     `gorm:"column:mem_total"`
+    MemUsed     uint64    `gorm:"column:mem_used"`
+    MemTotal    uint64    `gorm:"column:mem_total"`
     MemPercent  float64   `gorm:"column:mem_pct"`
-    DiskUsed    int64     `gorm:"column:disk_used"`
-    DiskTotal   int64     `gorm:"column:disk_total"`
+    DiskUsed    uint64    `gorm:"column:disk_used"`
+    DiskTotal   uint64    `gorm:"column:disk_total"`
     DiskPercent float64   `gorm:"column:disk_pct"`
 }
 

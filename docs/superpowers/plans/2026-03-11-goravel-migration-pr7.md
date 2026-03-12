@@ -104,11 +104,28 @@ func NewRegistry() *Registry {
 	}
 }
 
-// Update replaces the entire agent map with the provided list.
-func (r *Registry) Update(agents []AgentInfo) {
+// SetSelf registers the leader's own entry. This entry is preserved across
+// UpdateFollowers calls so discovery never evicts the leader.
+func (r *Registry) SetSelf(agent AgentInfo) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.agents = make(map[string]*AgentInfo, len(agents))
+	r.agents[agent.NodeID] = &agent
+}
+
+// UpdateFollowers replaces all follower entries with the provided list while
+// preserving any non-follower (leader) entries.
+func (r *Registry) UpdateFollowers(agents []AgentInfo) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// Remove existing followers
+	for id, a := range r.agents {
+		if a.Role == RoleFollower {
+			delete(r.agents, id)
+		}
+	}
+
+	// Add new follower entries
 	for i := range agents {
 		r.agents[agents[i].NodeID] = &agents[i]
 	}
@@ -385,7 +402,7 @@ func (d *SwarmDiscovery) Discover(ctx context.Context) {
 		healthy = append(healthy, info)
 	}
 
-	d.registry.Update(healthy)
+	d.registry.UpdateFollowers(healthy)
 }
 
 func (d *SwarmDiscovery) pingFollower(ctx context.Context, addr string) (AgentInfo, error) {
@@ -514,7 +531,7 @@ func (d *SwarmDiscovery) Discover(ctx context.Context) {
 		healthy = append(healthy, info)
 	}
 
-	d.registry.Update(healthy)
+	d.registry.UpdateFollowers(healthy)
 }
 
 func extractTaskIP(task swarm.Task) string {
@@ -611,7 +628,7 @@ func (d *DevDiscovery) Discover(ctx context.Context) {
 
 		healthy = append(healthy, info)
 	}
-	d.registry.Update(healthy)
+	d.registry.UpdateFollowers(healthy)
 }
 
 func (d *DevDiscovery) pingFollower(ctx context.Context, addr string) (AgentInfo, error) {
@@ -735,6 +752,8 @@ Registers registry, gRPC pool, and discovery as singletons. The discovery implem
 package providers
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"strings"
 
@@ -789,13 +808,18 @@ func (p *ClusterServiceProvider) Boot(app foundation.Application) {
 
 	nodeID := getNodeID()
 	hostname, _ := os.Hostname()
+	grpcPort := facades.Config().GetString("grpc.port", "9001")
+	selfAddr := fmt.Sprintf("%s:%s", hostname, grpcPort)
 	self := cluster.NewAgentInfo(
 		nodeID,
 		hostname,
-		facades.Config().GetString("app.url"),
+		selfAddr,
 		cluster.RoleLeader,
 		"healthy",
 	)
+
+	// Register the leader's own entry in the registry so it survives discovery cycles
+	registry.SetSelf(self)
 
 	action := agentActions.NewListAgentsAction(registry, self)
 	controller := agentControllers.NewListAgentsController(action)
@@ -820,7 +844,7 @@ func getNodeID() string {
 }
 ```
 
-**Note:** The `getNodeID()` helper reads the Docker Swarm node ID at boot. This is a simplified version — the full implementation may cache this or get it from the Docker service provider. Add missing `context` import.
+**Note:** The `getNodeID()` helper reads the Docker Swarm node ID at boot. This is a simplified version — the full implementation may cache this or get it from the Docker service provider.
 
 - [ ] **Step 2: Register the provider**
 
@@ -859,7 +883,7 @@ func (kernel *Kernel) Schedule() []schedule.Event {
 	events := []schedule.Event{}
 
 	// Only run discovery on leader nodes
-	if facades.Config().GetString("agent.role") != "leader" {
+	if facades.Config().GetString("cluster.role") != "leader" {
 		return events
 	}
 

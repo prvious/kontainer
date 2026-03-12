@@ -12,6 +12,26 @@
 
 **Prerequisites:** PR 5 (Orchestrator interface + Swarm implementation)
 
+> **Cross-plan dependency (PR5):** This plan uses `docker.ServiceFilters`, `docker.TaskFilters`, and the following sentinel errors. These types are defined in `server/app/services/docker/orchestrator.go` (PR5). If any filter fields or error types are missing, update PR5's orchestrator.go first.
+>
+> **Important:** PR5's current Orchestrator interface does NOT use `ServiceFilters`/`TaskFilters` structs — it uses plain parameters (e.g., `ListServices(ctx, stack string)`) and separate methods (`ListServiceTasks(ctx, serviceID)`, `ListNodeTasks(ctx, nodeID)`). This plan's actions that pass `docker.ServiceFilters{Stack: stack}` or `docker.TaskFilters{NodeID: nodeID}` must either: (a) update PR5 to accept filter structs, or (b) align with PR5's current signatures and pass plain parameters. Prefer option (b) unless filter structs are needed for multiple filter fields.
+>
+> **Error consolidation:** All domain sentinel errors must live in ONE file — `server/app/services/docker/errors.go`. Do NOT define errors in `orchestrator.go` or in controller files. The canonical error definitions are:
+>
+> ```go
+> // In server/app/services/docker/errors.go (single file for all domain errors)
+> package docker
+>
+> import "errors"
+>
+> var (
+>     ErrNotFound   = errors.New("resource not found")
+>     ErrGlobalMode = errors.New("operation not supported in global mode")
+> )
+> ```
+>
+> PR5 currently defines `ErrGlobalMode` in `orchestrator.go` — move it to `errors.go` when implementing. This plan's Task 2 defines `ErrNotFound` in `errors.go`, which is correct; do not duplicate it elsewhere.
+
 **Goravel patterns used:**
 - Controllers: `Handle(ctx http.Context) http.Response`
 - Route params: `ctx.Request().Route("serviceID")`
@@ -87,8 +107,8 @@ func NewListServicesAction(orchestrator docker.Orchestrator) *ListServicesAction
 }
 
 func (a *ListServicesAction) Execute(ctx context.Context, stack string) ([]docker.Service, error) {
-	filters := docker.ServiceFilters{Stack: stack}
-	return a.orchestrator.ListServices(ctx, filters)
+	// PR5's Orchestrator.ListServices takes a plain stack string, not a ServiceFilters struct.
+	return a.orchestrator.ListServices(ctx, stack)
 }
 ```
 
@@ -203,17 +223,20 @@ if errors.Is(err, docker.ErrNotFound) {
 }
 ```
 
-Define `ErrNotFound` in `server/app/services/docker/errors.go`:
+Define `ErrNotFound` in `server/app/services/docker/errors.go` (same file that will hold ALL domain errors — see cross-plan dependency note above):
 
 ```go
 package docker
 
 import "errors"
 
-var ErrNotFound = errors.New("not found")
+var (
+    ErrNotFound   = errors.New("resource not found")
+    ErrGlobalMode = errors.New("operation not supported in global mode")
+)
 ```
 
-The SwarmOrchestrator wraps Docker SDK's `errdefs.IsNotFound(err)` into `ErrNotFound`.
+The SwarmOrchestrator wraps Docker SDK's `errdefs.IsNotFound(err)` into `ErrNotFound`. Move `ErrGlobalMode` here from PR5's `orchestrator.go` so all sentinel errors are consolidated in one file.
 
 - [ ] **Step 3: Commit**
 
@@ -283,14 +306,20 @@ type scaleRequest struct {
 func (c *ScaleServiceController) Handle(ctx http.Context) http.Response {
 	serviceID := ctx.Request().Route("serviceID")
 
+	// Bind first, then validate — Goravel's Validate() works on already-parsed input,
+	// so the request body must be bound before validation rules can inspect field values.
 	var req scaleRequest
+	if err := ctx.Request().Bind(&req); err != nil {
+		return ctx.Response().Json(400, map[string]string{"error": "invalid request body"})
+	}
+
 	if errs := ctx.Request().Validate(map[string]string{
 		"replicas": "required|min_value:0",
 	}, nil); errs != nil {
 		return ctx.Response().Json(400, map[string]any{"error": errs.All()})
 	}
 
-	if err := ctx.Request().Bind(&req); err != nil || req.Replicas == nil {
+	if req.Replicas == nil {
 		return ctx.Response().Json(400, map[string]string{"error": "replicas field is required"})
 	}
 
@@ -310,11 +339,7 @@ func (c *ScaleServiceController) Handle(ctx http.Context) http.Response {
 }
 ```
 
-Add `ErrGlobalMode` to `server/app/services/docker/errors.go`:
-
-```go
-var ErrGlobalMode = errors.New("cannot scale a global service")
-```
+`ErrGlobalMode` should already be defined in `server/app/services/docker/errors.go` (consolidated in Task 2 above alongside `ErrNotFound`). If not yet present, add it there — do NOT define it in `orchestrator.go` or any other file.
 
 - [ ] **Step 3: Commit**
 
@@ -562,8 +587,9 @@ func NewListTasksAction(orchestrator docker.Orchestrator) *ListTasksAction {
 	return &ListTasksAction{orchestrator: orchestrator}
 }
 
-func (a *ListTasksAction) Execute(ctx context.Context, filters docker.TaskFilters) ([]docker.Task, error) {
-	return a.orchestrator.ListTasks(ctx, filters)
+func (a *ListTasksAction) Execute(ctx context.Context) ([]docker.Task, error) {
+	// PR5's Orchestrator.ListTasks takes no filter params — use ListServiceTasks/ListNodeTasks for filtered queries.
+	return a.orchestrator.ListTasks(ctx)
 }
 ```
 
@@ -575,7 +601,6 @@ import (
 	"github.com/goravel/framework/contracts/http"
 	"github.com/goravel/framework/facades"
 	taskActions "github.com/prvious/kontainer/server/app/actions/tasks"
-	"github.com/prvious/kontainer/server/app/services/docker"
 )
 
 type ListTasksController struct {
@@ -587,7 +612,7 @@ func NewListTasksController(action *taskActions.ListTasksAction) *ListTasksContr
 }
 
 func (c *ListTasksController) Handle(ctx http.Context) http.Response {
-	tasks, err := c.action.Execute(ctx.Context(), docker.TaskFilters{})
+	tasks, err := c.action.Execute(ctx.Context())
 	if err != nil {
 		facades.Log().Errorf("list tasks error: %v", err)
 		return ctx.Response().Json(500, map[string]string{"error": "failed to list tasks"})
@@ -600,6 +625,9 @@ func (c *ListTasksController) Handle(ctx http.Context) http.Response {
 - [ ] **Step 2: Create list service tasks** — filter by `serviceID` route param
 - [ ] **Step 3: Create inspect task** — route param `taskID`, returns `*docker.TaskDetail`
 - [ ] **Step 4: Create list task stats** — calls `orchestrator.TaskStats(ctx)`, returns container stats
+
+> **Note:** The `ContainerStats` domain type (PR5) includes `ServiceID` but not `ServiceName`. To get the service name, join with `ListServices` results or add `ServiceName` to `ContainerStats` in PR5. Also note PR5 uses `MemUsage`/`MemLimit`/`MemPercent` field names — if any downstream consumer (e.g., PR12-13's `CollectContainerMetricsAction`) references `MemoryUsed`, `MemoryLimit`, `MemoryPercent`, or `CreatedAt`, those fields must be added to PR5's `ContainerStats` or the consumer must be updated to match PR5's naming.
+
 - [ ] **Step 5: Commit all task controllers**
 
 ```bash
@@ -694,7 +722,7 @@ Controller returns `{"nodes": [...]}`.
 
 - [ ] **Step 2: List Node Tasks action + controller**
 
-Action calls `orchestrator.ListTasks(ctx, docker.TaskFilters{NodeID: nodeID})`.
+Action calls `orchestrator.ListNodeTasks(ctx, nodeID)` (PR5 provides a dedicated method instead of a TaskFilters struct).
 
 Controller gets `nodeID` from route param.
 

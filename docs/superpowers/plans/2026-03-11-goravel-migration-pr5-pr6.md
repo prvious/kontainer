@@ -237,11 +237,24 @@ type ImagePruneResult struct {
     ImagesDeleted  int
 }
 
+// --- Filter Types (for cross-plan compatibility with PR8-10 controllers) ---
+
+// ServiceFilters controls which services to return.
+type ServiceFilters struct {
+    Stack string // filter by com.docker.stack.namespace label
+}
+
+// TaskFilters controls which tasks to return.
+type TaskFilters struct {
+    ServiceID string
+    NodeID    string
+}
+
 // --- Orchestrator Interface ---
 
 type Orchestrator interface {
     // Services
-    ListServices(ctx context.Context, stack string) ([]Service, error)
+    ListServices(ctx context.Context, filters ServiceFilters) ([]Service, error)
     InspectService(ctx context.Context, id string) (*ServiceDetail, error)
     ScaleService(ctx context.Context, id string, replicas uint64) error
     RestartService(ctx context.Context, id string) error
@@ -250,10 +263,9 @@ type Orchestrator interface {
     UpdateServiceImage(ctx context.Context, id string, image string) error
 
     // Tasks
-    ListTasks(ctx context.Context) ([]Task, error)
-    ListServiceTasks(ctx context.Context, serviceID string) ([]Task, error)
-    ListNodeTasks(ctx context.Context, nodeID string) ([]Task, error)
+    ListTasks(ctx context.Context, filters TaskFilters) ([]Task, error)
     InspectTask(ctx context.Context, id string) (*TaskDetail, error)
+    // TaskStats returns container stats. The ContainerStats type includes ServiceID for correlation with service names.
     TaskStats(ctx context.Context) ([]ContainerStats, error)
 
     // Nodes
@@ -370,8 +382,12 @@ type DockerAPI interface {
     ImageList(ctx context.Context, opts image.ListOptions) ([]image.Summary, error)
     ImageRemove(ctx context.Context, imageID string, opts image.RemoveOptions) ([]image.DeleteResponse, error)
     ImagesPrune(ctx context.Context, pruneFilters filters.Args) (image.PruneReport, error)
+    // Docker SDK exec types (github.com/docker/docker/api/types/container):
+    //   ContainerExecCreate takes container.ExecOptions, returns types.IDResponse
+    //   ContainerExecAttach takes container.ExecStartOptions (NOT ExecAttachOptions), returns types.HijackedResponse
+    // Note: older SDK versions used types.ExecConfig / types.ExecStartCheck — those are deprecated.
     ContainerExecCreate(ctx context.Context, container string, config container.ExecOptions) (types.IDResponse, error)
-    ContainerExecAttach(ctx context.Context, execID string, config container.ExecAttachOptions) (types.HijackedResponse, error)
+    ContainerExecAttach(ctx context.Context, execID string, config container.ExecStartOptions) (types.HijackedResponse, error)
     ContainerExecResize(ctx context.Context, execID string, options container.ResizeOptions) error
     ContainerExecInspect(ctx context.Context, execID string) (container.ExecInspect, error)
     ContainerStats(ctx context.Context, containerID string, stream bool) (io.ReadCloser, error)
@@ -409,17 +425,17 @@ import (
     "strings"
 
     "github.com/docker/docker/api/types"
-    "github.com/docker/docker/api/types/filters"
+    dfilters "github.com/docker/docker/api/types/filters"
     dockerswarm "github.com/docker/docker/api/types/swarm"
 
     "github.com/prvious/kontainer/server/app/services/docker"
 )
 
-func (s *SwarmOrchestrator) ListServices(ctx context.Context, stack string) ([]docker.Service, error) {
+func (s *SwarmOrchestrator) ListServices(ctx context.Context, filters docker.ServiceFilters) ([]docker.Service, error) {
     opts := types.ServiceListOptions{}
-    if stack != "" {
-        f := filters.NewArgs()
-        f.Add("label", "com.docker.stack.namespace="+stack)
+    if filters.Stack != "" {
+        f := dfilters.NewArgs()
+        f.Add("label", "com.docker.stack.namespace="+filters.Stack)
         opts.Filters = f
     }
 
@@ -428,7 +444,7 @@ func (s *SwarmOrchestrator) ListServices(ctx context.Context, stack string) ([]d
         return nil, err
     }
 
-    taskFilter := filters.NewArgs()
+    taskFilter := dfilters.NewArgs()
     taskFilter.Add("desired-state", "running")
     tasks, err := s.client.TaskList(ctx, types.TaskListOptions{Filters: taskFilter})
     if err != nil {
@@ -487,7 +503,7 @@ func (s *SwarmOrchestrator) InspectService(ctx context.Context, id string) (*doc
     }
 
     // Count running tasks
-    taskFilter := filters.NewArgs()
+    taskFilter := dfilters.NewArgs()
     taskFilter.Add("service", id)
     taskFilter.Add("desired-state", "running")
     tasks, _ := s.client.TaskList(ctx, types.TaskListOptions{Filters: taskFilter})
@@ -638,16 +654,16 @@ Each file is a direct port from the corresponding `agent/services/*.go` action, 
 
 - [ ] **Step 1: Create tasks.go**
 
-Port logic from `agent/services/list_tasks.go`, `list_service_tasks.go`, `list_node_tasks.go`, `inspect_task.go`, `list_task_stats.go`. Map Docker `swarm.Task` → `docker.Task` domain type.
+Port logic from `agent/services/list_tasks.go`, `list_service_tasks.go`, `list_node_tasks.go`, `inspect_task.go`, `list_task_stats.go`. Map Docker `swarm.Task` → `docker.Task` domain type. Note: `ListServiceTasks` and `ListNodeTasks` are subsumed by `TaskFilters` — use `ListTasks(ctx, TaskFilters{ServiceID: id})` or `ListTasks(ctx, TaskFilters{NodeID: id})` instead.
 
 Key method signatures:
 ```go
-func (s *SwarmOrchestrator) ListTasks(ctx context.Context) ([]docker.Task, error)
-func (s *SwarmOrchestrator) ListServiceTasks(ctx context.Context, serviceID string) ([]docker.Task, error)
-func (s *SwarmOrchestrator) ListNodeTasks(ctx context.Context, nodeID string) ([]docker.Task, error)
+func (s *SwarmOrchestrator) ListTasks(ctx context.Context, filters docker.TaskFilters) ([]docker.Task, error)
 func (s *SwarmOrchestrator) InspectTask(ctx context.Context, id string) (*docker.TaskDetail, error)
 func (s *SwarmOrchestrator) TaskStats(ctx context.Context) ([]docker.ContainerStats, error)
 ```
+
+The `ListTasks` implementation should apply `filters.ServiceID` and `filters.NodeID` as Docker API filters when non-empty.
 
 - [ ] **Step 2: Create nodes.go**
 
@@ -1034,35 +1050,22 @@ message PruneImagesResponse {
 }
 
 // --- Exec (bidirectional stream) ---
+// Uses flat enum-based message format (matches PR11 expectations) instead of oneof.
 message ExecMessage {
-    oneof payload {
-        ExecStart start = 1;
-        ExecData data = 2;
-        ExecResize resize = 3;
-        ExecExit exit = 4;
-    }
-}
-
-message ExecStart {
-    string container_id = 1;
-    string shell = 2;
-    string user = 3;
-    uint32 cols = 4;
-    uint32 rows = 5;
-}
-
-message ExecData {
-    bytes data = 1;
-}
-
-message ExecResize {
-    uint32 cols = 1;
-    uint32 rows = 2;
-}
-
-message ExecExit {
-    int32 code = 1;
-    string error = 2;
+  enum Type {
+    INIT = 0;
+    DATA = 1;
+    RESIZE = 2;
+    EXIT = 3;
+    ERROR = 4;
+  }
+  Type type = 1;
+  bytes data = 2;      // for DATA type
+  uint32 cols = 3;     // for RESIZE type
+  uint32 rows = 4;     // for RESIZE type
+  int32 exit_code = 5; // for EXIT type
+  string error = 6;    // for ERROR type
+  string shell = 7;    // for INIT type
 }
 ```
 
@@ -1222,18 +1225,18 @@ import (
 
 type AgentController struct {
     pb.UnimplementedAgentServiceServer
+    nodeID string
 }
 
-func NewAgentController() *AgentController {
-    return &AgentController{}
+func NewAgentController(nodeID string) *AgentController {
+    return &AgentController{nodeID: nodeID}
 }
 
 func (c *AgentController) Health(ctx context.Context, req *pb.HealthRequest) (*pb.HealthResponse, error) {
     hostname, _ := os.Hostname()
-    // NodeID would be injected or resolved from Docker info
     return &pb.HealthResponse{
         Status:   "ok",
-        NodeId:   "", // Set during provider boot
+        NodeId:   c.nodeID,
         Hostname: hostname,
     }, nil
 }
@@ -1242,14 +1245,14 @@ func (c *AgentController) Info(ctx context.Context, req *pb.InfoRequest) (*pb.In
     hostname, _ := os.Hostname()
     role := facades.Config().GetString("cluster.role", "follower")
     return &pb.InfoResponse{
-        NodeId:   "",
+        NodeId:   c.nodeID,
         Hostname: hostname,
         Role:     role,
     }, nil
 }
 ```
 
-**Note:** The NodeID should be injected via constructor from the Docker service provider. For the initial implementation, it can be resolved lazily. Refine in Task 9 when wiring everything together.
+**IMPORTANT: NodeID must NOT be empty.** The `AgentController` must receive `nodeID` via constructor injection (e.g., `NewAgentController(nodeID string)`). The NodeID should be populated from the Docker SDK (`client.Info(ctx).Swarm.NodeID`) during `DockerServiceProvider.Register()`, or from a config value (`cluster.node_id`) as a fallback. Returning an empty NodeID will break leader-side discovery and registry correlation. Wire this in Task 9 when constructing the controller from the service provider.
 
 - [ ] **Step 2: Create metrics controller**
 
@@ -1347,7 +1350,10 @@ import (
 )
 
 func Grpc() {
-    agentCtrl := controllers.NewAgentController()
+    // nodeID must be resolved from DockerServiceProvider or config.
+    // Retrieve from app container: app.Make("docker.node_id") or facades.Config().
+    nodeID := "" // TODO: resolve from service provider — see Task 9
+    agentCtrl := controllers.NewAgentController(nodeID)
     pb.RegisterAgentServiceServer(facades.Grpc().Server(), agentCtrl)
 }
 ```
@@ -1372,7 +1378,7 @@ foundation.Setup().
     })
 ```
 
-**Verify:** Check Goravel docs for the exact method names (`WithGrpcServerInterceptors` vs other). The interceptor registration may use a different API. Adjust based on Goravel's bootstrap contract.
+**Confirmed:** Per Goravel gRPC docs, `facades.Grpc().Server()` IS correct for route registration (`proto.RegisterXxxServer(facades.Grpc().Server(), controller)` in `routes/grpc.go`), `WithGrpcServerInterceptors` IS a valid bootstrap function for unary interceptors, and `WithGrpcClientInterceptors` is available for client-side interceptors. Routes are registered in `bootstrap/app.go::WithRouting`.
 
 - [ ] **Step 3: Update gRPC config**
 
