@@ -2,28 +2,23 @@ package config
 
 import (
 	"github.com/goravel/framework/contracts/database/driver"
-	postgresfacades "github.com/goravel/postgres/facades"
+	sqlitefacades "github.com/goravel/sqlite/facades"
+
 	"github.com/prvious/kontainer/server/app/facades"
 )
 
 func init() {
 	config := facades.Config()
 	config.Add("database", map[string]any{
-		"default": "postgres",
+		"default": config.Env("DB_CONNECTION", "sqlite"),
 		// Database connections
 		"connections": map[string]any{
-			"postgres": map[string]any{
-				"host":     config.Env("DB_HOST"),
-				"port":     config.Env("DB_PORT"),
-				"database": config.Env("DB_DATABASE"),
-				"username": config.Env("DB_USERNAME"),
-				"password": config.Env("DB_PASSWORD"),
-				"sslmode":  "disable",
-				"singular": false,
+			"sqlite": map[string]any{
+				"driver":   "sqlite",
+				"database": config.Env("DB_DATABASE", "storage/kontainer.db"),
 				"prefix":   "",
-				"schema":   config.Env("DB_SCHEMA", "public"),
 				"via": func() (driver.Driver, error) {
-					return postgresfacades.Postgres("postgres")
+					return sqlitefacades.Sqlite("sqlite")
 				},
 			},
 		},
@@ -69,7 +64,8 @@ func init() {
 		// your application. Using this information, we can determine which of
 		// the migrations on disk haven't actually been run in the database.
 		"migrations": map[string]any{
-			"table": "migrations",
+			"driver": "sql",
+			"table":  "migrations",
 		},
 	})
 }
