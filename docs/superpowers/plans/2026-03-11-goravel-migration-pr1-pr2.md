@@ -206,7 +206,17 @@ cd /Users/clovismuneza/Apps/kontainer/server
 go get github.com/goravel/sqlite
 ```
 
-- [ ] **Step 2: Register the SQLite service provider**
+- [ ] **Step 2: Verify the SQLite package structure**
+
+After `go get`, inspect the installed package to confirm the import paths:
+
+```bash
+ls /Users/clovismuneza/Apps/kontainer/server/vendor/github.com/goravel/sqlite/ 2>/dev/null || go doc github.com/goravel/sqlite
+```
+
+Look for the `ServiceProvider` type and a `facades` sub-package. The import paths in Steps 2-3 below are based on the expected package structure — adjust if the actual package differs.
+
+- [ ] **Step 3: Register the SQLite service provider**
 
 In `server/config/app.go`, add the SQLite provider to the `providers` slice:
 
@@ -219,7 +229,7 @@ Add to providers:
 &sqlite.ServiceProvider{},
 ```
 
-- [ ] **Step 3: Configure the SQLite connection in `config/database.go`**
+- [ ] **Step 4: Configure the SQLite connection in `config/database.go`**
 
 Find the `"connections"` map in `config/database.go`. Add or replace the sqlite entry:
 
@@ -255,14 +265,14 @@ Also configure the migration driver:
 },
 ```
 
-- [ ] **Step 4: Create the storage directory**
+- [ ] **Step 5: Create the storage directory**
 
 ```bash
 mkdir -p /Users/clovismuneza/Apps/kontainer/server/storage
 touch /Users/clovismuneza/Apps/kontainer/server/storage/.gitkeep
 ```
 
-- [ ] **Step 5: Verify database connectivity**
+- [ ] **Step 6: Verify database connectivity**
 
 ```bash
 cd /Users/clovismuneza/Apps/kontainer/server
@@ -271,7 +281,7 @@ go run . artisan about
 
 Expected: Shows app info including database connection details.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 cd /Users/clovismuneza/Apps/kontainer
@@ -287,7 +297,15 @@ git commit -m "feat: configure SQLite database driver"
 - Create: `server/config/cluster.go`
 - Create: `server/config/metrics.go`
 
-- [ ] **Step 1: Create `config/cluster.go`**
+**Important:** Goravel's generated config files (e.g. `config/app.go`) use `init()` with `facades.Config()`. This works because the framework's config service provider bootstraps the config facade before other `init()` functions in the `config/` package are called. Custom config files in `config/` follow the same pattern — just ensure they're in the `config` package so the scaffold's blank import in `bootstrap/app.go` loads them.
+
+- [ ] **Step 1: Inspect an existing generated config file for the pattern**
+
+Read `server/config/app.go` to see how the scaffold uses `init()` and `facades.Config()`. Your custom files must follow the exact same pattern.
+
+- [ ] **Step 2: Create `config/cluster.go`**
+
+Follow the same pattern as the generated config files:
 
 ```go
 package config
@@ -308,7 +326,7 @@ func init() {
 }
 ```
 
-- [ ] **Step 2: Create `config/metrics.go`**
+- [ ] **Step 3: Create `config/metrics.go`**
 
 ```go
 package config
@@ -326,16 +344,27 @@ func init() {
 }
 ```
 
-- [ ] **Step 3: Verify config loads**
+- [ ] **Step 4: Verify config loads**
 
 ```bash
 cd /Users/clovismuneza/Apps/kontainer/server
 go run . artisan about
 ```
 
-Expected: No errors. App starts and shows config.
+Expected: No errors. App starts and shows config. If it panics with nil pointer on `facades.Config()`, check that `bootstrap/app.go` imports the `config` package.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Verify custom config values are accessible**
+
+Add a temporary test in main.go or use artisan tinker if available:
+
+```bash
+cd /Users/clovismuneza/Apps/kontainer/server
+go run . artisan about
+```
+
+Alternatively, add a quick `fmt.Println(facades.Config().GetString("cluster.role"))` in `main.go` after boot, run, verify it prints "leader", then remove it.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 cd /Users/clovismuneza/Apps/kontainer
@@ -543,38 +572,52 @@ git commit -m "chore: clean up Goravel scaffold boilerplate"
 
 - [ ] **Step 1: Update root `package.json` dev:agent script**
 
-Change `dev:agent` to point to the new server directory. Look at the current script:
+The current scripts use `air` for hot-reload:
 
 ```json
-"dev:agent": "cd agent && go run ."
+"dev:agent": "cd agent && air",
+"build:agent": "cd agent && go build -o bin/agent ."
 ```
 
-Update to:
+Update to point to new server directory, keeping `air` for hot-reload:
 
 ```json
-"dev:agent": "cd server && go run ."
-```
-
-Also update `build:agent`:
-
-```json
+"dev:agent": "cd server && air",
 "build:agent": "cd server && go build -o bin/agent ."
 ```
 
-- [ ] **Step 2: Verify `pnpm dev:agent` works**
+- [ ] **Step 2: Copy and adapt `.air.toml` for the new server**
+
+Copy the `air` config from `agent/` to `server/`:
+
+```bash
+cp /Users/clovismuneza/Apps/kontainer/agent/.air.toml /Users/clovismuneza/Apps/kontainer/server/.air.toml
+```
+
+Update paths in the copied `.air.toml` if any are agent-specific (e.g. binary output dir).
+
+- [ ] **Step 3: Verify `pnpm dev:agent` works**
 
 ```bash
 cd /Users/clovismuneza/Apps/kontainer
 pnpm dev:agent
 ```
 
-Expected: Goravel server starts on port 8080.
+Expected: Goravel server starts on port 8080 with hot-reload.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Update reset script path**
+
+In `package.json`, update the `reset` script to reference the new server directory for DB cleanup:
+
+```json
+"reset": "./dev/teardown.sh && rm -f server/storage/*.db server/storage/*.db-wal server/storage/*.db-shm"
+```
+
+- [ ] **Step 5: Commit**
 
 ```bash
 cd /Users/clovismuneza/Apps/kontainer
-git add package.json
+git add package.json server/.air.toml
 git commit -m "chore: update dev scripts to use /server (Goravel)"
 ```
 
@@ -604,6 +647,8 @@ EOF
 
 ## Chunk 2: PR 2 — Database Models & Migrations
 
+**Critical:** Every migration generated via `go run . artisan make:migration` is auto-registered in `bootstrap/migrations.go`. The generated file adds the migration struct to the `Migrations()` function which is called by `WithMigrations` in `bootstrap/app.go`. **Always commit `bootstrap/migrations.go` alongside new migration files.** If you create a migration manually without the artisan command, you must register it yourself in `bootstrap/migrations.go`.
+
 ### File Structure
 
 ```
@@ -613,11 +658,13 @@ server/
 │   ├── app_config.go             # Key-value app configuration
 │   ├── node_metric.go            # Time-series node metrics
 │   └── setting.go                # Key-value user settings
+├── bootstrap/
+│   └── migrations.go             # Auto-updated by make:migration (register all migrations)
 └── database/migrations/
-    ├── 20260311000001_create_users_table.go
-    ├── 20260311000002_create_app_configs_table.go
-    ├── 20260311000003_create_node_metrics_table.go
-    └── 20260311000004_create_settings_table.go
+    ├── <timestamp>_create_users_table.go
+    ├── <timestamp>_create_app_configs_table.go
+    ├── <timestamp>_create_node_metrics_table.go
+    └── <timestamp>_create_settings_table.go
 ```
 
 ---
@@ -692,7 +739,7 @@ type User struct {
 }
 ```
 
-Note: `orm.Model` provides `ID`, `CreatedAt`, `UpdatedAt` fields. No need for separate `orm.Timestamps` embed.
+Note: `orm.Model` already provides `ID`, `CreatedAt`, `UpdatedAt` fields. Do NOT also embed `orm.Timestamps` — that would cause duplicate fields and a compile error.
 
 - [ ] **Step 4: Run the migration**
 
@@ -745,7 +792,9 @@ func (r *M<timestamp>CreateAppConfigsTable) Up() error {
         return facades.Schema().Create("app_configs", func(table schema.Blueprint) {
             table.String("key")
             table.Text("value")
-
+            // Note: table.String("key").Primary() may not compile —
+            // Goravel's ColumnDefinition may not expose .Primary().
+            // Use table.Primary("key") as a separate call instead.
             table.Primary("key")
         })
     }
@@ -932,7 +981,9 @@ func (r *M<timestamp>CreateSettingsTable) Up() error {
         return facades.Schema().Create("settings", func(table schema.Blueprint) {
             table.String("key")
             table.Text("value")
-
+            // Note: table.String("key").Primary() may not compile —
+            // Goravel's ColumnDefinition may not expose .Primary().
+            // Use table.Primary("key") as a separate call instead.
             table.Primary("key")
         })
     }
