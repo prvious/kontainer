@@ -23,6 +23,8 @@ import (
 	"github.com/goravel/framework/view"
 	"github.com/goravel/gin"
 	"github.com/goravel/sqlite"
+
+	appproviders "github.com/prvious/kontainer/server/app/providers"
 )
 
 func Providers() []foundation.ServiceProvider {
@@ -48,5 +50,6 @@ func Providers() []foundation.ServiceProvider {
 		&schedule.ServiceProvider{},
 		&filesystem.ServiceProvider{},
 		&testing.ServiceProvider{},
+		&appproviders.AuthServiceProvider{},
 	}
 }
