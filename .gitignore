@@ -30,4 +30,4 @@ agent/tmp/
 .automaker
 *.db
 *.db-shm
-*.db-wal
+*.db-wal.worktrees/

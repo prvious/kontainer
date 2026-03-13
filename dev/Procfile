@@ -1,4 +1,4 @@
-leader: cd agent && source .env && DOCKER_HOST=tcp://localhost:2375 air -- --config ../dev/leader.yml
-follower1: cd agent && DOCKER_HOST=tcp://localhost:2376 air -- --config ../dev/follower1.yml
-follower2: cd agent && DOCKER_HOST=tcp://localhost:2378 air -- --config ../dev/follower2.yml
+leader: cd server && source .env && DOCKER_HOST=tcp://localhost:2375 air -- --config ../dev/leader.yml
+follower1: cd server && DOCKER_HOST=tcp://localhost:2376 air -- --config ../dev/follower1.yml
+follower2: cd server && DOCKER_HOST=tcp://localhost:2378 air -- --config ../dev/follower2.yml
 app: pnpm --filter app tauri dev
