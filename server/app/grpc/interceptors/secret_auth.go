@@ -2,6 +2,7 @@ package interceptors
 
 import (
 	"context"
+	"crypto/subtle"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -14,9 +15,8 @@ import (
 const SecretMetadataKey = "x-kontainer-secret"
 
 // ValidateSecret checks the shared secret from gRPC metadata.
-// Used by both unary and stream interceptors, and can be called
-// directly from streaming handlers where framework-level stream
-// interceptors are not available.
+// Called by the unary interceptor and directly from streaming handlers
+// (Goravel does not support framework-level stream interceptors).
 func ValidateSecret(ctx context.Context) error {
 	secret := facades.Config().GetString("cluster.secret")
 	if secret == "" {
@@ -29,7 +29,7 @@ func ValidateSecret(ctx context.Context) error {
 	}
 
 	values := md.Get(SecretMetadataKey)
-	if len(values) == 0 || values[0] != secret {
+	if len(values) == 0 || subtle.ConstantTimeCompare([]byte(values[0]), []byte(secret)) != 1 {
 		return status.Error(codes.Unauthenticated, "invalid secret")
 	}
 
@@ -42,12 +42,4 @@ func SecretAuth(ctx context.Context, req any, info *grpc.UnaryServerInfo, handle
 		return nil, err
 	}
 	return handler(ctx, req)
-}
-
-// SecretAuthStream validates the shared secret for streaming RPCs.
-func SecretAuthStream(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-	if err := ValidateSecret(ss.Context()); err != nil {
-		return err
-	}
-	return handler(srv, ss)
 }
