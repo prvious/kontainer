@@ -2,6 +2,7 @@ package swarm
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/docker/docker/api/types"
@@ -88,7 +89,10 @@ func (s *SwarmOrchestrator) InspectService(ctx context.Context, id string) (*doc
 	taskFilter := dfilters.NewArgs()
 	taskFilter.Add("service", id)
 	taskFilter.Add("desired-state", "running")
-	tasks, _ := s.client.TaskList(ctx, types.TaskListOptions{Filters: taskFilter})
+	tasks, err := s.client.TaskList(ctx, types.TaskListOptions{Filters: taskFilter})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list tasks for service %s: %w", id, err)
+	}
 	running := 0
 	for _, t := range tasks {
 		if t.Status.State == dockerswarm.TaskStateRunning {
@@ -142,6 +146,9 @@ func (s *SwarmOrchestrator) ScaleService(ctx context.Context, id string, replica
 
 	if svc.Spec.Mode.Global != nil {
 		return docker.ErrGlobalMode
+	}
+	if svc.Spec.Mode.Replicated == nil {
+		return fmt.Errorf("service %s has no replicated mode configuration", id)
 	}
 
 	svc.Spec.Mode.Replicated.Replicas = &replicas
