@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"crypto/subtle"
 	nethttp "net/http"
 
 	contractshttp "github.com/goravel/framework/contracts/http"
@@ -20,7 +21,7 @@ func SetupToken(expectedToken string) contractshttp.Middleware {
 			return
 		}
 
-		if provided != expectedToken {
+		if subtle.ConstantTimeCompare([]byte(provided), []byte(expectedToken)) != 1 {
 			ctx.Response().Json(nethttp.StatusUnauthorized, map[string]any{
 				"error": "invalid setup token",
 			})

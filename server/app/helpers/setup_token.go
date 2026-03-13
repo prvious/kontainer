@@ -24,3 +24,12 @@ func GetSetupToken() string {
 	}
 	return GenerateSetupToken()
 }
+
+// RandomHex generates a cryptographically random hex string of nBytes length.
+func RandomHex(nBytes int) string {
+	b := make([]byte, nBytes)
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand failed: " + err.Error())
+	}
+	return hex.EncodeToString(b)
+}

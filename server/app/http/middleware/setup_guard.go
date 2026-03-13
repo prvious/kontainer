@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 
 	contractshttp "github.com/goravel/framework/contracts/http"
-	"github.com/goravel/framework/facades"
+	"github.com/prvious/kontainer/server/app/facades"
 
 	"github.com/prvious/kontainer/server/app/models"
 )
@@ -21,7 +21,7 @@ func SetupGuard() contractshttp.Middleware {
 	return func(ctx contractshttp.Context) {
 		path := ctx.Request().Path()
 
-		if path == "/health" || path == "/ping" || strings.HasPrefix(path, "/setup") {
+		if path == "/health" || path == "/ping" || strings.HasPrefix(path, "/setup") || strings.HasPrefix(path, "/auth") {
 			ctx.Request().Next()
 			return
 		}

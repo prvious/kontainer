@@ -1,7 +1,7 @@
 package setup
 
 import (
-	"github.com/goravel/framework/facades"
+	"github.com/prvious/kontainer/server/app/facades"
 
 	"github.com/prvious/kontainer/server/app/models"
 )

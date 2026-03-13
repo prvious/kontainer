@@ -2,7 +2,7 @@ package routes
 
 import (
 	"github.com/goravel/framework/contracts/route"
-	"github.com/goravel/framework/facades"
+	"github.com/prvious/kontainer/server/app/facades"
 
 	setupactions "github.com/prvious/kontainer/server/app/actions/setup"
 	"github.com/prvious/kontainer/server/app/helpers"

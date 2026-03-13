@@ -1,20 +1,20 @@
 package setup
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"sync"
 
 	contractshttp "github.com/goravel/framework/contracts/http"
-	"github.com/goravel/framework/facades"
+
+	"github.com/prvious/kontainer/server/app/facades"
+	"github.com/prvious/kontainer/server/app/helpers"
 )
 
 type ManifestState struct {
 	mu    sync.Mutex
-	State string
-	Token string
-	Org   string
+	state string
+	token string
+	org   string
 }
 
 func NewManifestState() *ManifestState {
@@ -24,27 +24,27 @@ func NewManifestState() *ManifestState {
 func (s *ManifestState) Set(state, token, org string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.State = state
-	s.Token = token
-	s.Org = org
+	s.state = state
+	s.token = token
+	s.org = org
 }
 
 func (s *ManifestState) Get() (state, token, org string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.State, s.Token, s.Org
+	return s.state, s.token, s.org
 }
 
 func (s *ManifestState) ClearToken() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.Token = ""
+	s.token = ""
 }
 
 func (s *ManifestState) ClearState() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.State = ""
+	s.state = ""
 }
 
 type ManifestController struct {
@@ -58,8 +58,8 @@ func NewManifestController(state *ManifestState) *ManifestController {
 func (c *ManifestController) Handle(ctx contractshttp.Context) contractshttp.Response {
 	org := ctx.Request().Input("org")
 
-	state := randomHex(16)
-	token := randomHex(16)
+	state := helpers.RandomHex(16)
+	token := helpers.RandomHex(16)
 
 	c.manifestState.Set(state, token, org)
 
@@ -69,10 +69,3 @@ func (c *ManifestController) Handle(ctx contractshttp.Context) contractshttp.Res
 	return ctx.Response().Json(200, map[string]any{"setupUrl": setupURL})
 }
 
-func randomHex(nBytes int) string {
-	b := make([]byte, nBytes)
-	if _, err := rand.Read(b); err != nil {
-		panic("crypto/rand failed: " + err.Error())
-	}
-	return hex.EncodeToString(b)
-}

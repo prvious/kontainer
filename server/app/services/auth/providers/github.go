@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 
 	"golang.org/x/oauth2"
@@ -134,8 +135,8 @@ func (g *GitHubProvider) checkAccess(client *http.Client, login string) error {
 		return nil
 	}
 
-	url := fmt.Sprintf("https://api.github.com/orgs/%s/members/%s", g.org, login)
-	resp, err := client.Get(url)
+	checkURL := fmt.Sprintf("https://api.github.com/orgs/%s/members/%s", url.PathEscape(g.org), url.PathEscape(login))
+	resp, err := client.Get(checkURL)
 	if err != nil {
 		return fmt.Errorf("github: check org membership: %w", err)
 	}

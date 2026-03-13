@@ -1,7 +1,7 @@
 package auth
 
 import (
-	"github.com/goravel/framework/facades"
+	"github.com/prvious/kontainer/server/app/facades"
 	"github.com/prvious/kontainer/server/app/models"
 	"github.com/prvious/kontainer/server/app/services/auth/providers"
 )

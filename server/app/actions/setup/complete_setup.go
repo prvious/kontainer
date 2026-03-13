@@ -3,7 +3,7 @@ package setup
 import (
 	"fmt"
 
-	"github.com/goravel/framework/facades"
+	"github.com/prvious/kontainer/server/app/facades"
 
 	"github.com/prvious/kontainer/server/app/http/middleware"
 	"github.com/prvious/kontainer/server/app/models"

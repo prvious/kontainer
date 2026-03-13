@@ -2,7 +2,7 @@ package routes
 
 import (
 	"github.com/goravel/framework/contracts/route"
-	"github.com/goravel/framework/facades"
+	"github.com/prvious/kontainer/server/app/facades"
 
 	authactions "github.com/prvious/kontainer/server/app/actions/auth"
 	authcontrollers "github.com/prvious/kontainer/server/app/http/controllers/auth"
@@ -11,13 +11,25 @@ import (
 )
 
 func Auth() {
-	registryInstance, _ := facades.App().Make("auth.provider_registry")
+	registryInstance, err := facades.App().Make("auth.provider_registry")
+	if err != nil {
+		facades.Log().Errorf("Failed to resolve auth.provider_registry: %v", err)
+		return
+	}
 	registry := registryInstance.(*authproviders.ProviderRegistry)
 
-	sessionInstance, _ := facades.App().Make("auth.session_store")
+	sessionInstance, err := facades.App().Make("auth.session_store")
+	if err != nil {
+		facades.Log().Errorf("Failed to resolve auth.session_store: %v", err)
+		return
+	}
 	sessions := sessionInstance.(*authservice.SessionStore)
 
-	bridgeInstance, _ := facades.App().Make("auth.bridge")
+	bridgeInstance, err := facades.App().Make("auth.bridge")
+	if err != nil {
+		facades.Log().Errorf("Failed to resolve auth.bridge: %v", err)
+		return
+	}
 	bridge := bridgeInstance.(*authservice.AuthBridge)
 
 	upsertUser := authactions.NewUpsertUserAction()

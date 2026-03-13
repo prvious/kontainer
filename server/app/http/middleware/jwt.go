@@ -2,9 +2,11 @@ package middleware
 
 import (
 	nethttp "net/http"
+	"strings"
 
 	contractshttp "github.com/goravel/framework/contracts/http"
-	"github.com/goravel/framework/facades"
+
+	"github.com/prvious/kontainer/server/app/facades"
 )
 
 // JWT validates the Authorization Bearer token using Goravel's auth facade.
@@ -19,7 +21,7 @@ func JWT() contractshttp.Middleware {
 			return
 		}
 
-		_, err := facades.Auth(ctx).Parse(token)
+		_, err := facades.Auth(ctx).Parse(strings.TrimPrefix(token, "Bearer "))
 		if err != nil {
 			ctx.Response().Json(nethttp.StatusUnauthorized, map[string]any{
 				"error": "invalid or expired token",

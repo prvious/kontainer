@@ -3,10 +3,13 @@ package setup
 import (
 	"encoding/json"
 	"fmt"
+	"html"
 	nethttp "net/http"
+	"net/url"
 
 	contractshttp "github.com/goravel/framework/contracts/http"
-	"github.com/goravel/framework/facades"
+
+	"github.com/prvious/kontainer/server/app/facades"
 )
 
 type StartController struct {
@@ -63,7 +66,7 @@ func (c *StartController) Handle(ctx contractshttp.Context) contractshttp.Respon
 
 	var githubURL string
 	if org != "" {
-		githubURL = fmt.Sprintf("https://github.com/organizations/%s/settings/apps/new?state=%s", org, state)
+		githubURL = fmt.Sprintf("https://github.com/organizations/%s/settings/apps/new?state=%s", url.PathEscape(org), state)
 	} else {
 		githubURL = fmt.Sprintf("https://github.com/settings/apps/new?state=%s", state)
 	}
@@ -91,7 +94,7 @@ func renderErrorHTML(message string) string {
 <h1>Setup Error</h1>
 <p>%s</p>
 </body>
-</html>`, message)
+</html>`, html.EscapeString(message))
 }
 
 func htmlEscapeJSON(s string) string {

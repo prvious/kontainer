@@ -1,16 +1,14 @@
 package setup
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 
-	"github.com/goravel/framework/facades"
-
+	"github.com/prvious/kontainer/server/app/facades"
+	"github.com/prvious/kontainer/server/app/helpers"
 	"github.com/prvious/kontainer/server/app/models"
 )
 
@@ -62,7 +60,7 @@ func (a *ExchangeCodeAction) Execute(code string) (*GitHubAppCredentials, error)
 		return nil, fmt.Errorf("failed to parse GitHub API response: %w", err)
 	}
 
-	jwtSecret := generateRandomHex(32)
+	jwtSecret := helpers.RandomHex(32)
 
 	configs := map[string]string{
 		"github_app_id":         strconv.Itoa(ghResp.ID),
@@ -95,10 +93,3 @@ func (a *ExchangeCodeAction) Execute(code string) (*GitHubAppCredentials, error)
 	}, nil
 }
 
-func generateRandomHex(nBytes int) string {
-	b := make([]byte, nBytes)
-	if _, err := rand.Read(b); err != nil {
-		panic("crypto/rand failed: " + err.Error())
-	}
-	return hex.EncodeToString(b)
-}
