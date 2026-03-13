@@ -1,13 +1,15 @@
 module github.com/prvious/kontainer/server
 
-go 1.24.0
+go 1.25.0
 
 require (
 	github.com/gin-gonic/gin v1.11.0
 	github.com/goravel/framework v1.17.1
 	github.com/goravel/gin v1.17.0
 	github.com/goravel/sqlite v1.17.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/stretchr/testify v1.11.1
+	golang.org/x/oauth2 v0.36.0
 )
 
 require (
