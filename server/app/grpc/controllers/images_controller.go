@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"context"
-	"os"
 
 	pb "github.com/prvious/kontainer/server/proto/agent"
 )
@@ -13,7 +12,6 @@ func (c *AgentController) ListImages(ctx context.Context, req *pb.ListImagesRequ
 		return nil, err
 	}
 
-	hostname, _ := os.Hostname()
 	items := make([]*pb.ImageItem, 0, len(images))
 	for _, img := range images {
 		items = append(items, &pb.ImageItem{
@@ -26,7 +24,7 @@ func (c *AgentController) ListImages(ctx context.Context, req *pb.ListImagesRequ
 
 	return &pb.ListImagesResponse{
 		NodeId:   c.nodeID,
-		Hostname: hostname,
+		Hostname: c.hostname,
 		Images:   items,
 	}, nil
 }

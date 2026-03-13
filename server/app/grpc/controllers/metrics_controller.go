@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/shirou/gopsutil/v4/cpu"
@@ -13,8 +14,9 @@ import (
 	pb "github.com/prvious/kontainer/server/proto/agent"
 )
 
+var initHostProc sync.Once
+
 func (c *AgentController) Metrics(ctx context.Context, req *pb.MetricsRequest) (*pb.MetricsResponse, error) {
-	hostname, _ := os.Hostname()
 
 	// Collect node metrics
 	nodeMetrics, err := collectNodeMetrics()
@@ -44,16 +46,18 @@ func (c *AgentController) Metrics(ctx context.Context, req *pb.MetricsRequest) (
 	return &pb.MetricsResponse{
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		NodeId:    c.nodeID,
-		Hostname:  hostname,
+		Hostname:  c.hostname,
 		Node:      nodeMetrics,
 		Containers: containers,
 	}, nil
 }
 
 func collectNodeMetrics() (*pb.NodeMetrics, error) {
-	if _, err := os.Stat("/host/proc"); err == nil {
-		os.Setenv("HOST_PROC", "/host/proc")
-	}
+	initHostProc.Do(func() {
+		if _, err := os.Stat("/host/proc"); err == nil {
+			os.Setenv("HOST_PROC", "/host/proc")
+		}
+	})
 
 	v, err := mem.VirtualMemory()
 	if err != nil {
