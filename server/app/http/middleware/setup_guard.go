@@ -48,6 +48,7 @@ func isSetupComplete() bool {
 	var config models.AppConfig
 	err := facades.Orm().Query().Where("key", "setup_complete").First(&config)
 	if err != nil {
+		facades.Log().Errorf("Failed to check setup status from DB: %v", err)
 		return false
 	}
 	return config.Value == "true"

@@ -1,13 +1,13 @@
 package auth
 
 import (
-	"log"
 	nethttp "net/http"
 	"time"
 
 	contractshttp "github.com/goravel/framework/contracts/http"
 	"github.com/gorilla/websocket"
 
+	"github.com/prvious/kontainer/server/app/facades"
 	authservice "github.com/prvious/kontainer/server/app/services/auth"
 )
 
@@ -29,7 +29,7 @@ func (c *ListenController) Handle(ctx contractshttp.Context) contractshttp.Respo
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("ws upgrade error: %v", err)
+		facades.Log().Errorf("ws upgrade error: %v", err)
 		return nil
 	}
 	defer conn.Close()
@@ -45,7 +45,17 @@ func (c *ListenController) Handle(ctx contractshttp.Context) contractshttp.Respo
 		return nil
 	}
 
-	token, err := c.bridge.WaitForToken(sessionID, 10*time.Minute)
+	done := make(chan struct{})
+	go func() {
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				close(done)
+				return
+			}
+		}
+	}()
+
+	token, err := c.bridge.WaitForToken(sessionID, 10*time.Minute, done)
 	if err != nil {
 		conn.WriteJSON(map[string]string{"error": err.Error()}) //nolint:errcheck
 		return nil

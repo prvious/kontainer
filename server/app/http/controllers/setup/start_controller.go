@@ -1,6 +1,7 @@
 package setup
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"html"
@@ -30,7 +31,7 @@ func (c *StartController) Handle(ctx contractshttp.Context) contractshttp.Respon
 			[]byte(renderErrorHTML("No setup session found. Start the setup flow first.")))
 	}
 
-	if queryToken != storedToken {
+	if subtle.ConstantTimeCompare([]byte(queryToken), []byte(storedToken)) != 1 {
 		return ctx.Response().Data(nethttp.StatusUnauthorized, "text/html; charset=utf-8",
 			[]byte(renderErrorHTML("Invalid or expired setup token.")))
 	}

@@ -51,7 +51,7 @@ func (b *AuthBridge) SendToken(sessionID, token string) bool {
 	}
 }
 
-func (b *AuthBridge) WaitForToken(sessionID string, timeout time.Duration) (string, error) {
+func (b *AuthBridge) WaitForToken(sessionID string, timeout time.Duration, done <-chan struct{}) (string, error) {
 	b.mu.Lock()
 	ch, ok := b.pending[sessionID]
 	b.mu.Unlock()
@@ -62,18 +62,19 @@ func (b *AuthBridge) WaitForToken(sessionID string, timeout time.Duration) (stri
 
 	select {
 	case token := <-ch:
+		if token == "" {
+			return "", errors.New("session closed")
+		}
 		return token, nil
 	case <-time.After(timeout):
 		return "", errors.New("timeout waiting for token")
+	case <-done:
+		return "", errors.New("client disconnected")
 	}
 }
 
 func (b *AuthBridge) Cleanup(sessionID string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-
-	if ch, ok := b.pending[sessionID]; ok {
-		close(ch)
-		delete(b.pending, sessionID)
-	}
+	delete(b.pending, sessionID)
 }

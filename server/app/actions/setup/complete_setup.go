@@ -32,10 +32,14 @@ func (a *CompleteSetupAction) Execute() error {
 	middleware.MarkSetupComplete()
 
 	var jwtConfig models.AppConfig
-	if err := facades.Orm().Query().Where("key", "jwt_secret").First(&jwtConfig); err == nil && jwtConfig.Value != "" {
-		facades.Config().Add("auth.guards.user.secret", jwtConfig.Value)
-		facades.Log().Info("JWT secret loaded into user guard — auth system now active")
+	if err := facades.Orm().Query().Where("key", "jwt_secret").First(&jwtConfig); err != nil {
+		return fmt.Errorf("failed to load JWT secret: %w", err)
 	}
+	if jwtConfig.Value == "" {
+		return fmt.Errorf("JWT secret is empty — cannot activate auth")
+	}
+	facades.Config().Add("auth.guards.user.secret", jwtConfig.Value)
+	facades.Log().Info("JWT secret loaded into user guard — auth system now active")
 
 	return nil
 }

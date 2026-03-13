@@ -7,6 +7,7 @@ import (
 	"time"
 )
 
+
 const sessionTTL = 10 * time.Minute
 
 type sessionEntry struct {
@@ -16,9 +17,10 @@ type sessionEntry struct {
 
 // SessionStore is an in-memory CSRF state store with TTL-based expiration.
 type SessionStore struct {
-	mu      sync.Mutex
-	entries map[string]sessionEntry
-	done    chan struct{}
+	mu        sync.Mutex
+	entries   map[string]sessionEntry
+	done      chan struct{}
+	closeOnce sync.Once
 }
 
 func NewSessionStore() *SessionStore {
@@ -31,7 +33,9 @@ func NewSessionStore() *SessionStore {
 }
 
 func (s *SessionStore) Close() {
-	close(s.done)
+	s.closeOnce.Do(func() {
+		close(s.done)
+	})
 }
 
 func (s *SessionStore) Generate(sessionID string) (string, error) {

@@ -20,7 +20,8 @@ func TestAuthBridge_SendAndReceive(t *testing.T) {
 		bridge.SendToken(sessionID, "jwt-token-123")
 	}()
 
-	token, err := bridge.WaitForToken(sessionID, 1*time.Second)
+	done := make(chan struct{})
+	token, err := bridge.WaitForToken(sessionID, 1*time.Second, done)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -34,7 +35,8 @@ func TestAuthBridge_Timeout(t *testing.T) {
 
 	sessionID, _ := bridge.CreateSession()
 
-	_, err := bridge.WaitForToken(sessionID, 50*time.Millisecond)
+	done := make(chan struct{})
+	_, err := bridge.WaitForToken(sessionID, 50*time.Millisecond, done)
 	if err == nil {
 		t.Fatal("expected timeout error")
 	}
@@ -43,7 +45,8 @@ func TestAuthBridge_Timeout(t *testing.T) {
 func TestAuthBridge_UnknownSession(t *testing.T) {
 	bridge := authservice.NewAuthBridge()
 
-	_, err := bridge.WaitForToken("nonexistent", 50*time.Millisecond)
+	done := make(chan struct{})
+	_, err := bridge.WaitForToken("nonexistent", 50*time.Millisecond, done)
 	if err == nil {
 		t.Fatal("expected error for unknown session")
 	}

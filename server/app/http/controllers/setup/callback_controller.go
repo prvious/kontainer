@@ -7,6 +7,7 @@ import (
 	contractshttp "github.com/goravel/framework/contracts/http"
 
 	setupactions "github.com/prvious/kontainer/server/app/actions/setup"
+	"github.com/prvious/kontainer/server/app/facades"
 )
 
 type CallbackController struct {
@@ -38,8 +39,9 @@ func (c *CallbackController) Handle(ctx contractshttp.Context) contractshttp.Res
 
 	creds, err := c.exchangeCode.Execute(code)
 	if err != nil {
+		facades.Log().Errorf("GitHub App code exchange failed: %v", err)
 		return ctx.Response().Data(nethttp.StatusBadGateway, "text/html; charset=utf-8",
-			[]byte(renderErrorHTML(err.Error())))
+			[]byte(renderErrorHTML("Failed to exchange code with GitHub. Please try again.")))
 	}
 
 	c.manifestState.ClearState()

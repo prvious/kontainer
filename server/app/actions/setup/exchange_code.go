@@ -42,7 +42,7 @@ func (a *ExchangeCodeAction) Execute(code string) (*GitHubAppCredentials, error)
 	}
 
 	if resp.StatusCode != http.StatusCreated {
-		return nil, fmt.Errorf("GitHub API returned status %d", resp.StatusCode)
+		return nil, fmt.Errorf("GitHub API returned status %d: %s", resp.StatusCode, string(body))
 	}
 
 	var ghResp struct {

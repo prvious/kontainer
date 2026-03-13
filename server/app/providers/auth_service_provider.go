@@ -48,14 +48,20 @@ func (r *AuthServiceProvider) registerOAuthProviders(app foundation.Application)
 		facades.Log().Errorf("Failed to resolve provider registry: %v", err)
 		return
 	}
-	providerRegistry := registry.(*authproviders.ProviderRegistry)
+	providerRegistry, ok := registry.(*authproviders.ProviderRegistry)
+	if !ok {
+		facades.Log().Errorf("auth.provider_registry is not *ProviderRegistry")
+		return
+	}
 
 	configs := map[string]string{}
 	for _, key := range []string{"github_client_id", "github_client_secret", "github_org"} {
 		var ac models.AppConfig
-		if err := facades.Orm().Query().Where("key", key).First(&ac); err == nil {
-			configs[key] = ac.Value
+		if err := facades.Orm().Query().Where("key", key).First(&ac); err != nil {
+			facades.Log().Warningf("Failed to load OAuth config key %q: %v", key, err)
+			continue
 		}
+		configs[key] = ac.Value
 	}
 
 	clientID := configs["github_client_id"]
