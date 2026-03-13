@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"io"
+	"log"
 
 	"github.com/prvious/kontainer/server/app/grpc/interceptors"
 	"github.com/prvious/kontainer/server/app/services/docker"
@@ -46,7 +47,7 @@ func (c *AgentController) Exec(stream pb.AgentService_ExecServer) error {
 	defer session.Close()
 
 	// Read from Docker exec → send to gRPC stream
-	done := make(chan error, 1)
+	done := make(chan error, 2)
 	go func() {
 		buf := make([]byte, 4096)
 		for {
@@ -62,10 +63,12 @@ func (c *AgentController) Exec(stream pb.AgentService_ExecServer) error {
 			}
 			if err != nil {
 				if err == io.EOF {
-					stream.Send(&pb.ExecMessage{ //nolint:errcheck
+					if sendErr := stream.Send(&pb.ExecMessage{
 						Type:     pb.ExecMessage_EXIT,
 						ExitCode: 0,
-					})
+					}); sendErr != nil {
+						log.Printf("exec: failed to send EXIT message: %v", sendErr)
+					}
 				}
 				done <- err
 				return
@@ -89,7 +92,9 @@ func (c *AgentController) Exec(stream pb.AgentService_ExecServer) error {
 					return
 				}
 			case pb.ExecMessage_RESIZE:
-				_ = session.Resize(uint(msg.Cols), uint(msg.Rows))
+				if err := session.Resize(uint(msg.Cols), uint(msg.Rows)); err != nil {
+					log.Printf("exec: resize failed: %v", err)
+				}
 			}
 		}
 	}()
