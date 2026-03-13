@@ -3,6 +3,7 @@ package swarm
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"strings"
 
 	"github.com/docker/docker/api/types"
@@ -127,6 +128,7 @@ func (s *SwarmOrchestrator) TaskStats(ctx context.Context) ([]docker.ContainerSt
 		containerID := t.Status.ContainerStatus.ContainerID
 		statsResp, err := s.client.ContainerStats(ctx, containerID, false)
 		if err != nil {
+			log.Printf("TaskStats: failed to get stats for container %s: %v", containerID, err)
 			continue
 		}
 		resp := statsResp.Body
@@ -153,6 +155,7 @@ func (s *SwarmOrchestrator) TaskStats(ctx context.Context) ([]docker.ContainerSt
 		}
 
 		if err := json.NewDecoder(resp).Decode(&v); err != nil {
+			log.Printf("TaskStats: failed to decode stats for container %s: %v", containerID, err)
 			resp.Close()
 			continue
 		}
