@@ -31,10 +31,10 @@ func (r *DockerServiceProvider) Register(app foundation.Application) {
 			return "", fmt.Errorf("docker.client is not *dockerclient.Client")
 		}
 		info, err := client.Info(context.Background())
-		if err == nil && info.Swarm.NodeID != "" {
-			return info.Swarm.NodeID, nil
+		if err != nil {
+			return "", fmt.Errorf("failed to get Docker info for node ID: %w", err)
 		}
-		return "", nil
+		return info.Swarm.NodeID, nil
 	})
 
 	app.Singleton("docker.orchestrator", func(app foundation.Application) (any, error) {
@@ -47,8 +47,14 @@ func (r *DockerServiceProvider) Register(app foundation.Application) {
 			return nil, fmt.Errorf("docker.client is not *dockerclient.Client")
 		}
 
-		nodeIDInstance, _ := app.Make("docker.node_id")
-		nodeID, _ := nodeIDInstance.(string)
+		nodeIDInstance, err := app.Make("docker.node_id")
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve docker.node_id: %w", err)
+		}
+		nodeID, ok := nodeIDInstance.(string)
+		if !ok {
+			return nil, fmt.Errorf("docker.node_id is not a string")
+		}
 
 		hostname, _ := os.Hostname()
 		return swarm.NewSwarmOrchestrator(client, nodeID, hostname), nil

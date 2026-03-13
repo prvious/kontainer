@@ -19,8 +19,16 @@ func Grpc() {
 		return
 	}
 
-	nodeIDInstance, _ := facades.App().Make("docker.node_id")
-	nodeID, _ := nodeIDInstance.(string)
+	nodeIDInstance, err := facades.App().Make("docker.node_id")
+	if err != nil {
+		facades.Log().Errorf("Failed to resolve docker.node_id for gRPC: %v", err)
+		return
+	}
+	nodeID, ok := nodeIDInstance.(string)
+	if !ok {
+		facades.Log().Errorf("docker.node_id is not a string")
+		return
+	}
 
 	agentCtrl := controllers.NewAgentController(nodeID, orchestrator)
 	pb.RegisterAgentServiceServer(facades.Grpc().Server(), agentCtrl)
