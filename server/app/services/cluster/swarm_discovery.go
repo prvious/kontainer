@@ -3,13 +3,12 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 
-	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/swarm"
 	"github.com/docker/docker/client"
-	"github.com/goravel/framework/facades"
 	pb "github.com/prvious/kontainer/server/proto/agent"
 )
 
@@ -44,15 +43,17 @@ func (d *SwarmDiscovery) Discover(ctx context.Context) {
 	taskFilter.Add("service", d.followerService)
 	taskFilter.Add("desired-state", "running")
 
-	tasks, err := d.docker.TaskList(ctx, types.TaskListOptions{Filters: taskFilter})
+	tasks, err := d.docker.TaskList(ctx, swarm.TaskListOptions{Filters: taskFilter})
 	if err != nil {
-		facades.Log().Errorf("cluster discovery: task list error: %v", err)
+		log.Printf("cluster discovery: task list error, clearing stale followers: %v", err)
+		d.registry.UpdateFollowers(nil)
 		return
 	}
 
-	nodes, err := d.docker.NodeList(ctx, types.NodeListOptions{})
+	nodes, err := d.docker.NodeList(ctx, swarm.NodeListOptions{})
 	if err != nil {
-		facades.Log().Errorf("cluster discovery: node list error: %v", err)
+		log.Printf("cluster discovery: node list error, clearing stale followers: %v", err)
+		d.registry.UpdateFollowers(nil)
 		return
 	}
 	nodeHostnames := make(map[string]string, len(nodes))
@@ -68,13 +69,14 @@ func (d *SwarmDiscovery) Discover(ctx context.Context) {
 
 		ip := extractTaskIP(task)
 		if ip == "" {
+			log.Printf("cluster discovery: task %s on node %s has no network attachment, skipping", task.ID[:12], task.NodeID)
 			continue
 		}
 
 		addr := fmt.Sprintf("%s:%s", ip, d.grpcPort)
-		info, err := d.pingFollower(ctx, addr)
+		info, err := pingFollower(ctx, d.pool, addr)
 		if err != nil {
-			facades.Log().Warningf("cluster discovery: follower %s unreachable: %v", addr, err)
+			log.Printf("cluster discovery: follower %s unreachable: %v", addr, err)
 			continue
 		}
 
@@ -109,18 +111,20 @@ func extractTaskIP(task swarm.Task) string {
 	return ""
 }
 
-func (d *SwarmDiscovery) pingFollower(ctx context.Context, addr string) (AgentInfo, error) {
+// pingFollower checks a follower's health via gRPC. Shared by both
+// SwarmDiscovery and DevDiscovery.
+func pingFollower(ctx context.Context, pool *GrpcPool, addr string) (AgentInfo, error) {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
-	grpcClient, err := d.pool.GetClient(addr)
+	grpcClient, err := pool.GetClient(addr)
 	if err != nil {
 		return AgentInfo{}, err
 	}
 
 	resp, err := grpcClient.Health(ctx, &pb.HealthRequest{})
 	if err != nil {
-		d.pool.Remove(addr)
+		pool.Remove(addr)
 		return AgentInfo{}, err
 	}
 

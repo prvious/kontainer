@@ -2,10 +2,8 @@ package cluster
 
 import (
 	"context"
+	"log"
 	"time"
-
-	"github.com/goravel/framework/facades"
-	pb "github.com/prvious/kontainer/server/proto/agent"
 )
 
 // DevDiscovery pings a static list of follower addresses for local development.
@@ -26,9 +24,9 @@ func NewDevDiscovery(addresses []string, registry *Registry, pool *GrpcPool) *De
 func (d *DevDiscovery) Discover(ctx context.Context) {
 	var healthy []AgentInfo
 	for _, addr := range d.addresses {
-		info, err := d.pingFollower(ctx, addr)
+		info, err := pingFollower(ctx, d.pool, addr)
 		if err != nil {
-			facades.Log().Warningf("dev discovery: follower %s unreachable: %v", addr, err)
+			log.Printf("dev discovery: follower %s unreachable: %v", addr, err)
 			continue
 		}
 
@@ -39,26 +37,10 @@ func (d *DevDiscovery) Discover(ctx context.Context) {
 
 		healthy = append(healthy, info)
 	}
+
 	d.registry.UpdateFollowers(healthy)
-}
 
-func (d *DevDiscovery) pingFollower(ctx context.Context, addr string) (AgentInfo, error) {
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-
-	grpcClient, err := d.pool.GetClient(addr)
-	if err != nil {
-		return AgentInfo{}, err
+	if len(healthy) == 0 && len(d.addresses) > 0 {
+		log.Printf("dev discovery: all %d configured followers are unreachable", len(d.addresses))
 	}
-
-	resp, err := grpcClient.Health(ctx, &pb.HealthRequest{})
-	if err != nil {
-		d.pool.Remove(addr)
-		return AgentInfo{}, err
-	}
-
-	return AgentInfo{
-		NodeID:   resp.NodeId,
-		Hostname: resp.Hostname,
-	}, nil
 }

@@ -81,14 +81,25 @@ func (p *ClusterServiceProvider) Boot(app foundation.Application) {
 	}
 	registry, ok := registryInstance.(*cluster.Registry)
 	if !ok {
+		facades.Log().Errorf("ClusterServiceProvider Boot: cluster.registry is not *cluster.Registry")
 		return
 	}
 
 	// Resolve nodeID from Docker service provider
-	nodeIDInstance, _ := app.Make("docker.node_id")
-	nodeID, _ := nodeIDInstance.(string)
+	nodeIDInstance, err := app.Make("docker.node_id")
+	if err != nil {
+		facades.Log().Warningf("ClusterServiceProvider Boot: could not resolve docker.node_id: %v", err)
+	}
+	nodeID, ok := nodeIDInstance.(string)
+	if !ok || nodeID == "" {
+		facades.Log().Warningf("ClusterServiceProvider Boot: docker.node_id is empty, leader will have no node ID")
+	}
 
-	hostname, _ := os.Hostname()
+	hostname, err := os.Hostname()
+	if err != nil {
+		facades.Log().Warningf("ClusterServiceProvider Boot: could not determine hostname: %v", err)
+		hostname = "unknown"
+	}
 	grpcPort := facades.Config().GetString("grpc.port", "9000")
 	selfAddr := fmt.Sprintf("%s:%s", hostname, grpcPort)
 

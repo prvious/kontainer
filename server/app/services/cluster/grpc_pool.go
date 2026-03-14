@@ -3,6 +3,7 @@ package cluster
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 
 	pb "github.com/prvious/kontainer/server/proto/agent"
@@ -62,7 +63,9 @@ func (p *GrpcPool) Remove(address string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if conn, ok := p.conns[address]; ok {
-		conn.Close()
+		if err := conn.Close(); err != nil {
+			log.Printf("grpc pool: error closing connection to %s: %v", address, err)
+		}
 		delete(p.conns, address)
 	}
 }
@@ -72,7 +75,9 @@ func (p *GrpcPool) CloseAll() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for addr, conn := range p.conns {
-		conn.Close()
+		if err := conn.Close(); err != nil {
+			log.Printf("grpc pool: error closing connection to %s: %v", addr, err)
+		}
 		delete(p.conns, addr)
 	}
 }

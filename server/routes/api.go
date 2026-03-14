@@ -1,12 +1,13 @@
 package routes
 
 import (
+	"github.com/goravel/framework/contracts/http"
 	"github.com/goravel/framework/contracts/route"
 
 	agentActions "github.com/prvious/kontainer/server/app/actions/agents"
 	"github.com/prvious/kontainer/server/app/facades"
-	authcontrollers "github.com/prvious/kontainer/server/app/http/controllers/auth"
 	agentControllers "github.com/prvious/kontainer/server/app/http/controllers/agents"
+	authcontrollers "github.com/prvious/kontainer/server/app/http/controllers/auth"
 	"github.com/prvious/kontainer/server/app/http/middleware"
 	"github.com/prvious/kontainer/server/app/services/cluster"
 )
@@ -15,23 +16,26 @@ func Api() {
 	meCtrl := authcontrollers.NewMeController()
 
 	// Build agents controller from registry
-	var listAgentsCtrl *agentControllers.ListAgentsController
+	var agentsHandler func(ctx http.Context) http.Response
 	registryInstance, err := facades.App().Make("cluster.registry")
 	if err == nil {
 		if registry, ok := registryInstance.(*cluster.Registry); ok {
 			action := agentActions.NewListAgentsAction(registry)
-			listAgentsCtrl = agentControllers.NewListAgentsController(action)
+			ctrl := agentControllers.NewListAgentsController(action)
+			agentsHandler = ctrl.Handle
 		}
 	}
-	if listAgentsCtrl == nil {
-		facades.Log().Errorf("Failed to resolve cluster.registry for /api/agents")
+	if agentsHandler == nil {
+		facades.Log().Errorf("Failed to resolve cluster.registry for /api/agents — endpoint will return 503")
+		agentsHandler = func(ctx http.Context) http.Response {
+			return ctx.Response().Json(503, map[string]any{
+				"error": "cluster management unavailable: registry failed to initialize",
+			})
+		}
 	}
 
 	facades.Route().Prefix("api").Middleware(middleware.JWT()).Group(func(router route.Router) {
 		router.Get("me", meCtrl.Handle)
-
-		if listAgentsCtrl != nil {
-			router.Get("agents", listAgentsCtrl.Handle)
-		}
+		router.Get("agents", agentsHandler)
 	})
 }
