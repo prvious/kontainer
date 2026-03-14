@@ -31,6 +31,7 @@ type DockerAPI interface {
 	NodeInspectWithRaw(ctx context.Context, nodeID string) (dockerswarm.Node, []byte, error)
 	NodeUpdate(ctx context.Context, nodeID string, version dockerswarm.Version, node dockerswarm.NodeSpec) error
 	NetworkList(ctx context.Context, opts network.ListOptions) ([]network.Summary, error)
+	NetworkRemove(ctx context.Context, networkID string) error
 	VolumeList(ctx context.Context, opts volume.ListOptions) (volume.ListResponse, error)
 	SecretList(ctx context.Context, opts dockerswarm.SecretListOptions) ([]dockerswarm.Secret, error)
 	SecretCreate(ctx context.Context, secret dockerswarm.SecretSpec) (dockerswarm.SecretCreateResponse, error)
