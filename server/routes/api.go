@@ -43,6 +43,36 @@ func Api() {
 		router.Get("agents", agentsHandler)
 
 		if orchestrator == nil {
+			facades.Log().Warningf("Docker orchestrator unavailable — all Docker API routes will return 503")
+			unavailable := func(ctx http.Context) http.Response {
+				return ctx.Response().Json(503, map[string]string{
+					"error": "docker orchestrator is not available on this agent",
+				})
+			}
+			router.Get("services", unavailable)
+			router.Get("services/{serviceID}", unavailable)
+			router.Post("services/{serviceID}/scale", unavailable)
+			router.Post("services/{serviceID}/restart", unavailable)
+			router.Post("services/{serviceID}/rollback", unavailable)
+			router.Put("services/{serviceID}/env", unavailable)
+			router.Put("services/{serviceID}/image", unavailable)
+			router.Get("tasks", unavailable)
+			router.Get("tasks/stats", unavailable)
+			router.Get("tasks/{taskID}", unavailable)
+			router.Get("nodes", unavailable)
+			router.Patch("nodes/{nodeID}/availability", unavailable)
+			router.Patch("nodes/{nodeID}/role", unavailable)
+			router.Get("stacks", unavailable)
+			router.Delete("stacks/{stackName}", unavailable)
+			router.Get("networks", unavailable)
+			router.Get("volumes", unavailable)
+			router.Get("secrets", unavailable)
+			router.Post("secrets", unavailable)
+			router.Delete("secrets/{secretID}", unavailable)
+			router.Get("configs", unavailable)
+			router.Post("configs", unavailable)
+			router.Get("configs/{configID}", unavailable)
+			router.Delete("configs/{configID}", unavailable)
 			return
 		}
 
@@ -132,18 +162,25 @@ func resolveOrchestrator() docker.Orchestrator {
 }
 
 func buildAgentsHandler() func(ctx http.Context) http.Response {
-	registryInstance, err := facades.App().Make("cluster.registry")
-	if err == nil {
-		if registry, ok := registryInstance.(*cluster.Registry); ok {
-			action := agentActions.NewListAgentsAction(registry)
-			ctrl := agentControllers.NewListAgentsController(action)
-			return ctrl.Handle
-		}
-	}
-	facades.Log().Errorf("Failed to resolve cluster.registry for /api/agents")
-	return func(ctx http.Context) http.Response {
+	unavailable := func(ctx http.Context) http.Response {
 		return ctx.Response().Json(503, map[string]any{
 			"error": "cluster management unavailable",
 		})
 	}
+
+	registryInstance, err := facades.App().Make("cluster.registry")
+	if err != nil {
+		facades.Log().Errorf("Failed to resolve cluster.registry for /api/agents: %v", err)
+		return unavailable
+	}
+
+	registry, ok := registryInstance.(*cluster.Registry)
+	if !ok {
+		facades.Log().Errorf("cluster.registry resolved but is not *cluster.Registry (got %T)", registryInstance)
+		return unavailable
+	}
+
+	action := agentActions.NewListAgentsAction(registry)
+	ctrl := agentControllers.NewListAgentsController(action)
+	return ctrl.Handle
 }

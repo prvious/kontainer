@@ -28,6 +28,9 @@ func (c *UpdateServiceEnvController) Handle(ctx http.Context) http.Response {
 	if err := ctx.Request().Bind(&req); err != nil {
 		return ctx.Response().Json(400, map[string]string{"error": "invalid request body"})
 	}
+	if req.Env == nil {
+		return ctx.Response().Json(400, map[string]string{"error": "env field is required"})
+	}
 
 	if err := c.action.Execute(ctx.Context(), serviceID, req.Env); err != nil {
 		if errors.Is(err, docker.ErrNotFound) {

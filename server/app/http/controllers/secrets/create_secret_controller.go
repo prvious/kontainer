@@ -28,9 +28,12 @@ func (c *CreateSecretController) Handle(ctx http.Context) http.Response {
 	if req.Name == "" {
 		return ctx.Response().Json(400, map[string]string{"error": "name is required"})
 	}
+	if req.Data == "" {
+		return ctx.Response().Json(400, map[string]string{"error": "data is required"})
+	}
 
 	if err := c.action.Execute(ctx.Context(), req.Name, []byte(req.Data)); err != nil {
-		facades.Log().Errorf("create secret error: %v", err)
+		facades.Log().Errorf("create secret error [name=%s]: %v", req.Name, err)
 		return ctx.Response().Json(500, map[string]string{"error": "failed to create secret"})
 	}
 
