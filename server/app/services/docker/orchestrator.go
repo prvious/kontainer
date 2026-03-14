@@ -2,12 +2,9 @@ package docker
 
 import (
 	"context"
-	"errors"
 	"io"
 	"time"
 )
-
-var ErrGlobalMode = errors.New("cannot scale a global service")
 
 // --- Domain Types ---
 
