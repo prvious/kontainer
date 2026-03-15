@@ -1,15 +1,20 @@
 package routes
 
 import (
+	"os"
+
 	"github.com/goravel/framework/contracts/http"
 	"github.com/goravel/framework/contracts/route"
 
 	agentActions "github.com/prvious/kontainer/server/app/actions/agents"
 	configActions "github.com/prvious/kontainer/server/app/actions/configs"
+	imageActions "github.com/prvious/kontainer/server/app/actions/images"
+	metricsActions "github.com/prvious/kontainer/server/app/actions/metrics"
 	networkActions "github.com/prvious/kontainer/server/app/actions/networks"
 	nodeActions "github.com/prvious/kontainer/server/app/actions/nodes"
 	secretActions "github.com/prvious/kontainer/server/app/actions/secrets"
 	serviceActions "github.com/prvious/kontainer/server/app/actions/services"
+	settingsActions "github.com/prvious/kontainer/server/app/actions/settings"
 	stackActions "github.com/prvious/kontainer/server/app/actions/stacks"
 	taskActions "github.com/prvious/kontainer/server/app/actions/tasks"
 	volumeActions "github.com/prvious/kontainer/server/app/actions/volumes"
@@ -17,10 +22,13 @@ import (
 	agentControllers "github.com/prvious/kontainer/server/app/http/controllers/agents"
 	authcontrollers "github.com/prvious/kontainer/server/app/http/controllers/auth"
 	configControllers "github.com/prvious/kontainer/server/app/http/controllers/configs"
+	imageControllers "github.com/prvious/kontainer/server/app/http/controllers/images"
+	metricsControllers "github.com/prvious/kontainer/server/app/http/controllers/metrics"
 	networkControllers "github.com/prvious/kontainer/server/app/http/controllers/networks"
 	nodeControllers "github.com/prvious/kontainer/server/app/http/controllers/nodes"
 	secretControllers "github.com/prvious/kontainer/server/app/http/controllers/secrets"
 	serviceControllers "github.com/prvious/kontainer/server/app/http/controllers/services"
+	settingsControllers "github.com/prvious/kontainer/server/app/http/controllers/settings"
 	stackControllers "github.com/prvious/kontainer/server/app/http/controllers/stacks"
 	taskControllers "github.com/prvious/kontainer/server/app/http/controllers/tasks"
 	volumeControllers "github.com/prvious/kontainer/server/app/http/controllers/volumes"
@@ -150,6 +158,46 @@ func Api() {
 		router.Post("configs", createConfig.Handle)
 		router.Get("configs/{configID}", inspectConfig.Handle)
 		router.Delete("configs/{configID}", removeConfig.Handle)
+
+		// Metrics
+		clusterMetricsCtrl, nodeMetricsCtrl := buildMetricsControllers()
+		if clusterMetricsCtrl != nil {
+			router.Get("metrics", clusterMetricsCtrl.Handle)
+			router.Get("metrics/{nodeID}", nodeMetricsCtrl.Handle)
+		} else {
+			unavailable := func(ctx http.Context) http.Response {
+				return ctx.Response().Json(503, map[string]string{"error": "metrics unavailable"})
+			}
+			router.Get("metrics", unavailable)
+			router.Get("metrics/{nodeID}", unavailable)
+		}
+
+		// Images
+		clusterImagesCtrl, removeImageCtrl, pruneImagesCtrl := buildImageControllers(orchestrator)
+		if clusterImagesCtrl != nil {
+			router.Get("images", clusterImagesCtrl.Handle)
+			router.Delete("images/{imageID}", removeImageCtrl.Handle)
+			router.Post("images/prune", pruneImagesCtrl.Handle)
+		} else {
+			unavailable := func(ctx http.Context) http.Response {
+				return ctx.Response().Json(503, map[string]string{"error": "image management unavailable"})
+			}
+			router.Get("images", unavailable)
+			router.Delete("images/{imageID}", unavailable)
+			router.Post("images/prune", unavailable)
+		}
+	})
+
+	// Settings routes — no orchestrator dependency
+	facades.Route().Prefix("api").Middleware(middleware.JWT()).Group(func(router route.Router) {
+		getSettingsAction := settingsActions.NewGetSettingsAction()
+		updateSettingsAction := settingsActions.NewUpdateSettingsAction()
+
+		getSettingsCtrl := settingsControllers.NewGetSettingsController(getSettingsAction)
+		updateSettingsCtrl := settingsControllers.NewUpdateSettingsController(getSettingsAction, updateSettingsAction)
+
+		router.Get("settings", getSettingsCtrl.Handle)
+		router.Put("settings", updateSettingsCtrl.Handle)
 	})
 }
 
@@ -229,6 +277,84 @@ func resolveOrchestrator() docker.Orchestrator {
 		return nil
 	}
 	return orch
+}
+
+func buildMetricsControllers() (*metricsControllers.ClusterMetricsController, *metricsControllers.NodeMetricsController) {
+	collectorInstance, err := facades.App().Make("metrics.collector")
+	if err != nil {
+		facades.Log().Warningf("metrics routes unavailable: failed to resolve metrics.collector: %v", err)
+		return nil, nil
+	}
+	collector, ok := collectorInstance.(*metricsActions.CollectAndStoreAction)
+	if !ok {
+		facades.Log().Warningf("metrics routes unavailable: metrics.collector is not *metricsActions.CollectAndStoreAction")
+		return nil, nil
+	}
+
+	registryInstance, err := facades.App().Make("cluster.registry")
+	if err != nil {
+		facades.Log().Warningf("metrics routes unavailable: failed to resolve cluster.registry: %v", err)
+		return nil, nil
+	}
+	registry, ok := registryInstance.(*cluster.Registry)
+	if !ok {
+		facades.Log().Warningf("metrics routes unavailable: cluster.registry is not *cluster.Registry")
+		return nil, nil
+	}
+
+	leaderNodeID := facades.Config().GetString("cluster.node_id", "")
+
+	clusterMetricsCtrl := metricsControllers.NewClusterMetricsController(
+		metricsActions.NewGetClusterMetricsAction(collector, registry),
+	)
+	nodeMetricsCtrl := metricsControllers.NewNodeMetricsController(
+		metricsActions.NewGetNodeMetricsAction(collector, registry, leaderNodeID),
+	)
+
+	return clusterMetricsCtrl, nodeMetricsCtrl
+}
+
+func buildImageControllers(orchestrator docker.Orchestrator) (
+	*imageControllers.ClusterImagesController,
+	*imageControllers.RemoveImageController,
+	*imageControllers.PruneImagesController,
+) {
+	registryInstance, err := facades.App().Make("cluster.registry")
+	if err != nil {
+		facades.Log().Warningf("image routes unavailable: failed to resolve cluster.registry: %v", err)
+		return nil, nil, nil
+	}
+	registry, ok := registryInstance.(*cluster.Registry)
+	if !ok {
+		facades.Log().Warningf("image routes unavailable: cluster.registry is not *cluster.Registry")
+		return nil, nil, nil
+	}
+
+	poolInstance, err := facades.App().Make("cluster.pool")
+	if err != nil {
+		facades.Log().Warningf("image routes unavailable: failed to resolve cluster.pool: %v", err)
+		return nil, nil, nil
+	}
+	pool, ok := poolInstance.(*cluster.GrpcPool)
+	if !ok {
+		facades.Log().Warningf("image routes unavailable: cluster.pool is not *cluster.GrpcPool")
+		return nil, nil, nil
+	}
+
+	leaderNodeID := facades.Config().GetString("cluster.node_id", "")
+	hostname, _ := os.Hostname()
+
+	clusterImagesCtrl := imageControllers.NewClusterImagesController(
+		imageActions.NewListClusterImagesAction(orchestrator, registry, pool, leaderNodeID, hostname),
+	)
+	removeImageCtrl := imageControllers.NewRemoveImageController(
+		imageActions.NewRemoveImageAction(orchestrator, registry, pool, leaderNodeID),
+	)
+	pruneImagesCtrl := imageControllers.NewPruneImagesController(
+		imageActions.NewPruneImagesAction(orchestrator, registry, pool, leaderNodeID),
+	)
+
+	return clusterImagesCtrl, removeImageCtrl, pruneImagesCtrl
 }
 
 func buildAgentsHandler() func(ctx http.Context) http.Response {
