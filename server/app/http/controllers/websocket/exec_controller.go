@@ -29,7 +29,7 @@ func (c *ExecController) Handle(ctx http.Context) http.Response {
 	}
 
 	containerID := ctx.Request().Route("containerID")
-	w := ctx.Response().Writer().(goHttp.ResponseWriter)
+	w := ctx.Response().Writer()
 	r := ctx.Request().Origin().WithContext(
 		context.WithValue(ctx.Request().Origin().Context(), ws.ContainerIDKey, containerID),
 	)

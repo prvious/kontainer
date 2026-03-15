@@ -29,7 +29,7 @@ func (c *ServiceLogsController) Handle(ctx http.Context) http.Response {
 	}
 
 	serviceID := ctx.Request().Route("serviceID")
-	w := ctx.Response().Writer().(goHttp.ResponseWriter)
+	w := ctx.Response().Writer()
 	r := ctx.Request().Origin().WithContext(
 		context.WithValue(ctx.Request().Origin().Context(), ws.ServiceIDKey, serviceID),
 	)

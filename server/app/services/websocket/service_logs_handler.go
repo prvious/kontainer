@@ -7,18 +7,6 @@ import (
 	"github.com/prvious/kontainer/server/app/services/docker"
 )
 
-// contextKey is an unexported type for context keys in this package.
-type contextKey string
-
-const (
-	// ServiceIDKey is the context key for serviceID.
-	ServiceIDKey contextKey = "serviceID"
-	// TaskIDKey is the context key for taskID.
-	TaskIDKey contextKey = "taskID"
-	// ContainerIDKey is the context key for containerID.
-	ContainerIDKey contextKey = "containerID"
-)
-
 // ServiceLogsHandler handles WebSocket connections for service log streaming.
 type ServiceLogsHandler struct {
 	orchestrator docker.Orchestrator

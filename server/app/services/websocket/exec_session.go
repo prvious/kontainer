@@ -25,9 +25,15 @@ type execStatusMsg struct {
 }
 
 func writeExecMsg(conn *gorillaWs.Conn, mu *sync.Mutex, msg execStatusMsg) {
-	data, _ := json.Marshal(msg)
+	data, err := json.Marshal(msg)
+	if err != nil {
+		facades.Log().Errorf("exec: failed to marshal status message: %v", err)
+		return
+	}
 	mu.Lock()
-	_ = conn.WriteMessage(gorillaWs.TextMessage, data)
+	if writeErr := conn.WriteMessage(gorillaWs.TextMessage, data); writeErr != nil {
+		facades.Log().Errorf("exec: failed to write status message: %v", writeErr)
+	}
 	mu.Unlock()
 }
 
@@ -36,14 +42,13 @@ var defaultShells = []string{"/bin/sh", "/bin/bash", "/bin/ash"}
 // RunLocalExecSession runs a Docker exec session, relaying I/O between
 // the WebSocket connection and the container.
 func RunLocalExecSession(
+	ctx context.Context,
 	conn *gorillaWs.Conn,
 	wsMu *sync.Mutex,
 	orchestrator docker.Orchestrator,
 	containerID, shell, user string,
 	cols, rows uint,
 ) {
-	ctx := context.Background()
-
 	var shells []string
 	if shell == "" {
 		shells = append(shells, defaultShells...)
@@ -58,6 +63,7 @@ func RunLocalExecSession(
 
 	var session docker.ExecSession
 	var attached bool
+	var lastErr error
 
 	for _, sh := range shells {
 		s, err := orchestrator.ExecContainer(ctx, containerID, docker.ExecOptions{
@@ -68,8 +74,8 @@ func RunLocalExecSession(
 		})
 		if err != nil {
 			facades.Log().Errorf("exec create error with shell %s: %v", sh, err)
-			writeExecMsg(conn, wsMu, execStatusMsg{Type: "error", Message: fmt.Sprintf("failed to create exec: %v", err)})
-			return
+			lastErr = err
+			continue
 		}
 
 		session = s
@@ -78,7 +84,11 @@ func RunLocalExecSession(
 	}
 
 	if !attached {
-		writeExecMsg(conn, wsMu, execStatusMsg{Type: "error", Message: "no shell found in container"})
+		msg := "no shell found in container"
+		if lastErr != nil {
+			msg = fmt.Sprintf("failed to create exec: %v", lastErr)
+		}
+		writeExecMsg(conn, wsMu, execStatusMsg{Type: "error", Message: msg})
 		return
 	}
 	defer session.Close()
@@ -105,7 +115,9 @@ func RunLocalExecSession(
 					continue
 				}
 				if msg.Type == "resize" && msg.Cols > 0 && msg.Rows > 0 {
-					_ = session.Resize(msg.Cols, msg.Rows)
+					if err := session.Resize(msg.Cols, msg.Rows); err != nil {
+						facades.Log().Warningf("exec: resize failed: %v", err)
+					}
 				}
 			}
 		}

@@ -3,6 +3,7 @@ package websocket
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -58,11 +59,22 @@ func (h *ExecHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !isLocal {
 		addr, ok := h.registry.ByNodeID(nodeID)
 		if !ok {
-			facades.Log().Warningf("exec: node %s not in registry, falling back to local", nodeID)
-			isLocal = true
-		} else {
-			followerAddr = addr
+			// Node not in registry — report error instead of silently falling back
+			conn, err := Upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				facades.Log().Errorf("exec websocket upgrade error: %v", err)
+				return
+			}
+			defer conn.Close()
+			var wsMu sync.Mutex
+			writeExecMsg(conn, &wsMu, execStatusMsg{
+				Type:    "error",
+				Message: fmt.Sprintf("node %s is not available in the cluster", nodeID),
+			})
+			sendCloseFrame(conn)
+			return
 		}
+		followerAddr = addr
 	}
 
 	conn, err := Upgrader.Upgrade(w, r, nil)
@@ -75,9 +87,9 @@ func (h *ExecHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var wsMu sync.Mutex
 
 	if isLocal {
-		RunLocalExecSession(conn, &wsMu, h.orchestrator, containerID, shell, user, cols, rows)
+		RunLocalExecSession(r.Context(), conn, &wsMu, h.orchestrator, containerID, shell, user, cols, rows)
 	} else {
-		h.proxyViaGrpc(conn, &wsMu, followerAddr, containerID, shell, user, cols, rows)
+		h.proxyViaGrpc(conn, &wsMu, followerAddr, containerID, shell, cols, rows)
 	}
 
 	sendCloseFrame(conn)
@@ -88,7 +100,7 @@ func (h *ExecHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *ExecHandler) proxyViaGrpc(
 	conn *gorillaWs.Conn,
 	wsMu *sync.Mutex,
-	followerAddr, containerID, shell, user string,
+	followerAddr, containerID, shell string,
 	cols, rows uint,
 ) {
 	client, err := h.pool.GetClient(followerAddr)
@@ -97,7 +109,10 @@ func (h *ExecHandler) proxyViaGrpc(
 		return
 	}
 
-	stream, err := client.Exec(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	stream, err := client.Exec(ctx)
 	if err != nil {
 		writeExecMsg(conn, wsMu, execStatusMsg{Type: "error", Message: "failed to start exec stream"})
 		return
@@ -105,7 +120,6 @@ func (h *ExecHandler) proxyViaGrpc(
 
 	// Send initial setup message.
 	// Per the proto definition, containerID goes in Data (as bytes) and shell in Shell.
-	// The proto ExecMessage does not have ContainerId or User fields.
 	err = stream.Send(&pb.ExecMessage{
 		Type:  pb.ExecMessage_INIT,
 		Data:  []byte(containerID),
@@ -143,11 +157,13 @@ func (h *ExecHandler) proxyViaGrpc(
 					continue
 				}
 				if msg.Type == "resize" {
-					_ = stream.Send(&pb.ExecMessage{
+					if err := stream.Send(&pb.ExecMessage{
 						Type: pb.ExecMessage_RESIZE,
 						Cols: uint32(msg.Cols),
 						Rows: uint32(msg.Rows),
-					})
+					}); err != nil {
+						facades.Log().Warningf("exec: gRPC resize send failed: %v", err)
+					}
 				}
 			}
 		}
@@ -183,7 +199,9 @@ func (h *ExecHandler) proxyViaGrpc(
 	}()
 
 	<-done
-	_ = stream.CloseSend()
+	if err := stream.CloseSend(); err != nil {
+		facades.Log().Warningf("exec: gRPC CloseSend error: %v", err)
+	}
 }
 
 func parseUint(s string, fallback uint) uint {

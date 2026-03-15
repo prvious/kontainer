@@ -22,12 +22,14 @@ type LogMessage struct {
 func StreamDockerLogs(conn *gorillaWs.Conn, logsReader io.ReadCloser, timestamps bool) {
 	defer logsReader.Close()
 
-	// Goroutine to detect client disconnect
+	// Goroutine to detect client disconnect.
+	// Closing logsReader unblocks any blocking ReadFull in the main loop.
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
+				logsReader.Close()
 				return
 			}
 		}
@@ -44,7 +46,10 @@ func StreamDockerLogs(conn *gorillaWs.Conn, logsReader io.ReadCloser, timestamps
 		_, err := io.ReadFull(logsReader, header)
 		if err != nil {
 			if err != io.EOF {
-				facades.Log().Errorf("log stream read header error: %v", err)
+				// Suppress "read on closed" errors from disconnect goroutine closing the reader
+				if !strings.Contains(err.Error(), "closed") {
+					facades.Log().Errorf("log stream read header error: %v", err)
+				}
 			}
 			return
 		}
@@ -59,7 +64,9 @@ func StreamDockerLogs(conn *gorillaWs.Conn, logsReader io.ReadCloser, timestamps
 		_, err = io.ReadFull(logsReader, payload)
 		if err != nil {
 			if err != io.EOF {
-				facades.Log().Errorf("log stream read payload error: %v", err)
+				if !strings.Contains(err.Error(), "closed") {
+					facades.Log().Errorf("log stream read payload error: %v", err)
+				}
 			}
 			return
 		}
@@ -84,6 +91,7 @@ func StreamDockerLogs(conn *gorillaWs.Conn, logsReader io.ReadCloser, timestamps
 
 			data, err := json.Marshal(msg)
 			if err != nil {
+				facades.Log().Errorf("log stream: failed to marshal log message: %v", err)
 				continue
 			}
 

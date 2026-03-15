@@ -29,7 +29,7 @@ func (c *TaskLogsController) Handle(ctx http.Context) http.Response {
 	}
 
 	taskID := ctx.Request().Route("taskID")
-	w := ctx.Response().Writer().(goHttp.ResponseWriter)
+	w := ctx.Response().Writer()
 	r := ctx.Request().Origin().WithContext(
 		context.WithValue(ctx.Request().Origin().Context(), ws.TaskIDKey, taskID),
 	)
