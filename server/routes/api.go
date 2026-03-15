@@ -24,9 +24,11 @@ import (
 	stackControllers "github.com/prvious/kontainer/server/app/http/controllers/stacks"
 	taskControllers "github.com/prvious/kontainer/server/app/http/controllers/tasks"
 	volumeControllers "github.com/prvious/kontainer/server/app/http/controllers/volumes"
+	wsControllers "github.com/prvious/kontainer/server/app/http/controllers/websocket"
 	"github.com/prvious/kontainer/server/app/http/middleware"
 	"github.com/prvious/kontainer/server/app/services/cluster"
 	"github.com/prvious/kontainer/server/app/services/docker"
+	ws "github.com/prvious/kontainer/server/app/services/websocket"
 )
 
 func Api() {
@@ -37,6 +39,10 @@ func Api() {
 
 	// Agents controller from cluster registry
 	agentsHandler := buildAgentsHandler()
+
+	// WebSocket routes — inside /api prefix but WITHOUT JWT middleware.
+	// WS controllers handle JWT auth from the ?token= query param themselves.
+	registerWebSocketRoutes(orchestrator)
 
 	facades.Route().Prefix("api").Middleware(middleware.JWT()).Group(func(router route.Router) {
 		router.Get("me", meCtrl.Handle)
@@ -145,6 +151,70 @@ func Api() {
 		router.Get("configs/{configID}", inspectConfig.Handle)
 		router.Delete("configs/{configID}", removeConfig.Handle)
 	})
+}
+
+func registerWebSocketRoutes(orchestrator docker.Orchestrator) {
+	if orchestrator == nil {
+		facades.Log().Warningf("Docker orchestrator unavailable — WebSocket log/exec routes will return 503")
+		unavailable := func(ctx http.Context) http.Response {
+			return ctx.Response().Json(503, http.Json{
+				"error": "docker orchestrator is not available on this agent",
+			})
+		}
+		facades.Route().Prefix("api").Group(func(router route.Router) {
+			router.Get("services/{serviceID}/logs", unavailable)
+			router.Get("tasks/{taskID}/logs", unavailable)
+			router.Get("exec/{containerID}", unavailable)
+		})
+		return
+	}
+
+	serviceLogsHandler := ws.NewServiceLogsHandler(orchestrator)
+	taskLogsHandler := ws.NewTaskLogsHandler(orchestrator)
+
+	serviceLogsCtrl := wsControllers.NewServiceLogsController(serviceLogsHandler)
+	taskLogsCtrl := wsControllers.NewTaskLogsController(taskLogsHandler)
+
+	// Build exec handler with cluster dependencies
+	execCtrl := buildExecController(orchestrator)
+
+	facades.Route().Prefix("api").Group(func(router route.Router) {
+		router.Get("services/{serviceID}/logs", serviceLogsCtrl.Handle)
+		router.Get("tasks/{taskID}/logs", taskLogsCtrl.Handle)
+
+		if execCtrl != nil {
+			router.Get("exec/{containerID}", execCtrl.Handle)
+		}
+	})
+}
+
+func buildExecController(orchestrator docker.Orchestrator) *wsControllers.ExecController {
+	registryInstance, err := facades.App().Make("cluster.registry")
+	if err != nil {
+		facades.Log().Errorf("Failed to resolve cluster.registry for exec handler: %v", err)
+		return nil
+	}
+	registry, ok := registryInstance.(*cluster.Registry)
+	if !ok {
+		facades.Log().Errorf("cluster.registry is not *cluster.Registry for exec handler")
+		return nil
+	}
+
+	poolInstance, err := facades.App().Make("cluster.grpc_pool")
+	if err != nil {
+		facades.Log().Errorf("Failed to resolve cluster.grpc_pool for exec handler: %v", err)
+		return nil
+	}
+	pool, ok := poolInstance.(*cluster.GrpcPool)
+	if !ok {
+		facades.Log().Errorf("cluster.grpc_pool is not *cluster.GrpcPool for exec handler")
+		return nil
+	}
+
+	leaderNodeID := facades.Config().GetString("cluster.node_id", "")
+
+	execHandler := ws.NewExecHandler(orchestrator, registry, pool, leaderNodeID)
+	return wsControllers.NewExecController(execHandler)
 }
 
 func resolveOrchestrator() docker.Orchestrator {
