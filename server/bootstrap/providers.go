@@ -53,5 +53,6 @@ func Providers() []foundation.ServiceProvider {
 		&appproviders.AuthServiceProvider{},
 		&appproviders.DockerServiceProvider{},
 		&appproviders.ClusterServiceProvider{},
+		&appproviders.MetricsServiceProvider{},
 	}
 }

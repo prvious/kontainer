@@ -5,6 +5,7 @@ import (
 
 	"github.com/goravel/framework/contracts/schedule"
 
+	"github.com/prvious/kontainer/server/app/actions/metrics"
 	"github.com/prvious/kontainer/server/app/facades"
 	"github.com/prvious/kontainer/server/app/services/cluster"
 )
@@ -41,6 +42,31 @@ func (kernel *Kernel) Schedule() []schedule.Event {
 			discovery.Discover(context.Background())
 		}).EveryTenSeconds().SkipIfStillRunning())
 	}
+
+	// Metrics collection (every 30s) and pruning (every 5min)
+	collectorInstance, err := facades.App().Make("metrics.collector")
+	if err != nil {
+		facades.Log().Errorf("console kernel: failed to resolve metrics.collector: %v", err)
+		return events
+	}
+	collector := collectorInstance.(*metrics.CollectAndStoreAction)
+
+	events = append(events, facades.Schedule().Call(func() {
+		collector.Execute(context.Background())
+	}).EveryThirtySeconds().SkipIfStillRunning())
+
+	prunerInstance, err := facades.App().Make("metrics.pruner")
+	if err != nil {
+		facades.Log().Errorf("console kernel: failed to resolve metrics.pruner: %v", err)
+		return events
+	}
+	pruner := prunerInstance.(*metrics.PruneMetricsAction)
+
+	events = append(events, facades.Schedule().Call(func() {
+		if err := pruner.Execute(); err != nil {
+			facades.Log().Errorf("metrics prune error: %v", err)
+		}
+	}).EveryFiveMinutes())
 
 	return events
 }
