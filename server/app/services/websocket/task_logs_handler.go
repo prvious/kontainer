@@ -1,7 +1,9 @@
 package websocket
 
 import (
+	"context"
 	"net/http"
+	"sync"
 
 	"github.com/prvious/kontainer/server/app/facades"
 	"github.com/prvious/kontainer/server/app/services/docker"
@@ -25,10 +27,7 @@ func (h *TaskLogsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tail := r.URL.Query().Get("tail")
-	if tail == "" {
-		tail = "100"
-	}
+	tail := clampTail(r.URL.Query().Get("tail"), "100")
 	timestamps := r.URL.Query().Get("timestamps") != "false"
 
 	conn, err := Upgrader.Upgrade(w, r, nil)
@@ -38,7 +37,9 @@ func (h *TaskLogsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	logsReader, err := h.orchestrator.StreamTaskLogs(r.Context(), taskID, docker.LogStreamOptions{
+	// Use a background context — the HTTP request context may be cancelled
+	// after the WebSocket upgrade completes, but the log stream should continue.
+	logsReader, err := h.orchestrator.StreamTaskLogs(context.Background(), taskID, docker.LogStreamOptions{
 		Follow:     true,
 		Tail:       tail,
 		Timestamps: timestamps,
@@ -49,5 +50,6 @@ func (h *TaskLogsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	StreamDockerLogs(conn, logsReader, timestamps)
+	var wsMu sync.Mutex
+	StreamDockerLogs(conn, &wsMu, logsReader, timestamps)
 }

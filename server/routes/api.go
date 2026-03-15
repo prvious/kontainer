@@ -155,6 +155,17 @@ func Api() {
 
 func registerWebSocketRoutes(orchestrator docker.Orchestrator) {
 	if orchestrator == nil {
+		facades.Log().Warningf("Docker orchestrator unavailable — WebSocket log/exec routes will return 503")
+		unavailable := func(ctx http.Context) http.Response {
+			return ctx.Response().Json(503, http.Json{
+				"error": "docker orchestrator is not available on this agent",
+			})
+		}
+		facades.Route().Prefix("api").Group(func(router route.Router) {
+			router.Get("services/{serviceID}/logs", unavailable)
+			router.Get("tasks/{taskID}/logs", unavailable)
+			router.Get("exec/{containerID}", unavailable)
+		})
 		return
 	}
 

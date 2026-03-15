@@ -1,7 +1,10 @@
 package websocket
 
 import (
+	"context"
 	"net/http"
+	"strconv"
+	"sync"
 
 	"github.com/prvious/kontainer/server/app/facades"
 	"github.com/prvious/kontainer/server/app/services/docker"
@@ -25,10 +28,7 @@ func (h *ServiceLogsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tail := r.URL.Query().Get("tail")
-	if tail == "" {
-		tail = "100"
-	}
+	tail := clampTail(r.URL.Query().Get("tail"), "100")
 	timestamps := r.URL.Query().Get("timestamps") != "false"
 
 	conn, err := Upgrader.Upgrade(w, r, nil)
@@ -38,7 +38,9 @@ func (h *ServiceLogsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	logsReader, err := h.orchestrator.StreamServiceLogs(r.Context(), serviceID, docker.LogStreamOptions{
+	// Use a background context — the HTTP request context may be cancelled
+	// after the WebSocket upgrade completes, but the log stream should continue.
+	logsReader, err := h.orchestrator.StreamServiceLogs(context.Background(), serviceID, docker.LogStreamOptions{
 		Follow:     true,
 		Tail:       tail,
 		Timestamps: timestamps,
@@ -49,5 +51,24 @@ func (h *ServiceLogsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	StreamDockerLogs(conn, logsReader, timestamps)
+	var wsMu sync.Mutex
+	StreamDockerLogs(conn, &wsMu, logsReader, timestamps)
+}
+
+// clampTail validates and clamps the tail parameter to a reasonable range.
+func clampTail(raw, fallback string) string {
+	if raw == "" || raw == "all" {
+		if raw == "all" {
+			return raw
+		}
+		return fallback
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return fallback
+	}
+	if n > 10000 {
+		return "10000"
+	}
+	return raw
 }

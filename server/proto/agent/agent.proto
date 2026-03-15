@@ -106,4 +106,5 @@ message ExecMessage {
   int32 exit_code = 5;
   string error = 6;
   string shell = 7;
+  string user = 8;
 }

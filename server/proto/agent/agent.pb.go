@@ -942,6 +942,7 @@ type ExecMessage struct {
 	ExitCode      int32                  `protobuf:"varint,5,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`
 	Error         string                 `protobuf:"bytes,6,opt,name=error,proto3" json:"error,omitempty"`
 	Shell         string                 `protobuf:"bytes,7,opt,name=shell,proto3" json:"shell,omitempty"`
+	User          string                 `protobuf:"bytes,8,opt,name=user,proto3" json:"user,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1025,6 +1026,13 @@ func (x *ExecMessage) GetShell() string {
 	return ""
 }
 
+func (x *ExecMessage) GetUser() string {
+	if x != nil {
+		return x.User
+	}
+	return ""
+}
+
 var File_agent_agent_proto protoreflect.FileDescriptor
 
 const file_agent_agent_proto_rawDesc = "" +
@@ -1090,7 +1098,7 @@ const file_agent_agent_proto_rawDesc = "" +
 	"\x12PruneImagesRequest\"e\n" +
 	"\x13PruneImagesResponse\x12'\n" +
 	"\x0fspace_reclaimed\x18\x01 \x01(\x04R\x0espaceReclaimed\x12%\n" +
-	"\x0eimages_deleted\x18\x02 \x01(\x05R\rimagesDeleted\"\xfc\x01\n" +
+	"\x0eimages_deleted\x18\x02 \x01(\x05R\rimagesDeleted\"\x90\x02\n" +
 	"\vExecMessage\x12+\n" +
 	"\x04type\x18\x01 \x01(\x0e2\x17.agent.ExecMessage.TypeR\x04type\x12\x12\n" +
 	"\x04data\x18\x02 \x01(\fR\x04data\x12\x12\n" +
@@ -1098,7 +1106,8 @@ const file_agent_agent_proto_rawDesc = "" +
 	"\x04rows\x18\x04 \x01(\rR\x04rows\x12\x1b\n" +
 	"\texit_code\x18\x05 \x01(\x05R\bexitCode\x12\x14\n" +
 	"\x05error\x18\x06 \x01(\tR\x05error\x12\x14\n" +
-	"\x05shell\x18\a \x01(\tR\x05shell\";\n" +
+	"\x05shell\x18\a \x01(\tR\x05shell\x12\x12\n" +
+	"\x04user\x18\b \x01(\tR\x04user\";\n" +
 	"\x04Type\x12\b\n" +
 	"\x04INIT\x10\x00\x12\b\n" +
 	"\x04DATA\x10\x01\x12\n" +

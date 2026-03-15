@@ -5,9 +5,17 @@ import (
 	"encoding/json"
 	"io"
 	"strings"
+	"sync"
 
 	gorillaWs "github.com/gorilla/websocket"
+	"github.com/goravel/framework/support/carbon"
 	"github.com/prvious/kontainer/server/app/facades"
+)
+
+// Docker multiplexed stream header byte values.
+const (
+	dockerStreamStdout byte = 1
+	dockerStreamStderr byte = 2
 )
 
 // LogMessage is the JSON frame sent to the browser.
@@ -19,8 +27,10 @@ type LogMessage struct {
 
 // StreamDockerLogs reads from a Docker mux log stream and writes JSON frames to the WS connection.
 // Blocks until the stream ends, the WS client disconnects, or done is closed.
-func StreamDockerLogs(conn *gorillaWs.Conn, logsReader io.ReadCloser, timestamps bool) {
-	defer logsReader.Close()
+func StreamDockerLogs(conn *gorillaWs.Conn, wsMu *sync.Mutex, logsReader io.ReadCloser, timestamps bool) {
+	var closeOnce sync.Once
+	closeReader := func() { closeOnce.Do(func() { logsReader.Close() }) }
+	defer closeReader()
 
 	// Goroutine to detect client disconnect.
 	// Closing logsReader unblocks any blocking ReadFull in the main loop.
@@ -29,7 +39,7 @@ func StreamDockerLogs(conn *gorillaWs.Conn, logsReader io.ReadCloser, timestamps
 		defer close(done)
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
-				logsReader.Close()
+				closeReader()
 				return
 			}
 		}
@@ -45,17 +55,14 @@ func StreamDockerLogs(conn *gorillaWs.Conn, logsReader io.ReadCloser, timestamps
 
 		_, err := io.ReadFull(logsReader, header)
 		if err != nil {
-			if err != io.EOF {
-				// Suppress "read on closed" errors from disconnect goroutine closing the reader
-				if !strings.Contains(err.Error(), "closed") {
-					facades.Log().Errorf("log stream read header error: %v", err)
-				}
+			if err != io.EOF && !isClosedError(err) {
+				facades.Log().Errorf("log stream read header error: %v", err)
 			}
 			return
 		}
 
 		streamType := "stdout"
-		if header[0] == 2 {
+		if header[0] == dockerStreamStderr {
 			streamType = "stderr"
 		}
 
@@ -63,10 +70,8 @@ func StreamDockerLogs(conn *gorillaWs.Conn, logsReader io.ReadCloser, timestamps
 		payload := make([]byte, payloadSize)
 		_, err = io.ReadFull(logsReader, payload)
 		if err != nil {
-			if err != io.EOF {
-				if !strings.Contains(err.Error(), "closed") {
-					facades.Log().Errorf("log stream read payload error: %v", err)
-				}
+			if err != io.EOF && !isClosedError(err) {
+				facades.Log().Errorf("log stream read payload error: %v", err)
 			}
 			return
 		}
@@ -81,10 +86,13 @@ func StreamDockerLogs(conn *gorillaWs.Conn, logsReader io.ReadCloser, timestamps
 
 			msg := LogMessage{Stream: streamType}
 
-			// Parse timestamp if present (Docker format: "2025-01-01T00:00:00.000000000Z content")
-			if timestamps && len(line) > 30 && line[29] == 'Z' && line[30] == ' ' {
-				msg.Timestamp = line[:30]
-				msg.Line = line[31:]
+			if timestamps {
+				if ts, rest, ok := parseDockerTimestamp(line); ok {
+					msg.Timestamp = ts
+					msg.Line = rest
+				} else {
+					msg.Line = line
+				}
 			} else {
 				msg.Line = line
 			}
@@ -95,9 +103,36 @@ func StreamDockerLogs(conn *gorillaWs.Conn, logsReader io.ReadCloser, timestamps
 				continue
 			}
 
-			if err := conn.WriteMessage(gorillaWs.TextMessage, data); err != nil {
+			wsMu.Lock()
+			writeErr := conn.WriteMessage(gorillaWs.TextMessage, data)
+			wsMu.Unlock()
+			if writeErr != nil {
 				return
 			}
 		}
 	}
+}
+
+// parseDockerTimestamp splits a Docker log line into timestamp and content.
+// Docker timestamps are RFC3339Nano (e.g. "2025-01-01T00:00:00.000000000Z").
+func parseDockerTimestamp(line string) (timestamp, content string, ok bool) {
+	idx := strings.IndexByte(line, ' ')
+	if idx <= 0 {
+		return "", line, false
+	}
+	candidate := line[:idx]
+	if c := carbon.Parse(candidate); c.IsValid() {
+		return candidate, line[idx+1:], true
+	}
+	return "", line, false
+}
+
+// isClosedError checks if an error is from reading/writing a closed connection or pipe.
+func isClosedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "use of closed network connection") ||
+		strings.Contains(msg, "closed pipe")
 }

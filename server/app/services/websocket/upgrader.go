@@ -18,6 +18,8 @@ const (
 )
 
 // Upgrader is the shared WebSocket upgrader for all endpoints.
+// CheckOrigin allows all origins because auth is token-based (query param),
+// not cookie-based, so CSRF is not a risk. The primary client is a Tauri desktop app.
 var Upgrader = gorillaWs.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
