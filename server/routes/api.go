@@ -342,7 +342,10 @@ func buildImageControllers(orchestrator docker.Orchestrator) (
 	}
 
 	leaderNodeID := facades.Config().GetString("cluster.node_id", "")
-	hostname, _ := os.Hostname()
+	hostname, err := os.Hostname()
+	if err != nil {
+		facades.Log().Warningf("image routes: failed to get hostname, using empty string: %v", err)
+	}
 
 	clusterImagesCtrl := imageControllers.NewClusterImagesController(
 		imageActions.NewListClusterImagesAction(orchestrator, registry, pool, leaderNodeID, hostname),

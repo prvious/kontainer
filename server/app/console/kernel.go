@@ -15,7 +15,7 @@ type Kernel struct{}
 func (kernel *Kernel) Schedule() []schedule.Event {
 	var events []schedule.Event
 
-	// Only run discovery on leader nodes
+	// All scheduled tasks (discovery, metrics) only run on the leader
 	if facades.Config().GetString("cluster.role") != "leader" {
 		return events
 	}
@@ -49,7 +49,11 @@ func (kernel *Kernel) Schedule() []schedule.Event {
 		facades.Log().Errorf("console kernel: failed to resolve metrics.collector: %v", err)
 		return events
 	}
-	collector := collectorInstance.(*metrics.CollectAndStoreAction)
+	collector, ok := collectorInstance.(*metrics.CollectAndStoreAction)
+	if !ok {
+		facades.Log().Errorf("console kernel: metrics.collector is not *metrics.CollectAndStoreAction (got %T)", collectorInstance)
+		return events
+	}
 
 	events = append(events, facades.Schedule().Call(func() {
 		collector.Execute(context.Background())
@@ -60,7 +64,11 @@ func (kernel *Kernel) Schedule() []schedule.Event {
 		facades.Log().Errorf("console kernel: failed to resolve metrics.pruner: %v", err)
 		return events
 	}
-	pruner := prunerInstance.(*metrics.PruneMetricsAction)
+	pruner, ok := prunerInstance.(*metrics.PruneMetricsAction)
+	if !ok {
+		facades.Log().Errorf("console kernel: metrics.pruner is not *metrics.PruneMetricsAction (got %T)", prunerInstance)
+		return events
+	}
 
 	events = append(events, facades.Schedule().Call(func() {
 		if err := pruner.Execute(); err != nil {

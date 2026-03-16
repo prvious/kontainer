@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/goravel/framework/contracts/http"
+	"github.com/goravel/framework/facades"
 	metricsActions "github.com/prvious/kontainer/server/app/actions/metrics"
 )
 
@@ -24,8 +25,9 @@ func (c *ClusterMetricsController) Handle(ctx http.Context) http.Response {
 		rangeDuration = 24 * time.Hour
 	}
 
-	resp, err := c.action.Execute(ctx.Request().Origin().Context(), rangeDuration)
+	resp, err := c.action.Execute(ctx.Context(), rangeDuration)
 	if err != nil {
+		facades.Log().Errorf("cluster metrics controller: %v", err)
 		return ctx.Response().Json(500, map[string]string{"error": "failed to collect metrics"})
 	}
 	return ctx.Response().Json(200, resp)

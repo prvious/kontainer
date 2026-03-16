@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/goravel/framework/facades"
 	"github.com/prvious/kontainer/server/app/services/cluster"
 	"github.com/prvious/kontainer/server/app/services/docker"
 	pb "github.com/prvious/kontainer/server/proto/agent"
@@ -90,11 +91,13 @@ func (a *ListClusterImagesAction) Execute(ctx context.Context) (*ClusterImagesRe
 
 		client, err := a.pool.GetClient(agent.Address)
 		if err != nil {
+			facades.Log().Errorf("list images: failed to get gRPC client for node %s (%s): %v", agent.NodeID, agent.Address, err)
 			continue
 		}
 
 		resp, err := client.ListImages(ctx, &pb.ListImagesRequest{})
 		if err != nil {
+			facades.Log().Errorf("list images: failed to list images on node %s (%s): %v", agent.NodeID, agent.Address, err)
 			continue
 		}
 

@@ -44,6 +44,9 @@ func (a *CollectAndStoreAction) Execute(ctx context.Context) {
 	}
 
 	for _, follower := range a.registry.All() {
+		if follower.NodeID == a.nodeID {
+			continue
+		}
 		snapshot, err := a.FetchFollowerMetrics(ctx, follower.Address)
 		if err != nil {
 			facades.Log().Errorf("metrics collector: follower %s (%s) error: %v", follower.NodeID, follower.Address, err)
@@ -55,7 +58,12 @@ func (a *CollectAndStoreAction) Execute(ctx context.Context) {
 	}
 }
 
-// CollectLocal gathers local metrics. Exported for reuse by GetClusterMetricsAction.
+// NodeID returns the leader's node ID so callers can skip self in fan-out loops.
+func (a *CollectAndStoreAction) NodeID() string {
+	return a.nodeID
+}
+
+// CollectLocal gathers local metrics. Exported for reuse.
 func (a *CollectAndStoreAction) CollectLocal(ctx context.Context) (AgentMetricsSnapshot, error) {
 	return a.collectLocal(ctx)
 }
@@ -75,7 +83,7 @@ func (a *CollectAndStoreAction) collectLocal(ctx context.Context) (AgentMetricsS
 	}, nil
 }
 
-// FetchFollowerMetrics fetches metrics from a follower via gRPC. Exported for reuse.
+// FetchFollowerMetrics fetches metrics from a follower via gRPC.
 func (a *CollectAndStoreAction) FetchFollowerMetrics(ctx context.Context, address string) (AgentMetricsSnapshot, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -92,6 +100,7 @@ func (a *CollectAndStoreAction) FetchFollowerMetrics(ctx context.Context, addres
 
 	ts, err := time.Parse(time.RFC3339, resp.Timestamp)
 	if err != nil {
+		facades.Log().Warningf("metrics: follower %s sent unparseable timestamp %q, using current time: %v", address, resp.Timestamp, err)
 		ts = time.Now().UTC()
 	}
 

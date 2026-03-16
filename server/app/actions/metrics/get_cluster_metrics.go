@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/goravel/framework/facades"
@@ -23,11 +24,17 @@ func NewGetClusterMetricsAction(
 
 func (a *GetClusterMetricsAction) Execute(ctx context.Context, rangeDuration time.Duration) (ClusterMetricsResponse, error) {
 	// Collect real-time local snapshot
-	localSnapshot, _ := a.collector.CollectLocal(ctx)
+	localSnapshot, err := a.collector.CollectLocal(ctx)
+	if err != nil {
+		facades.Log().Errorf("cluster metrics: local collect error: %v", err)
+	}
 	agents := []AgentMetricsSnapshot{localSnapshot}
 
 	// Fan out to followers for real-time snapshots
 	for _, follower := range a.registry.All() {
+		if follower.NodeID == a.collector.NodeID() {
+			continue
+		}
 		snapshot, err := a.collector.FetchFollowerMetrics(ctx, follower.Address)
 		if err != nil {
 			facades.Log().Errorf("cluster metrics: follower %s error: %v", follower.Address, err)
@@ -40,7 +47,7 @@ func (a *GetClusterMetricsAction) Execute(ctx context.Context, rangeDuration tim
 	since := time.Now().Add(-rangeDuration).UTC()
 	var metrics []models.NodeMetric
 	if err := facades.Orm().Query().Where("timestamp >= ?", since).OrderBy("timestamp", "asc").Get(&metrics); err != nil {
-		facades.Log().Errorf("cluster metrics: history query error: %v", err)
+		return ClusterMetricsResponse{}, fmt.Errorf("query metrics history: %w", err)
 	}
 
 	history := make([]AgentMetricsSnapshot, 0, len(metrics))

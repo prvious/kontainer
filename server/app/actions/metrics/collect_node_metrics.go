@@ -1,7 +1,6 @@
 package metrics
 
 import (
-	"os"
 	"runtime"
 
 	"github.com/shirou/gopsutil/v4/cpu"
@@ -23,9 +22,6 @@ type NodeMetrics struct {
 type CollectNodeMetricsAction struct{}
 
 func NewCollectNodeMetricsAction() *CollectNodeMetricsAction {
-	if _, err := os.Stat("/host/proc"); err == nil {
-		os.Setenv("HOST_PROC", "/host/proc")
-	}
 	return &CollectNodeMetricsAction{}
 }
 
