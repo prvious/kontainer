@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Kontainer is a desktop app for managing containerized infrastructure (Docker Swarm, with Compose and Kubernetes planned). It consists of two components:
 
-- **Agent** — A Go (Chi) HTTP/WebSocket API deployed alongside the infrastructure, talks to the Docker socket
+- **Agent** — A Go (Goravel) HTTP/WebSocket/gRPC API deployed alongside the infrastructure, talks to the Docker socket
 - **Desktop App** — A Tauri (Rust + React + ShadcnUI + Tailwindcss) app that connects to one or more agents
 
 ## UI Requirements (MANDATORY)
@@ -77,7 +77,7 @@ handlers/
 Monorepo managed with pnpm workspaces:
 
 - `/app` — Desktop app (Tauri + React). Frontend in `app/src/`, Rust backend in `app/src-tauri/`.
-- `/agent` — Go agent binary deployed alongside infrastructure. Exposes REST + WebSocket API to Docker socket.
+- `/server` — Go agent binary (Goravel framework) deployed alongside infrastructure. Exposes REST + WebSocket + gRPC API to Docker socket.
 
 ## Development Commands
 
@@ -89,7 +89,7 @@ pnpm dev:app          # Tauri desktop app only (hot reload)
 pnpm dev:agent        # Go agent only (go run)
 pnpm build            # Build both
 pnpm build:app        # Build desktop app
-pnpm build:agent      # Build Go agent → agent/bin/agent
+pnpm build:agent      # Build Go agent → server/bin/agent
 pnpm lint             # Lint frontend
 pnpm fmt           # Format frontend
 ```
@@ -103,7 +103,7 @@ pnpm --filter app <script>     # Run a script in /app
 ## Tech Stack
 
 - Desktop: Tauri (Rust) + React + ShadcnUI + Tailwindcss
-- Agent: Go (stdlib, Chi)
+- Agent: Go (Goravel framework, gRPC)
 - Auth: OAuth 2.0 + JWT
 - Transport: HTTPS + WebSocket
 - App Storage: tauri-plugin-store (session.json)
@@ -387,7 +387,7 @@ cargo fmt
 cargo test
 ```
 
-### Go Agent (from agent/)
+### Go Agent (from server/)
 
 ```bash
 go run .
@@ -399,23 +399,24 @@ go test ./...
 
 ### Multi-Node Cluster (Leader/Follower)
 
-The agent binary runs in two modes controlled by `role` in `kontainer.yml` (`--config` flag, default `./kontainer.yml`):
+The agent binary runs in two modes controlled by the `AGENT_ROLE` environment variable (defaults to `leader`):
 
-- **Leader** — Full REST + WebSocket API. Handles auth, serves all `/api/*` routes, discovers and healthchecks follower agents. One per cluster.
-- **Follower** — Lightweight. Only exposes `/internal/health` and `/internal/info` behind a shared secret (`X-Kontainer-Secret` header). Deployed as a global Swarm service across worker nodes.
+- **Leader** — Full REST + WebSocket + gRPC API. Handles auth, serves all `/api/*` routes, runs scheduled tasks (discovery, metrics), discovers and healthchecks follower agents via gRPC. One per cluster.
+- **Follower** — Lightweight. Exposes gRPC services (behind `SecretAuth` interceptor) and `/health` + `/ping` HTTP endpoints. No API routes or scheduled tasks. Deployed as a global Swarm service across worker nodes.
 
-**Discovery:** Leader finds followers by querying Docker Swarm tasks for the follower service name (`cluster.follower_service`), pings each task IP on `/internal/health` every 10s, and maintains an in-memory agent registry.
+**Discovery:** Leader finds followers by querying Docker Swarm tasks for the follower service name (`cluster.follower_service`), connects to each via gRPC, and maintains an in-memory agent registry.
 
 **Dev mode:** Set `cluster.dev_followers` to a list of static addresses (e.g. `[localhost:8081, localhost:8082]`) instead of Swarm-based discovery.
 
 Key files:
 
-- `agent/cluster/discovery.go` — Swarm-based follower discovery (production)
-- `agent/cluster/dev_discovery.go` — Static follower list (development)
-- `agent/cluster/registry.go` — Thread-safe in-memory agent registry
-- `agent/cluster/middleware.go` — Internal secret auth middleware
-- `agent/server/server.go` — Leader routes
-- `agent/server/follower.go` — Follower routes
+- `server/app/services/cluster/discovery.go` — Swarm-based follower discovery (production)
+- `server/app/services/cluster/dev_discovery.go` — Static follower list (development)
+- `server/app/services/cluster/registry.go` — Thread-safe in-memory agent registry
+- `server/app/grpc/interceptors/secret_auth.go` — Internal secret auth middleware
+- `server/routes/api.go` — Leader API routes
+- `server/routes/grpc.go` — gRPC service registration
+- `server/bootstrap/app.go` — Role-based bootstrap (leader: HTTP+gRPC+schedule, follower: gRPC only)
 
 ### Frontend-Backend Communication
 
