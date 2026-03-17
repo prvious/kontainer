@@ -1,13 +1,14 @@
 package routes
 
 import (
-	controllers "github.com/prvious/kontainer/server/app/http/controllers"
 	"github.com/prvious/kontainer/server/app/facades"
+	healthControllers "github.com/prvious/kontainer/server/app/http/controllers/health"
+	pingControllers "github.com/prvious/kontainer/server/app/http/controllers/ping"
 )
 
 func Web() {
-	healthCtrl := controllers.NewHealthController()
-	pingCtrl := controllers.NewPingController()
+	healthCtrl := healthControllers.NewHealthController()
+	pingCtrl := pingControllers.NewPingController()
 
 	facades.Route().Get("health", healthCtrl.Handle)
 	facades.Route().Get("ping", pingCtrl.Handle)

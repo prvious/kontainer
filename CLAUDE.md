@@ -399,12 +399,12 @@ go test ./...
 
 ### Multi-Node Cluster (Leader/Follower)
 
-The agent binary runs in two modes controlled by `role` in `kontainer.yml` (`--config` flag, default `./kontainer.yml`):
+The agent binary runs in two modes controlled by the `AGENT_ROLE` environment variable (defaults to `leader`):
 
-- **Leader** — Full REST + WebSocket API. Handles auth, serves all `/api/*` routes, discovers and healthchecks follower agents. One per cluster.
-- **Follower** — Lightweight. Only exposes `/internal/health` and `/internal/info` behind a shared secret (`X-Kontainer-Secret` header). Deployed as a global Swarm service across worker nodes.
+- **Leader** — Full REST + WebSocket + gRPC API. Handles auth, serves all `/api/*` routes, runs scheduled tasks (discovery, metrics), discovers and healthchecks follower agents via gRPC. One per cluster.
+- **Follower** — Lightweight. Exposes gRPC services (behind `SecretAuth` interceptor) and `/health` + `/ping` HTTP endpoints. No API routes or scheduled tasks. Deployed as a global Swarm service across worker nodes.
 
-**Discovery:** Leader finds followers by querying Docker Swarm tasks for the follower service name (`cluster.follower_service`), pings each task IP on `/internal/health` every 10s, and maintains an in-memory agent registry.
+**Discovery:** Leader finds followers by querying Docker Swarm tasks for the follower service name (`cluster.follower_service`), connects to each via gRPC, and maintains an in-memory agent registry.
 
 **Dev mode:** Set `cluster.dev_followers` to a list of static addresses (e.g. `[localhost:8081, localhost:8082]`) instead of Swarm-based discovery.
 

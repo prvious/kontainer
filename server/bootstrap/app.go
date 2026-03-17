@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	"log"
 	"os"
 
 	contractsfoundation "github.com/goravel/framework/contracts/foundation"
@@ -18,10 +19,16 @@ import (
 
 func Boot() contractsfoundation.Application {
 	// Use os.Getenv because facades are not bootstrapped yet during Setup().
+	// IMPORTANT: Default must match config/cluster.go's config.Env("AGENT_ROLE", "leader").
 	role := os.Getenv("AGENT_ROLE")
 	if role == "" {
 		role = "leader"
 	}
+	if role != "leader" && role != "follower" {
+		log.Printf("WARNING: invalid AGENT_ROLE=%q, defaulting to \"leader\". Valid values: \"leader\", \"follower\".", role)
+		role = "leader"
+	}
+	log.Printf("Bootstrapping agent in %q mode", role)
 
 	builder := foundation.Setup().
 		WithMigrations(Migrations).
@@ -50,9 +57,10 @@ func Boot() contractsfoundation.Application {
 				return kernel.Schedule()
 			})
 	} else {
-		// Follower: only gRPC server, no HTTP routes or scheduled tasks
+		// Follower: gRPC + health/ping only, no API routes or scheduled tasks
 		builder = builder.
 			WithRouting(func() {
+				routes.Web()
 				routes.Grpc()
 			})
 	}
