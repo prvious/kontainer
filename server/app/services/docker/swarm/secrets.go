@@ -16,9 +16,14 @@ func (s *SwarmOrchestrator) ListSecrets(ctx context.Context) ([]docker.Secret, e
 
 	items := make([]docker.Secret, 0, len(secrets))
 	for _, sec := range secrets {
+		labels := sec.Spec.Labels
+		if labels == nil {
+			labels = make(map[string]string)
+		}
 		items = append(items, docker.Secret{
 			ID:        sec.ID,
 			Name:      sec.Spec.Name,
+			Labels:    labels,
 			CreatedAt: docker.FormatTime(sec.CreatedAt),
 			UpdatedAt: docker.FormatTime(sec.UpdatedAt),
 		})

@@ -16,8 +16,15 @@ func NewListTasksController(action *taskActions.ListTasksAction) *ListTasksContr
 }
 
 func (c *ListTasksController) Handle(ctx http.Context) http.Response {
-	serviceID := ctx.Request().Query("serviceID", "")
-	nodeID := ctx.Request().Query("nodeID", "")
+	// Support both query params (?serviceID=) and route params ({serviceID}, {nodeID})
+	serviceID := ctx.Request().Route("serviceID")
+	if serviceID == "" {
+		serviceID = ctx.Request().Query("serviceID", "")
+	}
+	nodeID := ctx.Request().Route("nodeID")
+	if nodeID == "" {
+		nodeID = ctx.Request().Query("nodeID", "")
+	}
 
 	filters := docker.TaskFilters{
 		ServiceID: serviceID,

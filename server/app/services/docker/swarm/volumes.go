@@ -16,12 +16,35 @@ func (s *SwarmOrchestrator) ListVolumes(ctx context.Context) ([]docker.Volume, e
 
 	items := make([]docker.Volume, 0, len(resp.Volumes))
 	for _, v := range resp.Volumes {
+		labels := v.Labels
+		if labels == nil {
+			labels = make(map[string]string)
+		}
+		options := v.Options
+		if options == nil {
+			options = make(map[string]string)
+		}
+
+		var refCount int64 = -1
+		var sizeBytes int64 = -1
+		if v.UsageData != nil {
+			refCount = v.UsageData.RefCount
+			sizeBytes = v.UsageData.Size
+		}
+
+		stack := labels["com.docker.stack.namespace"]
+
 		items = append(items, docker.Volume{
 			Name:       v.Name,
 			Driver:     v.Driver,
 			Mountpoint: v.Mountpoint,
 			Scope:      v.Scope,
+			Labels:     labels,
+			Options:    options,
 			CreatedAt:  v.CreatedAt,
+			RefCount:   refCount,
+			SizeBytes:  sizeBytes,
+			Stack:      stack,
 		})
 	}
 

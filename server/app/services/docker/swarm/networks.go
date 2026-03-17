@@ -23,6 +23,9 @@ func (s *SwarmOrchestrator) ListNetworks(ctx context.Context) ([]docker.Network,
 			Scope:      n.Scope,
 			Internal:   n.Internal,
 			Attachable: n.Attachable,
+			Ingress:    n.Ingress,
+			Services:   []docker.NetworkServiceRef{},
+			CreatedAt:  docker.FormatTime(n.Created),
 		})
 	}
 

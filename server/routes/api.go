@@ -111,10 +111,13 @@ func Api() {
 		listTasks := taskControllers.NewListTasksController(taskActions.NewListTasksAction(orchestrator))
 		inspectTask := taskControllers.NewInspectTaskController(taskActions.NewInspectTaskAction(orchestrator))
 		taskStats := taskControllers.NewListTaskStatsController(taskActions.NewListTaskStatsAction(orchestrator))
+		taskStatsAgg := taskControllers.NewListTaskStatsAggController(taskActions.NewListTaskStatsAggAction(orchestrator))
 
 		router.Get("tasks", listTasks.Handle)
 		router.Get("tasks/stats", taskStats.Handle)
 		router.Get("tasks/{taskID}", inspectTask.Handle)
+		router.Get("task-stats", taskStatsAgg.Handle)
+		router.Get("services/{serviceID}/tasks", listTasks.Handle)
 
 		// Nodes
 		listNodes := nodeControllers.NewListNodesController(nodeActions.NewListNodesAction(orchestrator))
@@ -122,6 +125,7 @@ func Api() {
 		updateRole := nodeControllers.NewUpdateNodeRoleController(nodeActions.NewUpdateNodeRoleAction(orchestrator))
 
 		router.Get("nodes", listNodes.Handle)
+		router.Get("nodes/{nodeID}/tasks", listTasks.Handle)
 		router.Patch("nodes/{nodeID}/availability", updateAvail.Handle)
 		router.Patch("nodes/{nodeID}/role", updateRole.Handle)
 
