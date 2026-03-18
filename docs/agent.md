@@ -129,7 +129,7 @@ The repo ships with a local multi-node Docker-in-Docker environment under `dev/`
 
 - `pnpm dev` starts the cluster, agents, and desktop app
 - `pnpm dev:cluster` starts only the local Swarm cluster
-- `dev/leader.yml` configures a leader with `CLUSTER_DEV_FOLLOWERS`
+- the local leader reads `CLUSTER_DEV_FOLLOWERS` from `server/.env` (loaded by `air`)
 
 ## Source of Truth
 
