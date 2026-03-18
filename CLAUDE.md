@@ -29,7 +29,7 @@ Every discrete operation is a single-responsibility action. One action per file.
 
 - File: `services/scale_service.go`
 - Struct: `ScaleServiceAction` with an `Execute` method
-- Injected via `main.go`
+- Registered via Goravel service providers
 
 **Rust (Tauri):**
 
@@ -68,7 +68,6 @@ handlers/
 
 ### General
 
-- Keep dependencies minimal — prefer stdlib where reasonable
 - Go agent is mostly stateless — the only exception is an embedded SQLite database (`modernc.org/sqlite`, pure Go) used by the leader to store time-series node metrics with automatic retention-based pruning. All other state is in-memory only.
 - Desktop app stores session data locally via `tauri-plugin-store` (`session.json`)
 - You must follow all existing code conventions. When creating or editing a file, check sibling files for structure, approach, and naming.
@@ -113,19 +112,18 @@ handlers/
 ### Prefer Goravel Over Native Go
 
 - Always prefer Goravel facades and helpers over native Go equivalents. The framework provides consistent APIs with built-in configuration, drivers, and testability (mocking).
-  - Logging: `facades.Log()` not `log.Println()`
-  - Config: `facades.Config().GetString()` not `os.Getenv()`
-  - HTTP client: `facades.Http().Get()` not `net/http`
-  - Filesystem: `facades.Storage().Put()` not `os.WriteFile()`
-  - Cache: `facades.Cache().Get()` not hand-rolled maps
-  - Hashing: `facades.Hash().Make()` not `bcrypt.GenerateFromPassword()`
-  - Encryption: `facades.Crypt().EncryptString()` not `crypto/aes` directly
+    - Logging: `facades.Log()` not `log.Println()`
+    - HTTP client: `facades.Http().Get()` not `net/http`
+    - Filesystem: `facades.Storage().Put()` not `os.WriteFile()`
+    - Cache: `facades.Cache().Get()` not hand-rolled maps
+    - Hashing: `facades.Hash().Make()` not `bcrypt.GenerateFromPassword()`
+    - Encryption: `facades.Crypt().EncryptString()` not `crypto/aes` directly
 - Only reach for native Go when Goravel doesn't provide the functionality or when you need lower-level control that the facade can't offer.
 
 ### Go Formatting & Quality
 
 - Run `gofmt` on all modified Go files before committing.
-- Run `go vet ./...` to catch common issues.
+- Run `go vet -C server ./...` to catch common issues.
 - Run `go test -C server ./...` to verify tests pass.
 
 ## Repository Structure
@@ -346,96 +344,18 @@ export const Route = createFileRoute("/posts/$postId")({
 - You must not remove any tests or test files from the tests directory without approval. These are not temporary or helper files - these are core to the application.
 - Tests should test all of the happy paths, failure paths, and weird paths.
 - Vitest Tests live in the `tests/feature` and `tests/unit` directories.
-- When writing your frontend tests, having a “fake” Tauri environment to simulate windows or intercept IPC calls is common, so-called mocking. The @tauri-apps/api/mocks module provides some helpful tools to make this easier for you
-- Remember to clear mocks after each test run to undo mock state changes between runs! See clearMocks()(https://tauri.app/reference/javascript/api/namespacemocks/#functions) docs for more info.
+- For Tauri mocking patterns (IPC, events, windows), see the `vitest-tauri-testing` skill which auto-activates when working on frontend tests.
 
-<code-snippet name="Mocking Commands for invoke" lang="typescript>
-import { beforeAll, expect, test } from "vitest";
-import { randomFillSync } from "crypto";
-
-import { mockIPC } from "@tauri-apps/api/mocks";
-import { invoke } from "@tauri-apps/api/core";
-
-// jsdom doesn't come with a WebCrypto implementation
-beforeAll(() => {
-Object.defineProperty(window, 'crypto', {
-value: {
-// @ts-ignore
-getRandomValues: (buffer) => {
-return randomFillSync(buffer);
-},
-},
-});
-});
-
-test("invoke simple", async () => {
-mockIPC((cmd, args) => {
-// simulated rust command called "add" that just adds two numbers
-if(cmd === "add") {
-return (args.a as number) + (args.b as number);
-}
-});
-});
-</code-snippet>
-
-<code-snippet name="Mocking Events" lang="typescript>
-import { mockIPC, clearMocks } from '@tauri-apps/api/mocks';
-import { emit, listen } from '@tauri-apps/api/event';
-import { afterEach, expect, test, vi } from 'vitest';
-
-test('mocked event', () => {
-mockIPC(() => {}, { shouldMockEvents: true }); // enable event mocking
-
-const eventHandler = vi.fn();
-listen('test-event', eventHandler);
-
-emit('test-event', { foo: 'bar' });
-expect(eventHandler).toHaveBeenCalledWith({
-event: 'test-event',
-payload: { foo: 'bar' },
-});
-});
-</code-snippet>
-
-<code-snippet name="Mocking Windows" lang="typescript>
-import { beforeAll, expect, test } from 'vitest';
-import { randomFillSync } from 'crypto';
-
-import { mockWindows } from '@tauri-apps/api/mocks';
-
-// jsdom doesn't come with a WebCrypto implementation
-beforeAll(() => {
-Object.defineProperty(window, 'crypto', {
-value: {
-// @ts-ignore
-getRandomValues: (buffer) => {
-return randomFillSync(buffer);
-},
-},
-});
-});
-
-test('invoke', async () => {
-mockWindows('main', 'second', 'third');
-
-const { getCurrent, getAll } = await import('@tauri-apps/api/webviewWindow');
-
-expect(getCurrent()).toHaveProperty('label', 'main');
-expect(getAll().map((w) => w.label)).toEqual(['main', 'second', 'third']);
-});
-</code-snippet>
-
-# Test Enforcement
-
-- Every change must be programmatically tested. Write a new test or update an existing test, then run the affected tests to make sure they pass.
-- Run the minimum number of tests needed to ensure code quality and speed.
+### Testing
 
 ```bash
-# Run Vitest tests
+# Run Vitest tests (frontend)
 pnpm --filter app test
+pnpm --filter app test tests/example.spec.ts   # specific file
 
-# Run specific test file
-pnpm --filter app test tests/example.spec.ts
+# Run Go tests (agent)
+go test -C server ./...
+go vet -C server ./...
 ```
 
 ### Rust (from app/src-tauri/)
@@ -446,20 +366,17 @@ cargo fmt
 cargo test
 ```
 
-### Go Agent (from server/)
+### Go Agent (from repo root)
 
 ```bash
-go run .
-go build -o bin/agent .
-go test ./...
-go vet ./...
+go run -C server .                    # Run agent
+go build -C server -o bin/agent .     # Build agent
 ```
 
 ### Go Test Rules
 
 - Every Go change must be tested. Write a new test or update an existing test, then run the affected tests.
 - Run `go test -C server ./...` to run all agent tests, or `go test -C server ./app/services/docker/...` to target a specific package.
-- You must not remove any test files without approval. Tests are core to the application.
 - When creating models for tests, use factories. Check if the factory has custom states before manually setting up models.
 - Most tests should be feature/integration tests. Use unit tests for pure logic only.
 
