@@ -1,269 +1,92 @@
 # Kontainer
 
-A desktop app for managing Docker Swarm clusters. Self-hosted, lightweight, multi-node.
+Kontainer is a desktop app for managing Docker Swarm infrastructure through a dedicated agent API.
+
+It pairs a Tauri desktop client with a Go agent built on Goravel so you can inspect clusters, operate services, stream logs, and open exec sessions without exposing the Docker socket directly to the UI.
 
 **Website:** [kontainer.dev](https://kontainer.dev)
 
+## Current Focus
+
+- Docker Swarm is the primary target.
+- Docker Compose and Kubernetes are planned, not first-class today.
+
+## What It Does
+
+- Browse cluster resources such as services, tasks, nodes, stacks, images, networks, volumes, secrets, and configs.
+- Operate services with actions like scale, restart, rollback, and selected configuration updates.
+- Stream service and task logs over WebSocket.
+- Open terminal sessions into running containers from the desktop app.
+- View cluster and node metrics collected by the leader agent.
+- Connect to multiple clusters from one desktop app.
+- Authenticate through a browser-based GitHub OAuth flow.
+
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────┐
-│                   Desktop App                       │
-│              Tauri (Rust) + React                   │
-│                                                     │
-│  OAuth login ─► Session store ─► Tauri IPC bridge   │
-└──────────────────────┬──────────────────────────────┘
-                       │ HTTPS + WebSocket
-          ┌────────────┼────────────────┐
-          ▼            ▼                ▼
-   ┌─────────┐  ┌─────────┐     ┌─────────┐
-   │ Leader  │  │Follower │     │Follower │
-   │  Agent  │◄─┤  Agent  │ ... │  Agent  │
-   │ (Go)    │  │ (Go)    │     │ (Go)    │
-   └────┬────┘  └────┬────┘     └────┬────┘
-        │             │               │
-   Docker socket Docker socket  Docker socket
-```
+Kontainer has two main parts:
 
-**Leader agent** -- Full REST + WebSocket API. Handles auth, discovers followers via Swarm tasks, collects cluster-wide metrics, and maintains an in-memory registry of all agents. Healthchecks followers every 10s. Stores time-series node metrics in embedded SQLite with automatic retention-based pruning.
+- `app/` - Tauri desktop app built with Rust, React, Shadcn UI, Tailwind CSS, TanStack Router, and TanStack Query.
+- `server/` - Go agent built with Goravel, gRPC, WebSocket support, Docker SDK integrations, and SQLite-backed persistence where needed.
 
-**Follower agents** -- Lightweight. Expose `/internal/health`, `/internal/info`, `/internal/metrics`, and `/internal/exec/{containerID}` endpoints behind a shared secret (`X-Kontainer-Secret`). Auto-discovered by the leader in production, or configured statically in dev via `KONTAINER_DEV_FOLLOWERS`.
+The agent runs in one of two modes:
 
-**Desktop app** -- Cross-platform (macOS, Linux, Windows). Connects to one or more leader agents, authenticates via OAuth through the system browser, communicates over Tauri IPC to Rust to HTTP/WebSocket to the agent. Supports multiple cluster profiles with instant switching.
+- `leader` - serves the public API, handles auth, runs scheduled work, and coordinates cluster-wide operations.
+- `follower` - exposes internal gRPC and health endpoints for node-local work in multi-node setups.
 
-## Features
+Frontend requests flow through the desktop boundary like this:
 
-### Infrastructure Dashboard
-- Cluster-wide stats: node count, CPU usage, memory usage per node
-- CPU and memory time-series charts with per-node filtering
-- Live container table with CPU/memory metrics, sortable and filterable
-- Service and stack overview cards
-- Auto-refreshing (5s polling) with live indicator
+`React -> Tauri invoke -> Rust command -> Go agent API`
 
-### Service Management
-- List, inspect, scale, restart, rollback services
-- Inline environment variable editor (add, edit, remove vars with immediate deploy)
-- Inline image tag editor (deploy new versions by changing the image)
-- Published ports, mounts, constraints, placement preferences
-- Update status tracking with convergence monitoring and error reporting
-- Tabbed detail view: overview, tasks, logs, configuration
+## Repository Layout
 
-### Container Exec (Terminal)
-- Full interactive terminal via WebSocket into any running container
-- Multi-session tabbed interface -- open terminals to multiple containers simultaneously
-- Shell auto-detection: tries `/bin/sh`, `/bin/bash`, `/bin/ash` with fallback chain
-- Custom shell and user parameters per session
-- Resizable panel with drag handle, minimize, and fullscreen modes
-- Per-session connection status indicators (connecting, connected, error, exited)
-- Reconnect on disconnect
-- Cross-node exec: leader proxies WebSocket connections to follower agents for containers on remote nodes
-- xterm.js-based terminal with Tokyo Night theme, auto-fit on resize
+- `app/` - desktop UI and Tauri commands
+- `server/` - Goravel agent, routes, actions, services, and tests
+- `dev/` - local multi-node Docker-in-Docker development environment
+- `docs/` - planning, reference, and design artifacts
 
-### Real-Time Log Streaming
-- WebSocket streaming for both services and individual tasks
-- stdout/stderr separation with toggles
-- Timestamp display toggle
-- Pause/resume, tail line selection (100, 500, 1000, all)
-- Auto-scroll with manual scroll override
-- Clear logs, reconnect on disconnect
-- Auto-reconnect with exponential backoff (up to 16s)
+## Deployment Docs
 
-### Task Inspection
-- Per-service task listing with state, desired state, exit codes, error messages
-- Live CPU and memory metrics per task (from cluster metrics)
-- Full task detail sheet: container ID, PID, image, env vars, mounts, networks
-- Per-task log streaming
-- One-click terminal access from task rows
+- `docs/deployment.md` - deployment modes, environment variables, Docker examples, and setup notes
+- `docs/agent.md` - current agent architecture, responsibilities, and discovery model
 
-### Node Management
-- Swarm node overview: hostname, role, status, availability, IP, engine version, OS
-- Promote/demote (worker to manager and back)
-- Drain, pause, activate nodes
-- Per-node CPU and memory breakdown in dashboard stats cards
+## Local Development
 
-### Multi-Cluster Support
-- Connect to multiple clusters from a single app instance
-- Cluster switcher in the sidebar with provider detection (AWS, GCP, Azure, DigitalOcean, local, self-hosted)
-- Add cluster dialog: validates agent URL with ping, triggers OAuth, saves profile
-- Remove and switch between clusters instantly; query cache clears on switch
+### Prerequisites
 
-### Cluster Metrics
-- Leader collects node and container metrics from all agents on a periodic interval
-- Per-node metrics: CPU %, memory used/total/%, disk used/total/%
-- Per-container metrics: CPU %, memory used/limit/%
-- Time-series history stored in embedded SQLite with automatic pruning
-- Cluster and per-node metrics API endpoints
+- `pnpm`
+- Go
+- Rust
+- Docker
 
-### Stack Management
-- List stacks with service and replica counts
-- Remove entire stacks
+### Common Commands
 
-### Networks, Volumes, Secrets & Configs
-- Browse overlay networks with attached services
-- Volume listing with size, driver, mountpoint
-- Create and delete secrets with content input
-- Create and delete configs with content input
-
-### Authentication
-- GitHub OAuth 2.0 (extensible provider system via the `providers` package)
-- Optional access control -- restrict login by GitHub username (`GITHUB_ALLOWED_USERS`) and/or organization membership (`GITHUB_ALLOWED_ORGS`)
-- WebSocket-based auth bridge between desktop app and agent
-- System browser opens for OAuth, deep-link callback returns JWT to the app
-- Short-lived JWTs (HS256), session persistence via `tauri-plugin-store`
-- Auto-logout on token expiry (30s check interval)
-- Multi-profile session storage: each cluster connection is an independent profile
-
-### Multi-Node Cluster Architecture
-- Leader/follower agent model controlled by `KONTAINER_ROLE` env var
-- Auto-discovery via Docker Swarm service tasks (`KONTAINER_FOLLOWER_SERVICE`)
-- Static follower list for development (`KONTAINER_DEV_FOLLOWERS`)
-- Internal healthchecks with shared secret authentication
-- Thread-safe in-memory agent registry with cluster-wide visibility
-- Agent listing API endpoint for the desktop app
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Desktop | Tauri 2 (Rust) + React 19 + Shadcn UI + Tailwind CSS 4 |
-| Agent | Go (Chi, Docker SDK, gorilla/websocket) |
-| Auth | OAuth 2.0 + JWT (HS256) |
-| Transport | HTTPS + WebSocket |
-| Storage | Agent: in-memory + embedded SQLite (metrics history, leader only). App: tauri-plugin-store |
-| Terminal | xterm.js + FitAddon |
-| Charts | Recharts |
-| Routing | TanStack Router (file-based) |
-| Data Fetching | TanStack Query (5s polling intervals) |
-
-## Deployment
-
-The agent reads configuration from a YAML file (default: `/etc/kontainer/kontainer.yml` inside the container). Secrets can reference Docker secrets via the `file:` prefix.
-
-**Leader service with Docker configs and secrets:**
-
-```yaml
-services:
-  kontainer-agent:
-    image: prvious/kontainer-agent
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    configs:
-      - source: kontainer-config
-        target: /etc/kontainer/kontainer.yml
-    secrets:
-      - jwt_secret
-      - github_client_secret
-      - internal_secret
-
-configs:
-  kontainer-config:
-    file: ./kontainer-leader.yml
-
-secrets:
-  jwt_secret:
-    external: true
-  github_client_secret:
-    external: true
-  internal_secret:
-    external: true
-```
-
-Example `kontainer-leader.yml`:
-
-```yaml
-role: leader
-agent_url: https://agent.example.com
-jwt_secret: file:/run/secrets/jwt_secret
-github:
-  client_id: your-github-client-id
-  client_secret: file:/run/secrets/github_client_secret
-  allowed_users: [alice, bob]
-cluster:
-  internal_secret: file:/run/secrets/internal_secret
-  follower_service: kontainer-follower
-```
-
-**Follower service (global, across worker nodes):**
-
-```yaml
-services:
-  kontainer-follower:
-    image: prvious/kontainer-agent
-    deploy:
-      mode: global
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    configs:
-      - source: kontainer-follower-config
-        target: /etc/kontainer/kontainer.yml
-    secrets:
-      - internal_secret
-
-configs:
-  kontainer-follower-config:
-    file: ./kontainer-follower.yml
-
-secrets:
-  internal_secret:
-    external: true
-```
-
-Example `kontainer-follower.yml`:
-
-```yaml
-role: follower
-cluster:
-  internal_secret: file:/run/secrets/internal_secret
-```
-
-## Access Control
-
-Login can optionally be restricted by GitHub username and/or organization membership:
-
-```yaml
-github:
-  allowed_users: [alice, bob]
-  allowed_orgs: [my-org, my-other-org]
-```
-
-Matching is **case-insensitive**.
-
-| `allowed_users` | `allowed_orgs` | Who can log in |
-|---|---|---|
-| unset | unset | All GitHub users (default) |
-| set | unset | Only listed usernames |
-| unset | set | Only members of listed orgs |
-| set | set | Only listed usernames **who are also** members of listed orgs |
-
-- `allowed_orgs` requires the `read:org` OAuth scope (added automatically when configured)
-
-Non-matching users receive a `403 Forbidden` response during the OAuth callback.
-
-## Development
+Run from the repository root:
 
 ```bash
-pnpm dev          # Start DinD cluster + leader + 2 followers + app
-pnpm dev:app      # Tauri desktop app only
-pnpm dev:agent    # Go agent only
-pnpm build        # Build everything
-pnpm build:app    # Build desktop app
-pnpm build:agent  # Build Go agent
-pnpm lint         # Lint frontend
-pnpm fmt          # Format frontend (oxfmt)
+pnpm dev           # Start the dev cluster, leader, followers, and desktop app
+pnpm dev:cluster   # Start only the local Docker-in-Docker Swarm cluster
+pnpm dev:app       # Start only the Tauri desktop app
+pnpm dev:agent     # Start only the Go agent
+pnpm build         # Build app and agent
+pnpm lint          # Lint the frontend
+pnpm fmt           # Format the frontend
+pnpm types         # Run frontend type checking
+pnpm down          # Tear down the local dev cluster
+pnpm reset         # Tear down the cluster and clear local agent databases
 ```
 
-Dev environment spins up a 3-node Docker-in-Docker Swarm cluster (1 manager + 2 workers) with seed stacks.
+`pnpm dev` bootstraps a local 3-node Docker-in-Docker Swarm cluster for development.
 
-### Running Tests
+## Testing
 
 ```bash
-pnpm --filter app test         # Vitest (frontend)
-go test -C agent ./...         # Go agent tests
-cargo test --manifest-path app/src-tauri/Cargo.toml  # Rust tests
+pnpm --filter app test
+go test -C server ./...
+cargo test --manifest-path app/src-tauri/Cargo.toml
 ```
 
-## Supported Orchestrators
+## Notes
 
-- Docker Swarm (active)
-- Docker Compose (planned)
-- Kubernetes (planned)
+- The desktop app talks to the agent API; the agent is not a raw Docker socket proxy.
+- In multi-node setups, the leader discovers and coordinates follower agents.
+- Keep long-form planning and framework-specific guidance in `docs/` and skills rather than expanding this README.
