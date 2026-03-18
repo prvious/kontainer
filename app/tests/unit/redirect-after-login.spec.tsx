@@ -24,7 +24,7 @@ function LoginComponent() {
     return (
         <div>
             <span data-testid='location'>login</span>
-            <button onClick={() => login("http://localhost:8080")}>Login</button>
+            <button onClick={() => login("http://localhost:3000")}>Login</button>
         </div>
     );
 }

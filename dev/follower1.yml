@@ -1,6 +1,0 @@
-port: "8081"
-role: follower
-dev: true
-
-cluster:
-  internal_secret: dev-secret

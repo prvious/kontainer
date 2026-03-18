@@ -23,11 +23,11 @@ describe("useAgentStatus", () => {
         });
 
         const onAuthFailure = vi.fn();
-        renderHook(() => useAgentStatus("http://localhost:8080", "my-jwt", onAuthFailure), { wrapper: createWrapper() });
+        renderHook(() => useAgentStatus("http://localhost:3000", "my-jwt", onAuthFailure), { wrapper: createWrapper() });
 
         await waitFor(() => {
             expect(invoke).toHaveBeenCalledWith("check_auth", {
-                url: "http://localhost:8080",
+                url: "http://localhost:3000",
                 token: "my-jwt",
             });
         });
@@ -39,7 +39,7 @@ describe("useAgentStatus", () => {
         vi.mocked(invoke).mockRejectedValue("auth_failed");
 
         const onAuthFailure = vi.fn();
-        renderHook(() => useAgentStatus("http://localhost:8080", "expired-jwt", onAuthFailure), { wrapper: createWrapper() });
+        renderHook(() => useAgentStatus("http://localhost:3000", "expired-jwt", onAuthFailure), { wrapper: createWrapper() });
 
         await waitFor(() => {
             expect(onAuthFailure).toHaveBeenCalledTimes(1);
@@ -47,10 +47,10 @@ describe("useAgentStatus", () => {
     });
 
     it("does NOT call onAuthFailure on non-auth errors", async () => {
-        vi.mocked(invoke).mockRejectedValue("Could not reach agent at http://localhost:8080: timeout");
+        vi.mocked(invoke).mockRejectedValue("Could not reach agent at http://localhost:3000: timeout");
 
         const onAuthFailure = vi.fn();
-        renderHook(() => useAgentStatus("http://localhost:8080", "my-jwt", onAuthFailure), { wrapper: createWrapper() });
+        renderHook(() => useAgentStatus("http://localhost:3000", "my-jwt", onAuthFailure), { wrapper: createWrapper() });
 
         await waitFor(() => {
             expect(invoke).toHaveBeenCalledWith("check_auth", expect.anything());
@@ -71,7 +71,7 @@ describe("useAgentStatus", () => {
 
     it("is disabled when token is null", async () => {
         const onAuthFailure = vi.fn();
-        renderHook(() => useAgentStatus("http://localhost:8080", null, onAuthFailure), { wrapper: createWrapper() });
+        renderHook(() => useAgentStatus("http://localhost:3000", null, onAuthFailure), { wrapper: createWrapper() });
 
         await new Promise((r) => setTimeout(r, 50));
 

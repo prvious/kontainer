@@ -20,7 +20,7 @@ const mockAuth: AuthContextValue = {
     user: { id: "1", name: "Test", email: "test@test.com", avatarUrl: "", provider: "github" },
     token: "test-jwt",
     expiresAt: Math.floor(Date.now() / 1000) + 9999,
-    agentUrl: "http://localhost:8080",
+    agentUrl: "http://localhost:3000",
     isLoading: false,
     login: vi.fn(),
     logout: vi.fn(),
@@ -169,7 +169,7 @@ describe("NodeActions", () => {
 
         await waitFor(() => {
             expect(invoke).toHaveBeenCalledWith("update_node_availability", {
-                url: "http://localhost:8080",
+                url: "http://localhost:3000",
                 token: "test-jwt",
                 nodeId: "node2",
                 availability: "active",
@@ -193,7 +193,7 @@ describe("NodeActions", () => {
 
         await waitFor(() => {
             expect(invoke).toHaveBeenCalledWith("update_node_role", {
-                url: "http://localhost:8080",
+                url: "http://localhost:3000",
                 token: "test-jwt",
                 nodeId: "node1",
                 role: "manager",

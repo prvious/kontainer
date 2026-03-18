@@ -21,7 +21,7 @@ const mockAuth: AuthContextValue = {
     user: { id: "1", name: "Test", email: "test@test.com", avatarUrl: "", provider: "github" },
     token: "test-jwt",
     expiresAt: Math.floor(Date.now() / 1000) + 9999,
-    agentUrl: "http://localhost:8080",
+    agentUrl: "http://localhost:3000",
     isLoading: false,
     login: vi.fn(),
     logout: vi.fn(),
@@ -97,7 +97,7 @@ describe("useTasks", () => {
 
         expect(result.current.data).toEqual(sampleTasks);
         expect(invoke).toHaveBeenCalledWith("list_tasks", {
-            url: "http://localhost:8080",
+            url: "http://localhost:3000",
             token: "test-jwt",
         });
     });

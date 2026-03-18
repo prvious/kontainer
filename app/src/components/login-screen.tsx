@@ -47,7 +47,7 @@ export function LoginScreen() {
     const { login } = useAuth();
     const navigate = useNavigate();
     const { redirect: redirectTo } = routeApi.useSearch();
-    const [agentUrl, setAgentUrl] = useState("http://localhost:8080");
+    const [agentUrl, setAgentUrl] = useState("http://localhost:3000");
     const [status, setStatus] = useState<ConnectionStatus>("idle");
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
     const [providers, setProviders] = useState<string[]>([]);
@@ -142,7 +142,7 @@ export function LoginScreen() {
                             <Input
                                 id='cluster-url'
                                 type='url'
-                                placeholder='http://localhost:8080'
+                                placeholder='http://localhost:3000'
                                 value={agentUrl}
                                 onChange={handleUrlChange}
                                 required

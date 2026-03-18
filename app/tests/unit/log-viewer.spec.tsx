@@ -62,7 +62,7 @@ const mockAuth: AuthContextValue = {
     user: { id: "1", name: "Test", email: "test@test.com", avatarUrl: "", provider: "github" },
     token: "test-jwt-token",
     expiresAt: Math.floor(Date.now() / 1000) + 9999,
-    agentUrl: "http://localhost:8080",
+    agentUrl: "http://localhost:3000",
     isLoading: false,
     login: vi.fn(),
     logout: vi.fn(),
@@ -119,7 +119,7 @@ describe("LogViewer", () => {
         });
 
         const ws = wsInstances[wsInstances.length - 1];
-        expect(ws.url).toContain("ws://localhost:8080/api/services/svc-123/logs");
+        expect(ws.url).toContain("ws://localhost:3000/api/services/svc-123/logs");
         expect(ws.url).toContain("token=test-jwt-token");
         expect(ws.url).toContain("tail=100");
         expect(ws.url).toContain("timestamps=true");

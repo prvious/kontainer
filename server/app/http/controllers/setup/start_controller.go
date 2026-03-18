@@ -36,7 +36,7 @@ func (c *StartController) Handle(ctx contractshttp.Context) contractshttp.Respon
 			[]byte(renderErrorHTML("Invalid or expired setup token.")))
 	}
 
-	agentURL := facades.Config().GetString("cluster.agent_url", "http://localhost:8080")
+	agentURL := facades.Config().GetString("cluster.agent_url", "http://localhost:3000")
 
 	appName := "Kontainer"
 	if org != "" {

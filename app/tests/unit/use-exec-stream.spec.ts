@@ -6,7 +6,7 @@ vi.mock("@/hooks/use-auth", () => ({
         user: null,
         token: "test-token",
         expiresAt: null,
-        agentUrl: "http://localhost:8080",
+        agentUrl: "http://localhost:3000",
         isLoading: false,
         profiles: [],
         activeProfileId: null,

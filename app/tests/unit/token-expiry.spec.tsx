@@ -35,7 +35,7 @@ describe("Token Expiry on Mount", () => {
                 {
                     id: "p1",
                     label: "Default",
-                    agentUrl: "http://localhost:8080",
+                    agentUrl: "http://localhost:3000",
                     userId: "123",
                     userName: "Jane Doe",
                     userEmail: "jane@example.com",
@@ -77,7 +77,7 @@ describe("Token Expiry on Mount", () => {
                 {
                     id: "p1",
                     label: "Default",
-                    agentUrl: "http://localhost:8080",
+                    agentUrl: "http://localhost:3000",
                     userId: "123",
                     userName: "Jane Doe",
                     userEmail: "jane@example.com",

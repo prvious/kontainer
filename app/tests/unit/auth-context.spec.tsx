@@ -38,7 +38,7 @@ function TestConsumer() {
             <span data-testid='loginError'>{loginError ?? "none"}</span>
             <span data-testid='profileCount'>{profiles.length}</span>
             <span data-testid='activeProfileId'>{activeProfileId ?? "none"}</span>
-            <button onClick={() => login("http://localhost:8080").catch((e) => setLoginError(typeof e === "string" ? e : e.message))}>Login</button>
+            <button onClick={() => login("http://localhost:3000").catch((e) => setLoginError(typeof e === "string" ? e : e.message))}>Login</button>
             <button onClick={() => logout()}>Logout</button>
             <button data-testid='switch' onClick={() => switchProfile("profile-2")}>
                 Switch
@@ -115,8 +115,8 @@ describe("AuthProvider", () => {
             screen.getByText("Login").click();
         });
 
-        expect(invoke).toHaveBeenCalledWith("auth_listen", { url: "http://localhost:8080" });
-        expect(openUrl).toHaveBeenCalledWith("http://localhost:8080/auth/github?session=abc123");
+        expect(invoke).toHaveBeenCalledWith("auth_listen", { url: "http://localhost:3000" });
+        expect(openUrl).toHaveBeenCalledWith("http://localhost:3000/auth/github?session=abc123");
 
         // Clean up: deliver token so login() resolves
         await act(async () => {
@@ -130,7 +130,7 @@ describe("AuthProvider", () => {
                 {
                     id: "test-uuid",
                     label: "Default",
-                    agentUrl: "http://localhost:8080",
+                    agentUrl: "http://localhost:3000",
                     userId: "123",
                     userName: "Jane Doe",
                     userEmail: "jane@example.com",
@@ -165,7 +165,7 @@ describe("AuthProvider", () => {
         expect(invoke).toHaveBeenCalledWith("parse_auth_token", {
             token: "fake.jwt.token",
         });
-        expect(invoke).toHaveBeenCalledWith("save_profile", expect.objectContaining({ input: expect.objectContaining({ agentUrl: "http://localhost:8080" }) }));
+        expect(invoke).toHaveBeenCalledWith("save_profile", expect.objectContaining({ input: expect.objectContaining({ agentUrl: "http://localhost:3000" }) }));
         expect(screen.getByTestId("user")).toHaveTextContent("Jane Doe");
         expect(screen.getByTestId("token")).toHaveTextContent("fake.jwt.token");
         expect(screen.getByTestId("expiresAt")).toHaveTextContent("9999999999");
@@ -179,7 +179,7 @@ describe("AuthProvider", () => {
                 {
                     id: "test-uuid",
                     label: "Default",
-                    agentUrl: "http://localhost:8080",
+                    agentUrl: "http://localhost:3000",
                     userId: "123",
                     userName: "Jane Doe",
                     userEmail: "jane@example.com",

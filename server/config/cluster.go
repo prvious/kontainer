@@ -11,6 +11,6 @@ func init() {
 		"secret":           config.Env("CLUSTER_SECRET", ""),
 		"follower_service": config.Env("CLUSTER_FOLLOWER_SERVICE", "kontainer-agent"),
 		"dev_followers":    config.Env("CLUSTER_DEV_FOLLOWERS", ""),
-		"agent_url":        config.Env("AGENT_URL", "http://localhost:8080"),
+		"agent_url":        config.Env("AGENT_URL", "http://localhost:3000"),
 	})
 }

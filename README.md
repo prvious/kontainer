@@ -66,8 +66,11 @@ Run from the repository root:
 pnpm dev           # Start the dev cluster, leader, followers, and desktop app
 pnpm dev:cluster   # Start only the local Docker-in-Docker Swarm cluster
 pnpm dev:app       # Start only the Tauri desktop app
-pnpm dev:agent     # Start only the Go agent
+pnpm dev:agent     # Start only the Goravel leader agent (defaults to http://localhost:3000)
+pnpm artisan list  # Run Goravel artisan commands from the server workspace
 pnpm build         # Build app and agent
+pnpm test:agent    # Run Go agent tests
+pnpm vet:agent     # Run Go agent vet checks
 pnpm lint          # Lint the frontend
 pnpm fmt           # Format the frontend
 pnpm types         # Run frontend type checking
@@ -77,11 +80,18 @@ pnpm reset         # Tear down the cluster and clear local agent databases
 
 `pnpm dev` bootstraps a local 3-node Docker-in-Docker Swarm cluster for development.
 
+The checked-in local server defaults in `server/.env.example` use:
+
+- leader HTTP on `http://localhost:3000`
+- follower HTTP on `http://localhost:3001` and `http://localhost:3002` via `dev/Procfile`
+- follower discovery through `CLUSTER_DEV_FOLLOWERS`
+
 ## Testing
 
 ```bash
 pnpm --filter app test
-go test -C server ./...
+pnpm test:agent
+pnpm vet:agent
 cargo test --manifest-path app/src-tauri/Cargo.toml
 ```
 
