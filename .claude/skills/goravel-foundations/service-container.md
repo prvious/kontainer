@@ -138,6 +138,70 @@ func (r *ServiceProvider) Register(app foundation.Application) {
 
 Never resolve other services inside `Register()` -- they may not be registered yet. Use `Boot()` for any code that needs to call `Make*` methods.
 
+## Contextual Binding
+
+Goravel v1.17 does NOT support contextual binding (binding different implementations based on which consumer receives the dependency). Unlike Laravel's `when()->needs()->give()` chain, there is no equivalent API on the Goravel container.
+
+**Workaround:** Register distinct keys and resolve the correct one explicitly in each consumer's factory closure:
+
+```go
+app.Singleton("report.filesystem", func(app foundation.Application) (any, error) {
+    return NewLocalFilesystem("/reports"), nil
+})
+
+app.Singleton("photo.filesystem", func(app foundation.Application) (any, error) {
+    return NewS3Filesystem(app.MakeConfig()), nil
+})
+
+// In the consumer's binding, resolve the specific key:
+app.Singleton("report.service", func(app foundation.Application) (any, error) {
+    fs, _ := app.Make("report.filesystem")
+    return NewReportService(fs.(Filesystem)), nil
+})
+```
+
+## Tagging
+
+Goravel v1.17 does NOT provide a `Tag()` / `Tagged()` API to group related bindings under a tag and resolve them as a set (as Laravel does).
+
+**Workaround:** Maintain a slice of keys manually and resolve them in a loop:
+
+```go
+var reportKeys = []string{"report.csv", "report.pdf", "report.excel"}
+
+// Register each
+for _, key := range reportKeys {
+    k := key // capture
+    app.Singleton(k, func(app foundation.Application) (any, error) {
+        return buildReport(k, app.MakeConfig()), nil
+    })
+}
+
+// Resolve all tagged reports
+func resolveReports(app foundation.Application) []Reporter {
+    var reports []Reporter
+    for _, key := range reportKeys {
+        r, _ := app.Make(key)
+        reports = append(reports, r.(Reporter))
+    }
+    return reports
+}
+```
+
+## Method Injection
+
+Goravel v1.17 does NOT support automatic method injection (auto-resolving method parameters from the container). Dependencies are resolved at the call site, not injected into method signatures.
+
+In HTTP controllers, the `http.Context` is passed directly -- it is not resolved from the container. For other dependencies, resolve them in the provider's `Boot()` or at the point of use:
+
+```go
+func (r *ServiceProvider) Boot(app foundation.Application) {
+    cfg := app.MakeConfig()
+    cache := app.MakeCache()
+    // Pass explicitly to wherever they're needed
+}
+```
+
 ## Binding Lifecycle Summary
 
 | Method | New instance per resolve? | Accepts params? |

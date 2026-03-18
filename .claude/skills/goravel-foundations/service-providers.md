@@ -160,6 +160,36 @@ foundation.Setup().
     Create()
 ```
 
+## Deferred Providers
+
+Goravel v1.17 does NOT support deferred (lazy) providers -- providers that are only loaded when their binding is actually resolved. All providers listed in `bootstrap/providers.go` have their `Register()` and `Boot()` methods called eagerly at startup.
+
+**Workaround:** Keep expensive initialization inside the binding closure rather than in `Register()` or `Boot()`. The closure runs lazily on first `Make()` call when using `Singleton`:
+
+```go
+func (r *ServiceProvider) Register(app foundation.Application) {
+    // The closure body runs only when "heavy.service" is first resolved,
+    // not at boot time. This achieves lazy initialization without deferred providers.
+    app.Singleton("heavy.service", func(app foundation.Application) (any, error) {
+        return NewExpensiveService(app.MakeConfig()), nil // runs on first Make()
+    })
+}
+```
+
+If the provider itself is expensive to register (rare), extract it into a separate binary or feature-flag it with a config guard in `Providers()`:
+
+```go
+func Providers() []foundation.ServiceProvider {
+    providers := []foundation.ServiceProvider{
+        &providers.AppServiceProvider{},
+    }
+    if os.Getenv("ENABLE_HEAVY_FEATURE") == "true" {
+        providers = append(providers, &providers.HeavyServiceProvider{})
+    }
+    return providers
+}
+```
+
 ## Lifecycle Summary
 
 1. `foundation.Setup()` initializes the app.

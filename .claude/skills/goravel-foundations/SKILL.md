@@ -7,6 +7,8 @@ description: Use when working with Goravel service container, service providers,
 
 Goravel's foundation layer manages the application lifecycle: bootstrapping, service registration, dependency resolution, and configuration. All framework and application services flow through the service container and are wired together via service providers.
 
+**Version:** All patterns target Goravel v1.17.
+
 ## Request Lifecycle
 
 1. `main.go` calls `bootstrap.Boot()` then `app.Wait()` to keep the process alive.
