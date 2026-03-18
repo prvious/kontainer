@@ -71,6 +71,52 @@ handlers/
 - Keep dependencies minimal — prefer stdlib where reasonable
 - Go agent is mostly stateless — the only exception is an embedded SQLite database (`modernc.org/sqlite`, pure Go) used by the leader to store time-series node metrics with automatic retention-based pruning. All other state is in-memory only.
 - Desktop app stores session data locally via `tauri-plugin-store` (`session.json`)
+- You must follow all existing code conventions. When creating or editing a file, check sibling files for structure, approach, and naming.
+- Use descriptive names for variables and methods. For example, `isRegisteredForDiscounts`, not `discount()`.
+- Check for existing components/services to reuse before writing a new one.
+- Do not create new top-level directories without approval.
+- Do not change dependencies (go.mod, package.json, Cargo.toml) without approval.
+
+## Go Agent Conventions (Goravel)
+
+### Scaffolding
+
+- Use `go run . artisan make:*` commands to create new files (migrations, controllers, models, etc.). List available commands with `go run . artisan list` and check parameters with `go run . artisan [command] --help`.
+- Pass `--no-interaction` to artisan commands when running non-interactively.
+
+### Database & ORM
+
+- Use Goravel ORM models and relationships before resorting to raw queries. Prefer `facades.Orm().Query()` over `facades.DB()`.
+- Generate code that prevents N+1 query problems by using eager loading (`With()`).
+- Use the query builder (`facades.DB()`) only for complex operations that can't be expressed with ORM methods.
+- When modifying a column in a migration, include all previously defined attributes — otherwise they will be dropped.
+
+### Model Creation
+
+- When creating new models, also create useful factories and seeders. Check available options with `go run . artisan make:model --help`.
+
+### Validation
+
+- Create dedicated form request structs for validation rather than inline validation in controllers. Include both rules and custom error messages.
+- Check sibling form requests to follow existing conventions (array vs string based rules).
+
+### Authentication & Authorization
+
+- Use Goravel's built-in auth features (`facades.Auth()`, guards, policies) — see the goravel-security skill.
+
+### Queues
+
+- Use queued jobs for time-consuming operations. Implement the `queue.Job` interface and dispatch via `facades.Queue()`.
+
+### Configuration
+
+- Use environment variables only in configuration files (`config/*.go`) — never use `os.Getenv()` directly in application code. Always use `facades.Config().GetString("app.name")`, not `os.Getenv("APP_NAME")`.
+
+### Go Formatting & Quality
+
+- Run `gofmt` on all modified Go files before committing.
+- Run `go vet ./...` to catch common issues.
+- Run `go test -C server ./...` to verify tests pass.
 
 ## Repository Structure
 
@@ -369,7 +415,10 @@ expect(getAll().map((w) => w.label)).toEqual(['main', 'second', 'third']);
 });
 </code-snippet>
 
-### Testing
+# Test Enforcement
+
+- Every change must be programmatically tested. Write a new test or update an existing test, then run the affected tests to make sure they pass.
+- Run the minimum number of tests needed to ensure code quality and speed.
 
 ```bash
 # Run Vitest tests
@@ -393,7 +442,16 @@ cargo test
 go run .
 go build -o bin/agent .
 go test ./...
+go vet ./...
 ```
+
+### Go Test Rules
+
+- Every Go change must be tested. Write a new test or update an existing test, then run the affected tests.
+- Run `go test -C server ./...` to run all agent tests, or `go test -C server ./app/services/docker/...` to target a specific package.
+- You must not remove any test files without approval. Tests are core to the application.
+- When creating models for tests, use factories. Check if the factory has custom states before manually setting up models.
+- Most tests should be feature/integration tests. Use unit tests for pure logic only.
 
 ## Current Architecture
 
