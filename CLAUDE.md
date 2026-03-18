@@ -506,3 +506,9 @@ Both frontend and backend use path aliases:
 - `src-tauri/tauri.conf.json`: Tauri app config (window size, permissions, etc.)
 - `src-tauri/Cargo.toml`: Rust dependencies
 - `components.json`: shadcn/ui configuration
+
+## Goravel Skills
+
+Goravel skills are available at `.claude/skills/goravel-*/`. Claude invokes them based on their descriptions when working on server code. For deeper API details, each skill's "Reference Files" section points to supporting files within the skill directory.
+
+When working on the Go agent, these skills provide idiomatic Goravel patterns. Project-specific conventions (action-per-file, domain grouping, etc.) are defined above in this file and take precedence.
