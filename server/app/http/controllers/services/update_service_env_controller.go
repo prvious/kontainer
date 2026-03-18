@@ -18,7 +18,7 @@ func NewUpdateServiceEnvController(action *serviceActions.UpdateServiceEnvAction
 }
 
 type updateEnvRequest struct {
-	Env []string `json:"env"`
+	Env []docker.EnvVar `json:"env"`
 }
 
 func (c *UpdateServiceEnvController) Handle(ctx http.Context) http.Response {

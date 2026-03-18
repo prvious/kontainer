@@ -17,9 +17,15 @@ func (s *SwarmOrchestrator) ListConfigs(ctx context.Context) ([]docker.Config, e
 
 	items := make([]docker.Config, 0, len(configs))
 	for _, c := range configs {
+		labels := c.Spec.Labels
+		if labels == nil {
+			labels = make(map[string]string)
+		}
 		items = append(items, docker.Config{
 			ID:        c.ID,
 			Name:      c.Spec.Name,
+			Labels:    labels,
+			DataSize:  int64(len(c.Spec.Data)),
 			CreatedAt: docker.FormatTime(c.CreatedAt),
 			UpdatedAt: docker.FormatTime(c.UpdatedAt),
 		})
@@ -46,10 +52,17 @@ func (s *SwarmOrchestrator) InspectConfig(ctx context.Context, id string) (*dock
 		return nil, err
 	}
 
+	labels := cfg.Spec.Labels
+	if labels == nil {
+		labels = make(map[string]string)
+	}
+
 	return &docker.ConfigDetail{
 		Config: docker.Config{
 			ID:        cfg.ID,
 			Name:      cfg.Spec.Name,
+			Labels:    labels,
+			DataSize:  int64(len(cfg.Spec.Data)),
 			CreatedAt: docker.FormatTime(cfg.CreatedAt),
 			UpdatedAt: docker.FormatTime(cfg.UpdatedAt),
 		},

@@ -12,6 +12,16 @@ import (
 	"github.com/prvious/kontainer/server/app/services/docker"
 )
 
+// parseEnvVars splits "KEY=VALUE" env strings into structured EnvVar slices.
+func parseEnvVars(envs []string) []docker.EnvVar {
+	vars := make([]docker.EnvVar, 0, len(envs))
+	for _, e := range envs {
+		key, value, _ := strings.Cut(e, "=")
+		vars = append(vars, docker.EnvVar{Key: key, Value: value})
+	}
+	return vars
+}
+
 func (s *SwarmOrchestrator) ListServices(ctx context.Context, filters docker.ServiceFilters) ([]docker.Service, error) {
 	opts := types.ServiceListOptions{}
 	if filters.Stack != "" {
@@ -41,9 +51,12 @@ func (s *SwarmOrchestrator) ListServices(ctx context.Context, filters docker.Ser
 
 	items := make([]docker.Service, 0, len(svcs))
 	for _, svc := range svcs {
-		img := svc.Spec.TaskTemplate.ContainerSpec.Image
-		if idx := strings.Index(img, "@sha256:"); idx != -1 {
-			img = img[:idx]
+		var img string
+		if svc.Spec.TaskTemplate.ContainerSpec != nil {
+			img = svc.Spec.TaskTemplate.ContainerSpec.Image
+			if idx := strings.Index(img, "@sha256:"); idx != -1 {
+				img = img[:idx]
+			}
 		}
 
 		var desired int
@@ -73,45 +86,46 @@ func (s *SwarmOrchestrator) InspectService(ctx context.Context, id string) (*doc
 		return nil, err
 	}
 
-	img := svc.Spec.TaskTemplate.ContainerSpec.Image
-	if idx := strings.Index(img, "@sha256:"); idx != -1 {
-		img = img[:idx]
-	}
-
-	var desired int
-	if svc.Spec.Mode.Replicated != nil && svc.Spec.Mode.Replicated.Replicas != nil {
-		desired = int(*svc.Spec.Mode.Replicated.Replicas)
-	} else if svc.Spec.Mode.Global != nil {
-		desired = -1
-	}
-
-	// Count running tasks
-	taskFilter := dfilters.NewArgs()
-	taskFilter.Add("service", id)
-	taskFilter.Add("desired-state", "running")
-	tasks, err := s.client.TaskList(ctx, types.TaskListOptions{Filters: taskFilter})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list tasks for service %s: %w", id, err)
-	}
-	running := 0
-	for _, t := range tasks {
-		if t.Status.State == dockerswarm.TaskStateRunning {
-			running++
+	var img string
+	var envVars []docker.EnvVar
+	if svc.Spec.TaskTemplate.ContainerSpec != nil {
+		img = svc.Spec.TaskTemplate.ContainerSpec.Image
+		if idx := strings.Index(img, "@sha256:"); idx != -1 {
+			img = img[:idx]
 		}
+		envVars = parseEnvVars(svc.Spec.TaskTemplate.ContainerSpec.Env)
+	}
+	if envVars == nil {
+		envVars = make([]docker.EnvVar, 0)
+	}
+
+	mode := "replicated"
+	var replicas *int
+	if svc.Spec.Mode.Replicated != nil && svc.Spec.Mode.Replicated.Replicas != nil {
+		r := int(*svc.Spec.Mode.Replicated.Replicas)
+		replicas = &r
+	} else if svc.Spec.Mode.Global != nil {
+		mode = "global"
+	}
+
+	labels := svc.Spec.Labels
+	if labels == nil {
+		labels = make(map[string]string)
 	}
 
 	detail := &docker.ServiceDetail{
-		Service: docker.Service{
-			ID:              svc.ID,
-			Name:            svc.Spec.Name,
-			Image:           img,
-			Stack:           svc.Spec.Labels["com.docker.stack.namespace"],
-			ReplicasRunning: running,
-			ReplicasDesired: desired,
-			UpdatedAt:       docker.FormatTime(svc.UpdatedAt),
-		},
-		Env:    svc.Spec.TaskTemplate.ContainerSpec.Env,
-		Labels: svc.Spec.Labels,
+		ID:        svc.ID,
+		Name:      svc.Spec.Name,
+		Image:     img,
+		Stack:     svc.Spec.Labels["com.docker.stack.namespace"],
+		Mode:      mode,
+		Replicas:  replicas,
+		CreatedAt: docker.FormatTime(svc.CreatedAt),
+		UpdatedAt: docker.FormatTime(svc.UpdatedAt),
+		Env:       envVars,
+		Ports:     make([]docker.PortConfig, 0),
+		Mounts:    make([]docker.Mount, 0),
+		Labels:    labels,
 	}
 
 	for _, p := range svc.Endpoint.Ports {
@@ -123,16 +137,46 @@ func (s *SwarmOrchestrator) InspectService(ctx context.Context, id string) (*doc
 		})
 	}
 
-	for _, m := range svc.Spec.TaskTemplate.ContainerSpec.Mounts {
-		detail.Mounts = append(detail.Mounts, docker.Mount{
-			Type:   string(m.Type),
-			Source: m.Source,
-			Target: m.Target,
-		})
+	if svc.Spec.TaskTemplate.ContainerSpec != nil {
+		for _, m := range svc.Spec.TaskTemplate.ContainerSpec.Mounts {
+			detail.Mounts = append(detail.Mounts, docker.Mount{
+				Type:     string(m.Type),
+				Source:   m.Source,
+				Target:   m.Target,
+				ReadOnly: m.ReadOnly,
+			})
+		}
 	}
 
 	if svc.Spec.TaskTemplate.Placement != nil {
 		detail.Constraints = svc.Spec.TaskTemplate.Placement.Constraints
+	}
+	if detail.Constraints == nil {
+		detail.Constraints = make([]string, 0)
+	}
+
+	// Populate update status if present
+	if svc.UpdateStatus != nil && svc.UpdateStatus.State != "" {
+		us := &docker.UpdateStatusInfo{
+			State:   string(svc.UpdateStatus.State),
+			Message: svc.UpdateStatus.Message,
+		}
+		if svc.UpdateStatus.StartedAt != nil {
+			us.StartedAt = docker.FormatTime(*svc.UpdateStatus.StartedAt)
+		}
+		if svc.UpdateStatus.CompletedAt != nil {
+			us.CompletedAt = docker.FormatTime(*svc.UpdateStatus.CompletedAt)
+		}
+		detail.UpdateStatus = us
+	}
+
+	// Populate previous image if available
+	if svc.PreviousSpec != nil && svc.PreviousSpec.TaskTemplate.ContainerSpec != nil {
+		prevImg := svc.PreviousSpec.TaskTemplate.ContainerSpec.Image
+		if idx := strings.Index(prevImg, "@sha256:"); idx != -1 {
+			prevImg = prevImg[:idx]
+		}
+		detail.PreviousImage = prevImg
 	}
 
 	return detail, nil
@@ -179,13 +223,17 @@ func (s *SwarmOrchestrator) RollbackService(ctx context.Context, id string) erro
 	return err
 }
 
-func (s *SwarmOrchestrator) UpdateServiceEnv(ctx context.Context, id string, env []string) error {
+func (s *SwarmOrchestrator) UpdateServiceEnv(ctx context.Context, id string, env []docker.EnvVar) error {
 	svc, _, err := s.client.ServiceInspectWithRaw(ctx, id, types.ServiceInspectOptions{})
 	if err != nil {
 		return err
 	}
 
-	svc.Spec.TaskTemplate.ContainerSpec.Env = env
+	flat := make([]string, 0, len(env))
+	for _, e := range env {
+		flat = append(flat, e.Key+"="+e.Value)
+	}
+	svc.Spec.TaskTemplate.ContainerSpec.Env = flat
 	_, err = s.client.ServiceUpdate(ctx, id, svc.Version, svc.Spec, dockerswarm.ServiceUpdateOptions{})
 	return err
 }

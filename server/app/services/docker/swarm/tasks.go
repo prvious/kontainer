@@ -27,6 +27,28 @@ func (s *SwarmOrchestrator) ListTasks(ctx context.Context, filters docker.TaskFi
 		return nil, err
 	}
 
+	// Build service name lookup
+	serviceNames := make(map[string]string)
+	svcs, svcErr := s.client.ServiceList(ctx, types.ServiceListOptions{})
+	if svcErr != nil {
+		log.Printf("ListTasks: failed to list services for name lookup: %v", svcErr)
+	} else {
+		for _, svc := range svcs {
+			serviceNames[svc.ID] = svc.Spec.Name
+		}
+	}
+
+	// Build node name lookup
+	nodeNames := make(map[string]string)
+	nodes, nodeErr := s.client.NodeList(ctx, types.NodeListOptions{})
+	if nodeErr != nil {
+		log.Printf("ListTasks: failed to list nodes for name lookup: %v", nodeErr)
+	} else {
+		for _, n := range nodes {
+			nodeNames[n.ID] = n.Description.Hostname
+		}
+	}
+
 	items := make([]docker.Task, 0, len(tasks))
 	for _, t := range tasks {
 		img := ""
@@ -38,20 +60,40 @@ func (s *SwarmOrchestrator) ListTasks(ctx context.Context, filters docker.TaskFi
 		}
 
 		containerID := ""
+		var exitCode *int
 		if t.Status.ContainerStatus != nil {
 			containerID = t.Status.ContainerStatus.ContainerID
+			if t.Status.State == dockerswarm.TaskStateComplete ||
+				t.Status.State == dockerswarm.TaskStateFailed ||
+				t.Status.State == dockerswarm.TaskStateShutdown ||
+				t.Status.State == dockerswarm.TaskStateRejected {
+				ec := t.Status.ContainerStatus.ExitCode
+				exitCode = &ec
+			}
+		}
+
+		svcName := serviceNames[t.ServiceID]
+		if svcName == "" {
+			svcName = t.ServiceID
+		}
+		nodeName := nodeNames[t.NodeID]
+		if nodeName == "" {
+			nodeName = t.NodeID
 		}
 
 		items = append(items, docker.Task{
 			ID:           t.ID,
 			ServiceID:    t.ServiceID,
+			ServiceName:  svcName,
 			NodeID:       t.NodeID,
-			Status:       string(t.Status.State),
+			NodeName:     nodeName,
+			State:        string(t.Status.State),
 			DesiredState: string(t.DesiredState),
 			Timestamp:    docker.FormatTime(t.Status.Timestamp),
 			ContainerID:  containerID,
 			Image:        img,
 			Slot:         t.Slot,
+			ExitCode:     exitCode,
 			Error:        t.Status.Err,
 		})
 	}
@@ -66,16 +108,60 @@ func (s *SwarmOrchestrator) InspectTask(ctx context.Context, id string) (*docker
 	}
 
 	img := ""
+	var envVars []docker.EnvVar
+	var mounts []docker.Mount
 	if t.Spec.ContainerSpec != nil {
 		img = t.Spec.ContainerSpec.Image
 		if idx := strings.Index(img, "@sha256:"); idx != -1 {
 			img = img[:idx]
 		}
+		envVars = parseEnvVars(t.Spec.ContainerSpec.Env)
+		for _, m := range t.Spec.ContainerSpec.Mounts {
+			mounts = append(mounts, docker.Mount{
+				Type:     string(m.Type),
+				Source:   m.Source,
+				Target:   m.Target,
+				ReadOnly: m.ReadOnly,
+			})
+		}
+	}
+	if envVars == nil {
+		envVars = make([]docker.EnvVar, 0)
+	}
+	if mounts == nil {
+		mounts = make([]docker.Mount, 0)
 	}
 
 	containerID := ""
+	pid := 0
+	var exitCode *int
 	if t.Status.ContainerStatus != nil {
 		containerID = t.Status.ContainerStatus.ContainerID
+		pid = int(t.Status.ContainerStatus.PID)
+		if t.Status.State == dockerswarm.TaskStateComplete ||
+			t.Status.State == dockerswarm.TaskStateFailed ||
+			t.Status.State == dockerswarm.TaskStateShutdown ||
+			t.Status.State == dockerswarm.TaskStateRejected {
+			ec := t.Status.ContainerStatus.ExitCode
+			exitCode = &ec
+		}
+	}
+
+	// Build networks info
+	networks := make([]docker.TaskNetworkInfo, 0, len(t.NetworksAttachments))
+	for _, na := range t.NetworksAttachments {
+		name := ""
+		if na.Network.Spec.Name != "" {
+			name = na.Network.Spec.Name
+		}
+		addrs := na.Addresses
+		if addrs == nil {
+			addrs = make([]string, 0)
+		}
+		networks = append(networks, docker.TaskNetworkInfo{
+			Name:      name,
+			Addresses: addrs,
+		})
 	}
 
 	detail := &docker.TaskDetail{
@@ -83,25 +169,38 @@ func (s *SwarmOrchestrator) InspectTask(ctx context.Context, id string) (*docker
 			ID:           t.ID,
 			ServiceID:    t.ServiceID,
 			NodeID:       t.NodeID,
-			Status:       string(t.Status.State),
+			State:        string(t.Status.State),
 			DesiredState: string(t.DesiredState),
 			Timestamp:    docker.FormatTime(t.Status.Timestamp),
 			ContainerID:  containerID,
 			Image:        img,
 			Slot:         t.Slot,
+			ExitCode:     exitCode,
 			Error:        t.Status.Err,
 		},
+		Pid:       pid,
+		CreatedAt: docker.FormatTime(t.CreatedAt),
+		UpdatedAt: docker.FormatTime(t.UpdatedAt),
+		Env:       envVars,
+		Mounts:    mounts,
+		Networks:  networks,
 	}
 
-	// Resolve service name
+	// Resolve service name (fall back to ID if resolution fails)
 	svc, _, svcErr := s.client.ServiceInspectWithRaw(ctx, t.ServiceID, types.ServiceInspectOptions{})
-	if svcErr == nil {
+	if svcErr != nil {
+		log.Printf("InspectTask: failed to resolve service name for %s: %v", t.ServiceID, svcErr)
+		detail.ServiceName = t.ServiceID
+	} else {
 		detail.ServiceName = svc.Spec.Name
 	}
 
-	// Resolve node name
+	// Resolve node name (fall back to ID if resolution fails)
 	node, _, nodeErr := s.client.NodeInspectWithRaw(ctx, t.NodeID)
-	if nodeErr == nil {
+	if nodeErr != nil {
+		log.Printf("InspectTask: failed to resolve node name for %s: %v", t.NodeID, nodeErr)
+		detail.NodeName = t.NodeID
+	} else {
 		detail.NodeName = node.Description.Hostname
 	}
 
@@ -188,4 +287,31 @@ func (s *SwarmOrchestrator) TaskStats(ctx context.Context) ([]docker.ContainerSt
 	}
 
 	return stats, nil
+}
+
+func (s *SwarmOrchestrator) TaskStatsAgg(ctx context.Context) (*docker.TaskStatsAggregate, error) {
+	tasks, err := s.client.TaskList(ctx, types.TaskListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	agg := &docker.TaskStatsAggregate{}
+	for _, t := range tasks {
+		agg.Total++
+		switch t.Status.State {
+		case dockerswarm.TaskStateRunning:
+			agg.Running++
+		case dockerswarm.TaskStateFailed:
+			agg.Failed++
+		case dockerswarm.TaskStatePreparing, dockerswarm.TaskStateAssigned, dockerswarm.TaskStateAccepted, dockerswarm.TaskStatePending, dockerswarm.TaskStateReady, dockerswarm.TaskStateStarting:
+			agg.Preparing++
+		case dockerswarm.TaskStateComplete:
+			agg.Complete++
+		case dockerswarm.TaskStateShutdown, dockerswarm.TaskStateRejected, dockerswarm.TaskStateOrphaned, dockerswarm.TaskStateRemove:
+			agg.Shutdown++
+		}
+		if t.DesiredState == dockerswarm.TaskStateRunning {
+			agg.DesiredRunning++
+		}
+	}
+	return agg, nil
 }

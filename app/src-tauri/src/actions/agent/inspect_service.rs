@@ -51,6 +51,7 @@ pub struct ServiceDetail {
     pub mounts: Vec<MountInfo>,
     pub constraints: Vec<String>,
     pub ports: Vec<PortInfo>,
+    pub labels: std::collections::HashMap<String, String>,
     pub update_status: Option<UpdateStatusInfo>,
     pub previous_image: Option<String>,
 }

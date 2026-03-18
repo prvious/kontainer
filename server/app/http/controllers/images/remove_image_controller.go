@@ -16,7 +16,7 @@ func NewRemoveImageController(action *imageActions.RemoveImageAction) *RemoveIma
 
 func (c *RemoveImageController) Handle(ctx http.Context) http.Response {
 	imageID := ctx.Request().Route("imageID")
-	nodeID := ctx.Request().Query("nodeId", "")
+	nodeID := ctx.Request().Query("node", "")
 	force := ctx.Request().QueryBool("force", false)
 
 	resp, err := c.action.Execute(ctx.Context(), imageID, nodeID, force)

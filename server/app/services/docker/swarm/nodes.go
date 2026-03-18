@@ -24,6 +24,8 @@ func (s *SwarmOrchestrator) ListNodes(ctx context.Context) ([]docker.Node, error
 			ip = n.Status.Addr
 		}
 
+		leader := n.ManagerStatus != nil && n.ManagerStatus.Leader
+
 		items = append(items, docker.Node{
 			ID:            n.ID,
 			Hostname:      n.Description.Hostname,
@@ -31,7 +33,11 @@ func (s *SwarmOrchestrator) ListNodes(ctx context.Context) ([]docker.Node, error
 			Availability:  string(n.Spec.Availability),
 			Role:          string(n.Spec.Role),
 			EngineVersion: n.Description.Engine.EngineVersion,
+			OS:            n.Description.Platform.OS,
+			Architecture:  n.Description.Platform.Architecture,
 			IP:            ip,
+			Leader:        leader,
+			UpdatedAt:     docker.FormatTime(n.UpdatedAt),
 		})
 	}
 
