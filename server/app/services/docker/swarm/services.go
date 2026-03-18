@@ -51,9 +51,12 @@ func (s *SwarmOrchestrator) ListServices(ctx context.Context, filters docker.Ser
 
 	items := make([]docker.Service, 0, len(svcs))
 	for _, svc := range svcs {
-		img := svc.Spec.TaskTemplate.ContainerSpec.Image
-		if idx := strings.Index(img, "@sha256:"); idx != -1 {
-			img = img[:idx]
+		var img string
+		if svc.Spec.TaskTemplate.ContainerSpec != nil {
+			img = svc.Spec.TaskTemplate.ContainerSpec.Image
+			if idx := strings.Index(img, "@sha256:"); idx != -1 {
+				img = img[:idx]
+			}
 		}
 
 		var desired int
@@ -220,13 +223,17 @@ func (s *SwarmOrchestrator) RollbackService(ctx context.Context, id string) erro
 	return err
 }
 
-func (s *SwarmOrchestrator) UpdateServiceEnv(ctx context.Context, id string, env []string) error {
+func (s *SwarmOrchestrator) UpdateServiceEnv(ctx context.Context, id string, env []docker.EnvVar) error {
 	svc, _, err := s.client.ServiceInspectWithRaw(ctx, id, types.ServiceInspectOptions{})
 	if err != nil {
 		return err
 	}
 
-	svc.Spec.TaskTemplate.ContainerSpec.Env = env
+	flat := make([]string, 0, len(env))
+	for _, e := range env {
+		flat = append(flat, e.Key+"="+e.Value)
+	}
+	svc.Spec.TaskTemplate.ContainerSpec.Env = flat
 	_, err = s.client.ServiceUpdate(ctx, id, svc.Version, svc.Spec, dockerswarm.ServiceUpdateOptions{})
 	return err
 }

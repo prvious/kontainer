@@ -14,6 +14,6 @@ func NewUpdateServiceEnvAction(orchestrator docker.Orchestrator) *UpdateServiceE
 	return &UpdateServiceEnvAction{orchestrator: orchestrator}
 }
 
-func (a *UpdateServiceEnvAction) Execute(ctx context.Context, serviceID string, env []string) error {
+func (a *UpdateServiceEnvAction) Execute(ctx context.Context, serviceID string, env []docker.EnvVar) error {
 	return a.orchestrator.UpdateServiceEnv(ctx, serviceID, env)
 }

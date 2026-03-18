@@ -111,6 +111,7 @@ type TaskStatsAggregate struct {
 	Failed         int `json:"failed"`
 	Preparing      int `json:"preparing"`
 	Complete       int `json:"complete"`
+	Shutdown       int `json:"shutdown"`
 	DesiredRunning int `json:"desiredRunning"`
 }
 
@@ -250,7 +251,7 @@ type Orchestrator interface {
 	ScaleService(ctx context.Context, id string, replicas uint64) error
 	RestartService(ctx context.Context, id string) error
 	RollbackService(ctx context.Context, id string) error
-	UpdateServiceEnv(ctx context.Context, id string, env []string) error
+	UpdateServiceEnv(ctx context.Context, id string, env []EnvVar) error
 	UpdateServiceImage(ctx context.Context, id string, image string) error
 
 	// Tasks

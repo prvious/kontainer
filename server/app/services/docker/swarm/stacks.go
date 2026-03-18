@@ -2,6 +2,7 @@ package swarm
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/docker/docker/api/types"
 	dfilters "github.com/docker/docker/api/types/filters"
@@ -54,13 +55,14 @@ func (s *SwarmOrchestrator) ListStacks(ctx context.Context) ([]docker.Stack, err
 	taskFilter := dfilters.NewArgs()
 	taskFilter.Add("desired-state", "running")
 	tasks, taskErr := s.client.TaskList(ctx, types.TaskListOptions{Filters: taskFilter})
+	if taskErr != nil {
+		return nil, fmt.Errorf("failed to list tasks for stack replica count: %w", taskErr)
+	}
 	stackRunning := make(map[string]int)
-	if taskErr == nil {
-		for _, t := range tasks {
-			if t.Status.State == dockerswarm.TaskStateRunning {
-				if ns := svcToStack[t.ServiceID]; ns != "" {
-					stackRunning[ns]++
-				}
+	for _, t := range tasks {
+		if t.Status.State == dockerswarm.TaskStateRunning {
+			if ns := svcToStack[t.ServiceID]; ns != "" {
+				stackRunning[ns]++
 			}
 		}
 	}

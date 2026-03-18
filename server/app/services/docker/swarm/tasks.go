@@ -306,6 +306,8 @@ func (s *SwarmOrchestrator) TaskStatsAgg(ctx context.Context) (*docker.TaskStats
 			agg.Preparing++
 		case dockerswarm.TaskStateComplete:
 			agg.Complete++
+		case dockerswarm.TaskStateShutdown, dockerswarm.TaskStateRejected, dockerswarm.TaskStateOrphaned, dockerswarm.TaskStateRemove:
+			agg.Shutdown++
 		}
 		if t.DesiredState == dockerswarm.TaskStateRunning {
 			agg.DesiredRunning++

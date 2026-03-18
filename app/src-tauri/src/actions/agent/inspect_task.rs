@@ -29,11 +29,13 @@ pub struct TaskNetworkInfo {
 pub struct TaskDetail {
     pub id: String,
     pub service_id: String,
+    pub service_name: String,
     pub slot: i32,
     pub node_id: String,
     pub node_name: String,
     pub state: String,
     pub desired_state: String,
+    pub timestamp: String,
     pub error: String,
     pub image: String,
     pub container_id: String,
