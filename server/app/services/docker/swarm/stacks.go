@@ -17,19 +17,62 @@ func (s *SwarmOrchestrator) ListStacks(ctx context.Context) ([]docker.Stack, err
 		return nil, err
 	}
 
-	stackCounts := make(map[string]int)
+	type stackInfo struct {
+		services        int
+		desiredReplicas int
+		updatedAt       string
+	}
+	stacks := make(map[string]*stackInfo)
+
+	// Map service -> stack and count desired replicas
+	svcToStack := make(map[string]string)
 	for _, svc := range svcs {
 		ns := svc.Spec.Labels["com.docker.stack.namespace"]
-		if ns != "" {
-			stackCounts[ns]++
+		if ns == "" {
+			continue
+		}
+		svcToStack[svc.ID] = ns
+
+		si, ok := stacks[ns]
+		if !ok {
+			si = &stackInfo{}
+			stacks[ns] = si
+		}
+		si.services++
+
+		if svc.Spec.Mode.Replicated != nil && svc.Spec.Mode.Replicated.Replicas != nil {
+			si.desiredReplicas += int(*svc.Spec.Mode.Replicated.Replicas)
+		}
+
+		ts := docker.FormatTime(svc.UpdatedAt)
+		if ts > si.updatedAt {
+			si.updatedAt = ts
 		}
 	}
 
-	items := make([]docker.Stack, 0, len(stackCounts))
-	for name, count := range stackCounts {
+	// Count running tasks per stack
+	taskFilter := dfilters.NewArgs()
+	taskFilter.Add("desired-state", "running")
+	tasks, taskErr := s.client.TaskList(ctx, types.TaskListOptions{Filters: taskFilter})
+	stackRunning := make(map[string]int)
+	if taskErr == nil {
+		for _, t := range tasks {
+			if t.Status.State == dockerswarm.TaskStateRunning {
+				if ns := svcToStack[t.ServiceID]; ns != "" {
+					stackRunning[ns]++
+				}
+			}
+		}
+	}
+
+	items := make([]docker.Stack, 0, len(stacks))
+	for name, si := range stacks {
 		items = append(items, docker.Stack{
-			Name:     name,
-			Services: count,
+			Name:            name,
+			Services:        si.services,
+			RunningReplicas: stackRunning[name],
+			DesiredReplicas: si.desiredReplicas,
+			UpdatedAt:       si.updatedAt,
 		})
 	}
 

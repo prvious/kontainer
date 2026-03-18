@@ -83,9 +83,17 @@ func (s *SwarmOrchestrator) InspectService(ctx context.Context, id string) (*doc
 		return nil, err
 	}
 
-	img := svc.Spec.TaskTemplate.ContainerSpec.Image
-	if idx := strings.Index(img, "@sha256:"); idx != -1 {
-		img = img[:idx]
+	var img string
+	var envVars []docker.EnvVar
+	if svc.Spec.TaskTemplate.ContainerSpec != nil {
+		img = svc.Spec.TaskTemplate.ContainerSpec.Image
+		if idx := strings.Index(img, "@sha256:"); idx != -1 {
+			img = img[:idx]
+		}
+		envVars = parseEnvVars(svc.Spec.TaskTemplate.ContainerSpec.Env)
+	}
+	if envVars == nil {
+		envVars = make([]docker.EnvVar, 0)
 	}
 
 	mode := "replicated"
@@ -95,13 +103,6 @@ func (s *SwarmOrchestrator) InspectService(ctx context.Context, id string) (*doc
 		replicas = &r
 	} else if svc.Spec.Mode.Global != nil {
 		mode = "global"
-	}
-
-	// Parse env vars into structured format
-	envVars := make([]docker.EnvVar, 0, len(svc.Spec.TaskTemplate.ContainerSpec.Env))
-	for _, e := range svc.Spec.TaskTemplate.ContainerSpec.Env {
-		key, value, _ := strings.Cut(e, "=")
-		envVars = append(envVars, docker.EnvVar{Key: key, Value: value})
 	}
 
 	labels := svc.Spec.Labels
@@ -133,13 +134,15 @@ func (s *SwarmOrchestrator) InspectService(ctx context.Context, id string) (*doc
 		})
 	}
 
-	for _, m := range svc.Spec.TaskTemplate.ContainerSpec.Mounts {
-		detail.Mounts = append(detail.Mounts, docker.Mount{
-			Type:     string(m.Type),
-			Source:   m.Source,
-			Target:   m.Target,
-			ReadOnly: m.ReadOnly,
-		})
+	if svc.Spec.TaskTemplate.ContainerSpec != nil {
+		for _, m := range svc.Spec.TaskTemplate.ContainerSpec.Mounts {
+			detail.Mounts = append(detail.Mounts, docker.Mount{
+				Type:     string(m.Type),
+				Source:   m.Source,
+				Target:   m.Target,
+				ReadOnly: m.ReadOnly,
+			})
+		}
 	}
 
 	if svc.Spec.TaskTemplate.Placement != nil {

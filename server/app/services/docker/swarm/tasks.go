@@ -30,7 +30,9 @@ func (s *SwarmOrchestrator) ListTasks(ctx context.Context, filters docker.TaskFi
 	// Build service name lookup
 	serviceNames := make(map[string]string)
 	svcs, svcErr := s.client.ServiceList(ctx, types.ServiceListOptions{})
-	if svcErr == nil {
+	if svcErr != nil {
+		log.Printf("ListTasks: failed to list services for name lookup: %v", svcErr)
+	} else {
 		for _, svc := range svcs {
 			serviceNames[svc.ID] = svc.Spec.Name
 		}
@@ -39,7 +41,9 @@ func (s *SwarmOrchestrator) ListTasks(ctx context.Context, filters docker.TaskFi
 	// Build node name lookup
 	nodeNames := make(map[string]string)
 	nodes, nodeErr := s.client.NodeList(ctx, types.NodeListOptions{})
-	if nodeErr == nil {
+	if nodeErr != nil {
+		log.Printf("ListTasks: failed to list nodes for name lookup: %v", nodeErr)
+	} else {
 		for _, n := range nodes {
 			nodeNames[n.ID] = n.Description.Hostname
 		}
@@ -59,8 +63,13 @@ func (s *SwarmOrchestrator) ListTasks(ctx context.Context, filters docker.TaskFi
 		var exitCode *int
 		if t.Status.ContainerStatus != nil {
 			containerID = t.Status.ContainerStatus.ContainerID
-			ec := t.Status.ContainerStatus.ExitCode
-			exitCode = &ec
+			if t.Status.State == dockerswarm.TaskStateComplete ||
+				t.Status.State == dockerswarm.TaskStateFailed ||
+				t.Status.State == dockerswarm.TaskStateShutdown ||
+				t.Status.State == dockerswarm.TaskStateRejected {
+				ec := t.Status.ContainerStatus.ExitCode
+				exitCode = &ec
+			}
 		}
 
 		svcName := serviceNames[t.ServiceID]
@@ -129,8 +138,13 @@ func (s *SwarmOrchestrator) InspectTask(ctx context.Context, id string) (*docker
 	if t.Status.ContainerStatus != nil {
 		containerID = t.Status.ContainerStatus.ContainerID
 		pid = int(t.Status.ContainerStatus.PID)
-		ec := t.Status.ContainerStatus.ExitCode
-		exitCode = &ec
+		if t.Status.State == dockerswarm.TaskStateComplete ||
+			t.Status.State == dockerswarm.TaskStateFailed ||
+			t.Status.State == dockerswarm.TaskStateShutdown ||
+			t.Status.State == dockerswarm.TaskStateRejected {
+			ec := t.Status.ContainerStatus.ExitCode
+			exitCode = &ec
+		}
 	}
 
 	// Build networks info
@@ -172,15 +186,21 @@ func (s *SwarmOrchestrator) InspectTask(ctx context.Context, id string) (*docker
 		Networks:  networks,
 	}
 
-	// Resolve service name
+	// Resolve service name (fall back to ID if resolution fails)
 	svc, _, svcErr := s.client.ServiceInspectWithRaw(ctx, t.ServiceID, types.ServiceInspectOptions{})
-	if svcErr == nil {
+	if svcErr != nil {
+		log.Printf("InspectTask: failed to resolve service name for %s: %v", t.ServiceID, svcErr)
+		detail.ServiceName = t.ServiceID
+	} else {
 		detail.ServiceName = svc.Spec.Name
 	}
 
-	// Resolve node name
+	// Resolve node name (fall back to ID if resolution fails)
 	node, _, nodeErr := s.client.NodeInspectWithRaw(ctx, t.NodeID)
-	if nodeErr == nil {
+	if nodeErr != nil {
+		log.Printf("InspectTask: failed to resolve node name for %s: %v", t.NodeID, nodeErr)
+		detail.NodeName = t.NodeID
+	} else {
 		detail.NodeName = node.Description.Hostname
 	}
 
