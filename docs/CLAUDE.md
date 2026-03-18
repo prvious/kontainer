@@ -1,1 +1,0 @@
-/Users/clovismuneza/Apps/kontainer/CLAUDE.md

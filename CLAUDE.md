@@ -1,499 +1,95 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file contains repo-specific rules that should change implementation behavior. Put framework reference material in skills, not here.
 
 ## Project Overview
 
-Kontainer is a desktop app for managing containerized infrastructure (Docker Swarm, with Compose and Kubernetes planned). It consists of two components:
+Kontainer has two parts:
 
-- **Agent** — A Go (Goravel) HTTP/WebSocket/gRPC API deployed alongside the infrastructure, talks to the Docker socket
-- **Desktop App** — A Tauri (Rust + React + ShadcnUI + Tailwindcss) app that connects to one or more agents
+- `server/` - a Go agent built with Goravel
+- `app/` - a Tauri desktop app using Rust, React, Shadcn UI, and Tailwind CSS
 
-## UI Requirements (MANDATORY)
+The primary target today is Docker Swarm. Compose and Kubernetes are planned.
 
-**Shadcn UI is REQUIRED for all UI work. This is non-negotiable.**
+## Skills Activation
 
-- You MUST always use Shadcn UI components before even considering creating custom components. If Shadcn has a component for it, use it. No exceptions.
-- If a needed Shadcn component is not yet installed, install it first (`pnpm dlx shadcn@latest add <component>`), then use it.
-- Do NOT create custom UI components when a Shadcn equivalent exists. Exhaust all Shadcn options first.
-- When working on any UI task, you MUST activate the `frontend-design` and `shadcn-ui` skills before writing any code.
-- The `src/components/ui/` directory is a NO-GO zone — never manually edit, extend, or fix files in it. These are Shadcn-managed.
+This project has domain-specific skills available. You MUST activate the relevant skill whenever you work in that domain; don't wait until you're stuck.
 
-## Conventions
+- `frontend-ui` - Activates for React UI work in `app/`. Use when building or restyling screens, composing Shadcn UI components, choosing Tailwind classes, adjusting layout, spacing, dark mode, or responsive behavior.
+- `goravel-tooling` - Activates when writing or updating artisan commands, Goravel tests, or framework-integrated logging.
+- `goravel-data` - Activates when working with ORM models, relationships, queries, migrations, factories, or seeders.
+- `goravel-foundations` - Activates when working with service providers, the service container, facades, configuration, or application bootstrap and lifecycle wiring.
+- `goravel-async` - Activates when working with queues, jobs, events, listeners, task scheduling, or caching.
+- `goravel-security` - Activates when implementing authentication, authorization, JWT guards, policies, hashing, or encryption.
+- `goravel-http` - Activates when building routes, controllers, middleware, request validation, request parsing, or HTTP responses.
+- `goravel-integrations` - Activates when working with gRPC, outbound HTTP clients, filesystem/storage, mail, or localization.
+- `vitest-tauri-testing` - Activates for frontend tests that mock Tauri IPC, events, windows, or other native-layer integrations.
 
-### Action Pattern (Both Go and Rust)
+## Hard Rules
 
-Every discrete operation is a single-responsibility action. One action per file. Actions receive their dependencies via constructor injection.
-
-**Go (Agent):**
-
-- File: `services/scale_service.go`
-- Struct: `ScaleServiceAction` with an `Execute` method
-- Registered via Goravel service providers
-
-**Rust (Tauri):**
-
-- Follow the same pattern for Tauri commands — one command per file, dependencies injected via Tauri's state management
-
-### Project Structure
-
-Group related code by domain, not by type:
-
-```
-# ✅ Do this
-services/
-  list_services.go
-  scale_service.go
-
-# ❌ Not this
-actions/
-  list_services.go
-  scale_service.go
-handlers/
-  services_handler.go
-```
-
-### API Design
-
-- The agent exposes its own clean API — it is NOT a proxy to the Docker socket
-- Response shapes should be flat and minimal — only what the frontend needs
-- Auth routes are public, all `/api/*` routes require JWT
-- Real-time features (logs, auth flow) use WebSocket with polling fallback
-
-### Auth
-
-- Laravel Socialite-inspired OAuth flow (redirect → callback → JWT)
-- The agent handles the full OAuth dance; the desktop app just receives a deeplink with the JWT from the agent once auth flow is done
-- JWTs are short-lived, stored in `session.json` via `tauri-plugin-store`
-
-### General
-
-- Go agent is mostly stateless — the only exception is an embedded SQLite database (`modernc.org/sqlite`, pure Go) used by the leader to store time-series node metrics with automatic retention-based pruning. All other state is in-memory only.
-- Desktop app stores session data locally via `tauri-plugin-store` (`session.json`)
-- You must follow all existing code conventions. When creating or editing a file, check sibling files for structure, approach, and naming.
-- Use descriptive names for variables and methods. For example, `isRegisteredForDiscounts`, not `discount()`.
-- Check for existing components/services to reuse before writing a new one.
+- Follow existing patterns in sibling files before introducing a new approach.
+- Reuse existing components, services, and utilities before creating new ones.
 - Do not create new top-level directories without approval.
-- Do not change dependencies (go.mod, package.json, Cargo.toml) without approval.
+- Do not change dependencies (`go.mod`, `package.json`, `Cargo.toml`) without approval.
+- Group code by domain, not by technical layer.
+- Use descriptive names for variables, methods, types, and files.
 
-## Go Agent Conventions (Goravel)
+## UI Rules
 
-### Scaffolding
+- For UI work, load the `frontend-ui` skill before writing code.
+- Use Shadcn UI components whenever an equivalent exists.
+- If a needed Shadcn component is missing, install it with the Shadcn CLI, then use it.
+- Never manually edit `app/src/components/ui/`; that directory is Shadcn-managed.
+- Follow existing Tailwind patterns, including dark mode behavior where the surrounding UI already supports it.
 
-- Use `./artisan make:*` commands to create new files (migrations, controllers, models, etc.). List available commands with `./artisan list` and check parameters with `./artisan [command] --help`.
+## Code Organization
 
-### Database & ORM
+Use the action-per-file pattern for discrete operations.
 
-- Use Goravel ORM models and relationships before resorting to raw queries. Prefer `facades.Orm().Query()` over `facades.DB()`.
-- Generate code that prevents N+1 query problems by using eager loading (`With()`).
-- Use the query builder (`facades.DB()`) only for complex operations that can't be expressed with ORM methods.
+- Go example: `services/scale_service.go` defines `ScaleServiceAction` with `Execute`
+- Rust/Tauri commands should follow the same single-responsibility pattern and use state injection
 
-### Model Creation
+## Agent Rules
 
-- When creating new models, also create useful factories and seeders. Check available options with `./artisan make:model --help`.
+- The agent exposes its own API; it is not a proxy to the Docker socket.
+- Keep API responses flat and limited to what the frontend needs.
+- Auth routes are public; `/api/*` routes require JWT.
+- Real-time flows such as logs and auth bridging use WebSocket.
 
-### Validation
+### Goravel
 
-- Create dedicated form request structs for validation rather than inline validation in controllers. Include both rules and custom error messages.
-- Check sibling form requests to follow existing conventions (array vs string based rules).
+- Prefer Goravel facades and framework primitives over ad hoc native Go implementations.
+- Prefer ORM models and relationships over raw queries; use eager loading to avoid N+1 issues.
+- Use dedicated request structs for validation instead of inline controller validation.
+- Use environment variables only in config files; read config through Goravel config APIs in application code.
+- When relevant, load the matching `goravel-*` skill instead of duplicating framework reference here.
 
-### Authentication & Authorization
+## Desktop App Rules
 
-- Use Goravel's built-in auth features (`facades.Auth()`, guards, policies) — see the goravel-security skill.
+- React talks to Rust via Tauri `invoke`; Rust talks to the Go agent.
+- Register every new Tauri command in `app/src-tauri/src/lib.rs`.
+- Keep Rust and TypeScript types in sync for any data crossing the Tauri boundary.
+- For serialized Rust structs sent to TypeScript, use `#[serde(rename_all = "camelCase")]` unless a sibling pattern clearly differs.
+- Session state is stored locally in `session.json` via `tauri-plugin-store`.
 
-### Queues
+## Architecture Notes
 
-- Use queued jobs for time-consuming operations. dispatch via `facades.Queue()`.
+- The agent runs in `leader` or `follower` mode based on `AGENT_ROLE`.
+- Leaders serve the API and scheduled work; followers expose internal gRPC and health endpoints.
+- Leader discovery and follower registration live under `server/app/services/cluster/`.
+- Read the nearby cluster files before changing discovery, registration, or role-specific bootstrap behavior.
 
-### Configuration
+## Testing And Verification
 
-- Use environment variables only in configuration files (`config/*.go`) — never use `os.Getenv()` directly in application code. Always use `facades.Config().GetString("app.name")`, not `os.Getenv("APP_NAME")`.
+- Every code change must be covered by tests or by updating existing tests.
+- Run the smallest relevant test set first, then broader verification when the change touches shared infrastructure.
+- Frontend tests use Vitest.
+- Do not delete tests without approval.
 
-### Prefer Goravel Over Native Go
+Run the relevant checks for the code you changed:
 
-- Always prefer Goravel facades and helpers over native Go equivalents. The framework provides consistent APIs with built-in configuration, drivers, and testability (mocking).
-    - Logging: `facades.Log()` not `log.Println()`
-    - HTTP client: `facades.Http().Get()` not `net/http`
-    - Filesystem: `facades.Storage().Put()` not `os.WriteFile()`
-    - Cache: `facades.Cache().Get()` not hand-rolled maps
-    - Hashing: `facades.Hash().Make()` not `bcrypt.GenerateFromPassword()`
-    - Encryption: `facades.Crypt().EncryptString()` not `crypto/aes` directly
-- Only reach for native Go when Goravel doesn't provide the functionality or when you need lower-level control that the facade can't offer.
+- Frontend: `pnpm --filter app test`, `pnpm types`, `pnpm lint`, `pnpm fmt`
+- Go agent: `gofmt`, `go vet -C server ./...`, `go test -C server ./...`
+- Tauri/Rust: `cargo fmt`, `cargo test`
 
-### Go Formatting & Quality
-
-- Run `gofmt` on all modified Go files before committing.
-- Run `go vet -C server ./...` to catch common issues.
-- Run `go test -C server ./...` to verify tests pass.
-
-## Repository Structure
-
-Monorepo managed with pnpm workspaces:
-
-- `/app` — Desktop app (Tauri + React). Frontend in `app/src/`, Rust backend in `app/src-tauri/`.
-- `/server` — Go agent binary (Goravel framework) deployed alongside infrastructure. Exposes REST + WebSocket + gRPC API to Docker socket.
-
-## Development Commands
-
-All commands run from the repo root:
-
-```bash
-pnpm dev              # Run both app and agent in parallel
-pnpm dev:app          # Tauri desktop app only (hot reload)
-pnpm dev:agent        # Go agent only (go run)
-pnpm build            # Build both
-pnpm build:app        # Build desktop app
-pnpm build:agent      # Build Go agent → server/bin/agent
-pnpm lint             # Lint frontend
-pnpm fmt           # Format frontend
-```
-
-Run commands in a specific workspace:
-
-```bash
-pnpm --filter app <script>     # Run a script in /app
-```
-
-## Tech Stack
-
-- Desktop: Tauri (Rust) + React + ShadcnUI + Tailwindcss
-- Agent: Go (Goravel framework, gRPC)
-- Auth: OAuth 2.0 + JWT
-- Transport: HTTPS + WebSocket
-- App Storage: tauri-plugin-store (session.json)
-- Agent Storage: In-memory + embedded SQLite for metrics history (leader only)
-
-## Supported Orchestrators
-
-- Docker Swarm (primary)
-- Docker Compose (planned)
-- Kubernetes (planned)
-
-=== .ai/shadcn rules ===
-
-# Shadcn UI Components
-
-This application uses Shadcn UI components for consistent, accessible, and customizable UI elements.
-
-## Component Usage
-
-**Always use Shadcn UI components when building UI features.**
-
-## Installation Workflow
-
-If a required Shadcn component is not yet installed in the project:
-
-1. Install the component using the Shadcn CLI
-2. Continue with the implementation work using the newly installed component
-
-## Examples
-
-### Installing Components
-
-- `pnpm dlx shadcn@latest add button`
-- `pnpm dlx shadcn@latest add card`
-- `pnpm dlx shadcn@latest add dialog`
-
-## Important Notes
-
-- Components are installed to the `src/components/ui/` directory
-- Shadcn components are fully customizable and use Tailwind CSS
-- Always check if a component exists before installing to avoid duplicates
-- Components are designed to be accessible and follow best practices
-- Never attempy to manually edit,extend, or fix anything in the `src/components/ui`. the directory contains components installed from shadcnui. this is a NO GO zone.
-- The components rely on base-ui implementation instead of radix-ui. so, prefer using `render={() => [element we want to render as the child]}` instead of using the `asChild` prop on the element you'd like to replace
-
-=== tailwindcss/core rules ===
-
-## Tailwind CSS
-
-- Use Tailwind CSS classes to style HTML; check and use existing Tailwind conventions within the project before writing your own.
-- Offer to extract repeated patterns into components that match the project's conventions (i.e. JSX/TSX).
-- Think through class placement, order, priority, and defaults. Remove redundant classes, add classes to parent or child carefully to limit repetition, and group elements logically.
-
-### Spacing
-
-- When listing items, use gap utilities for spacing; don't use margins.
-
-<code-snippet name="Valid Flex Gap Spacing Example" lang="html">
-    <div class="flex gap-8">
-        <div>Superior</div>
-        <div>Michigan</div>
-        <div>Erie</div>
-    </div>
-</code-snippet>
-
-### Dark Mode
-
-- If existing pages and components support dark mode, new pages and components must support dark mode in a similar way, typically using `dark:`.
-
-=== tailwindcss/v4 rules ===
-
-## Tailwind CSS 4
-
-- Always use Tailwind CSS v4; do not use the deprecated utilities.
-- `corePlugins` is not supported in Tailwind v4.
-- In Tailwind v4, configuration is CSS-first using the `@theme` directive — no separate `tailwind.config.js` file is needed.
-
-<code-snippet name="Extending Theme in CSS" lang="css">
-@theme {
-  --color-brand: oklch(0.72 0.11 178);
-}
-</code-snippet>
-
-- In Tailwind v4, you import Tailwind using a regular CSS `@import` statement, not using the `@tailwind` directives used in v3:
-
-<code-snippet name="Tailwind v4 Import Tailwind Diff" lang="diff">
-   - @tailwind base;
-   - @tailwind components;
-   - @tailwind utilities;
-   + @import "tailwindcss";
-</code-snippet>
-
-### Replaced Utilities
-
-- Tailwind v4 removed deprecated utilities. Do not use the deprecated option; use the replacement.
-- Opacity values are still numeric.
-
-| Deprecated | Replacement |
-|------------+--------------|
-| bg-opacity-_ | bg-black/_ |
-| text-opacity-_ | text-black/_ |
-| border-opacity-_ | border-black/_ |
-| divide-opacity-_ | divide-black/_ |
-| ring-opacity-_ | ring-black/_ |
-| placeholder-opacity-_ | placeholder-black/_ |
-| flex-shrink-_ | shrink-_ |
-| flex-grow-_ | grow-_ |
-| overflow-ellipsis | text-ellipsis |
-| decoration-slice | box-decoration-slice |
-| decoration-clone | box-decoration-clone |
-
-=== tanstack-router rules ===
-
-# TanStack Router: File-Based Routing
-
-## File Structure = Routes
-
-src/
-└── routes/
-    ├── \_\_root.tsx
-    ├── index.tsx
-    ├── about.tsx
-    └── posts/
-        ├── index.tsx
-        └── $postId.tsx
-
-| File              | URL            |
-| ----------------- | -------------- |
-| index.tsx         | /              |
-| about.tsx         | /about         |
-| posts/index.tsx   | /posts         |
-| posts/$postId.tsx | /posts/:postId |
-
-## Root Route
-
-```tsx
-import { Outlet, createRootRoute } from "@tanstack/react-router";
-
-export const Route = createRootRoute({
-    component: () => (
-        <>
-            {" "}
-            <Outlet />{" "}
-        </>
-    ),
-});
-```
-
-## Page Routes
-
-```tsx
-import { createFileRoute } from "@tanstack/react-router";
-
-export const Route = createFileRoute("/about")({
-    component: () => <div>About</div>,
-});
-```
-
-## Dynamic Routes
-
-routes/posts/$postId.tsx
-
-```tsx
-import { createFileRoute } from "@tanstack/react-router";
-
-export const Route = createFileRoute("/posts/$postId")({
-    component: () => {
-        const { postId } = Route.useParams();
-        return <div>{postId}</div>;
-    },
-});
-```
-
-=== vitest rules ===
-
-## Vitest
-
-### Test rules
-
-- Every change must be programmatically tested. Write a new test or update an existing test, then run the affected tests to make sure they pass.
-- Run the minimum number of tests needed to ensure code quality and speed.
-- If you need to verify a feature is working, write or update a unit / feature test.
-- All Frontend/React tests must be written using Vitest.
-- You must not remove any tests or test files from the tests directory without approval. These are not temporary or helper files - these are core to the application.
-- Tests should test all of the happy paths, failure paths, and weird paths.
-- Vitest Tests live in the `tests/feature` and `tests/unit` directories.
-- For Tauri mocking patterns (IPC, events, windows), see the `vitest-tauri-testing` skill which auto-activates when working on frontend tests.
-
-### Testing
-
-```bash
-# Run Vitest tests (frontend)
-pnpm --filter app test
-pnpm --filter app test tests/example.spec.ts   # specific file
-
-# Run Go tests (agent)
-go test -C server ./...
-go vet -C server ./...
-```
-
-### Rust (from app/src-tauri/)
-
-```bash
-cargo check
-cargo fmt
-cargo test
-```
-
-### Go Agent (from repo root)
-
-```bash
-go run -C server .                    # Run agent
-go build -C server -o bin/agent .     # Build agent
-```
-
-### Go Test Rules
-
-- Every Go change must be tested. Write a new test or update an existing test, then run the affected tests.
-- Run `go test -C server ./...` to run all agent tests, or `go test -C server ./app/services/docker/...` to target a specific package.
-- When creating models for tests, use factories. Check if the factory has custom states before manually setting up models.
-- Most tests should be feature/integration tests. Use unit tests for pure logic only.
-
-## Current Architecture
-
-### Multi-Node Cluster (Leader/Follower)
-
-The agent binary runs in two modes controlled by the `AGENT_ROLE` environment variable (defaults to `leader`):
-
-- **Leader** — Full REST + WebSocket + gRPC API. Handles auth, serves all `/api/*` routes, runs scheduled tasks (discovery, metrics), discovers and healthchecks follower agents via gRPC. One per cluster.
-- **Follower** — Lightweight. Exposes gRPC services (behind `SecretAuth` interceptor) and `/health` + `/ping` HTTP endpoints. No API routes or scheduled tasks. Deployed as a global Swarm service across worker nodes.
-
-**Discovery:** Leader finds followers by querying Docker Swarm tasks for the follower service name (`cluster.follower_service`), connects to each via gRPC, and maintains an in-memory agent registry.
-
-**Dev mode:** Set `cluster.dev_followers` to a list of static addresses (e.g. `[localhost:8081, localhost:8082]`) instead of Swarm-based discovery.
-
-Key files:
-
-- `server/app/services/cluster/discovery.go` — Swarm-based follower discovery (production)
-- `server/app/services/cluster/dev_discovery.go` — Static follower list (development)
-- `server/app/services/cluster/registry.go` — Thread-safe in-memory agent registry
-- `server/app/grpc/interceptors/secret_auth.go` — Internal secret auth middleware
-- `server/routes/api.go` — Leader API routes
-- `server/routes/grpc.go` — gRPC service registration
-- `server/bootstrap/app.go` — Role-based bootstrap (leader: HTTP+gRPC+schedule, follower: gRPC only)
-
-### Frontend-Backend Communication
-
-React → Tauri IPC (`invoke`) → Rust HTTP client → Go agent API.
-
-```typescript
-// Frontend calls Tauri command
-const services = await invoke("list_services", { url: agentUrl, token });
-```
-
-```rust
-// Rust command makes HTTP request to agent
-#[tauri::command]
-async fn list_services(url: String, token: String) -> Result<ListServicesResponse, String> {
-    // GET {url}/api/services with Bearer token
-}
-```
-
-All Tauri commands registered in `src-tauri/src/lib.rs` `invoke_handler!` macro.
-
-### Type Synchronization (CRITICAL)
-
-When modifying data structures passed between Rust and TypeScript:
-
-1. **Update Rust first:** Modify struct in the relevant action file under `src-tauri/src/actions/`
-2. **Update TypeScript:** Match the interface in `src/types/*.ts`
-3. **Verify serialization:** Ensure serde attributes match camelCase in TypeScript
-    ```rust
-    #[derive(Serialize, Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    pub struct MyStruct {
-        pub bucket_name: String,  // Becomes "bucketName" in JSON
-    }
-    ```
-
-### Data Flow
-
-- **React hooks** (`src/hooks/`) use TanStack Query with 5s refetch intervals
-- **Mutation hooks** call Tauri commands and invalidate relevant query keys
-- **Auth context** (`src/contexts/auth-context.tsx`) provides `token` and `agentUrl` to all hooks
-- **WebSocket features** (logs, auth bridge) connect directly from the Rust layer or React to the agent
-
-### Error Handling
-
-All Tauri commands return `Result<T, String>`. The agent returns structured JSON errors with HTTP status codes. Frontend handles errors from `invoke()`:
-
-```typescript
-try {
-    await invoke("scale_service", { url, token, serviceId, replicas });
-} catch (error) {
-    console.error(error); // string error message
-}
-```
-
-## Code Style
-
-### TypeScript/React
-
-- **File Naming:** kebab-case for components and utilities (e.g., `connection-manager.tsx`)
-- **Component Structure:** Functional components, React 19 patterns (no React import needed for JSX)
-- **Imports:** Use `@/` alias for absolute imports (configured in vite.config.ts and tsconfig.json)
-- **Styling:** Tailwind CSS 4 utility classes, shadcn/ui components
-- **Types:** Strict TypeScript (`strict: true` in tsconfig), define interfaces in `src/types/`
-- **Formatting:** This project uses oxfmt, Use `pnpm fmt` before committing
-- **Quality Checks:** Always run `pnpm types`, `pnpm run lint` and `pnpm fmt` after finishing all tasks in a session
-
-### Rust
-
-- **Edition:** Rust 2021
-- **Formatting:** Use `cargo fmt` before committing
-- **Error Handling:** Use `thiserror` for custom error types, propagate with `?`
-- **Async:** All Tauri commands are async, using Tokio runtime
-- **Serialization:** Use `#[serde(rename_all = "camelCase")]` for structs sent to frontend
-- **Modules:** Organize by feature under `actions/{domain}/`, use `pub` visibility intentionally
-
-### Path Aliases
-
-Both frontend and backend use path aliases:
-
-- TypeScript: `@/components` → `src/components`
-- Configured in: `vite.config.ts`, `tsconfig.json`, `components.json`
-
-## Configuration Files
-
-- `vite.config.ts`: Vite config with React plugin, Tailwind, path aliases
-- `tsconfig.json`: TypeScript strict mode, ES2020 target, path aliases
-- `src-tauri/tauri.conf.json`: Tauri app config (window size, permissions, etc.)
-- `src-tauri/Cargo.toml`: Rust dependencies
-- `components.json`: shadcn/ui configuration
-
-## Goravel Skills
-
-Goravel skills are available at `.claude/skills/goravel-*/`. Claude invokes them based on their descriptions when working on server code. For deeper API details, each skill's "Reference Files" section points to supporting files within the skill directory.
-
-When working on the Go agent, these skills provide idiomatic Goravel patterns. Project-specific conventions (action-per-file, domain grouping, etc.) are defined above in this file and take precedence.
+Keep this file short. If guidance becomes tutorial-like, move it into a skill.
