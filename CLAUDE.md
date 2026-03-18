@@ -81,19 +81,17 @@ handlers/
 
 ### Scaffolding
 
-- Use `go run . artisan make:*` commands to create new files (migrations, controllers, models, etc.). List available commands with `go run . artisan list` and check parameters with `go run . artisan [command] --help`.
-- Pass `--no-interaction` to artisan commands when running non-interactively.
+- Use `./artisan make:*` commands to create new files (migrations, controllers, models, etc.). List available commands with `./artisan list` and check parameters with `./artisan [command] --help`.
 
 ### Database & ORM
 
 - Use Goravel ORM models and relationships before resorting to raw queries. Prefer `facades.Orm().Query()` over `facades.DB()`.
 - Generate code that prevents N+1 query problems by using eager loading (`With()`).
 - Use the query builder (`facades.DB()`) only for complex operations that can't be expressed with ORM methods.
-- When modifying a column in a migration, include all previously defined attributes — otherwise they will be dropped.
 
 ### Model Creation
 
-- When creating new models, also create useful factories and seeders. Check available options with `go run . artisan make:model --help`.
+- When creating new models, also create useful factories and seeders. Check available options with `./artisan make:model --help`.
 
 ### Validation
 
@@ -106,11 +104,23 @@ handlers/
 
 ### Queues
 
-- Use queued jobs for time-consuming operations. Implement the `queue.Job` interface and dispatch via `facades.Queue()`.
+- Use queued jobs for time-consuming operations. dispatch via `facades.Queue()`.
 
 ### Configuration
 
 - Use environment variables only in configuration files (`config/*.go`) — never use `os.Getenv()` directly in application code. Always use `facades.Config().GetString("app.name")`, not `os.Getenv("APP_NAME")`.
+
+### Prefer Goravel Over Native Go
+
+- Always prefer Goravel facades and helpers over native Go equivalents. The framework provides consistent APIs with built-in configuration, drivers, and testability (mocking).
+  - Logging: `facades.Log()` not `log.Println()`
+  - Config: `facades.Config().GetString()` not `os.Getenv()`
+  - HTTP client: `facades.Http().Get()` not `net/http`
+  - Filesystem: `facades.Storage().Put()` not `os.WriteFile()`
+  - Cache: `facades.Cache().Get()` not hand-rolled maps
+  - Hashing: `facades.Hash().Make()` not `bcrypt.GenerateFromPassword()`
+  - Encryption: `facades.Crypt().EncryptString()` not `crypto/aes` directly
+- Only reach for native Go when Goravel doesn't provide the functionality or when you need lower-level control that the facade can't offer.
 
 ### Go Formatting & Quality
 
