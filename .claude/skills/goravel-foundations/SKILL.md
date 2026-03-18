@@ -176,6 +176,15 @@ foundation.Setup().WithPaths(func(paths configuration.Paths) {
 })
 ```
 
+## Related Skills
+
+- **goravel-http** — Routing (`facades.Route()`), controllers, middleware, request/response, validation
+- **goravel-data** — ORM models, migrations, query builder (`facades.Orm()`, `facades.DB()`)
+- **goravel-security** — Authentication (`facades.Auth()`), authorization (`facades.Gate()`), encryption, hashing
+- **goravel-async** — Queues, events, scheduling, caching (`facades.Queue()`, `facades.Cache()`)
+- **goravel-tooling** — Artisan commands, testing, logging (`facades.Log()`)
+- **goravel-integrations** — gRPC, HTTP client, filesystem, mail, localization, package development
+
 ## Reference Files
 
 | File | Contents |

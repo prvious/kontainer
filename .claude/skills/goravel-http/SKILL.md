@@ -209,6 +209,12 @@ facades.Route().Middleware(middleware.Throttle("api")).Group(func(router route.R
 })
 ```
 
+## Related Skills
+
+- See **goravel-foundations** skill for service providers, the service container, `bootstrap/app.go` lifecycle, and `With*` registration methods
+- See **goravel-security** skill for authentication guards (`facades.Auth()`), authorization gates, and the auth middleware pattern
+- See **goravel-data** skill for ORM models and database queries used in controllers
+
 ## Reference Files
 
 | File | Contents |
