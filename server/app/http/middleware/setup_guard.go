@@ -18,6 +18,12 @@ func MarkSetupComplete() {
 }
 
 func SetupGuard() contractshttp.Middleware {
+	if facades.Config().GetString("cluster.role") != "leader" {
+		return func(ctx contractshttp.Context) {
+			ctx.Request().Next()
+		}
+	}
+
 	return func(ctx contractshttp.Context) {
 		path := ctx.Request().Path()
 

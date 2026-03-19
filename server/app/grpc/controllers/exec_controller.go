@@ -2,8 +2,8 @@ package controllers
 
 import (
 	"io"
-	"log"
 
+	"github.com/goravel/framework/facades"
 	"github.com/prvious/kontainer/server/app/grpc/interceptors"
 	"github.com/prvious/kontainer/server/app/services/docker"
 	pb "github.com/prvious/kontainer/server/proto/agent"
@@ -67,7 +67,7 @@ func (c *AgentController) Exec(stream pb.AgentService_ExecServer) error {
 						Type:     pb.ExecMessage_EXIT,
 						ExitCode: 0,
 					}); sendErr != nil {
-						log.Printf("exec: failed to send EXIT message: %v", sendErr)
+						facades.Log().Errorf("exec: failed to send EXIT message: %v", sendErr)
 					}
 				}
 				done <- err
@@ -93,7 +93,7 @@ func (c *AgentController) Exec(stream pb.AgentService_ExecServer) error {
 				}
 			case pb.ExecMessage_RESIZE:
 				if err := session.Resize(uint(msg.Cols), uint(msg.Rows)); err != nil {
-					log.Printf("exec: resize failed: %v", err)
+					facades.Log().Errorf("exec: resize failed: %v", err)
 				}
 			}
 		}

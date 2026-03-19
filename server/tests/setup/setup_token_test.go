@@ -4,7 +4,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/goravel/framework/facades"
 	"github.com/prvious/kontainer/server/app/helpers"
+	_ "github.com/prvious/kontainer/server/tests"
 )
 
 func TestGenerateSetupToken(t *testing.T) {
@@ -24,8 +26,10 @@ func TestGenerateSetupToken(t *testing.T) {
 	}
 }
 
-func TestGetSetupToken_FromEnv(t *testing.T) {
-	t.Setenv("KONTAINER_SETUP_TOKEN", "custom-token")
+func TestGetSetupToken_FromConfig(t *testing.T) {
+	facades.Config().Add("app.setup_token", "custom-token")
+	defer facades.Config().Add("app.setup_token", "")
+
 	token := helpers.GetSetupToken()
 	if token != "custom-token" {
 		t.Errorf("expected 'custom-token', got '%s'", token)
@@ -33,7 +37,8 @@ func TestGetSetupToken_FromEnv(t *testing.T) {
 }
 
 func TestGetSetupToken_Generated(t *testing.T) {
-	t.Setenv("KONTAINER_SETUP_TOKEN", "")
+	facades.Config().Add("app.setup_token", "")
+
 	token := helpers.GetSetupToken()
 	if !strings.HasPrefix(token, "ktsetup_") {
 		t.Errorf("expected generated token with prefix, got '%s'", token)

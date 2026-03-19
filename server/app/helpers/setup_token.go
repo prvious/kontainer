@@ -3,7 +3,8 @@ package helpers
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"os"
+
+	"github.com/goravel/framework/facades"
 )
 
 const tokenPrefix = "ktsetup_"
@@ -17,9 +18,9 @@ func GenerateSetupToken() string {
 	return tokenPrefix + hex.EncodeToString(b)
 }
 
-// GetSetupToken returns KONTAINER_SETUP_TOKEN env var if set, otherwise generates a new token.
+// GetSetupToken returns the configured setup token if set, otherwise generates a new token.
 func GetSetupToken() string {
-	if token := os.Getenv("KONTAINER_SETUP_TOKEN"); token != "" {
+	if token := facades.Config().GetString("app.setup_token"); token != "" {
 		return token
 	}
 	return GenerateSetupToken()

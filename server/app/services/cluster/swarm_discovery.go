@@ -3,12 +3,12 @@ package cluster
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/swarm"
 	"github.com/docker/docker/client"
+	"github.com/goravel/framework/facades"
 	pb "github.com/prvious/kontainer/server/proto/agent"
 )
 
@@ -45,14 +45,14 @@ func (d *SwarmDiscovery) Discover(ctx context.Context) {
 
 	tasks, err := d.docker.TaskList(ctx, swarm.TaskListOptions{Filters: taskFilter})
 	if err != nil {
-		log.Printf("cluster discovery: task list error, clearing stale followers: %v", err)
+		facades.Log().Errorf("cluster discovery: task list error, clearing stale followers: %v", err)
 		d.registry.UpdateFollowers(nil)
 		return
 	}
 
 	nodes, err := d.docker.NodeList(ctx, swarm.NodeListOptions{})
 	if err != nil {
-		log.Printf("cluster discovery: node list error, clearing stale followers: %v", err)
+		facades.Log().Errorf("cluster discovery: node list error, clearing stale followers: %v", err)
 		d.registry.UpdateFollowers(nil)
 		return
 	}
@@ -69,14 +69,14 @@ func (d *SwarmDiscovery) Discover(ctx context.Context) {
 
 		ip := extractTaskIP(task)
 		if ip == "" {
-			log.Printf("cluster discovery: task %s on node %s has no network attachment, skipping", task.ID[:12], task.NodeID)
+			facades.Log().Warningf("cluster discovery: task %s on node %s has no network attachment, skipping", task.ID[:12], task.NodeID)
 			continue
 		}
 
 		addr := fmt.Sprintf("%s:%s", ip, d.grpcPort)
 		info, err := pingFollower(ctx, d.pool, addr)
 		if err != nil {
-			log.Printf("cluster discovery: follower %s unreachable: %v", addr, err)
+			facades.Log().Warningf("cluster discovery: follower %s unreachable: %v", addr, err)
 			continue
 		}
 

@@ -40,6 +40,10 @@ import (
 )
 
 func Api() {
+	if facades.Config().GetString("cluster.role") != "leader" {
+		return
+	}
+
 	meCtrl := authcontrollers.NewMeController()
 
 	// Resolve orchestrator for all Docker API controllers
