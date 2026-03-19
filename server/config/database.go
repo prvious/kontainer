@@ -63,6 +63,8 @@ func init() {
 		// This table keeps track of all the migrations that have already run for
 		// your application. Using this information, we can determine which of
 		// the migrations on disk haven't actually been run in the database.
+		// Use the "sql" migration driver for raw SQL migrations instead of the
+		// ORM-based "default" driver, since some tables use non-standard primary keys.
 		"migrations": map[string]any{
 			"driver": "sql",
 			"table":  "migrations",
