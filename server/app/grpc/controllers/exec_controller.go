@@ -99,5 +99,9 @@ func (c *AgentController) Exec(stream pb.AgentService_ExecServer) error {
 		}
 	}()
 
-	return <-done
+	err = <-done
+	if err == io.EOF {
+		return nil
+	}
+	return err
 }
