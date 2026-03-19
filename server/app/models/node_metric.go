@@ -1,10 +1,14 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"github.com/goravel/framework/database/orm"
+)
 
 type NodeMetric struct {
-	ID          uint      `gorm:"primaryKey"`
-	Timestamp   time.Time `gorm:"not null"`
+	orm.Model
+	Timestamp   time.Time `gorm:"not null" json:"timestamp"`
 	NodeID      string    `gorm:"column:node_id;not null"`
 	Hostname    string    `gorm:"not null"`
 	CPUs        int       `gorm:"column:cpus"`

@@ -20,6 +20,7 @@ func (r *M20260312062834CreateAppConfigsTable) Up() error {
 			table.String("key")
 			table.Text("value")
 			table.Primary("key")
+			table.Timestamps()
 		})
 	}
 
