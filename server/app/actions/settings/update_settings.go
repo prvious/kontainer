@@ -2,6 +2,8 @@ package settings
 
 import (
 	"fmt"
+
+	"github.com/goravel/framework/contracts/database/orm"
 	"github.com/goravel/framework/facades"
 	"github.com/prvious/kontainer/server/app/models"
 )
@@ -13,18 +15,16 @@ func NewUpdateSettingsAction() *UpdateSettingsAction {
 }
 
 func (a *UpdateSettingsAction) Execute(settings map[string]string) error {
-	var errs []error
-	for key, value := range settings {
-		var setting models.Setting
-		if err := facades.Orm().Query().UpdateOrCreate(&setting,
-			models.Setting{Key: key},
-			models.Setting{Value: value},
-		); err != nil {
-			errs = append(errs, fmt.Errorf("failed to save %s: %w", key, err))
+	return facades.Orm().Transaction(func(tx orm.Query) error {
+		for key, value := range settings {
+			var setting models.Setting
+			if err := tx.UpdateOrCreate(&setting,
+				models.Setting{Key: key},
+				models.Setting{Value: value},
+			); err != nil {
+				return fmt.Errorf("failed to save %s: %w", key, err)
+			}
 		}
-	}
-	if len(errs) > 0 {
-		return fmt.Errorf("settings update errors: %v", errs)
-	}
-	return nil
+		return nil
+	})
 }
