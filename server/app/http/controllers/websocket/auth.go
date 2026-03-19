@@ -12,10 +12,10 @@ import (
 func validateWSToken(ctx http.Context) http.Response {
 	token := ctx.Request().Query("token", "")
 	if token == "" {
-		return ctx.Response().Json(401, http.Json{"error": "missing token"})
+		return ctx.Response().Json(401, map[string]any{"error": "missing token"})
 	}
 	if _, err := facades.Auth(ctx).Parse(token); err != nil {
-		return ctx.Response().Json(401, http.Json{"error": "invalid token"})
+		return ctx.Response().Json(401, map[string]any{"error": "invalid token"})
 	}
 	return nil
 }
