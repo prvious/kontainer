@@ -8,7 +8,7 @@ func init() {
 	config := facades.Config()
 	config.Add("jwt", map[string]any{
 		"secret":      config.Env("JWT_SECRET", ""),
-		"ttl":         1440,
-		"refresh_ttl": 0,
+		"ttl":         config.Env("JWT_TTL", 1440),
+		"refresh_ttl": config.Env("JWT_REFRESH_TTL", 0),
 	})
 }
