@@ -10,7 +10,7 @@ type M20210101000001CreateJobsTable struct{}
 
 // Signature The unique signature for the migration.
 func (r *M20210101000001CreateJobsTable) Signature() string {
-	return "20210101000002_create_jobs_table"
+	return "20210101000001_create_jobs_table"
 }
 
 // Up Run the migrations.
