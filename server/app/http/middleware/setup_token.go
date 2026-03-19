@@ -17,7 +17,7 @@ func SetupToken(expectedToken string) contractshttp.Middleware {
 			ctx.Response().Json(nethttp.StatusUnauthorized, map[string]any{
 				"error": "setup token required",
 			})
-			ctx.Request().Abort()
+			ctx.Request().Abort(nethttp.StatusUnauthorized)
 			return
 		}
 
@@ -25,7 +25,7 @@ func SetupToken(expectedToken string) contractshttp.Middleware {
 			ctx.Response().Json(nethttp.StatusUnauthorized, map[string]any{
 				"error": "invalid setup token",
 			})
-			ctx.Request().Abort()
+			ctx.Request().Abort(nethttp.StatusUnauthorized)
 			return
 		}
 

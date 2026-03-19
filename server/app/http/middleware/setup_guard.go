@@ -46,7 +46,7 @@ func SetupGuard() contractshttp.Middleware {
 		ctx.Response().Json(nethttp.StatusServiceUnavailable, map[string]any{
 			"status": "setup_required",
 		})
-		ctx.Request().Abort()
+		ctx.Request().Abort(nethttp.StatusServiceUnavailable)
 	}
 }
 

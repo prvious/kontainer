@@ -17,7 +17,7 @@ func JWT() contractshttp.Middleware {
 			ctx.Response().Json(nethttp.StatusUnauthorized, map[string]any{
 				"error": "authorization required",
 			})
-			ctx.Request().Abort()
+			ctx.Request().Abort(nethttp.StatusUnauthorized)
 			return
 		}
 
@@ -26,7 +26,7 @@ func JWT() contractshttp.Middleware {
 			ctx.Response().Json(nethttp.StatusUnauthorized, map[string]any{
 				"error": "invalid or expired token",
 			})
-			ctx.Request().Abort()
+			ctx.Request().Abort(nethttp.StatusUnauthorized)
 			return
 		}
 
