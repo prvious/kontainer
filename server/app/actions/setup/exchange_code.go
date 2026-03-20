@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/goravel/framework/contracts/database/orm"
 	"github.com/prvious/kontainer/server/app/facades"
 	"github.com/prvious/kontainer/server/app/helpers"
 	"github.com/prvious/kontainer/server/app/models"
@@ -72,14 +73,19 @@ func (a *ExchangeCodeAction) Execute(code string) (*GitHubAppCredentials, error)
 		"jwt_secret":            jwtSecret,
 	}
 
-	for key, value := range configs {
-		var appConfig models.AppConfig
-		if err := facades.Orm().Query().UpdateOrCreate(&appConfig,
-			models.AppConfig{Key: key},
-			models.AppConfig{Value: value},
-		); err != nil {
-			return nil, fmt.Errorf("failed to store %s: %w", key, err)
+	if err := facades.Orm().Transaction(func(tx orm.Query) error {
+		for key, value := range configs {
+			var appConfig models.AppConfig
+			if err := tx.UpdateOrCreate(&appConfig,
+				models.AppConfig{Key: key},
+				models.AppConfig{Value: value},
+			); err != nil {
+				return fmt.Errorf("failed to store %s: %w", key, err)
+			}
 		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 
 	return &GitHubAppCredentials{

@@ -2,7 +2,6 @@ package middleware
 
 import (
 	nethttp "net/http"
-	"strings"
 
 	contractshttp "github.com/goravel/framework/contracts/http"
 
@@ -17,16 +16,16 @@ func JWT() contractshttp.Middleware {
 			ctx.Response().Json(nethttp.StatusUnauthorized, map[string]any{
 				"error": "authorization required",
 			})
-			ctx.Request().Abort()
+			ctx.Request().Abort(nethttp.StatusUnauthorized)
 			return
 		}
 
-		_, err := facades.Auth(ctx).Parse(strings.TrimPrefix(token, "Bearer "))
+		_, err := facades.Auth(ctx).Parse(token)
 		if err != nil {
 			ctx.Response().Json(nethttp.StatusUnauthorized, map[string]any{
 				"error": "invalid or expired token",
 			})
-			ctx.Request().Abort()
+			ctx.Request().Abort(nethttp.StatusUnauthorized)
 			return
 		}
 

@@ -3,9 +3,9 @@ package cluster
 import (
 	"context"
 	"fmt"
-	"log"
 	"sync"
 
+	"github.com/goravel/framework/facades"
 	pb "github.com/prvious/kontainer/server/proto/agent"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -64,7 +64,7 @@ func (p *GrpcPool) Remove(address string) {
 	defer p.mu.Unlock()
 	if conn, ok := p.conns[address]; ok {
 		if err := conn.Close(); err != nil {
-			log.Printf("grpc pool: error closing connection to %s: %v", address, err)
+			facades.Log().Errorf("grpc pool: error closing connection to %s: %v", address, err)
 		}
 		delete(p.conns, address)
 	}
@@ -76,7 +76,7 @@ func (p *GrpcPool) CloseAll() {
 	defer p.mu.Unlock()
 	for addr, conn := range p.conns {
 		if err := conn.Close(); err != nil {
-			log.Printf("grpc pool: error closing connection to %s: %v", addr, err)
+			facades.Log().Errorf("grpc pool: error closing connection to %s: %v", addr, err)
 		}
 		delete(p.conns, addr)
 	}

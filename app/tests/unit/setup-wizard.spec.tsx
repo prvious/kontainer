@@ -6,7 +6,7 @@ import { SetupWizard } from "@/components/setup-wizard";
 
 describe("SetupWizard", () => {
     const defaultProps = {
-        agentUrl: "http://localhost:8080",
+        agentUrl: "http://localhost:3000",
         onComplete: vi.fn(),
         onBack: vi.fn(),
     };
@@ -59,7 +59,7 @@ describe("SetupWizard", () => {
     it("passes org to setup_github_connect when provided", async () => {
         vi.mocked(invoke)
             .mockResolvedValueOnce({ step: "pending" }) // verify token
-            .mockResolvedValueOnce({ setupUrl: "http://localhost:8080/setup/github/start?token=abc" }); // github connect
+            .mockResolvedValueOnce({ setupUrl: "http://localhost:3000/setup/github/start?token=abc" }); // github connect
 
         render(<SetupWizard {...defaultProps} />);
         const user = userEvent.setup();
@@ -77,7 +77,7 @@ describe("SetupWizard", () => {
         await act(async () => {});
 
         expect(invoke).toHaveBeenCalledWith("setup_github_connect", {
-            url: "http://localhost:8080",
+            url: "http://localhost:3000",
             token: "ktsetup_abc123",
             org: "my-org",
         });
@@ -86,7 +86,7 @@ describe("SetupWizard", () => {
     it("passes null org when field is empty", async () => {
         vi.mocked(invoke)
             .mockResolvedValueOnce({ step: "pending" }) // verify token
-            .mockResolvedValueOnce({ setupUrl: "http://localhost:8080/setup/github/start?token=abc" }); // github connect
+            .mockResolvedValueOnce({ setupUrl: "http://localhost:3000/setup/github/start?token=abc" }); // github connect
 
         render(<SetupWizard {...defaultProps} />);
         const user = userEvent.setup();
@@ -100,7 +100,7 @@ describe("SetupWizard", () => {
         await act(async () => {});
 
         expect(invoke).toHaveBeenCalledWith("setup_github_connect", {
-            url: "http://localhost:8080",
+            url: "http://localhost:3000",
             token: "ktsetup_abc123",
             org: null,
         });
@@ -139,7 +139,7 @@ describe("SetupWizard", () => {
         await act(async () => {});
 
         expect(invoke).toHaveBeenCalledWith("setup_complete", {
-            url: "http://localhost:8080",
+            url: "http://localhost:3000",
             token: "ktsetup_abc123",
         });
         expect(defaultProps.onComplete).toHaveBeenCalled();
@@ -147,6 +147,6 @@ describe("SetupWizard", () => {
 
     it("displays agent URL", () => {
         render(<SetupWizard {...defaultProps} />);
-        expect(screen.getByText("http://localhost:8080")).toBeInTheDocument();
+        expect(screen.getByText("http://localhost:3000")).toBeInTheDocument();
     });
 });

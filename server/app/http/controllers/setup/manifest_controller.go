@@ -63,9 +63,8 @@ func (c *ManifestController) Handle(ctx contractshttp.Context) contractshttp.Res
 
 	c.manifestState.Set(state, token, org)
 
-	agentURL := facades.Config().GetString("cluster.agent_url", "http://localhost:8080")
+	agentURL := facades.Config().GetString("cluster.agent_url", "http://localhost:3000")
 	setupURL := fmt.Sprintf("%s/setup/github/start?token=%s", agentURL, token)
 
 	return ctx.Response().Json(200, map[string]any{"setupUrl": setupURL})
 }
-

@@ -11,6 +11,10 @@ import (
 )
 
 func Auth() {
+	if facades.Config().GetString("cluster.role") != "leader" {
+		return
+	}
+
 	registryInstance, err := facades.App().Make("auth.provider_registry")
 	if err != nil {
 		facades.Log().Errorf("Failed to resolve auth.provider_registry: %v", err)

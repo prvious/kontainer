@@ -8,7 +8,7 @@ func init() {
 	config := facades.Config()
 	config.Add("queue", map[string]any{
 		// Default Queue Connection Name
-		"default": "sync",
+		"default": config.Env("QUEUE_CONNECTION", "sync"),
 
 		// Queue Connections
 		//
@@ -20,7 +20,7 @@ func init() {
 			},
 			"database": map[string]any{
 				"driver":     "database",
-				"connection": "postgres",
+				"connection": "sqlite",
 				"queue":      "default",
 				"concurrent": 1,
 			},
@@ -31,7 +31,7 @@ func init() {
 		// These options configure the behavior of failed queue job logging so you
 		// can control how and where failed jobs are stored.
 		"failed": map[string]any{
-			"database": config.Env("DB_CONNECTION", "postgres"),
+			"database": config.Env("DB_CONNECTION", "sqlite"),
 			"table":    "failed_jobs",
 		},
 	})

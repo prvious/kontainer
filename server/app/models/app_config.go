@@ -1,8 +1,11 @@
 package models
 
+import "github.com/goravel/framework/database/orm"
+
 type AppConfig struct {
-	Key   string `gorm:"primaryKey"`
-	Value string `gorm:"type:text;not null"`
+	orm.Timestamps
+	Key   string `gorm:"primaryKey" json:"key"`
+	Value string `gorm:"type:text;not null" json:"value"`
 }
 
 func (r *AppConfig) TableName() string {

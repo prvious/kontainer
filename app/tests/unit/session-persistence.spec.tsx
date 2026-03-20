@@ -23,7 +23,7 @@ const mockStoredProfiles: StoredProfiles = {
         {
             id: "profile-1",
             label: "Default",
-            agentUrl: "http://localhost:8080",
+            agentUrl: "http://localhost:3000",
             userId: "123",
             userName: "Jane Doe",
             userEmail: "jane@example.com",
@@ -50,7 +50,7 @@ function TestConsumer() {
             <span data-testid='expiresAt'>{expiresAt?.toString() ?? "none"}</span>
             <span data-testid='agentUrl'>{agentUrl ?? "none"}</span>
             <span data-testid='isLoading'>{isLoading ? "true" : "false"}</span>
-            <button onClick={() => login("http://localhost:8080")}>Login</button>
+            <button onClick={() => login("http://localhost:3000")}>Login</button>
         </div>
     );
 }
@@ -105,7 +105,7 @@ describe("Session Persistence", () => {
             "save_profile",
             expect.objectContaining({
                 input: expect.objectContaining({
-                    agentUrl: "http://localhost:8080",
+                    agentUrl: "http://localhost:3000",
                     userId: "123",
                     userName: "Jane Doe",
                     token: "fake.jwt.token",
@@ -127,7 +127,7 @@ describe("Session Persistence", () => {
         expect(screen.getByTestId("user")).toHaveTextContent("Jane Doe");
         expect(screen.getByTestId("token")).toHaveTextContent("stored.jwt.token");
         expect(screen.getByTestId("expiresAt")).toHaveTextContent("9999999999");
-        expect(screen.getByTestId("agentUrl")).toHaveTextContent("http://localhost:8080");
+        expect(screen.getByTestId("agentUrl")).toHaveTextContent("http://localhost:3000");
         expect(screen.getByTestId("isLoading")).toHaveTextContent("false");
     });
 
@@ -210,14 +210,14 @@ describe("Session Persistence", () => {
         });
 
         // Verify agentUrl is set in the context
-        expect(screen.getByTestId("agentUrl")).toHaveTextContent("http://localhost:8080");
+        expect(screen.getByTestId("agentUrl")).toHaveTextContent("http://localhost:3000");
 
         // Verify save_profile was called with the agentUrl
         expect(invoke).toHaveBeenCalledWith(
             "save_profile",
             expect.objectContaining({
                 input: expect.objectContaining({
-                    agentUrl: "http://localhost:8080",
+                    agentUrl: "http://localhost:3000",
                 }),
             }),
         );

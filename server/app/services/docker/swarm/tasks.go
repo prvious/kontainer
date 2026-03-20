@@ -3,12 +3,12 @@ package swarm
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"strings"
 
 	"github.com/docker/docker/api/types"
 	dfilters "github.com/docker/docker/api/types/filters"
 	dockerswarm "github.com/docker/docker/api/types/swarm"
+	"github.com/goravel/framework/facades"
 
 	"github.com/prvious/kontainer/server/app/services/docker"
 )
@@ -31,7 +31,7 @@ func (s *SwarmOrchestrator) ListTasks(ctx context.Context, filters docker.TaskFi
 	serviceNames := make(map[string]string)
 	svcs, svcErr := s.client.ServiceList(ctx, types.ServiceListOptions{})
 	if svcErr != nil {
-		log.Printf("ListTasks: failed to list services for name lookup: %v", svcErr)
+		facades.Log().Warningf("ListTasks: failed to list services for name lookup: %v", svcErr)
 	} else {
 		for _, svc := range svcs {
 			serviceNames[svc.ID] = svc.Spec.Name
@@ -42,7 +42,7 @@ func (s *SwarmOrchestrator) ListTasks(ctx context.Context, filters docker.TaskFi
 	nodeNames := make(map[string]string)
 	nodes, nodeErr := s.client.NodeList(ctx, types.NodeListOptions{})
 	if nodeErr != nil {
-		log.Printf("ListTasks: failed to list nodes for name lookup: %v", nodeErr)
+		facades.Log().Warningf("ListTasks: failed to list nodes for name lookup: %v", nodeErr)
 	} else {
 		for _, n := range nodes {
 			nodeNames[n.ID] = n.Description.Hostname
@@ -189,7 +189,7 @@ func (s *SwarmOrchestrator) InspectTask(ctx context.Context, id string) (*docker
 	// Resolve service name (fall back to ID if resolution fails)
 	svc, _, svcErr := s.client.ServiceInspectWithRaw(ctx, t.ServiceID, types.ServiceInspectOptions{})
 	if svcErr != nil {
-		log.Printf("InspectTask: failed to resolve service name for %s: %v", t.ServiceID, svcErr)
+		facades.Log().Warningf("InspectTask: failed to resolve service name for %s: %v", t.ServiceID, svcErr)
 		detail.ServiceName = t.ServiceID
 	} else {
 		detail.ServiceName = svc.Spec.Name
@@ -198,7 +198,7 @@ func (s *SwarmOrchestrator) InspectTask(ctx context.Context, id string) (*docker
 	// Resolve node name (fall back to ID if resolution fails)
 	node, _, nodeErr := s.client.NodeInspectWithRaw(ctx, t.NodeID)
 	if nodeErr != nil {
-		log.Printf("InspectTask: failed to resolve node name for %s: %v", t.NodeID, nodeErr)
+		facades.Log().Warningf("InspectTask: failed to resolve node name for %s: %v", t.NodeID, nodeErr)
 		detail.NodeName = t.NodeID
 	} else {
 		detail.NodeName = node.Description.Hostname
@@ -227,7 +227,7 @@ func (s *SwarmOrchestrator) TaskStats(ctx context.Context) ([]docker.ContainerSt
 		containerID := t.Status.ContainerStatus.ContainerID
 		statsResp, err := s.client.ContainerStats(ctx, containerID, false)
 		if err != nil {
-			log.Printf("TaskStats: failed to get stats for container %s: %v", containerID, err)
+			facades.Log().Warningf("TaskStats: failed to get stats for container %s: %v", containerID, err)
 			continue
 		}
 		resp := statsResp.Body
@@ -254,7 +254,7 @@ func (s *SwarmOrchestrator) TaskStats(ctx context.Context) ([]docker.ContainerSt
 		}
 
 		if err := json.NewDecoder(resp).Decode(&v); err != nil {
-			log.Printf("TaskStats: failed to decode stats for container %s: %v", containerID, err)
+			facades.Log().Warningf("TaskStats: failed to decode stats for container %s: %v", containerID, err)
 			resp.Close()
 			continue
 		}

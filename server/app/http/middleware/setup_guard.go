@@ -18,6 +18,12 @@ func MarkSetupComplete() {
 }
 
 func SetupGuard() contractshttp.Middleware {
+	if facades.Config().GetString("cluster.role") != "leader" {
+		return func(ctx contractshttp.Context) {
+			ctx.Request().Next()
+		}
+	}
+
 	return func(ctx contractshttp.Context) {
 		path := ctx.Request().Path()
 
@@ -40,7 +46,7 @@ func SetupGuard() contractshttp.Middleware {
 		ctx.Response().Json(nethttp.StatusServiceUnavailable, map[string]any{
 			"status": "setup_required",
 		})
-		ctx.Request().Abort()
+		ctx.Request().Abort(nethttp.StatusServiceUnavailable)
 	}
 }
 

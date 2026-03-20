@@ -74,7 +74,7 @@ func (kernel *Kernel) Schedule() []schedule.Event {
 		if err := pruner.Execute(); err != nil {
 			facades.Log().Errorf("metrics prune error: %v", err)
 		}
-	}).EveryFiveMinutes())
+	}).EveryFiveMinutes().SkipIfStillRunning())
 
 	return events
 }

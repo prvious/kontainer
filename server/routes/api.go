@@ -40,6 +40,10 @@ import (
 )
 
 func Api() {
+	if facades.Config().GetString("cluster.role") != "leader" {
+		return
+	}
+
 	meCtrl := authcontrollers.NewMeController()
 
 	// Resolve orchestrator for all Docker API controllers
@@ -255,14 +259,14 @@ func buildExecController(orchestrator docker.Orchestrator) *wsControllers.ExecCo
 		return nil
 	}
 
-	poolInstance, err := facades.App().Make("cluster.grpc_pool")
+	poolInstance, err := facades.App().Make("cluster.pool")
 	if err != nil {
-		facades.Log().Errorf("Failed to resolve cluster.grpc_pool for exec handler: %v", err)
+		facades.Log().Errorf("Failed to resolve cluster.pool for exec handler: %v", err)
 		return nil
 	}
 	pool, ok := poolInstance.(*cluster.GrpcPool)
 	if !ok {
-		facades.Log().Errorf("cluster.grpc_pool is not *cluster.GrpcPool for exec handler")
+		facades.Log().Errorf("cluster.pool is not *cluster.GrpcPool for exec handler")
 		return nil
 	}
 

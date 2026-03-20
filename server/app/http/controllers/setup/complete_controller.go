@@ -6,6 +6,7 @@ import (
 	contractshttp "github.com/goravel/framework/contracts/http"
 
 	setupactions "github.com/prvious/kontainer/server/app/actions/setup"
+	"github.com/prvious/kontainer/server/app/facades"
 )
 
 type CompleteController struct {
@@ -18,7 +19,8 @@ func NewCompleteController(completeSetup *setupactions.CompleteSetupAction) *Com
 
 func (c *CompleteController) Handle(ctx contractshttp.Context) contractshttp.Response {
 	if err := c.completeSetup.Execute(); err != nil {
-		return ctx.Response().Json(nethttp.StatusBadRequest, map[string]any{"error": err.Error()})
+		facades.Log().Errorf("setup completion failed: %v", err)
+		return ctx.Response().Json(nethttp.StatusInternalServerError, map[string]any{"error": "setup completion failed"})
 	}
 
 	return ctx.Response().Json(nethttp.StatusOK, map[string]any{"status": "complete"})

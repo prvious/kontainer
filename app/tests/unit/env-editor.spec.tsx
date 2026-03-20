@@ -20,7 +20,7 @@ const mockAuth: AuthContextValue = {
     user: { id: "1", name: "Test", email: "test@test.com", avatarUrl: "", provider: "github" },
     token: "test-jwt",
     expiresAt: Math.floor(Date.now() / 1000) + 9999,
-    agentUrl: "http://localhost:8080",
+    agentUrl: "http://localhost:3000",
     isLoading: false,
     login: vi.fn(),
     logout: vi.fn(),
@@ -127,7 +127,7 @@ describe("EnvEditor", () => {
 
         await waitFor(() => {
             expect(invoke).toHaveBeenCalledWith("update_service_env", {
-                url: "http://localhost:8080",
+                url: "http://localhost:3000",
                 token: "test-jwt",
                 serviceId: "svc1",
                 env: [{ key: "FOO", value: "bar" }],
@@ -147,7 +147,7 @@ describe("EnvEditor", () => {
 
         await waitFor(() => {
             expect(invoke).toHaveBeenCalledWith("update_service_env", {
-                url: "http://localhost:8080",
+                url: "http://localhost:3000",
                 token: "test-jwt",
                 serviceId: "svc1",
                 env: [{ key: "FOO", value: "updated" }],

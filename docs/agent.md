@@ -129,7 +129,10 @@ The repo ships with a local multi-node Docker-in-Docker environment under `dev/`
 
 - `pnpm dev` starts the cluster, agents, and desktop app
 - `pnpm dev:cluster` starts only the local Swarm cluster
+- `pnpm dev:agent` starts the Goravel leader from `server/` through `air`
+- `pnpm artisan list` runs Goravel artisan commands against the server workspace
 - the local leader reads `CLUSTER_DEV_FOLLOWERS` from `server/.env` (loaded by `air`)
+- the default local leader URL is `http://localhost:3000`, with followers on `localhost:3001` and `localhost:3002`
 
 ## Source of Truth
 

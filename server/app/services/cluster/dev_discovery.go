@@ -2,8 +2,9 @@ package cluster
 
 import (
 	"context"
-	"log"
 	"time"
+
+	"github.com/goravel/framework/facades"
 )
 
 // DevDiscovery pings a static list of follower addresses for local development.
@@ -26,7 +27,7 @@ func (d *DevDiscovery) Discover(ctx context.Context) {
 	for _, addr := range d.addresses {
 		info, err := pingFollower(ctx, d.pool, addr)
 		if err != nil {
-			log.Printf("dev discovery: follower %s unreachable: %v", addr, err)
+			facades.Log().Warningf("dev discovery: follower %s unreachable: %v", addr, err)
 			continue
 		}
 
@@ -41,6 +42,6 @@ func (d *DevDiscovery) Discover(ctx context.Context) {
 	d.registry.UpdateFollowers(healthy)
 
 	if len(healthy) == 0 && len(d.addresses) > 0 {
-		log.Printf("dev discovery: all %d configured followers are unreachable", len(d.addresses))
+		facades.Log().Warningf("dev discovery: all %d configured followers are unreachable", len(d.addresses))
 	}
 }

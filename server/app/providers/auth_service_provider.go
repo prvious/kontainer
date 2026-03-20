@@ -71,7 +71,7 @@ func (r *AuthServiceProvider) registerOAuthProviders(app foundation.Application)
 		return
 	}
 
-	agentURL := facades.Config().GetString("cluster.agent_url", "http://localhost:8080")
+	agentURL := facades.Config().GetString("cluster.agent_url", "http://localhost:3000")
 	org := configs["github_org"]
 
 	providerRegistry.Register(authproviders.NewGitHubProvider(

@@ -1,6 +1,7 @@
 package providers
 
 import (
+	"fmt"
 	"os"
 	"time"
 
@@ -20,19 +21,28 @@ func (p *MetricsServiceProvider) Register(app foundation.Application) {
 		if err != nil {
 			return nil, err
 		}
-		orchestrator := orchestratorInstance.(docker.Orchestrator)
+		orchestrator, ok := orchestratorInstance.(docker.Orchestrator)
+		if !ok {
+			return nil, fmt.Errorf("docker.orchestrator does not implement docker.Orchestrator")
+		}
 
 		registryInstance, err := app.Make("cluster.registry")
 		if err != nil {
 			return nil, err
 		}
-		registry := registryInstance.(*cluster.Registry)
+		registry, ok := registryInstance.(*cluster.Registry)
+		if !ok {
+			return nil, fmt.Errorf("cluster.registry is not *cluster.Registry")
+		}
 
 		poolInstance, err := app.Make("cluster.pool")
 		if err != nil {
 			return nil, err
 		}
-		pool := poolInstance.(*cluster.GrpcPool)
+		pool, ok := poolInstance.(*cluster.GrpcPool)
+		if !ok {
+			return nil, fmt.Errorf("cluster.pool is not *cluster.GrpcPool")
+		}
 
 		nodeID := facades.Config().GetString("cluster.node_id", "")
 		hostname, err := os.Hostname()

@@ -70,9 +70,9 @@ describe("LoginScreen", () => {
 
     it("renders the cluster URL input with default value", async () => {
         await renderLoginScreen();
-        const input = screen.getByPlaceholderText("http://localhost:8080");
+        const input = screen.getByPlaceholderText("http://localhost:3000");
         expect(input).toBeInTheDocument();
-        expect(input).toHaveValue("http://localhost:8080");
+        expect(input).toHaveValue("http://localhost:3000");
     });
 
     it("renders the connect button", async () => {
@@ -87,7 +87,7 @@ describe("LoginScreen", () => {
         const button = screen.getByRole("button", { name: /connect/i });
         await user.click(button);
 
-        expect(invoke).toHaveBeenCalledWith("ping_agent", { url: "http://localhost:8080" });
+        expect(invoke).toHaveBeenCalledWith("ping_agent", { url: "http://localhost:3000" });
     });
 
     it("shows auth providers after successful ping", async () => {
@@ -107,7 +107,7 @@ describe("LoginScreen", () => {
         const button = screen.getByRole("button", { name: /connect/i });
         await user.click(button);
 
-        expect(invoke).toHaveBeenCalledWith("fetch_providers", { url: "http://localhost:8080" });
+        expect(invoke).toHaveBeenCalledWith("fetch_providers", { url: "http://localhost:3000" });
     });
 
     it("shows provider buttons when online", async () => {
@@ -153,10 +153,10 @@ describe("LoginScreen", () => {
         await user.click(githubButton);
 
         // auth_listen should be called
-        expect(invoke).toHaveBeenCalledWith("auth_listen", { url: "http://localhost:8080" });
+        expect(invoke).toHaveBeenCalledWith("auth_listen", { url: "http://localhost:3000" });
 
         // session ID event fires synchronously in invoke mock → opens browser
-        expect(openUrl).toHaveBeenCalledWith("http://localhost:8080/auth/github?session=test-session");
+        expect(openUrl).toHaveBeenCalledWith("http://localhost:3000/auth/github?session=test-session");
 
         // Clean up: deliver token so login() resolves
         await act(async () => {
@@ -167,7 +167,7 @@ describe("LoginScreen", () => {
     it("shows error when ping fails", async () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_profiles") return { profiles: [], activeProfileId: null };
-            if (cmd === "ping_agent") throw "Could not reach agent at http://localhost:8080";
+            if (cmd === "ping_agent") throw "Could not reach agent at http://localhost:3000";
             return undefined;
         });
 
@@ -191,7 +191,7 @@ describe("LoginScreen", () => {
         expect(screen.getByText("Authenticate")).toBeInTheDocument();
 
         // Change URL — should reset
-        const input = screen.getByPlaceholderText("http://localhost:8080");
+        const input = screen.getByPlaceholderText("http://localhost:3000");
         await user.type(input, "/new");
 
         expect(screen.queryByText("Authenticate")).not.toBeInTheDocument();
@@ -202,7 +202,7 @@ describe("LoginScreen", () => {
         await renderLoginScreen();
         const user = userEvent.setup();
 
-        const input = screen.getByPlaceholderText("http://localhost:8080");
+        const input = screen.getByPlaceholderText("http://localhost:3000");
         await user.clear(input);
         await user.type(input, "http://myserver:9090///");
 

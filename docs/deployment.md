@@ -40,9 +40,9 @@ These are the main deployment variables used by the current server config.
 | Variable                   | Default                 | Purpose                                                                                                              |
 | -------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | `AGENT_ROLE`               | `leader`                | Chooses `leader` or `follower` mode                                                                                  |
-| `AGENT_URL`                | `http://localhost:8080` | Public base URL used by auth/setup flows. Ensure the port matches `APP_PORT`                                         |
+| `AGENT_URL`                | `http://localhost:3000` | Public base URL used by auth/setup flows. Ensure the port matches `APP_PORT`                                         |
 | `APP_HOST`                 | `127.0.0.1`             | HTTP bind host                                                                                                       |
-| `APP_PORT`                 | `8080`                  | HTTP bind port                                                                                                       |
+| `APP_PORT`                 | `3000`                  | HTTP bind port                                                                                                       |
 | `GRPC_PORT`                | `9000`                  | Internal gRPC port used for follower communication                                                                   |
 | `DB_DATABASE`              | `storage/kontainer.db`  | SQLite database path                                                                                                 |
 | `JWT_SECRET`               | empty                   | JWT signing key. The setup flow generates and persists its own value in the database, which takes precedence at boot |
@@ -69,14 +69,14 @@ This example runs only a leader agent.
 ```bash
 docker run -d \
   --name kontainer-agent \
-  -p 8080:8080 \
+  -p 3000:3000 \
   -p 9000:9000 \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v kontainer-data:/data \
   -e AGENT_ROLE=leader \
-  -e AGENT_URL=http://localhost:8080 \
+  -e AGENT_URL=http://localhost:3000 \
   -e APP_HOST=0.0.0.0 \
-  -e APP_PORT=8080 \
+  -e APP_PORT=3000 \
   -e GRPC_PORT=9000 \
   -e DB_DATABASE=/data/kontainer.db \
   ghcr.io/prvious/kontainer-agent:latest
@@ -104,13 +104,13 @@ docker service create \
   --name kontainer-leader \
   --constraint 'node.role==manager' \
   --network kontainer-network \
-  --publish published=8080,target=8080 \
+  --publish published=3000,target=3000 \
   --mount type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock \
   --mount type=volume,source=kontainer-data,target=/data \
   -e AGENT_ROLE=leader \
   -e AGENT_URL=https://agent.example.com \
   -e APP_HOST=0.0.0.0 \
-  -e APP_PORT=8080 \
+  -e APP_PORT=3000 \
   -e GRPC_PORT=9000 \
   -e DB_DATABASE=/data/kontainer.db \
   -e CLUSTER_SECRET=replace-me \
@@ -128,7 +128,7 @@ docker service create \
   --mount type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock \
   -e AGENT_ROLE=follower \
   -e APP_HOST=0.0.0.0 \
-  -e APP_PORT=8080 \
+  -e APP_PORT=3000 \
   -e GRPC_PORT=9000 \
   -e CLUSTER_SECRET=replace-me \
   ghcr.io/prvious/kontainer-agent:latest
@@ -169,6 +169,8 @@ The repo includes a local Docker-in-Docker Swarm environment under `dev/`.
 
 - `pnpm dev` starts the local cluster, leader, followers, and desktop app
 - `pnpm dev:cluster` starts only the local Swarm cluster
+- `pnpm dev:agent` starts the Goravel leader locally on `http://localhost:3000`
+- `pnpm artisan list` runs Goravel artisan commands from `server/`
 - the local leader config uses `CLUSTER_DEV_FOLLOWERS` to point at follower addresses directly
 
 ## Source of Truth

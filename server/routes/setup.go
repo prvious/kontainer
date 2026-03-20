@@ -11,6 +11,10 @@ import (
 )
 
 func Setup() {
+	if facades.Config().GetString("cluster.role") != "leader" {
+		return
+	}
+
 	setupToken := helpers.GetSetupToken()
 
 	facades.Log().Infof("Setup token: %s", setupToken)

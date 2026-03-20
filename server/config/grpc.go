@@ -8,7 +8,7 @@ func init() {
 	config := facades.Config()
 	config.Add("grpc", map[string]any{
 		"host": config.Env("GRPC_HOST", ""),
-		"port": config.Env("GRPC_PORT", "9000"),
+		"port": config.Env("GRPC_PORT", ""),
 
 		// Configure servers which the client will connect to
 		"servers": map[string]any{
