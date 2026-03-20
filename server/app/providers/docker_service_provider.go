@@ -37,6 +37,14 @@ func (r *DockerServiceProvider) Register(app foundation.Application) {
 		return info.Swarm.NodeID, nil
 	})
 
+	app.Singleton("docker.hostname", func(app foundation.Application) (any, error) {
+		hostname, err := os.Hostname()
+		if err != nil {
+			return "", fmt.Errorf("failed to get hostname: %w", err)
+		}
+		return hostname, nil
+	})
+
 	app.Singleton("docker.orchestrator", func(app foundation.Application) (any, error) {
 		clientInstance, err := app.Make("docker.client")
 		if err != nil {
@@ -56,7 +64,15 @@ func (r *DockerServiceProvider) Register(app foundation.Application) {
 			return nil, fmt.Errorf("docker.node_id is not a string")
 		}
 
-		hostname, _ := os.Hostname()
+		hostnameInstance, err := app.Make("docker.hostname")
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve docker.hostname: %w", err)
+		}
+		hostname, ok := hostnameInstance.(string)
+		if !ok {
+			return nil, fmt.Errorf("docker.hostname is not a string")
+		}
+
 		return swarm.NewSwarmOrchestrator(client, nodeID, hostname), nil
 	})
 }

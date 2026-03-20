@@ -2,7 +2,6 @@ package providers
 
 import (
 	"fmt"
-	"os"
 	"strings"
 
 	dockerclient "github.com/docker/docker/client"
@@ -95,9 +94,12 @@ func (p *ClusterServiceProvider) Boot(app foundation.Application) {
 		facades.Log().Warningf("ClusterServiceProvider Boot: docker.node_id is empty, leader will have no node ID")
 	}
 
-	hostname, err := os.Hostname()
+	hostnameInstance, err := app.Make("docker.hostname")
 	if err != nil {
-		facades.Log().Warningf("ClusterServiceProvider Boot: could not determine hostname: %v", err)
+		facades.Log().Warningf("ClusterServiceProvider Boot: could not resolve hostname: %v", err)
+	}
+	hostname, _ := hostnameInstance.(string)
+	if hostname == "" {
 		hostname = "unknown"
 	}
 	grpcPort := facades.Config().GetString("grpc.port", "9000")

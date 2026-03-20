@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	nethttp "net/http"
 	"strings"
 	"sync/atomic"
 
@@ -43,10 +42,10 @@ func SetupGuard() contractshttp.Middleware {
 			return
 		}
 
-		ctx.Response().Json(nethttp.StatusServiceUnavailable, map[string]any{
+		ctx.Response().Json(contractshttp.StatusServiceUnavailable, map[string]any{
 			"status": "setup_required",
 		})
-		ctx.Request().Abort(nethttp.StatusServiceUnavailable)
+		ctx.Request().Abort(contractshttp.StatusServiceUnavailable)
 	}
 }
 

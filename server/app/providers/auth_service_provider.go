@@ -28,6 +28,7 @@ func (r *AuthServiceProvider) Register(app foundation.Application) {
 func (r *AuthServiceProvider) Boot(app foundation.Application) {
 	r.loadJWTSecretFromDB()
 	r.registerOAuthProviders(app)
+
 }
 
 func (r *AuthServiceProvider) loadJWTSecretFromDB() {
