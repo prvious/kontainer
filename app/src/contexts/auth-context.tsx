@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import type { AuthUser, ParsedToken } from "@/types/auth";
+import type { AuthUser, ParsedToken, CheckAuthResponse } from "@/types/auth";
 import type { ConnectionProfile, StoredProfiles } from "@/types/connection";
 import { AuthContext } from "@/contexts/auth-context-value";
 
@@ -59,14 +59,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const handleToken = useCallback(async (jwt: string, loginAgentUrl: string) => {
         try {
-            const parsed = await invoke<ParsedToken>("parse_auth_token", {
+            // Step 1: Get expiry from JWT claims
+            const parsed = await invoke<ParsedToken>("parse_auth_token", { token: jwt });
+
+            // Step 2: Get user info from agent's /api/me
+            const authResponse = await invoke<CheckAuthResponse>("check_auth", {
+                url: loginAgentUrl,
                 token: jwt,
             });
 
             const profileId = crypto.randomUUID();
             const label = pendingLabelRef.current;
 
-            setUser(parsed.user);
+            setUser(authResponse.user);
             setToken(jwt);
             setExpiresAt(parsed.expiresAt);
             setAgentUrl(loginAgentUrl);
@@ -77,11 +82,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                         id: profileId,
                         label,
                         agentUrl: loginAgentUrl,
-                        userId: parsed.user.id,
-                        userName: parsed.user.name,
-                        userEmail: parsed.user.email,
-                        userAvatarUrl: parsed.user.avatarUrl,
-                        userProvider: parsed.user.provider,
+                        userId: authResponse.user.id,
+                        userName: authResponse.user.name,
+                        userEmail: authResponse.user.email,
+                        userAvatarUrl: authResponse.user.avatarUrl,
+                        userProvider: authResponse.user.provider,
                         token: jwt,
                         expiresAt: parsed.expiresAt,
                     },
@@ -96,11 +101,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 setProfiles(data.profiles);
                 setActiveProfileId(data.activeProfileId);
             } catch {
-                // At minimum set the new profile locally
                 setActiveProfileId(profileId);
             }
         } catch (err) {
-            console.error("Failed to parse auth token:", err);
+            console.error("Failed to handle auth token:", err);
         }
     }, []);
 
