@@ -1,10 +1,8 @@
 package setup
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
+	nethttp "net/http"
 	"strconv"
 
 	"github.com/goravel/framework/contracts/database/orm"
@@ -31,19 +29,16 @@ type GitHubAppCredentials struct {
 
 func (a *ExchangeCodeAction) Execute(code string) (*GitHubAppCredentials, error) {
 	conversionURL := fmt.Sprintf("https://api.github.com/app-manifests/%s/conversions", code)
-	resp, err := http.Post(conversionURL, "application/json", nil)
+	resp, err := facades.Http().
+		WithHeader("Accept", "application/json").
+		Post(conversionURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to contact GitHub API: %w", err)
 	}
-	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read GitHub API response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusCreated {
-		return nil, fmt.Errorf("GitHub API returned status %d: %s", resp.StatusCode, string(body))
+	if resp.Status() != nethttp.StatusCreated {
+		body, _ := resp.Body()
+		return nil, fmt.Errorf("GitHub API returned status %d: %s", resp.Status(), body)
 	}
 
 	var ghResp struct {
@@ -57,7 +52,7 @@ func (a *ExchangeCodeAction) Execute(code string) (*GitHubAppCredentials, error)
 			Login string `json:"login"`
 		} `json:"owner"`
 	}
-	if err := json.Unmarshal(body, &ghResp); err != nil {
+	if err := resp.Bind(&ghResp); err != nil {
 		return nil, fmt.Errorf("failed to parse GitHub API response: %w", err)
 	}
 
