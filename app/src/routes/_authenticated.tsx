@@ -2,6 +2,7 @@ import { Outlet, createFileRoute, redirect, useRouter } from "@tanstack/react-ro
 import { SidebarNav } from "@/components/sidebar-nav";
 import { DashboardHeader } from "@/components/dashboard-header";
 import { StatusBar } from "@/components/status-bar";
+import { AccentLine } from "@/components/accent-line";
 import { TerminalProvider } from "@/contexts/terminal-context";
 import { CommandPaletteProvider } from "@/contexts/command-palette-context";
 import { CommandPalette } from "@/components/command-palette";
@@ -31,17 +32,14 @@ function AuthenticatedLayout() {
     return (
         <TerminalProvider>
             <CommandPaletteProvider>
-                <div className='flex h-screen flex-col overflow-hidden'>
-                    <div className='flex flex-1 overflow-hidden p-2 pb-0 pl-0'>
+                <div className='flex h-screen flex-col overflow-hidden bg-background'>
+                    <AccentLine />
+                    <DashboardHeader />
+                    <div className='flex flex-1 overflow-hidden'>
                         <SidebarNav />
-                        <div className='flex flex-1 flex-col overflow-hidden'>
-                            <DashboardHeader />
-                            <div className='grain flex flex-1 flex-col overflow-hidden rounded-xl bg-background shadow-sm'>
-                                <main className='flex-1 overflow-y-auto'>
-                                    <Outlet />
-                                </main>
-                            </div>
-                        </div>
+                        <main className='flex-1 overflow-y-auto'>
+                            <Outlet />
+                        </main>
                     </div>
                     <StatusBar />
                 </div>
