@@ -96,10 +96,11 @@ func (p *ClusterServiceProvider) Boot(app foundation.Application) {
 
 	hostnameInstance, err := app.Make("docker.hostname")
 	if err != nil {
-		facades.Log().Warningf("ClusterServiceProvider Boot: could not resolve hostname: %v", err)
+		facades.Log().Errorf("ClusterServiceProvider Boot: could not resolve hostname, using 'unknown': %v", err)
 	}
 	hostname, _ := hostnameInstance.(string)
 	if hostname == "" {
+		facades.Log().Warningf("ClusterServiceProvider Boot: hostname resolved but is empty, using 'unknown'")
 		hostname = "unknown"
 	}
 	grpcPort := facades.Config().GetString("grpc.port", "9000")

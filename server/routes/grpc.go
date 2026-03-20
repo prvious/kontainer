@@ -1,6 +1,7 @@
 package routes
 
 import (
+	metricsActions "github.com/prvious/kontainer/server/app/actions/metrics"
 	"github.com/prvious/kontainer/server/app/facades"
 	"github.com/prvious/kontainer/server/app/grpc/controllers"
 	"github.com/prvious/kontainer/server/app/services/docker"
@@ -30,6 +31,18 @@ func Grpc() {
 		return
 	}
 
-	agentCtrl := controllers.NewAgentController(nodeID, orchestrator)
+	hostnameInstance, err := facades.App().Make("docker.hostname")
+	if err != nil {
+		facades.Log().Warningf("gRPC AgentService not registered — docker.hostname unavailable: %v", err)
+		return
+	}
+	hostname, ok := hostnameInstance.(string)
+	if !ok {
+		facades.Log().Warningf("gRPC AgentService not registered — docker.hostname has unexpected type")
+		return
+	}
+
+	nodeMetrics := metricsActions.NewCollectNodeMetricsAction()
+	agentCtrl := controllers.NewAgentController(nodeID, hostname, orchestrator, nodeMetrics)
 	pb.RegisterAgentServiceServer(facades.Grpc().Server(), agentCtrl)
 }
