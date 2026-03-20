@@ -6,10 +6,17 @@ import (
 	"github.com/goravel/framework/contracts/console"
 	"github.com/goravel/framework/contracts/schedule"
 
-	"github.com/prvious/kontainer/server/app/actions/metrics"
 	"github.com/prvious/kontainer/server/app/facades"
 	"github.com/prvious/kontainer/server/app/services/cluster"
 )
+
+type metricsCollector interface {
+	Execute(ctx context.Context)
+}
+
+type metricsPruner interface {
+	Execute() error
+}
 
 type Kernel struct{}
 
@@ -54,9 +61,9 @@ func (kernel *Kernel) Schedule() []schedule.Event {
 		facades.Log().Errorf("console kernel: failed to resolve metrics.collector: %v", err)
 		return events
 	}
-	collector, ok := collectorInstance.(*metrics.CollectAndStoreAction)
+	collector, ok := collectorInstance.(metricsCollector)
 	if !ok {
-		facades.Log().Errorf("console kernel: metrics.collector is not *metrics.CollectAndStoreAction (got %T)", collectorInstance)
+		facades.Log().Errorf("console kernel: metrics.collector does not implement metricsCollector (got %T)", collectorInstance)
 		return events
 	}
 
@@ -69,9 +76,9 @@ func (kernel *Kernel) Schedule() []schedule.Event {
 		facades.Log().Errorf("console kernel: failed to resolve metrics.pruner: %v", err)
 		return events
 	}
-	pruner, ok := prunerInstance.(*metrics.PruneMetricsAction)
+	pruner, ok := prunerInstance.(metricsPruner)
 	if !ok {
-		facades.Log().Errorf("console kernel: metrics.pruner is not *metrics.PruneMetricsAction (got %T)", prunerInstance)
+		facades.Log().Errorf("console kernel: metrics.pruner does not implement metricsPruner (got %T)", prunerInstance)
 		return events
 	}
 
