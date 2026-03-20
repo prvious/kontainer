@@ -5,6 +5,7 @@ import { AuthProvider } from "@/contexts/auth-context";
 import { useAuth } from "@/hooks/use-auth";
 import { useNativeBehavior } from "@/hooks/use-native-behavior";
 import { router } from "@/router";
+import { SplashScreen } from "@/components/splash-screen";
 import { createRoot } from "react-dom/client";
 import "./app.css";
 
@@ -19,7 +20,7 @@ function InnerApp() {
     }, [auth.isLoading]);
 
     if (auth.isLoading) {
-        return null;
+        return <SplashScreen />;
     }
 
     return <RouterProvider router={router} context={{ auth }} />;
