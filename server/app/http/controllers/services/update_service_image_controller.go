@@ -6,6 +6,7 @@ import (
 	"github.com/goravel/framework/contracts/http"
 	serviceActions "github.com/prvious/kontainer/server/app/actions/services"
 	"github.com/prvious/kontainer/server/app/facades"
+	"github.com/prvious/kontainer/server/app/http/requests"
 	"github.com/prvious/kontainer/server/app/services/docker"
 )
 
@@ -17,20 +18,16 @@ func NewUpdateServiceImageController(action *serviceActions.UpdateServiceImageAc
 	return &UpdateServiceImageController{action: action}
 }
 
-type updateImageRequest struct {
-	Image string `json:"image"`
-}
-
 func (c *UpdateServiceImageController) Handle(ctx http.Context) http.Response {
 	serviceID := ctx.Request().Route("serviceID")
 
-	var req updateImageRequest
-	if err := ctx.Request().Bind(&req); err != nil {
-		return ctx.Response().Json(400, map[string]string{"error": "invalid request body"})
+	var req requests.UpdateServiceImageRequest
+	errs, err := ctx.Request().ValidateRequest(&req)
+	if err != nil {
+		return ctx.Response().Json(400, map[string]string{"error": err.Error()})
 	}
-
-	if req.Image == "" {
-		return ctx.Response().Json(400, map[string]string{"error": "image field is required"})
+	if errs != nil {
+		return ctx.Response().Json(422, map[string]any{"errors": errs.All()})
 	}
 
 	if err := c.action.Execute(ctx.Context(), serviceID, req.Image); err != nil {
