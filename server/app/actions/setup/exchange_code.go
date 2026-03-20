@@ -37,7 +37,10 @@ func (a *ExchangeCodeAction) Execute(code string) (*GitHubAppCredentials, error)
 	}
 
 	if resp.Status() != nethttp.StatusCreated {
-		body, _ := resp.Body()
+		body, bodyErr := resp.Body()
+		if bodyErr != nil {
+			return nil, fmt.Errorf("GitHub API returned status %d (body unreadable: %v)", resp.Status(), bodyErr)
+		}
 		return nil, fmt.Errorf("GitHub API returned status %d: %s", resp.Status(), body)
 	}
 

@@ -94,14 +94,17 @@ func (p *ClusterServiceProvider) Boot(app foundation.Application) {
 		facades.Log().Warningf("ClusterServiceProvider Boot: docker.node_id is empty, leader will have no node ID")
 	}
 
+	var hostname string
 	hostnameInstance, err := app.Make("docker.hostname")
 	if err != nil {
 		facades.Log().Errorf("ClusterServiceProvider Boot: could not resolve hostname, using 'unknown': %v", err)
-	}
-	hostname, _ := hostnameInstance.(string)
-	if hostname == "" {
-		facades.Log().Warningf("ClusterServiceProvider Boot: hostname resolved but is empty, using 'unknown'")
 		hostname = "unknown"
+	} else {
+		hostname, _ = hostnameInstance.(string)
+		if hostname == "" {
+			facades.Log().Warningf("ClusterServiceProvider Boot: hostname resolved but is empty, using 'unknown'")
+			hostname = "unknown"
+		}
 	}
 	grpcPort := facades.Config().GetString("grpc.port", "9000")
 	selfAddr := fmt.Sprintf("%s:%s", hostname, grpcPort)
