@@ -10,17 +10,18 @@ import { CommandPalette } from "@/components/command-palette";
 import { useAuth } from "@/hooks/use-auth";
 import { useAgentStatus } from "@/hooks/use-agent-status";
 
-class ShellErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
+class ShellErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; error: Error | null }> {
     constructor(props: { children: ReactNode }) {
         super(props);
-        this.state = { hasError: false };
+        this.state = { hasError: false, error: null };
     }
 
-    static getDerivedStateFromError(): { hasError: boolean } {
-        return { hasError: true };
+    static getDerivedStateFromError(error: Error): { hasError: boolean; error: Error } {
+        return { hasError: true, error };
     }
 
     componentDidCatch(error: Error, info: ErrorInfo) {
+        // TODO: replace with structured logging / Sentry once logging infra exists
         console.error("[shell] render error:", error, info.componentStack);
     }
 
@@ -28,17 +29,25 @@ class ShellErrorBoundary extends Component<{ children: ReactNode }, { hasError: 
         if (this.state.hasError) {
             return (
                 <div className='flex h-screen items-center justify-center bg-background text-foreground'>
-                    <div className='text-center'>
+                    <div className='max-w-md text-center'>
                         <p className='font-mono text-sm text-muted-foreground'>Something went wrong.</p>
-                        <button
-                            className='mt-3 rounded border border-border px-3 py-1.5 font-mono text-xs text-foreground transition-colors hover:bg-bg-elevated'
-                            onClick={() => {
-                                this.setState({ hasError: false });
-                                window.location.reload();
-                            }}
-                        >
-                            Reload
-                        </button>
+                        {this.state.error && <p className='mt-2 font-mono text-xs text-muted-foreground/60'>{this.state.error.message}</p>}
+                        <div className='mt-4 flex items-center justify-center gap-2'>
+                            <button
+                                className='rounded border border-border px-3 py-1.5 font-mono text-xs text-foreground transition-colors hover:bg-bg-elevated'
+                                onClick={() => {
+                                    this.setState({ hasError: false, error: null });
+                                }}
+                            >
+                                Go to Dashboard
+                            </button>
+                            <button
+                                className='rounded border border-border px-3 py-1.5 font-mono text-xs text-muted-foreground transition-colors hover:bg-bg-elevated hover:text-foreground'
+                                onClick={() => window.location.reload()}
+                            >
+                                Reload
+                            </button>
+                        </div>
                     </div>
                 </div>
             );
