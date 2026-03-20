@@ -32,6 +32,7 @@ func (r *M20260312062903CreateNodeMetricsTable) Up() error {
 
 			table.Index("timestamp")
 			table.Index("node_id")
+			table.Timestamps()
 		})
 	}
 

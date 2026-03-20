@@ -20,7 +20,7 @@ func NewCompleteController(completeSetup *setupactions.CompleteSetupAction) *Com
 func (c *CompleteController) Handle(ctx contractshttp.Context) contractshttp.Response {
 	if err := c.completeSetup.Execute(); err != nil {
 		facades.Log().Errorf("setup completion failed: %v", err)
-		return ctx.Response().Json(nethttp.StatusBadRequest, map[string]any{"error": "setup completion failed"})
+		return ctx.Response().Json(nethttp.StatusInternalServerError, map[string]any{"error": "setup completion failed"})
 	}
 
 	return ctx.Response().Json(nethttp.StatusOK, map[string]any{"status": "complete"})
