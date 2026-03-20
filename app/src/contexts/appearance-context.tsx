@@ -8,14 +8,10 @@ import { fonts as availableFonts, DEFAULT_FONT_ID, getFontById } from "@/lib/fon
 import type { AppSettings } from "@/types/settings";
 import { AppearanceContext } from "@/contexts/appearance-context-value";
 
-function syncDOM(resolved: "light" | "dark", themeId: string, fontCssFamily: string) {
+function syncDOM(themeId: string, fontCssFamily: string) {
     const cl = document.documentElement.classList;
 
-    if (resolved === "dark") {
-        cl.add("dark");
-    } else {
-        cl.remove("dark");
-    }
+    cl.add("dark");
 
     // Remove any existing theme classes, then add the new one (skip "default")
     for (const c of Array.from(cl)) {
@@ -112,7 +108,7 @@ export function AppearanceProvider({ children }: { children: React.ReactNode }) 
         const def = getFontById(font);
 
         if (loadedFonts.current.has(font)) {
-            syncDOM(resolved, theme, def.cssFamily);
+            syncDOM(theme, def.cssFamily);
             return;
         }
 
@@ -121,11 +117,11 @@ export function AppearanceProvider({ children }: { children: React.ReactNode }) 
             .then(() => {
                 if (cancelled) return;
                 loadedFonts.current.add(font);
-                syncDOM(resolved, theme, def.cssFamily);
+                syncDOM(theme, def.cssFamily);
             })
             .catch(() => {
                 if (cancelled) return;
-                syncDOM(resolved, theme, def.cssFamily);
+                syncDOM(theme, def.cssFamily);
             });
 
         return () => {

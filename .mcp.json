@@ -3,6 +3,10 @@
         "tanstack": {
             "command": "npx",
             "args": ["@tanstack/cli", "mcp"]
+        },
+        "shadcn": {
+            "command": "npx",
+            "args": ["shadcn@latest", "mcp"]
         }
     }
 }

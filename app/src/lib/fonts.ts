@@ -5,9 +5,15 @@ export interface FontDefinition {
     load: () => Promise<void>;
 }
 
-export const DEFAULT_FONT_ID = "figtree";
+export const DEFAULT_FONT_ID = "space-grotesk";
 
 export const fonts: FontDefinition[] = [
+    {
+        id: "space-grotesk",
+        label: "Space Grotesk",
+        cssFamily: '"Space Grotesk Variable", sans-serif',
+        load: () => Promise.resolve(),
+    },
     {
         id: "figtree",
         label: "Figtree",

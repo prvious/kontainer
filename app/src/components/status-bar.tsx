@@ -1,88 +1,141 @@
 import { useNavigate } from "@tanstack/react-router";
-import { Server, ListChecks, Cpu, MemoryStick, Terminal, ChevronUp, X, Command } from "lucide-react";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { useAuth } from "@/hooks/use-auth";
-import { useNodes } from "@/hooks/use-nodes";
+import { GitBranch, Container, Cpu, MemoryStick, Layers, TriangleAlert, Terminal, ScrollText, ChevronUp, X } from "lucide-react";
 import { useTaskStats } from "@/hooks/use-task-stats";
 import { useClusterMetrics } from "@/hooks/use-cluster-metrics";
 import { useTerminal } from "@/hooks/use-terminal";
-import { useCommandPalette } from "@/hooks/use-command-palette";
 
-function resourceColor(pct: number): string {
-    if (pct > 90) return "text-destructive";
-    if (pct >= 70) return "text-warning";
-    return "";
+function Separator() {
+    return <span className='h-full w-px bg-border' />;
+}
+
+function Segment({
+    icon: Icon,
+    iconColor,
+    label,
+    textColor,
+    onClick,
+    testId,
+    valueTestId,
+}: {
+    icon: typeof Cpu;
+    iconColor: string;
+    label: string;
+    textColor?: string;
+    onClick?: () => void;
+    testId?: string;
+    valueTestId?: string;
+}) {
+    const Wrapper = onClick ? "button" : "div";
+    return (
+        <Wrapper
+            className={`flex h-full items-center gap-[5px] px-2.5 ${textColor ?? "text-text-secondary"} ${onClick ? 'transition-colors hover:text-foreground' : ""}`}
+            onClick={onClick}
+            data-testid={testId}
+        >
+            <Icon className={`size-[11px] ${iconColor}`} />
+            <span className='font-mono text-[10px] font-medium' data-testid={valueTestId}>
+                {label}
+            </span>
+        </Wrapper>
+    );
 }
 
 export function StatusBar() {
     const navigate = useNavigate();
-    const { profiles, activeProfileId } = useAuth();
-    const { data: nodes, isLoading: nodesLoading } = useNodes();
     const { data: taskStats, isLoading: taskStatsLoading } = useTaskStats();
     const { data: metrics, isLoading: metricsLoading } = useClusterMetrics();
-    const { setOpen, setInitialSearch } = useCommandPalette();
-
-    const activeProfile = profiles.find((p) => p.id === activeProfileId);
-    const clusterName = activeProfile?.label ?? "--";
-
-    // Nodes
-    const totalNodes = nodes?.length ?? 0;
-    const readyNodes = nodes?.filter((n) => n.status === "ready").length ?? 0;
-    const allNodesReady = totalNodes > 0 && readyNodes === totalNodes;
-    const nodeLabel = nodesLoading ? "--" : allNodesReady ? `${totalNodes} nodes` : `${readyNodes}/${totalNodes} nodes`;
-    const nodeWarning = !nodesLoading && totalNodes > 0 && readyNodes < totalNodes;
-
-    // Tasks
-    const running = taskStats?.running ?? 0;
-    const desired = taskStats?.desiredRunning ?? 0;
-    const failed = taskStats?.failed ?? 0;
-    const taskLabel = taskStatsLoading ? "--" : `${running}/${desired} tasks`;
-    const taskWarning = !taskStatsLoading && desired > 0 && running < desired;
-    const taskDanger = !taskStatsLoading && failed > 0;
-
-    // Metrics (averaged across agents)
-    const agents = metrics?.agents ?? [];
-    const avgCpu = agents.length > 0 ? Math.round(agents.reduce((sum, a) => sum + a.node.cpuPercent, 0) / agents.length) : null;
-    const avgMem = agents.length > 0 ? Math.round(agents.reduce((sum, a) => sum + a.node.memoryPercent, 0) / agents.length) : null;
-
-    const cpuDisplay = metricsLoading || avgCpu === null ? "--" : `${avgCpu}%`;
-    const memDisplay = metricsLoading || avgMem === null ? "--" : `${avgMem}%`;
-
-    const cpuColor = avgCpu !== null ? resourceColor(avgCpu) : "";
-    const memColor = avgMem !== null ? resourceColor(avgMem) : "";
 
     const { sessions, activeSessionId, isMinimized, setMinimized, switchSession, closeSession } = useTerminal();
-    const showSessionPills = sessions.length > 0;
 
-    function taskColorClass(): string {
-        if (taskDanger) return "text-destructive";
-        if (taskWarning) return "text-warning";
-        return "";
-    }
+    // Metrics
+    const agents = metrics?.agents ?? [];
+    const avgCpu = agents.length > 0 ? Math.round(agents.reduce((sum, a) => sum + a.node.cpuPercent, 0) / agents.length) : null;
+    const totalMem = agents.reduce((sum, a) => sum + a.node.memoryUsed, 0);
+    const totalMemMax = agents.reduce((sum, a) => sum + a.node.memoryTotal, 0);
+    const memDisplay = metricsLoading || totalMemMax === 0 ? "--" : `${(totalMem / 1e9).toFixed(1)}/${(totalMemMax / 1e9).toFixed(0)}G`;
+
+    // Tasks
+    const taskCount = taskStatsLoading ? "--" : `${taskStats?.running ?? 0} TASKS`;
+    const taskColor = (taskStats?.failed ?? 0) > 0 ? "text-accent-red" : undefined;
+
+    // CPU display
+    const cpuDisplay = metricsLoading || avgCpu === null ? "--" : `CPU ${avgCpu}%`;
+
+    // Alerts (failed tasks)
+    const alertCount = taskStats?.failed ?? 0;
 
     return (
-        <TooltipProvider>
-            <div className='flex h-7 shrink-0 items-center gap-1.5 border-0 border-border px-3 text-xs text-foreground'>
-                {/* Terminal sessions or hint */}
-                {showSessionPills ? (
+        <div className='flex h-7 shrink-0 items-center border-t border-border bg-statusbar-bg/95 text-xs'>
+            {/* Left segments */}
+            <div className='flex h-full items-center'>
+                <Segment icon={GitBranch} iconColor='text-muted-foreground' label='main' textColor='text-muted-foreground' /> {/* TODO: wire to agent data */}
+                <Separator />
+                <Segment icon={Container} iconColor='text-muted-foreground' label='Docker --' textColor='text-muted-foreground' />{" "}
+                {/* TODO: wire to agent data */}
+                <Separator />
+                <Segment
+                    icon={Cpu}
+                    iconColor='text-accent-cyan'
+                    label={cpuDisplay}
+                    testId='status-cpu'
+                    valueTestId='cpu-value'
+                    onClick={() => navigate({ to: "/" })}
+                />
+                <Separator />
+                <Segment
+                    icon={MemoryStick}
+                    iconColor='text-accent-purple'
+                    label={`MEM ${memDisplay}`}
+                    testId='status-mem'
+                    valueTestId='mem-value'
+                    onClick={() => navigate({ to: "/" })}
+                />
+                <Separator />
+                <Segment
+                    icon={Layers}
+                    iconColor='text-accent-orange'
+                    label={taskCount}
+                    textColor={taskColor}
+                    testId='status-tasks'
+                    onClick={() => navigate({ to: "/tasks" })}
+                />
+                <Separator />
+                {alertCount > 0 && (
+                    <Segment
+                        icon={TriangleAlert}
+                        iconColor='text-accent-red'
+                        label={`${alertCount} ALERT${alertCount > 1 ? "S" : ""}`}
+                        textColor='text-accent-red'
+                    />
+                )}
+            </div>
+
+            {/* Spacer */}
+            <div className='flex-1' />
+
+            {/* Right segments */}
+            <div className='flex h-full items-center'>
+                {/* Terminal sessions */}
+                {sessions.length > 0 ? (
                     <>
-                        <div className='flex items-center gap-1'>
+                        <Separator />
+                        <div className='flex h-full items-center gap-1 px-2.5'>
                             {sessions.map((session) => {
                                 const name = session.target.containerName || session.target.containerId.slice(0, 12);
                                 const isActive = session.id === activeSessionId;
                                 return (
                                     <button
                                         key={session.id}
-                                        className={`group flex items-center gap-1 rounded-md px-1.5 py-0.5 transition-colors hover:bg-accent hover:text-foreground ${isActive ? 'bg-accent text-foreground' : "text-muted-foreground"}`}
+                                        className={`group flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[10px] transition-colors ${isActive ? 'bg-bg-elevated text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
                                         onClick={() => {
                                             switchSession(session.id);
                                             setMinimized(false);
                                         }}
                                     >
-                                        <Terminal className='size-3' />
+                                        <Terminal className='size-[11px] text-accent-green' />
                                         <span className='max-w-[80px] truncate'>{name}</span>
                                         <span
-                                            className='shrink-0 rounded p-0.5 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-muted'
+                                            className='shrink-0 rounded p-0.5 opacity-0 group-hover:opacity-100 hover:bg-muted'
                                             onClick={(e) => {
                                                 e.stopPropagation();
                                                 closeSession(session.id);
@@ -96,123 +149,27 @@ export function StatusBar() {
                                 );
                             })}
                             {isMinimized && (
-                                <button
-                                    className='rounded-md p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
-                                    onClick={() => setMinimized(false)}
-                                    title='Expand terminal'
-                                >
+                                <button className='rounded p-0.5 text-muted-foreground hover:text-foreground' onClick={() => setMinimized(false)}>
                                     <ChevronUp className='size-3.5' />
                                 </button>
                             )}
                         </div>
-
-                        <span className='h-3 w-px bg-border' />
                     </>
                 ) : (
-                    <button
-                        className='flex items-center gap-1.5 hover:text-foreground'
-                        onClick={() => {
-                            setInitialSearch("terminal");
-                            setOpen(true);
-                        }}
-                    >
-                        <Terminal className='size-3' />
-                        <span>Terminal</span>
-                        <kbd className='flex items-center gap-0.5 rounded border border-border bg-muted px-1 py-px text-[10px] leading-none text-muted-foreground'>
-                            <Command className='size-2.5' />T
-                        </kbd>
-                    </button>
+                    <>
+                        <Separator />
+                        <Segment icon={Terminal} iconColor='text-accent-green' label='0 TERMINALS' />
+                    </>
                 )}
-
-                {/* Spacer */}
-                <div className='flex-1' />
-
-                {/* Cluster name */}
-                <div className='flex items-center gap-1.5'>
-                    <span className='animate-pulse-dot size-1.5 shrink-0 rounded-full bg-primary' />
-                    <span className='font-medium'>{clusterName}</span>
+                <Separator />
+                <Segment icon={ScrollText} iconColor='text-muted-foreground' label='-- STREAMS' textColor='text-muted-foreground' />{" "}
+                {/* TODO: wire to log stream count */}
+                <Separator />
+                <div className='flex h-full items-center gap-[5px] px-2.5'>
+                    <span className='size-1.5 rounded-full bg-muted-foreground' />
+                    <span className='font-mono text-[10px] font-medium text-muted-foreground'>WS --</span> {/* TODO: wire to WebSocket state */}
                 </div>
-
-                <span className='h-3 w-px bg-border' />
-
-                {/* Nodes */}
-                <Tooltip>
-                    <TooltipTrigger
-                        render={(props) => (
-                            <button
-                                {...props}
-                                data-testid='status-nodes'
-                                className={`flex items-center gap-1 hover:text-foreground ${nodeWarning ? "text-warning" : ""}`}
-                                onClick={() => navigate({ to: "/nodes" })}
-                            >
-                                <Server className='size-3' />
-                                <span>{nodeLabel}</span>
-                            </button>
-                        )}
-                    />
-                    <TooltipContent>View nodes</TooltipContent>
-                </Tooltip>
-
-                <span className='h-3 w-px bg-border' />
-
-                {/* Tasks */}
-                <Tooltip>
-                    <TooltipTrigger
-                        render={(props) => (
-                            <button
-                                {...props}
-                                data-testid='status-tasks'
-                                className={`flex items-center gap-1 hover:text-foreground ${taskColorClass()}`}
-                                onClick={() => navigate({ to: "/tasks" })}
-                            >
-                                <ListChecks className='size-3' />
-                                <span>{taskLabel}</span>
-                            </button>
-                        )}
-                    />
-                    <TooltipContent>View tasks</TooltipContent>
-                </Tooltip>
-
-                <span className='h-3 w-px bg-border' />
-
-                {/* CPU */}
-                <Tooltip>
-                    <TooltipTrigger
-                        render={(props) => (
-                            <button
-                                {...props}
-                                data-testid='status-cpu'
-                                className={`flex items-center gap-1 hover:text-foreground ${cpuColor}`}
-                                onClick={() => navigate({ to: "/" })}
-                            >
-                                <Cpu className='size-3' />
-                                <span data-testid='cpu-value'>{cpuDisplay}</span>
-                            </button>
-                        )}
-                    />
-                    <TooltipContent>View dashboard</TooltipContent>
-                </Tooltip>
-
-                <span className='h-3 w-px bg-border' />
-
-                {/* MEM */}
-                <Tooltip>
-                    <TooltipTrigger
-                        render={(props) => (
-                            <button
-                                {...props}
-                                data-testid='status-mem'
-                                className={`flex items-center gap-1 hover:text-foreground ${memColor}`}
-                                onClick={() => navigate({ to: "/" })}
-                            >
-                                <MemoryStick className='size-3' />
-                                <span data-testid='mem-value'>{memDisplay}</span>
-                            </button>
-                        )}
-                    />
-                    <TooltipContent>View dashboard</TooltipContent>
-                </Tooltip>
             </div>
-        </TooltipProvider>
+        </div>
     );
 }
