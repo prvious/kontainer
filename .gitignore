@@ -33,3 +33,4 @@ agent/tmp/
 *.db-wal
 .worktrees/
 docs/superpowers
+docs/plans
