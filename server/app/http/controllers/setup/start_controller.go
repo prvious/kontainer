@@ -11,13 +11,14 @@ import (
 	contractshttp "github.com/goravel/framework/contracts/http"
 
 	"github.com/prvious/kontainer/server/app/facades"
+	setupservice "github.com/prvious/kontainer/server/app/services/setup"
 )
 
 type StartController struct {
-	manifestState *ManifestState
+	manifestState *setupservice.ManifestState
 }
 
-func NewStartController(state *ManifestState) *StartController {
+func NewStartController(state *setupservice.ManifestState) *StartController {
 	return &StartController{manifestState: state}
 }
 

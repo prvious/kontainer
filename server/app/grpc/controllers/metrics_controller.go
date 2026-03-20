@@ -2,32 +2,22 @@ package controllers
 
 import (
 	"context"
-	"os"
-	"runtime"
-	"sync"
 	"time"
 
-	"github.com/shirou/gopsutil/v4/cpu"
-	"github.com/shirou/gopsutil/v4/disk"
-	"github.com/shirou/gopsutil/v4/mem"
-
 	pb "github.com/prvious/kontainer/server/proto/agent"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
-var initHostProc sync.Once
-
 func (c *AgentController) Metrics(ctx context.Context, req *pb.MetricsRequest) (*pb.MetricsResponse, error) {
-
-	// Collect node metrics
-	nodeMetrics, err := collectNodeMetrics()
+	nodeMetrics, err := c.nodeMetrics.Execute()
 	if err != nil {
-		return nil, err
+		return nil, status.Errorf(codes.Internal, "collect node metrics: %v", err)
 	}
 
-	// Collect container metrics via orchestrator
 	containerStats, err := c.orchestrator.TaskStats(ctx)
 	if err != nil {
-		return nil, err
+		return nil, status.Errorf(codes.Internal, "collect container stats: %v", err)
 	}
 
 	containers := make([]*pb.ContainerMetrics, 0, len(containerStats))
@@ -44,49 +34,19 @@ func (c *AgentController) Metrics(ctx context.Context, req *pb.MetricsRequest) (
 	}
 
 	return &pb.MetricsResponse{
-		Timestamp: time.Now().UTC().Format(time.RFC3339),
-		NodeId:    c.nodeID,
-		Hostname:  c.hostname,
-		Node:      nodeMetrics,
+		Timestamp:  time.Now().UTC().Format(time.RFC3339),
+		NodeId:     c.nodeID,
+		Hostname:   c.hostname,
+		Node: &pb.NodeMetrics{
+			Cpus:          int32(nodeMetrics.CPUs),
+			CpuPercent:    nodeMetrics.CPUPercent,
+			MemoryUsed:    int64(nodeMetrics.MemoryUsed),
+			MemoryTotal:   int64(nodeMetrics.MemoryTotal),
+			MemoryPercent: nodeMetrics.MemoryPercent,
+			DiskUsed:      int64(nodeMetrics.DiskUsed),
+			DiskTotal:     int64(nodeMetrics.DiskTotal),
+			DiskPercent:   nodeMetrics.DiskPercent,
+		},
 		Containers: containers,
-	}, nil
-}
-
-func collectNodeMetrics() (*pb.NodeMetrics, error) {
-	initHostProc.Do(func() {
-		if _, err := os.Stat("/host/proc"); err == nil {
-			os.Setenv("HOST_PROC", "/host/proc")
-		}
-	})
-
-	v, err := mem.VirtualMemory()
-	if err != nil {
-		return nil, err
-	}
-
-	cpuPercent, err := cpu.Percent(0, false)
-	if err != nil {
-		return nil, err
-	}
-
-	d, err := disk.Usage("/")
-	if err != nil {
-		return nil, err
-	}
-
-	cpuPct := 0.0
-	if len(cpuPercent) > 0 {
-		cpuPct = cpuPercent[0]
-	}
-
-	return &pb.NodeMetrics{
-		Cpus:          int32(runtime.NumCPU()),
-		CpuPercent:    cpuPct,
-		MemoryUsed:    int64(v.Used),
-		MemoryTotal:   int64(v.Total),
-		MemoryPercent: v.UsedPercent,
-		DiskUsed:      int64(d.Used),
-		DiskTotal:     int64(d.Total),
-		DiskPercent:   d.UsedPercent,
 	}, nil
 }

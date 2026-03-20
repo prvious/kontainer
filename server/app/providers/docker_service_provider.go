@@ -8,6 +8,7 @@ import (
 	dockerclient "github.com/docker/docker/client"
 	"github.com/goravel/framework/contracts/foundation"
 
+	"github.com/prvious/kontainer/server/app/facades"
 	"github.com/prvious/kontainer/server/app/services/docker/swarm"
 )
 
@@ -77,4 +78,14 @@ func (r *DockerServiceProvider) Register(app foundation.Application) {
 	})
 }
 
-func (r *DockerServiceProvider) Boot(app foundation.Application) {}
+func (r *DockerServiceProvider) Boot(app foundation.Application) {
+	// When running inside a container, /host/proc is typically bind-mounted from the host's /proc.
+	// Setting HOST_PROC tells gopsutil to read host-level metrics instead of container-level metrics.
+	// This runs in DockerServiceProvider (not MetricsServiceProvider) to ensure it's set before any
+	// metrics action — whether container-managed or ad-hoc — collects data.
+	if _, err := os.Stat("/host/proc"); err == nil {
+		if err := os.Setenv("HOST_PROC", "/host/proc"); err != nil {
+			facades.Log().Warningf("failed to set HOST_PROC: %v", err)
+		}
+	}
+}

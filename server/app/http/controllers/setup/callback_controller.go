@@ -8,14 +8,15 @@ import (
 
 	setupactions "github.com/prvious/kontainer/server/app/actions/setup"
 	"github.com/prvious/kontainer/server/app/facades"
+	setupservice "github.com/prvious/kontainer/server/app/services/setup"
 )
 
 type CallbackController struct {
-	manifestState *ManifestState
+	manifestState *setupservice.ManifestState
 	exchangeCode  *setupactions.ExchangeCodeAction
 }
 
-func NewCallbackController(state *ManifestState, exchangeCode *setupactions.ExchangeCodeAction) *CallbackController {
+func NewCallbackController(state *setupservice.ManifestState, exchangeCode *setupactions.ExchangeCodeAction) *CallbackController {
 	return &CallbackController{manifestState: state, exchangeCode: exchangeCode}
 }
 

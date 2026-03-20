@@ -2,9 +2,9 @@ package controllers
 
 import (
 	"context"
-	"os"
 
 	"github.com/prvious/kontainer/server/app/facades"
+	metricsActions "github.com/prvious/kontainer/server/app/actions/metrics"
 	"github.com/prvious/kontainer/server/app/services/docker"
 	pb "github.com/prvious/kontainer/server/proto/agent"
 )
@@ -14,11 +14,11 @@ type AgentController struct {
 	nodeID       string
 	hostname     string
 	orchestrator docker.Orchestrator
+	nodeMetrics  *metricsActions.CollectNodeMetricsAction
 }
 
-func NewAgentController(nodeID string, orchestrator docker.Orchestrator) *AgentController {
-	hostname, _ := os.Hostname() // Cached once at startup; never changes during process lifetime
-	return &AgentController{nodeID: nodeID, hostname: hostname, orchestrator: orchestrator}
+func NewAgentController(nodeID string, hostname string, orchestrator docker.Orchestrator, nodeMetrics *metricsActions.CollectNodeMetricsAction) *AgentController {
+	return &AgentController{nodeID: nodeID, hostname: hostname, orchestrator: orchestrator, nodeMetrics: nodeMetrics}
 }
 
 func (c *AgentController) Health(ctx context.Context, req *pb.HealthRequest) (*pb.HealthResponse, error) {
