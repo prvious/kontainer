@@ -6,9 +6,14 @@ import { createMemoryHistory, createRootRouteWithContext, createRoute, createRou
 import { AuthProvider } from "@/contexts/auth-context";
 import { useAuth } from "@/hooks/use-auth";
 import type { AuthContextValue } from "@/contexts/auth-context-value";
-import type { ParsedToken } from "@/types/auth";
+import type { CheckAuthResponse, ParsedToken } from "@/types/auth";
 
 const mockParsedToken: ParsedToken = {
+    userId: "123",
+    expiresAt: 9999999999,
+};
+
+const mockCheckAuthResponse: CheckAuthResponse = {
     user: {
         id: "123",
         name: "Jane Doe",
@@ -16,7 +21,7 @@ const mockParsedToken: ParsedToken = {
         avatarUrl: "https://example.com/avatar.png",
         provider: "github",
     },
-    expiresAt: 9999999999,
+    status: "ok",
 };
 
 function LoginComponent() {
@@ -94,6 +99,7 @@ describe("Redirect After Login", () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_profiles") return { profiles: [], activeProfileId: null };
             if (cmd === "parse_auth_token") return mockParsedToken;
+            if (cmd === "check_auth") return mockCheckAuthResponse;
             if (cmd === "save_profile") return undefined;
             if (cmd === "auth_listen") {
                 tokenCallback?.({ payload: { token: "fake.jwt.token" } });

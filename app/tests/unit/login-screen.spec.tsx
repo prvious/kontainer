@@ -64,13 +64,13 @@ describe("LoginScreen", () => {
 
     it("renders the title and description", async () => {
         await renderLoginScreen();
-        expect(screen.getByText("Connect to Cluster")).toBeInTheDocument();
-        expect(screen.getByText("Enter your agent URL to get started.")).toBeInTheDocument();
+        expect(screen.getByText("kontainer")).toBeInTheDocument();
+        expect(screen.getByText("Connect to your infrastructure agent")).toBeInTheDocument();
     });
 
     it("renders the cluster URL input with default value", async () => {
         await renderLoginScreen();
-        const input = screen.getByPlaceholderText("http://localhost:3000");
+        const input = screen.getByPlaceholderText("https://agent.kontainer.dev");
         expect(input).toBeInTheDocument();
         expect(input).toHaveValue("http://localhost:3000");
     });
@@ -97,7 +97,7 @@ describe("LoginScreen", () => {
         const button = screen.getByRole("button", { name: /connect/i });
         await user.click(button);
 
-        expect(screen.getByText("Authenticate")).toBeInTheDocument();
+        expect(screen.getByText("authenticate with")).toBeInTheDocument();
     });
 
     it("fetches providers after successful ping", async () => {
@@ -188,13 +188,13 @@ describe("LoginScreen", () => {
         const button = screen.getByRole("button", { name: /connect/i });
         await user.click(button);
 
-        expect(screen.getByText("Authenticate")).toBeInTheDocument();
+        expect(screen.getByText("authenticate with")).toBeInTheDocument();
 
         // Change URL — should reset
-        const input = screen.getByPlaceholderText("http://localhost:3000");
+        const input = screen.getByPlaceholderText("https://agent.kontainer.dev");
         await user.type(input, "/new");
 
-        expect(screen.queryByText("Authenticate")).not.toBeInTheDocument();
+        expect(screen.queryByText("authenticate with")).not.toBeInTheDocument();
         expect(screen.getByRole("button", { name: /connect/i })).toBeInTheDocument();
     });
 
@@ -202,7 +202,7 @@ describe("LoginScreen", () => {
         await renderLoginScreen();
         const user = userEvent.setup();
 
-        const input = screen.getByPlaceholderText("http://localhost:3000");
+        const input = screen.getByPlaceholderText("https://agent.kontainer.dev");
         await user.clear(input);
         await user.type(input, "http://myserver:9090///");
 
