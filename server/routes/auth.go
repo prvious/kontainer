@@ -15,36 +15,16 @@ func Auth() {
 		return
 	}
 
-	registryInstance, err := facades.App().Make("auth.provider_registry")
-	if err != nil {
-		facades.Log().Errorf("Failed to resolve auth.provider_registry: %v", err)
-		return
-	}
-	registry, ok := registryInstance.(*authproviders.ProviderRegistry)
+	registry, ok := resolve[*authproviders.ProviderRegistry]("auth.provider_registry")
 	if !ok {
-		facades.Log().Errorf("auth.provider_registry is not *ProviderRegistry")
 		return
 	}
-
-	sessionInstance, err := facades.App().Make("auth.session_store")
-	if err != nil {
-		facades.Log().Errorf("Failed to resolve auth.session_store: %v", err)
-		return
-	}
-	sessions, ok := sessionInstance.(*authservice.SessionStore)
+	sessions, ok := resolve[*authservice.SessionStore]("auth.session_store")
 	if !ok {
-		facades.Log().Errorf("auth.session_store is not *SessionStore")
 		return
 	}
-
-	bridgeInstance, err := facades.App().Make("auth.bridge")
-	if err != nil {
-		facades.Log().Errorf("Failed to resolve auth.bridge: %v", err)
-		return
-	}
-	bridge, ok := bridgeInstance.(*authservice.AuthBridge)
+	bridge, ok := resolve[*authservice.AuthBridge]("auth.bridge")
 	if !ok {
-		facades.Log().Errorf("auth.bridge is not *AuthBridge")
 		return
 	}
 

@@ -9,36 +9,21 @@ import (
 )
 
 func Grpc() {
-	orchestratorInstance, err := facades.App().Make("docker.orchestrator")
-	if err != nil {
-		facades.Log().Warningf("gRPC AgentService not registered — Docker orchestrator unavailable: %v", err)
-		return
-	}
-	orchestrator, ok := orchestratorInstance.(docker.Orchestrator)
+	orchestrator, ok := resolve[docker.Orchestrator]("docker.orchestrator")
 	if !ok {
-		facades.Log().Warningf("gRPC AgentService not registered — docker.orchestrator has unexpected type")
+		facades.Log().Warningf("gRPC AgentService not registered — Docker orchestrator unavailable")
 		return
 	}
 
-	nodeIDInstance, err := facades.App().Make("docker.node_id")
-	if err != nil {
-		facades.Log().Warningf("gRPC AgentService not registered — docker.node_id unavailable: %v", err)
-		return
-	}
-	nodeID, ok := nodeIDInstance.(string)
+	nodeID, ok := resolve[string]("docker.node_id")
 	if !ok {
-		facades.Log().Warningf("gRPC AgentService not registered — docker.node_id has unexpected type")
+		facades.Log().Warningf("gRPC AgentService not registered — docker.node_id unavailable")
 		return
 	}
 
-	hostnameInstance, err := facades.App().Make("docker.hostname")
-	if err != nil {
-		facades.Log().Warningf("gRPC AgentService not registered — docker.hostname unavailable: %v", err)
-		return
-	}
-	hostname, ok := hostnameInstance.(string)
+	hostname, ok := resolve[string]("docker.hostname")
 	if !ok {
-		facades.Log().Warningf("gRPC AgentService not registered — docker.hostname has unexpected type")
+		facades.Log().Warningf("gRPC AgentService not registered — docker.hostname unavailable")
 		return
 	}
 
