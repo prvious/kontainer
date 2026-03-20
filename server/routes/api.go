@@ -48,21 +48,30 @@ func Api() {
 		return
 	}
 
-	meCtrl := authcontrollers.NewMeController()
-
-	// Resolve orchestrator for all Docker API controllers
-	orchestrator := resolveOrchestrator()
-
-	// Agents controller from cluster registry
-	agentsHandler := buildAgentsHandler()
+	// Resolve shared dependencies once
+	orchestrator, _ := resolve[docker.Orchestrator]("docker.orchestrator")
+	registry, _ := resolve[*cluster.Registry]("cluster.registry")
+	pool, _ := resolve[*cluster.GrpcPool]("cluster.pool")
+	hostname, hostnameOk := resolve[string]("docker.hostname")
+	if !hostnameOk {
+		facades.Log().Warningf("docker.hostname not resolved — image listings will use empty hostname")
+	}
+	leaderNodeID := facades.Config().GetString("cluster.node_id", "")
 
 	// WebSocket routes — inside /api prefix but WITHOUT JWT middleware.
 	// WS controllers handle JWT auth from the ?token= query param themselves.
-	registerWebSocketRoutes(orchestrator)
+	registerWebSocketRoutes(orchestrator, registry, pool, leaderNodeID)
 
 	facades.Route().Prefix("api").Middleware(middleware.JWT()).Group(func(router route.Router) {
-		router.Get("me", meCtrl.Handle)
-		router.Get("agents", agentsHandler)
+		router.Get("me", authcontrollers.NewMeController().Handle)
+
+		// Agents
+		if registry != nil {
+			agentsCtrl := agentControllers.NewListAgentsController(agentActions.NewListAgentsAction(registry))
+			router.Get("agents", agentsCtrl.Handle)
+		} else {
+			router.Get("agents", unavailableHandler("cluster management unavailable"))
+		}
 
 		if orchestrator == nil {
 			facades.Log().Warningf("Docker orchestrator unavailable — all Docker API routes will return 503")
@@ -94,87 +103,55 @@ func Api() {
 			router.Post("configs", dockerUnavailable)
 			router.Get("configs/{configID}", dockerUnavailable)
 			router.Delete("configs/{configID}", dockerUnavailable)
-			return
+		} else {
+			// Services
+			router.Get("services", serviceControllers.NewListServicesController(serviceActions.NewListServicesAction(orchestrator)).Handle)
+			router.Get("services/{serviceID}", serviceControllers.NewInspectServiceController(serviceActions.NewInspectServiceAction(orchestrator)).Handle)
+			router.Post("services/{serviceID}/scale", serviceControllers.NewScaleServiceController(serviceActions.NewScaleServiceAction(orchestrator)).Handle)
+			router.Post("services/{serviceID}/restart", serviceControllers.NewRestartServiceController(serviceActions.NewRestartServiceAction(orchestrator)).Handle)
+			router.Post("services/{serviceID}/rollback", serviceControllers.NewRollbackServiceController(serviceActions.NewRollbackServiceAction(orchestrator)).Handle)
+			router.Put("services/{serviceID}/env", serviceControllers.NewUpdateServiceEnvController(serviceActions.NewUpdateServiceEnvAction(orchestrator)).Handle)
+			router.Put("services/{serviceID}/image", serviceControllers.NewUpdateServiceImageController(serviceActions.NewUpdateServiceImageAction(orchestrator)).Handle)
+
+			// Tasks
+			listTasks := taskControllers.NewListTasksController(taskActions.NewListTasksAction(orchestrator))
+			router.Get("tasks", listTasks.Handle)
+			router.Get("tasks/stats", taskControllers.NewListTaskStatsController(taskActions.NewListTaskStatsAction(orchestrator)).Handle)
+			router.Get("tasks/{taskID}", taskControllers.NewInspectTaskController(taskActions.NewInspectTaskAction(orchestrator)).Handle)
+			router.Get("task-stats", taskControllers.NewListTaskStatsAggController(taskActions.NewListTaskStatsAggAction(orchestrator)).Handle)
+			router.Get("services/{serviceID}/tasks", listTasks.Handle)
+
+			// Nodes
+			router.Get("nodes", nodeControllers.NewListNodesController(nodeActions.NewListNodesAction(orchestrator)).Handle)
+			router.Get("nodes/{nodeID}/tasks", listTasks.Handle)
+			router.Patch("nodes/{nodeID}/availability", nodeControllers.NewUpdateNodeAvailabilityController(nodeActions.NewUpdateNodeAvailabilityAction(orchestrator)).Handle)
+			router.Patch("nodes/{nodeID}/role", nodeControllers.NewUpdateNodeRoleController(nodeActions.NewUpdateNodeRoleAction(orchestrator)).Handle)
+
+			// Stacks
+			router.Get("stacks", stackControllers.NewListStacksController(stackActions.NewListStacksAction(orchestrator)).Handle)
+			router.Delete("stacks/{stackName}", stackControllers.NewRemoveStackController(stackActions.NewRemoveStackAction(orchestrator)).Handle)
+
+			// Networks & Volumes
+			router.Get("networks", networkControllers.NewListNetworksController(networkActions.NewListNetworksAction(orchestrator)).Handle)
+			router.Get("volumes", volumeControllers.NewListVolumesController(volumeActions.NewListVolumesAction(orchestrator)).Handle)
+
+			// Secrets
+			router.Get("secrets", secretControllers.NewListSecretsController(secretActions.NewListSecretsAction(orchestrator)).Handle)
+			router.Post("secrets", secretControllers.NewCreateSecretController(secretActions.NewCreateSecretAction(orchestrator)).Handle)
+			router.Delete("secrets/{secretID}", secretControllers.NewRemoveSecretController(secretActions.NewRemoveSecretAction(orchestrator)).Handle)
+
+			// Configs
+			router.Get("configs", configControllers.NewListConfigsController(configActions.NewListConfigsAction(orchestrator)).Handle)
+			router.Post("configs", configControllers.NewCreateConfigController(configActions.NewCreateConfigAction(orchestrator)).Handle)
+			router.Get("configs/{configID}", configControllers.NewInspectConfigController(configActions.NewInspectConfigAction(orchestrator)).Handle)
+			router.Delete("configs/{configID}", configControllers.NewRemoveConfigController(configActions.NewRemoveConfigAction(orchestrator)).Handle)
 		}
 
-		// Services
-		listSvc := serviceControllers.NewListServicesController(serviceActions.NewListServicesAction(orchestrator))
-		inspectSvc := serviceControllers.NewInspectServiceController(serviceActions.NewInspectServiceAction(orchestrator))
-		scaleSvc := serviceControllers.NewScaleServiceController(serviceActions.NewScaleServiceAction(orchestrator))
-		restartSvc := serviceControllers.NewRestartServiceController(serviceActions.NewRestartServiceAction(orchestrator))
-		rollbackSvc := serviceControllers.NewRollbackServiceController(serviceActions.NewRollbackServiceAction(orchestrator))
-		updateEnv := serviceControllers.NewUpdateServiceEnvController(serviceActions.NewUpdateServiceEnvAction(orchestrator))
-		updateImg := serviceControllers.NewUpdateServiceImageController(serviceActions.NewUpdateServiceImageAction(orchestrator))
-
-		router.Get("services", listSvc.Handle)
-		router.Get("services/{serviceID}", inspectSvc.Handle)
-		router.Post("services/{serviceID}/scale", scaleSvc.Handle)
-		router.Post("services/{serviceID}/restart", restartSvc.Handle)
-		router.Post("services/{serviceID}/rollback", rollbackSvc.Handle)
-		router.Put("services/{serviceID}/env", updateEnv.Handle)
-		router.Put("services/{serviceID}/image", updateImg.Handle)
-
-		// Tasks
-		listTasks := taskControllers.NewListTasksController(taskActions.NewListTasksAction(orchestrator))
-		inspectTask := taskControllers.NewInspectTaskController(taskActions.NewInspectTaskAction(orchestrator))
-		taskStats := taskControllers.NewListTaskStatsController(taskActions.NewListTaskStatsAction(orchestrator))
-		taskStatsAgg := taskControllers.NewListTaskStatsAggController(taskActions.NewListTaskStatsAggAction(orchestrator))
-
-		router.Get("tasks", listTasks.Handle)
-		router.Get("tasks/stats", taskStats.Handle)
-		router.Get("tasks/{taskID}", inspectTask.Handle)
-		router.Get("task-stats", taskStatsAgg.Handle)
-		router.Get("services/{serviceID}/tasks", listTasks.Handle)
-
-		// Nodes
-		listNodes := nodeControllers.NewListNodesController(nodeActions.NewListNodesAction(orchestrator))
-		updateAvail := nodeControllers.NewUpdateNodeAvailabilityController(nodeActions.NewUpdateNodeAvailabilityAction(orchestrator))
-		updateRole := nodeControllers.NewUpdateNodeRoleController(nodeActions.NewUpdateNodeRoleAction(orchestrator))
-
-		router.Get("nodes", listNodes.Handle)
-		router.Get("nodes/{nodeID}/tasks", listTasks.Handle)
-		router.Patch("nodes/{nodeID}/availability", updateAvail.Handle)
-		router.Patch("nodes/{nodeID}/role", updateRole.Handle)
-
-		// Stacks
-		listStacks := stackControllers.NewListStacksController(stackActions.NewListStacksAction(orchestrator))
-		removeStack := stackControllers.NewRemoveStackController(stackActions.NewRemoveStackAction(orchestrator))
-
-		router.Get("stacks", listStacks.Handle)
-		router.Delete("stacks/{stackName}", removeStack.Handle)
-
-		// Networks & Volumes
-		listNets := networkControllers.NewListNetworksController(networkActions.NewListNetworksAction(orchestrator))
-		listVols := volumeControllers.NewListVolumesController(volumeActions.NewListVolumesAction(orchestrator))
-
-		router.Get("networks", listNets.Handle)
-		router.Get("volumes", listVols.Handle)
-
-		// Secrets
-		listSecrets := secretControllers.NewListSecretsController(secretActions.NewListSecretsAction(orchestrator))
-		createSecret := secretControllers.NewCreateSecretController(secretActions.NewCreateSecretAction(orchestrator))
-		removeSecret := secretControllers.NewRemoveSecretController(secretActions.NewRemoveSecretAction(orchestrator))
-
-		router.Get("secrets", listSecrets.Handle)
-		router.Post("secrets", createSecret.Handle)
-		router.Delete("secrets/{secretID}", removeSecret.Handle)
-
-		// Configs
-		listConfigs := configControllers.NewListConfigsController(configActions.NewListConfigsAction(orchestrator))
-		createConfig := configControllers.NewCreateConfigController(configActions.NewCreateConfigAction(orchestrator))
-		inspectConfig := configControllers.NewInspectConfigController(configActions.NewInspectConfigAction(orchestrator))
-		removeConfig := configControllers.NewRemoveConfigController(configActions.NewRemoveConfigAction(orchestrator))
-
-		router.Get("configs", listConfigs.Handle)
-		router.Post("configs", createConfig.Handle)
-		router.Get("configs/{configID}", inspectConfig.Handle)
-		router.Delete("configs/{configID}", removeConfig.Handle)
-
 		// Metrics
-		clusterMetricsCtrl, nodeMetricsCtrl := buildMetricsControllers()
-		if clusterMetricsCtrl != nil {
-			router.Get("metrics", clusterMetricsCtrl.Handle)
-			router.Get("metrics/{nodeID}", nodeMetricsCtrl.Handle)
+		collector, collectorOk := resolve[*metricsActions.CollectAndStoreAction]("metrics.collector")
+		if collectorOk && registry != nil {
+			router.Get("metrics", metricsControllers.NewClusterMetricsController(metricsActions.NewGetClusterMetricsAction(collector, registry)).Handle)
+			router.Get("metrics/{nodeID}", metricsControllers.NewNodeMetricsController(metricsActions.NewGetNodeMetricsAction(collector, registry, leaderNodeID)).Handle)
 		} else {
 			metricsUnavailable := unavailableHandler("metrics unavailable")
 			router.Get("metrics", metricsUnavailable)
@@ -182,11 +159,10 @@ func Api() {
 		}
 
 		// Images
-		clusterImagesCtrl, removeImageCtrl, pruneImagesCtrl := buildImageControllers(orchestrator)
-		if clusterImagesCtrl != nil {
-			router.Get("images", clusterImagesCtrl.Handle)
-			router.Delete("images/{imageID}", removeImageCtrl.Handle)
-			router.Post("images/prune", pruneImagesCtrl.Handle)
+		if orchestrator != nil && registry != nil && pool != nil {
+			router.Get("images", imageControllers.NewClusterImagesController(imageActions.NewListClusterImagesAction(orchestrator, registry, pool, leaderNodeID, hostname)).Handle)
+			router.Delete("images/{imageID}", imageControllers.NewRemoveImageController(imageActions.NewRemoveImageAction(orchestrator, registry, pool, leaderNodeID)).Handle)
+			router.Post("images/prune", imageControllers.NewPruneImagesController(imageActions.NewPruneImagesAction(orchestrator, registry, pool, leaderNodeID)).Handle)
 		} else {
 			imagesUnavailable := unavailableHandler("image management unavailable")
 			router.Get("images", imagesUnavailable)
@@ -197,16 +173,12 @@ func Api() {
 		// Settings — no orchestrator dependency
 		getSettingsAction := settingsActions.NewGetSettingsAction()
 		updateSettingsAction := settingsActions.NewUpdateSettingsAction()
-
-		getSettingsCtrl := settingsControllers.NewGetSettingsController(getSettingsAction)
-		updateSettingsCtrl := settingsControllers.NewUpdateSettingsController(getSettingsAction, updateSettingsAction)
-
-		router.Get("settings", getSettingsCtrl.Handle)
-		router.Put("settings", updateSettingsCtrl.Handle)
+		router.Get("settings", settingsControllers.NewGetSettingsController(getSettingsAction).Handle)
+		router.Put("settings", settingsControllers.NewUpdateSettingsController(getSettingsAction, updateSettingsAction).Handle)
 	})
 }
 
-func registerWebSocketRoutes(orchestrator docker.Orchestrator) {
+func registerWebSocketRoutes(orchestrator docker.Orchestrator, registry *cluster.Registry, pool *cluster.GrpcPool, leaderNodeID string) {
 	if orchestrator == nil {
 		facades.Log().Warningf("Docker orchestrator unavailable — WebSocket log/exec routes will return 503")
 		wsUnavailable := unavailableHandler("docker orchestrator is not available on this agent")
@@ -218,166 +190,19 @@ func registerWebSocketRoutes(orchestrator docker.Orchestrator) {
 		return
 	}
 
-	serviceLogsHandler := ws.NewServiceLogsHandler(orchestrator)
-	taskLogsHandler := ws.NewTaskLogsHandler(orchestrator)
-
-	serviceLogsCtrl := wsControllers.NewServiceLogsController(serviceLogsHandler)
-	taskLogsCtrl := wsControllers.NewTaskLogsController(taskLogsHandler)
-
-	// Build exec handler with cluster dependencies
-	execCtrl := buildExecController(orchestrator)
+	serviceLogsCtrl := wsControllers.NewServiceLogsController(ws.NewServiceLogsHandler(orchestrator))
+	taskLogsCtrl := wsControllers.NewTaskLogsController(ws.NewTaskLogsHandler(orchestrator))
 
 	facades.Route().Prefix("api").Group(func(router route.Router) {
 		router.Get("services/{serviceID}/logs", serviceLogsCtrl.Handle)
 		router.Get("tasks/{taskID}/logs", taskLogsCtrl.Handle)
 
-		if execCtrl != nil {
+		if registry != nil && pool != nil {
+			execHandler := ws.NewExecHandler(orchestrator, registry, pool, leaderNodeID)
+			execCtrl := wsControllers.NewExecController(execHandler)
 			router.Get("exec/{containerID}", execCtrl.Handle)
+		} else {
+			router.Get("exec/{containerID}", unavailableHandler("exec unavailable — cluster dependencies missing"))
 		}
 	})
-}
-
-func buildExecController(orchestrator docker.Orchestrator) *wsControllers.ExecController {
-	registryInstance, err := facades.App().Make("cluster.registry")
-	if err != nil {
-		facades.Log().Errorf("Failed to resolve cluster.registry for exec handler: %v", err)
-		return nil
-	}
-	registry, ok := registryInstance.(*cluster.Registry)
-	if !ok {
-		facades.Log().Errorf("cluster.registry is not *cluster.Registry for exec handler")
-		return nil
-	}
-
-	poolInstance, err := facades.App().Make("cluster.pool")
-	if err != nil {
-		facades.Log().Errorf("Failed to resolve cluster.pool for exec handler: %v", err)
-		return nil
-	}
-	pool, ok := poolInstance.(*cluster.GrpcPool)
-	if !ok {
-		facades.Log().Errorf("cluster.pool is not *cluster.GrpcPool for exec handler")
-		return nil
-	}
-
-	leaderNodeID := facades.Config().GetString("cluster.node_id", "")
-
-	execHandler := ws.NewExecHandler(orchestrator, registry, pool, leaderNodeID)
-	return wsControllers.NewExecController(execHandler)
-}
-
-func resolveOrchestrator() docker.Orchestrator {
-	instance, err := facades.App().Make("docker.orchestrator")
-	if err != nil {
-		facades.Log().Errorf("Failed to resolve docker.orchestrator for API routes: %v", err)
-		return nil
-	}
-	orch, ok := instance.(docker.Orchestrator)
-	if !ok {
-		facades.Log().Errorf("docker.orchestrator does not implement docker.Orchestrator")
-		return nil
-	}
-	return orch
-}
-
-func buildMetricsControllers() (*metricsControllers.ClusterMetricsController, *metricsControllers.NodeMetricsController) {
-	collectorInstance, err := facades.App().Make("metrics.collector")
-	if err != nil {
-		facades.Log().Warningf("metrics routes unavailable: failed to resolve metrics.collector: %v", err)
-		return nil, nil
-	}
-	collector, ok := collectorInstance.(*metricsActions.CollectAndStoreAction)
-	if !ok {
-		facades.Log().Warningf("metrics routes unavailable: metrics.collector is not *metricsActions.CollectAndStoreAction")
-		return nil, nil
-	}
-
-	registryInstance, err := facades.App().Make("cluster.registry")
-	if err != nil {
-		facades.Log().Warningf("metrics routes unavailable: failed to resolve cluster.registry: %v", err)
-		return nil, nil
-	}
-	registry, ok := registryInstance.(*cluster.Registry)
-	if !ok {
-		facades.Log().Warningf("metrics routes unavailable: cluster.registry is not *cluster.Registry")
-		return nil, nil
-	}
-
-	leaderNodeID := facades.Config().GetString("cluster.node_id", "")
-
-	clusterMetricsCtrl := metricsControllers.NewClusterMetricsController(
-		metricsActions.NewGetClusterMetricsAction(collector, registry),
-	)
-	nodeMetricsCtrl := metricsControllers.NewNodeMetricsController(
-		metricsActions.NewGetNodeMetricsAction(collector, registry, leaderNodeID),
-	)
-
-	return clusterMetricsCtrl, nodeMetricsCtrl
-}
-
-func buildImageControllers(orchestrator docker.Orchestrator) (
-	*imageControllers.ClusterImagesController,
-	*imageControllers.RemoveImageController,
-	*imageControllers.PruneImagesController,
-) {
-	registryInstance, err := facades.App().Make("cluster.registry")
-	if err != nil {
-		facades.Log().Warningf("image routes unavailable: failed to resolve cluster.registry: %v", err)
-		return nil, nil, nil
-	}
-	registry, ok := registryInstance.(*cluster.Registry)
-	if !ok {
-		facades.Log().Warningf("image routes unavailable: cluster.registry is not *cluster.Registry")
-		return nil, nil, nil
-	}
-
-	poolInstance, err := facades.App().Make("cluster.pool")
-	if err != nil {
-		facades.Log().Warningf("image routes unavailable: failed to resolve cluster.pool: %v", err)
-		return nil, nil, nil
-	}
-	pool, ok := poolInstance.(*cluster.GrpcPool)
-	if !ok {
-		facades.Log().Warningf("image routes unavailable: cluster.pool is not *cluster.GrpcPool")
-		return nil, nil, nil
-	}
-
-	leaderNodeID := facades.Config().GetString("cluster.node_id", "")
-	hostnameInstance, err := facades.App().Make("docker.hostname")
-	if err != nil {
-		facades.Log().Warningf("image routes: failed to resolve hostname, using empty string: %v", err)
-	}
-	hostname, _ := hostnameInstance.(string)
-
-	clusterImagesCtrl := imageControllers.NewClusterImagesController(
-		imageActions.NewListClusterImagesAction(orchestrator, registry, pool, leaderNodeID, hostname),
-	)
-	removeImageCtrl := imageControllers.NewRemoveImageController(
-		imageActions.NewRemoveImageAction(orchestrator, registry, pool, leaderNodeID),
-	)
-	pruneImagesCtrl := imageControllers.NewPruneImagesController(
-		imageActions.NewPruneImagesAction(orchestrator, registry, pool, leaderNodeID),
-	)
-
-	return clusterImagesCtrl, removeImageCtrl, pruneImagesCtrl
-}
-
-func buildAgentsHandler() func(ctx http.Context) http.Response {
-	clusterUnavailable := unavailableHandler("cluster management unavailable")
-
-	registryInstance, err := facades.App().Make("cluster.registry")
-	if err != nil {
-		facades.Log().Errorf("Failed to resolve cluster.registry for /api/agents: %v", err)
-		return clusterUnavailable
-	}
-
-	registry, ok := registryInstance.(*cluster.Registry)
-	if !ok {
-		facades.Log().Errorf("cluster.registry resolved but is not *cluster.Registry (got %T)", registryInstance)
-		return clusterUnavailable
-	}
-
-	action := agentActions.NewListAgentsAction(registry)
-	ctrl := agentControllers.NewListAgentsController(action)
-	return ctrl.Handle
 }
