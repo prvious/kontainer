@@ -68,9 +68,10 @@ export function StatusBar() {
         <div className='flex h-7 shrink-0 items-center border-t border-border bg-statusbar-bg/95 text-xs'>
             {/* Left segments */}
             <div className='flex h-full items-center'>
-                <Segment icon={GitBranch} iconColor='text-accent-green' label='main' />
+                <Segment icon={GitBranch} iconColor='text-muted-foreground' label='main' textColor='text-muted-foreground' /> {/* TODO: wire to agent data */}
                 <Separator />
-                <Segment icon={Container} iconColor='text-text-secondary' label='Docker 24.0.7' />
+                <Segment icon={Container} iconColor='text-muted-foreground' label='Docker --' textColor='text-muted-foreground' />{" "}
+                {/* TODO: wire to agent data */}
                 <Separator />
                 <Segment
                     icon={Cpu}
@@ -161,11 +162,12 @@ export function StatusBar() {
                     </>
                 )}
                 <Separator />
-                <Segment icon={ScrollText} iconColor='text-accent-cyan' label='0 LOG STREAMS' />
+                <Segment icon={ScrollText} iconColor='text-muted-foreground' label='-- STREAMS' textColor='text-muted-foreground' />{" "}
+                {/* TODO: wire to log stream count */}
                 <Separator />
                 <div className='flex h-full items-center gap-[5px] px-2.5'>
-                    <span className='animate-pulse-dot size-1.5 rounded-full bg-accent-green' />
-                    <span className='font-mono text-[10px] font-medium text-accent-green'>WS CONNECTED</span>
+                    <span className='size-1.5 rounded-full bg-muted-foreground' />
+                    <span className='font-mono text-[10px] font-medium text-muted-foreground'>WS --</span> {/* TODO: wire to WebSocket state */}
                 </div>
             </div>
         </div>

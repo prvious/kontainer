@@ -103,8 +103,9 @@ export function SidebarNav() {
             {/* Bottom: system + agent info */}
             <div className='space-y-3 px-2 pb-3'>
                 {renderSection(bottomSection)}
+                {/* TODO: wire to agent health endpoint */}
                 <div className='rounded border border-border bg-bg-elevated px-3 py-2.5'>
-                    <p className='font-mono text-[9px] font-bold tracking-[0.5px] text-accent-green'>AGENT v0.4.2</p>
+                    <p className='font-mono text-[9px] font-bold tracking-[0.5px] text-muted-foreground'>AGENT --</p>
                     <p className='font-mono text-[9px] font-medium tracking-[0.5px] text-muted-foreground'>uptime: --</p>
                 </div>
             </div>

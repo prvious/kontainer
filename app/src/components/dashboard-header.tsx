@@ -11,13 +11,9 @@ export function DashboardHeader() {
 
     return (
         <header data-tauri-drag-region className='flex h-[38px] shrink-0 items-center justify-between border-b border-border bg-titlebar-bg/90 px-4'>
-            {/* Left: traffic lights spacer + logo */}
+            {/* Left: native traffic lights spacer + logo */}
             <div className='flex items-center gap-3'>
-                <div className='flex items-center gap-2'>
-                    <span className='size-3 rounded-full bg-[#FF5F57]' />
-                    <span className='size-3 rounded-full bg-[#FEBC2E]' />
-                    <span className='size-3 rounded-full bg-[#28C840]' />
-                </div>
+                <div className='w-[52px] shrink-0' />
                 <Logo />
             </div>
 
