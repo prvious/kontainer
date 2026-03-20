@@ -52,7 +52,10 @@ func Api() {
 	orchestrator, _ := resolve[docker.Orchestrator]("docker.orchestrator")
 	registry, _ := resolve[*cluster.Registry]("cluster.registry")
 	pool, _ := resolve[*cluster.GrpcPool]("cluster.pool")
-	hostname, _ := resolve[string]("docker.hostname")
+	hostname, hostnameOk := resolve[string]("docker.hostname")
+	if !hostnameOk {
+		facades.Log().Warningf("docker.hostname not resolved — image listings will use empty hostname")
+	}
 	leaderNodeID := facades.Config().GetString("cluster.node_id", "")
 
 	// WebSocket routes — inside /api prefix but WITHOUT JWT middleware.
@@ -198,6 +201,8 @@ func registerWebSocketRoutes(orchestrator docker.Orchestrator, registry *cluster
 			execHandler := ws.NewExecHandler(orchestrator, registry, pool, leaderNodeID)
 			execCtrl := wsControllers.NewExecController(execHandler)
 			router.Get("exec/{containerID}", execCtrl.Handle)
+		} else {
+			router.Get("exec/{containerID}", unavailableHandler("exec unavailable — cluster dependencies missing"))
 		}
 	})
 }
