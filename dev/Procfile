@@ -1,4 +1,4 @@
 leader: cd server && source .env && DOCKER_HOST=tcp://localhost:2375 air
-follower1: cd server && DOCKER_HOST=tcp://localhost:2376 APP_PORT=3001 AGENT_ROLE=follower CLUSTER_SECRET=dev-secret air
-follower2: cd server && DOCKER_HOST=tcp://localhost:2378 APP_PORT=3002 AGENT_ROLE=follower CLUSTER_SECRET=dev-secret air
+follower1: cd server && DOCKER_HOST=tcp://localhost:2376 APP_PORT=3001 GRPC_PORT=9001 AGENT_ROLE=follower CLUSTER_SECRET=dev-secret air
+follower2: cd server && DOCKER_HOST=tcp://localhost:2378 APP_PORT=3002 GRPC_PORT=9002 AGENT_ROLE=follower CLUSTER_SECRET=dev-secret air
 app: pnpm --filter app tauri dev
