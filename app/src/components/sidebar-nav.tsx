@@ -1,9 +1,5 @@
 import { Link, useMatches } from "@tanstack/react-router";
-import {
-    Activity, Box, HardDrive,
-    FileStack, LayoutDashboard, Layers, Network, Server,
-    Settings, Terminal, ScrollText,
-} from "lucide-react";
+import { Activity, Box, HardDrive, FileStack, LayoutDashboard, Layers, Network, Server, Settings, Terminal, ScrollText } from "lucide-react";
 import { useNodes } from "@/hooks/use-nodes";
 import { useTaskStats } from "@/hooks/use-task-stats";
 
@@ -66,9 +62,7 @@ export function SidebarNav() {
     function renderSection(section: NavSection) {
         return (
             <div key={section.heading}>
-                <p className='px-3 font-mono text-[9px] font-semibold tracking-[1px] text-muted-foreground'>
-                    // {section.heading}
-                </p>
+                <p className='px-3 font-mono text-[9px] font-semibold tracking-[1px] text-muted-foreground'>// {section.heading}</p>
                 <div className='mt-1 space-y-0.5'>
                     {section.items.map((item) => {
                         const active = isActive(item.to);
@@ -79,9 +73,7 @@ export function SidebarNav() {
                                 key={item.to}
                                 to={item.to}
                                 className={`flex h-[34px] items-center gap-2.5 rounded px-3 font-mono text-xs font-medium tracking-[0.5px] transition-colors ${
-                                    active
-                                        ? "bg-sidebar-accent text-foreground"
-                                        : "text-text-secondary hover:text-foreground"
+                                    active ? 'bg-sidebar-accent text-foreground' : 'text-text-secondary hover:text-foreground'
                                 }`}
                             >
                                 <item.icon className='size-4 shrink-0 text-muted-foreground' />
@@ -89,7 +81,7 @@ export function SidebarNav() {
                                 {count !== undefined && count > 0 && (
                                     <span
                                         className={`rounded px-1.5 py-0.5 font-mono text-[10px] leading-none ${
-                                            item.badgeColor ?? "bg-sidebar-accent text-muted-foreground"
+                                            item.badgeColor ?? 'bg-sidebar-accent text-muted-foreground'
                                         }`}
                                     >
                                         {count}
@@ -106,20 +98,14 @@ export function SidebarNav() {
     return (
         <aside className='flex w-[220px] shrink-0 flex-col border-r border-border bg-sidebar/90'>
             {/* Top: main navigation */}
-            <nav className='flex-1 space-y-4 overflow-y-auto px-2 py-3'>
-                {topSections.map(renderSection)}
-            </nav>
+            <nav className='flex-1 space-y-4 overflow-y-auto px-2 py-3'>{topSections.map(renderSection)}</nav>
 
             {/* Bottom: system + agent info */}
             <div className='space-y-3 px-2 pb-3'>
                 {renderSection(bottomSection)}
                 <div className='rounded border border-border bg-bg-elevated px-3 py-2.5'>
-                    <p className='font-mono text-[9px] font-bold tracking-[0.5px] text-accent-green'>
-                        AGENT v0.4.2
-                    </p>
-                    <p className='font-mono text-[9px] font-medium tracking-[0.5px] text-muted-foreground'>
-                        uptime: --
-                    </p>
+                    <p className='font-mono text-[9px] font-bold tracking-[0.5px] text-accent-green'>AGENT v0.4.2</p>
+                    <p className='font-mono text-[9px] font-medium tracking-[0.5px] text-muted-foreground'>uptime: --</p>
                 </div>
             </div>
         </aside>

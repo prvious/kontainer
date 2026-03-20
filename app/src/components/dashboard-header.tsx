@@ -10,10 +10,7 @@ export function DashboardHeader() {
     const clusterName = activeProfile?.label ?? "No cluster";
 
     return (
-        <header
-            data-tauri-drag-region
-            className='flex h-[38px] shrink-0 items-center justify-between border-b border-border bg-titlebar-bg/90 px-4'
-        >
+        <header data-tauri-drag-region className='flex h-[38px] shrink-0 items-center justify-between border-b border-border bg-titlebar-bg/90 px-4'>
             {/* Left: traffic lights spacer + logo */}
             <div className='flex items-center gap-3'>
                 <div className='flex items-center gap-2'>
@@ -25,23 +22,15 @@ export function DashboardHeader() {
             </div>
 
             {/* Center: cluster selector */}
-            <button
-                className='flex items-center gap-2 text-text-secondary transition-colors hover:text-foreground'
-                onClick={() => setOpen(true)}
-            >
-                <span className='size-[7px] shrink-0 rounded-full bg-accent-green animate-pulse-dot' />
-                <span className='font-mono text-[11px] font-medium tracking-[0.5px]'>
-                    {clusterName}
-                </span>
+            <button className='flex items-center gap-2 text-text-secondary transition-colors hover:text-foreground' onClick={() => setOpen(true)}>
+                <span className='animate-pulse-dot size-[7px] shrink-0 rounded-full bg-accent-green' />
+                <span className='font-mono text-[11px] font-medium tracking-[0.5px]'>{clusterName}</span>
                 <ChevronDown className='size-3 text-muted-foreground' />
             </button>
 
             {/* Right: utility icons */}
             <div className='flex items-center gap-4'>
-                <button
-                    className='text-muted-foreground transition-colors hover:text-foreground'
-                    onClick={() => setOpen(true)}
-                >
+                <button className='text-muted-foreground transition-colors hover:text-foreground' onClick={() => setOpen(true)}>
                     <Search className='size-3.5' />
                 </button>
                 <button className='text-muted-foreground transition-colors hover:text-foreground'>

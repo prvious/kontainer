@@ -11,71 +11,71 @@
     --titlebar-inset: 35px;
 
     /* Core surfaces */
-    --background: #0C0C0C;
-    --foreground: #FFFFFF;
-    --card: #0A0A0A;
-    --card-foreground: #FFFFFF;
-    --popover: #0A0A0A;
-    --popover-foreground: #FFFFFF;
+    --background: #0c0c0c;
+    --foreground: #ffffff;
+    --card: #0a0a0a;
+    --card-foreground: #ffffff;
+    --popover: #0a0a0a;
+    --popover-foreground: #ffffff;
 
     /* Primary = accent green */
-    --primary: #00FF88;
+    --primary: #00ff88;
     --primary-foreground: #000000;
 
     /* Secondary & muted */
-    --secondary: #1A1A1A;
-    --secondary-foreground: #FFFFFF;
+    --secondary: #1a1a1a;
+    --secondary-foreground: #ffffff;
     --muted: #141414;
     --muted-foreground: #6a6a6a;
     --accent: #141414;
-    --accent-foreground: #FFFFFF;
+    --accent-foreground: #ffffff;
 
     /* Destructive */
-    --destructive: #FF4444;
+    --destructive: #ff4444;
 
     /* Borders & input */
     --border: #2f2f2f;
     --input: #2f2f2f;
-    --ring: #00FF88;
+    --ring: #00ff88;
 
     /* Charts */
-    --chart-1: #00D4FF;
-    --chart-2: #00FF88;
-    --chart-3: #A78BFA;
-    --chart-4: #FF8800;
-    --chart-5: #FF4444;
+    --chart-1: #00d4ff;
+    --chart-2: #00ff88;
+    --chart-3: #a78bfa;
+    --chart-4: #ff8800;
+    --chart-5: #ff4444;
 
     --radius: 0.5rem;
 
     /* Sidebar */
     --sidebar: #080808;
-    --sidebar-foreground: #FFFFFF;
-    --sidebar-primary: #00FF88;
+    --sidebar-foreground: #ffffff;
+    --sidebar-primary: #00ff88;
     --sidebar-primary-foreground: #000000;
-    --sidebar-accent: #FFFFFF0D;
-    --sidebar-accent-foreground: #FFFFFF;
+    --sidebar-accent: #ffffff0d;
+    --sidebar-accent-foreground: #ffffff;
     --sidebar-border: #2f2f2f;
-    --sidebar-ring: #00FF88;
+    --sidebar-ring: #00ff88;
 
     /* Semantic status */
-    --success: #00FF88;
+    --success: #00ff88;
     --success-foreground: #000000;
-    --warning: #FF8800;
+    --warning: #ff8800;
     --warning-foreground: #000000;
 
     /* Design system extensions */
-    --accent-green: #00FF88;
-    --accent-green-20: #00FF8833;
-    --accent-cyan: #00D4FF;
-    --accent-cyan-20: #00D4FF33;
-    --accent-purple: #A78BFA;
-    --accent-purple-20: #A78BFA33;
-    --accent-orange: #FF8800;
-    --accent-orange-20: #FF880033;
-    --accent-red: #FF4444;
+    --accent-green: #00ff88;
+    --accent-green-20: #00ff8833;
+    --accent-cyan: #00d4ff;
+    --accent-cyan-20: #00d4ff33;
+    --accent-purple: #a78bfa;
+    --accent-purple-20: #a78bfa33;
+    --accent-orange: #ff8800;
+    --accent-orange-20: #ff880033;
+    --accent-red: #ff4444;
     --text-secondary: #8a8a8a;
     --bg-elevated: #141414;
-    --bg-subtle: #1A1A1A;
+    --bg-subtle: #1a1a1a;
     --border-light: #3f3f3f;
     --titlebar-bg: #060606;
     --statusbar-bg: #060606;

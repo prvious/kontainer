@@ -1,8 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
-import {
-    GitBranch, Container, Cpu, MemoryStick, Layers,
-    TriangleAlert, Terminal, ScrollText, ChevronUp, X,
-} from "lucide-react";
+import { GitBranch, Container, Cpu, MemoryStick, Layers, TriangleAlert, Terminal, ScrollText, ChevronUp, X } from "lucide-react";
 import { useTaskStats } from "@/hooks/use-task-stats";
 import { useClusterMetrics } from "@/hooks/use-cluster-metrics";
 import { useTerminal } from "@/hooks/use-terminal";
@@ -31,12 +28,14 @@ function Segment({
     const Wrapper = onClick ? "button" : "div";
     return (
         <Wrapper
-            className={`flex items-center gap-[5px] px-2.5 h-full ${textColor ?? "text-text-secondary"} ${onClick ? "hover:text-foreground transition-colors" : ""}`}
+            className={`flex h-full items-center gap-[5px] px-2.5 ${textColor ?? "text-text-secondary"} ${onClick ? 'transition-colors hover:text-foreground' : ""}`}
             onClick={onClick}
             data-testid={testId}
         >
             <Icon className={`size-[11px] ${iconColor}`} />
-            <span className='font-mono text-[10px] font-medium' data-testid={valueTestId}>{label}</span>
+            <span className='font-mono text-[10px] font-medium' data-testid={valueTestId}>
+                {label}
+            </span>
         </Wrapper>
     );
 }
@@ -126,7 +125,7 @@ export function StatusBar() {
                                 return (
                                     <button
                                         key={session.id}
-                                        className={`group flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[10px] transition-colors ${isActive ? "bg-bg-elevated text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                                        className={`group flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[10px] transition-colors ${isActive ? 'bg-bg-elevated text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
                                         onClick={() => {
                                             switchSession(session.id);
                                             setMinimized(false);
@@ -149,10 +148,7 @@ export function StatusBar() {
                                 );
                             })}
                             {isMinimized && (
-                                <button
-                                    className='rounded p-0.5 text-muted-foreground hover:text-foreground'
-                                    onClick={() => setMinimized(false)}
-                                >
+                                <button className='rounded p-0.5 text-muted-foreground hover:text-foreground' onClick={() => setMinimized(false)}>
                                     <ChevronUp className='size-3.5' />
                                 </button>
                             )}
@@ -167,8 +163,8 @@ export function StatusBar() {
                 <Separator />
                 <Segment icon={ScrollText} iconColor='text-accent-cyan' label='0 LOG STREAMS' />
                 <Separator />
-                <div className='flex items-center gap-[5px] px-2.5 h-full'>
-                    <span className='size-1.5 rounded-full bg-accent-green animate-pulse-dot' />
+                <div className='flex h-full items-center gap-[5px] px-2.5'>
+                    <span className='animate-pulse-dot size-1.5 rounded-full bg-accent-green' />
                     <span className='font-mono text-[10px] font-medium text-accent-green'>WS CONNECTED</span>
                 </div>
             </div>
