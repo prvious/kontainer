@@ -36,7 +36,7 @@ const topSections: NavSection[] = [
 const bottomSection: NavSection = {
     heading: "SYSTEM",
     items: [
-        { label: "EXEC", to: "/exec", icon: Terminal },
+        { label: "EXEC", to: "/logs", icon: Terminal }, // TODO: create /exec route
         { label: "LOGS", to: "/logs", icon: ScrollText },
         { label: "SETTINGS", to: "/settings", icon: Settings },
     ],

@@ -56,7 +56,7 @@ export function StatusBar() {
 
     // Tasks
     const taskCount = taskStatsLoading ? "--" : `${taskStats?.running ?? 0} TASKS`;
-    const taskColor = (taskStats?.failed ?? 0) > 0 ? "text-accent-red" : "";
+    const taskColor = (taskStats?.failed ?? 0) > 0 ? "text-accent-red" : undefined;
 
     // CPU display
     const cpuDisplay = metricsLoading || avgCpu === null ? "--" : `CPU ${avgCpu}%`;
