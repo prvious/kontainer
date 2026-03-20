@@ -1,8 +1,6 @@
 package routes
 
 import (
-	"os"
-
 	"github.com/goravel/framework/contracts/http"
 	"github.com/goravel/framework/contracts/route"
 
@@ -353,9 +351,15 @@ func buildImageControllers(orchestrator docker.Orchestrator) (
 	}
 
 	leaderNodeID := facades.Config().GetString("cluster.node_id", "")
-	hostname, err := os.Hostname()
+	hostnameInstance, err := facades.App().Make("docker.hostname")
 	if err != nil {
-		facades.Log().Warningf("image routes: failed to get hostname, using empty string: %v", err)
+		facades.Log().Warningf("image routes: failed to resolve hostname: %v", err)
+		return nil, nil, nil
+	}
+	hostname, ok := hostnameInstance.(string)
+	if !ok {
+		facades.Log().Warningf("image routes: docker.hostname is not a string")
+		return nil, nil, nil
 	}
 
 	clusterImagesCtrl := imageControllers.NewClusterImagesController(

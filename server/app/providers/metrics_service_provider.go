@@ -45,10 +45,11 @@ func (p *MetricsServiceProvider) Register(app foundation.Application) {
 		}
 
 		nodeID := facades.Config().GetString("cluster.node_id", "")
-		hostname, err := os.Hostname()
+		hostnameInstance, err := app.Make("docker.hostname")
 		if err != nil {
-			facades.Log().Warningf("metrics: failed to get hostname, using empty string: %v", err)
+			facades.Log().Warningf("metrics: failed to resolve hostname: %v", err)
 		}
+		hostname, _ := hostnameInstance.(string)
 
 		nodeAction := metrics.NewCollectNodeMetricsAction()
 		containerAction := metrics.NewCollectContainerMetricsAction(orchestrator)
