@@ -3,7 +3,6 @@ package providers
 import (
 	"github.com/goravel/framework/contracts/foundation"
 	"github.com/prvious/kontainer/server/app/facades"
-	"github.com/prvious/kontainer/server/app/helpers"
 
 	"github.com/prvious/kontainer/server/app/models"
 	authservice "github.com/prvious/kontainer/server/app/services/auth"
@@ -30,10 +29,6 @@ func (r *AuthServiceProvider) Boot(app foundation.Application) {
 	r.loadJWTSecretFromDB()
 	r.registerOAuthProviders(app)
 
-	if facades.Config().GetString("cluster.role") == "leader" {
-		setupToken := helpers.GetSetupToken()
-		facades.Log().Infof("Setup token: %s", setupToken)
-	}
 }
 
 func (r *AuthServiceProvider) loadJWTSecretFromDB() {

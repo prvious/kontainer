@@ -16,6 +16,7 @@ func Setup() {
 	}
 
 	setupToken := helpers.GetSetupToken()
+	facades.Log().Infof("Setup token: %s", setupToken)
 
 	manifestState := setupcontrollers.NewManifestState()
 

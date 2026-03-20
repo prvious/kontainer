@@ -39,7 +39,7 @@ import (
 
 func unavailableHandler(message string) func(ctx http.Context) http.Response {
 	return func(ctx http.Context) http.Response {
-		return ctx.Response().Json(503, map[string]string{"error": message})
+		return ctx.Response().Json(http.StatusServiceUnavailable, map[string]string{"error": message})
 	}
 }
 
@@ -345,14 +345,9 @@ func buildImageControllers(orchestrator docker.Orchestrator) (
 	leaderNodeID := facades.Config().GetString("cluster.node_id", "")
 	hostnameInstance, err := facades.App().Make("docker.hostname")
 	if err != nil {
-		facades.Log().Warningf("image routes: failed to resolve hostname: %v", err)
-		return nil, nil, nil
+		facades.Log().Warningf("image routes: failed to resolve hostname, using empty string: %v", err)
 	}
-	hostname, ok := hostnameInstance.(string)
-	if !ok {
-		facades.Log().Warningf("image routes: docker.hostname is not a string")
-		return nil, nil, nil
-	}
+	hostname, _ := hostnameInstance.(string)
 
 	clusterImagesCtrl := imageControllers.NewClusterImagesController(
 		imageActions.NewListClusterImagesAction(orchestrator, registry, pool, leaderNodeID, hostname),
