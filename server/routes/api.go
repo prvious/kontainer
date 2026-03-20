@@ -37,6 +37,12 @@ import (
 	ws "github.com/prvious/kontainer/server/app/services/websocket"
 )
 
+func unavailableHandler(message string) func(ctx http.Context) http.Response {
+	return func(ctx http.Context) http.Response {
+		return ctx.Response().Json(503, map[string]string{"error": message})
+	}
+}
+
 func Api() {
 	if facades.Config().GetString("cluster.role") != "leader" {
 		return
@@ -60,38 +66,34 @@ func Api() {
 
 		if orchestrator == nil {
 			facades.Log().Warningf("Docker orchestrator unavailable — all Docker API routes will return 503")
-			unavailable := func(ctx http.Context) http.Response {
-				return ctx.Response().Json(503, map[string]string{
-					"error": "docker orchestrator is not available on this agent",
-				})
-			}
-			router.Get("services", unavailable)
-			router.Get("services/{serviceID}", unavailable)
-			router.Post("services/{serviceID}/scale", unavailable)
-			router.Post("services/{serviceID}/restart", unavailable)
-			router.Post("services/{serviceID}/rollback", unavailable)
-			router.Put("services/{serviceID}/env", unavailable)
-			router.Put("services/{serviceID}/image", unavailable)
-			router.Get("tasks", unavailable)
-			router.Get("tasks/stats", unavailable)
-			router.Get("tasks/{taskID}", unavailable)
-			router.Get("task-stats", unavailable)
-			router.Get("services/{serviceID}/tasks", unavailable)
-			router.Get("nodes", unavailable)
-			router.Get("nodes/{nodeID}/tasks", unavailable)
-			router.Patch("nodes/{nodeID}/availability", unavailable)
-			router.Patch("nodes/{nodeID}/role", unavailable)
-			router.Get("stacks", unavailable)
-			router.Delete("stacks/{stackName}", unavailable)
-			router.Get("networks", unavailable)
-			router.Get("volumes", unavailable)
-			router.Get("secrets", unavailable)
-			router.Post("secrets", unavailable)
-			router.Delete("secrets/{secretID}", unavailable)
-			router.Get("configs", unavailable)
-			router.Post("configs", unavailable)
-			router.Get("configs/{configID}", unavailable)
-			router.Delete("configs/{configID}", unavailable)
+			dockerUnavailable := unavailableHandler("docker orchestrator is not available on this agent")
+			router.Get("services", dockerUnavailable)
+			router.Get("services/{serviceID}", dockerUnavailable)
+			router.Post("services/{serviceID}/scale", dockerUnavailable)
+			router.Post("services/{serviceID}/restart", dockerUnavailable)
+			router.Post("services/{serviceID}/rollback", dockerUnavailable)
+			router.Put("services/{serviceID}/env", dockerUnavailable)
+			router.Put("services/{serviceID}/image", dockerUnavailable)
+			router.Get("tasks", dockerUnavailable)
+			router.Get("tasks/stats", dockerUnavailable)
+			router.Get("tasks/{taskID}", dockerUnavailable)
+			router.Get("task-stats", dockerUnavailable)
+			router.Get("services/{serviceID}/tasks", dockerUnavailable)
+			router.Get("nodes", dockerUnavailable)
+			router.Get("nodes/{nodeID}/tasks", dockerUnavailable)
+			router.Patch("nodes/{nodeID}/availability", dockerUnavailable)
+			router.Patch("nodes/{nodeID}/role", dockerUnavailable)
+			router.Get("stacks", dockerUnavailable)
+			router.Delete("stacks/{stackName}", dockerUnavailable)
+			router.Get("networks", dockerUnavailable)
+			router.Get("volumes", dockerUnavailable)
+			router.Get("secrets", dockerUnavailable)
+			router.Post("secrets", dockerUnavailable)
+			router.Delete("secrets/{secretID}", dockerUnavailable)
+			router.Get("configs", dockerUnavailable)
+			router.Post("configs", dockerUnavailable)
+			router.Get("configs/{configID}", dockerUnavailable)
+			router.Delete("configs/{configID}", dockerUnavailable)
 			return
 		}
 
@@ -174,11 +176,9 @@ func Api() {
 			router.Get("metrics", clusterMetricsCtrl.Handle)
 			router.Get("metrics/{nodeID}", nodeMetricsCtrl.Handle)
 		} else {
-			unavailable := func(ctx http.Context) http.Response {
-				return ctx.Response().Json(503, map[string]string{"error": "metrics unavailable"})
-			}
-			router.Get("metrics", unavailable)
-			router.Get("metrics/{nodeID}", unavailable)
+			metricsUnavailable := unavailableHandler("metrics unavailable")
+			router.Get("metrics", metricsUnavailable)
+			router.Get("metrics/{nodeID}", metricsUnavailable)
 		}
 
 		// Images
@@ -188,17 +188,13 @@ func Api() {
 			router.Delete("images/{imageID}", removeImageCtrl.Handle)
 			router.Post("images/prune", pruneImagesCtrl.Handle)
 		} else {
-			unavailable := func(ctx http.Context) http.Response {
-				return ctx.Response().Json(503, map[string]string{"error": "image management unavailable"})
-			}
-			router.Get("images", unavailable)
-			router.Delete("images/{imageID}", unavailable)
-			router.Post("images/prune", unavailable)
+			imagesUnavailable := unavailableHandler("image management unavailable")
+			router.Get("images", imagesUnavailable)
+			router.Delete("images/{imageID}", imagesUnavailable)
+			router.Post("images/prune", imagesUnavailable)
 		}
-	})
 
-	// Settings routes — no orchestrator dependency
-	facades.Route().Prefix("api").Middleware(middleware.JWT()).Group(func(router route.Router) {
+		// Settings — no orchestrator dependency
 		getSettingsAction := settingsActions.NewGetSettingsAction()
 		updateSettingsAction := settingsActions.NewUpdateSettingsAction()
 
@@ -213,15 +209,11 @@ func Api() {
 func registerWebSocketRoutes(orchestrator docker.Orchestrator) {
 	if orchestrator == nil {
 		facades.Log().Warningf("Docker orchestrator unavailable — WebSocket log/exec routes will return 503")
-		unavailable := func(ctx http.Context) http.Response {
-			return ctx.Response().Json(503, http.Json{
-				"error": "docker orchestrator is not available on this agent",
-			})
-		}
+		wsUnavailable := unavailableHandler("docker orchestrator is not available on this agent")
 		facades.Route().Prefix("api").Group(func(router route.Router) {
-			router.Get("services/{serviceID}/logs", unavailable)
-			router.Get("tasks/{taskID}/logs", unavailable)
-			router.Get("exec/{containerID}", unavailable)
+			router.Get("services/{serviceID}/logs", wsUnavailable)
+			router.Get("tasks/{taskID}/logs", wsUnavailable)
+			router.Get("exec/{containerID}", wsUnavailable)
 		})
 		return
 	}
@@ -376,22 +368,18 @@ func buildImageControllers(orchestrator docker.Orchestrator) (
 }
 
 func buildAgentsHandler() func(ctx http.Context) http.Response {
-	unavailable := func(ctx http.Context) http.Response {
-		return ctx.Response().Json(503, map[string]any{
-			"error": "cluster management unavailable",
-		})
-	}
+	clusterUnavailable := unavailableHandler("cluster management unavailable")
 
 	registryInstance, err := facades.App().Make("cluster.registry")
 	if err != nil {
 		facades.Log().Errorf("Failed to resolve cluster.registry for /api/agents: %v", err)
-		return unavailable
+		return clusterUnavailable
 	}
 
 	registry, ok := registryInstance.(*cluster.Registry)
 	if !ok {
 		facades.Log().Errorf("cluster.registry resolved but is not *cluster.Registry (got %T)", registryInstance)
-		return unavailable
+		return clusterUnavailable
 	}
 
 	action := agentActions.NewListAgentsAction(registry)
