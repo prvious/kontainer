@@ -8,6 +8,7 @@ import (
 	"github.com/prvious/kontainer/server/app/helpers"
 	setupcontrollers "github.com/prvious/kontainer/server/app/http/controllers/setup"
 	"github.com/prvious/kontainer/server/app/http/middleware"
+	setupservice "github.com/prvious/kontainer/server/app/services/setup"
 )
 
 func Setup() {
@@ -18,7 +19,7 @@ func Setup() {
 	setupToken := helpers.GetSetupToken()
 	facades.Log().Infof("Setup token: %s", setupToken)
 
-	manifestState := setupcontrollers.NewManifestState()
+	manifestState := setupservice.NewManifestState()
 
 	checkStatus := setupactions.NewCheckStatusAction()
 	exchangeCode := setupactions.NewExchangeCodeAction()
