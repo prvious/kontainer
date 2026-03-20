@@ -3,17 +3,7 @@ import { Button } from "@/components/ui/button";
 
 type AuthStep = "browser" | "auth" | "token";
 
-export function AuthenticatingScreen({
-    provider,
-    agentUrl,
-    step,
-    onCancel,
-}: {
-    provider: string;
-    agentUrl: string;
-    step: AuthStep;
-    onCancel: () => void;
-}) {
+export function AuthenticatingScreen({ provider, agentUrl, step, onCancel }: { provider: string; agentUrl: string; step: AuthStep; onCancel: () => void }) {
     const providerLabel = provider.charAt(0).toUpperCase() + provider.slice(1);
 
     const steps: { id: AuthStep; label: string; icon: typeof Globe }[] = [
@@ -33,9 +23,7 @@ export function AuthenticatingScreen({
                 {/* Title */}
                 <div className='flex flex-col items-center gap-2'>
                     <h1 className='text-xl font-bold text-foreground'>Authenticating...</h1>
-                    <p className='font-mono text-[13px] text-text-secondary'>
-                        Waiting for {providerLabel} authorization
-                    </p>
+                    <p className='font-mono text-[13px] text-text-secondary'>Waiting for {providerLabel} authorization</p>
                 </div>
 
                 {/* Steps */}
@@ -49,20 +37,12 @@ export function AuthenticatingScreen({
                             <div key={s.id} className='flex flex-col items-center gap-2'>
                                 <Icon
                                     className={`size-5 ${
-                                        isCompleted
-                                            ? "text-accent-green"
-                                            : isCurrent
-                                              ? "animate-pulse text-accent-orange"
-                                              : "text-muted-foreground"
+                                        isCompleted ? "text-accent-green" : isCurrent ? 'animate-pulse text-accent-orange' : "text-muted-foreground"
                                     }`}
                                 />
                                 <span
                                     className={`font-mono text-[10px] font-semibold ${
-                                        isCompleted
-                                            ? "text-accent-green"
-                                            : isCurrent
-                                              ? "text-accent-orange"
-                                              : "text-muted-foreground"
+                                        isCompleted ? "text-accent-green" : isCurrent ? "text-accent-orange" : "text-muted-foreground"
                                     }`}
                                 >
                                     {s.label}

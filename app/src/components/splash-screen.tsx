@@ -4,10 +4,7 @@ export function SplashScreen() {
     return (
         <div className='flex h-screen flex-col bg-background'>
             {/* Accent line */}
-            <div
-                className='h-0.5 w-full shrink-0'
-                style={{ background: "linear-gradient(90deg, #00FF88, #00D4FF 50%, #A78BFA)" }}
-            />
+            <div className='h-0.5 w-full shrink-0' style={{ background: "linear-gradient(90deg, #00FF88, #00D4FF 50%, #A78BFA)" }} />
 
             <div className='flex flex-1 items-center justify-center'>
                 <div className='flex w-[400px] flex-col items-center gap-7'>

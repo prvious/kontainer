@@ -7,14 +7,7 @@ import { ChevronDown, Plus } from "lucide-react";
 import { router } from "@/router";
 import type { ConnectionProfile } from "@/types/connection";
 
-
-const DOT_COLORS = [
-    "bg-accent-green",
-    "bg-cyan-400",
-    "bg-orange-400",
-    "bg-purple-400",
-    "bg-red-400",
-] as const;
+const DOT_COLORS = ["bg-accent-green", "bg-cyan-400", "bg-orange-400", "bg-purple-400", "bg-red-400"] as const;
 
 function ProfileRow({
     profile,
@@ -32,18 +25,13 @@ function ProfileRow({
     onDisconnect?: () => void;
 }) {
     return (
-        <button
-            onClick={onSwitch}
-            className='group flex w-full items-center gap-3 rounded px-2 py-2 text-left transition-colors hover:bg-bg-elevated'
-        >
+        <button onClick={onSwitch} className='group flex w-full items-center gap-3 rounded px-2 py-2 text-left transition-colors hover:bg-bg-elevated'>
             <span className={`size-2 shrink-0 rounded-full ${dotColor}`} />
             <div className='flex-1 overflow-hidden'>
                 <div className='flex items-center gap-2'>
                     <span className='truncate text-sm font-bold text-foreground'>{profile.label}</span>
                 </div>
-                <span className='truncate font-mono text-[10px] text-muted-foreground'>
-                    {profile.agentUrl.replace(/^https?:\/\//, "")}
-                </span>
+                <span className='truncate font-mono text-[10px] text-muted-foreground'>{profile.agentUrl.replace(/^https?:\/\//, "")}</span>
             </div>
             {isActive ? (
                 <button
@@ -94,9 +82,7 @@ export function ClusterSwitcher({ variant = "sidebar" }: { variant?: "sidebar" |
         variant === "titlebar" ? (
             <button className='flex items-center gap-2 text-text-secondary transition-colors hover:text-foreground'>
                 <span className='animate-pulse-dot size-[7px] shrink-0 rounded-full bg-accent-green' />
-                <span className='font-mono text-[11px] font-medium tracking-[0.5px]'>
-                    {activeProfile?.label ?? "No cluster"}
-                </span>
+                <span className='font-mono text-[11px] font-medium tracking-[0.5px]'>{activeProfile?.label ?? "No cluster"}</span>
                 <ChevronDown className='size-3 text-muted-foreground' />
             </button>
         ) : (
@@ -117,27 +103,17 @@ export function ClusterSwitcher({ variant = "sidebar" }: { variant?: "sidebar" |
             <Popover open={open} onOpenChange={setOpen}>
                 <PopoverTrigger render={trigger} />
 
-                <PopoverContent
-                    side={variant === "titlebar" ? "bottom" : "top"}
-                    align='center'
-                    className='w-[300px] border-border bg-card p-2'
-                >
+                <PopoverContent side={variant === "titlebar" ? "bottom" : "top"} align='center' className='w-[300px] border-border bg-card p-2'>
                     {/* Header */}
                     <div className='mb-2 flex items-center justify-between px-2 py-1'>
-                        <span className='font-mono text-[9px] font-medium uppercase tracking-widest text-muted-foreground'>
-                            Switch Cluster
-                        </span>
-                        <span className='rounded bg-bg-elevated px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground'>
-                            {profiles.length}
-                        </span>
+                        <span className='font-mono text-[9px] font-medium tracking-widest text-muted-foreground uppercase'>Switch Cluster</span>
+                        <span className='rounded bg-bg-elevated px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground'>{profiles.length}</span>
                     </div>
 
                     {/* Profile list */}
                     <div className='max-h-64 overflow-y-auto'>
                         {profiles.length === 0 ? (
-                            <div className='px-2 py-4 text-center font-mono text-[11px] text-muted-foreground'>
-                                No clusters connected
-                            </div>
+                            <div className='px-2 py-4 text-center font-mono text-[11px] text-muted-foreground'>No clusters connected</div>
                         ) : (
                             <div className='space-y-0.5'>
                                 {profiles.map((profile, index) => (
@@ -152,11 +128,7 @@ export function ClusterSwitcher({ variant = "sidebar" }: { variant?: "sidebar" |
                                             setOpen(false);
                                             void logout().finally(() => {
                                                 queryClient.clear();
-                                                router
-                                                    .invalidate()
-                                                    .finally(() =>
-                                                        router.navigate({ to: "/login", search: { redirect: undefined } }),
-                                                    );
+                                                router.invalidate().finally(() => router.navigate({ to: "/login", search: { redirect: undefined } }));
                                             });
                                         }}
                                     />
