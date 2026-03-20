@@ -19,5 +19,8 @@
         "lint": "pnpm --filter app lint",
         "fmt": "pnpm --filter app fmt",
         "types": "pnpm --filter app types"
+    },
+    "devDependencies": {
+        "shadcn": "^4.1.0"
     }
 }
