@@ -6,6 +6,7 @@ import (
 	"github.com/goravel/framework/contracts/http"
 	"github.com/prvious/kontainer/server/app/actions/nodes"
 	"github.com/prvious/kontainer/server/app/facades"
+	"github.com/prvious/kontainer/server/app/http/requests"
 	"github.com/prvious/kontainer/server/app/services/docker"
 )
 
@@ -17,23 +18,16 @@ func NewUpdateNodeRoleController(action *nodes.UpdateNodeRoleAction) *UpdateNode
 	return &UpdateNodeRoleController{action: action}
 }
 
-type updateNodeRoleRequest struct {
-	Role string `json:"role"`
-}
-
 func (c *UpdateNodeRoleController) Handle(ctx http.Context) http.Response {
 	nodeID := ctx.Request().Route("nodeID")
 
-	var req updateNodeRoleRequest
-	if err := ctx.Request().Bind(&req); err != nil {
-		return ctx.Response().Json(400, map[string]string{"error": "invalid request body"})
+	var req requests.UpdateNodeRoleRequest
+	errs, err := ctx.Request().ValidateRequest(&req)
+	if err != nil {
+		return ctx.Response().Json(400, map[string]string{"error": err.Error()})
 	}
-
-	switch req.Role {
-	case "manager", "worker":
-		// valid
-	default:
-		return ctx.Response().Json(400, map[string]string{"error": "role must be manager or worker"})
+	if errs != nil {
+		return ctx.Response().Json(422, map[string]any{"errors": errs.All()})
 	}
 
 	if err := c.action.Execute(ctx.Context(), nodeID, req.Role); err != nil {

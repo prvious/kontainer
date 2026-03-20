@@ -6,6 +6,7 @@ import (
 	"github.com/goravel/framework/contracts/http"
 	serviceActions "github.com/prvious/kontainer/server/app/actions/services"
 	"github.com/prvious/kontainer/server/app/facades"
+	"github.com/prvious/kontainer/server/app/http/requests"
 	"github.com/prvious/kontainer/server/app/services/docker"
 )
 
@@ -17,23 +18,19 @@ func NewScaleServiceController(action *serviceActions.ScaleServiceAction) *Scale
 	return &ScaleServiceController{action: action}
 }
 
-type scaleRequest struct {
-	Replicas *uint64 `form:"replicas" json:"replicas"`
-}
-
 func (c *ScaleServiceController) Handle(ctx http.Context) http.Response {
 	serviceID := ctx.Request().Route("serviceID")
 
-	var req scaleRequest
-	if err := ctx.Request().Bind(&req); err != nil {
-		return ctx.Response().Json(400, map[string]string{"error": "invalid request body"})
+	var req requests.ScaleServiceRequest
+	errs, err := ctx.Request().ValidateRequest(&req)
+	if err != nil {
+		return ctx.Response().Json(400, map[string]string{"error": err.Error()})
+	}
+	if errs != nil {
+		return ctx.Response().Json(422, map[string]any{"errors": errs.All()})
 	}
 
-	if req.Replicas == nil {
-		return ctx.Response().Json(400, map[string]string{"error": "replicas field is required"})
-	}
-
-	err := c.action.Execute(ctx.Context(), serviceID, *req.Replicas)
+	err = c.action.Execute(ctx.Context(), serviceID, *req.Replicas)
 	if err != nil {
 		if errors.Is(err, docker.ErrNotFound) {
 			return ctx.Response().Json(404, map[string]string{"error": "service not found"})

@@ -6,6 +6,7 @@ import (
 	"github.com/goravel/framework/contracts/http"
 	"github.com/prvious/kontainer/server/app/actions/nodes"
 	"github.com/prvious/kontainer/server/app/facades"
+	"github.com/prvious/kontainer/server/app/http/requests"
 	"github.com/prvious/kontainer/server/app/services/docker"
 )
 
@@ -17,23 +18,16 @@ func NewUpdateNodeAvailabilityController(action *nodes.UpdateNodeAvailabilityAct
 	return &UpdateNodeAvailabilityController{action: action}
 }
 
-type updateNodeAvailabilityRequest struct {
-	Availability string `json:"availability"`
-}
-
 func (c *UpdateNodeAvailabilityController) Handle(ctx http.Context) http.Response {
 	nodeID := ctx.Request().Route("nodeID")
 
-	var req updateNodeAvailabilityRequest
-	if err := ctx.Request().Bind(&req); err != nil {
-		return ctx.Response().Json(400, map[string]string{"error": "invalid request body"})
+	var req requests.UpdateNodeAvailabilityRequest
+	errs, err := ctx.Request().ValidateRequest(&req)
+	if err != nil {
+		return ctx.Response().Json(400, map[string]string{"error": err.Error()})
 	}
-
-	switch req.Availability {
-	case "active", "drain", "pause":
-		// valid
-	default:
-		return ctx.Response().Json(400, map[string]string{"error": "availability must be active, drain, or pause"})
+	if errs != nil {
+		return ctx.Response().Json(422, map[string]any{"errors": errs.All()})
 	}
 
 	if err := c.action.Execute(ctx.Context(), nodeID, req.Availability); err != nil {

@@ -4,6 +4,7 @@ import (
 	"github.com/goravel/framework/contracts/http"
 	"github.com/prvious/kontainer/server/app/actions/secrets"
 	"github.com/prvious/kontainer/server/app/facades"
+	"github.com/prvious/kontainer/server/app/http/requests"
 )
 
 type CreateSecretController struct {
@@ -14,22 +15,14 @@ func NewCreateSecretController(action *secrets.CreateSecretAction) *CreateSecret
 	return &CreateSecretController{action: action}
 }
 
-type createSecretRequest struct {
-	Name string `json:"name"`
-	Data string `json:"data"`
-}
-
 func (c *CreateSecretController) Handle(ctx http.Context) http.Response {
-	var req createSecretRequest
-	if err := ctx.Request().Bind(&req); err != nil {
-		return ctx.Response().Json(400, map[string]string{"error": "invalid request body"})
+	var req requests.CreateSecretRequest
+	errors, err := ctx.Request().ValidateRequest(&req)
+	if err != nil {
+		return ctx.Response().Json(400, map[string]string{"error": err.Error()})
 	}
-
-	if req.Name == "" {
-		return ctx.Response().Json(400, map[string]string{"error": "name is required"})
-	}
-	if req.Data == "" {
-		return ctx.Response().Json(400, map[string]string{"error": "data is required"})
+	if errors != nil {
+		return ctx.Response().Json(422, map[string]any{"errors": errors.All()})
 	}
 
 	if err := c.action.Execute(ctx.Context(), req.Name, []byte(req.Data)); err != nil {
