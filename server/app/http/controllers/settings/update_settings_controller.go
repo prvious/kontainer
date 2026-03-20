@@ -3,6 +3,7 @@ package settings
 import (
 	"github.com/goravel/framework/contracts/http"
 	settingsActions "github.com/prvious/kontainer/server/app/actions/settings"
+	"github.com/prvious/kontainer/server/app/facades"
 	"github.com/prvious/kontainer/server/app/http/requests"
 )
 
@@ -29,6 +30,7 @@ func (c *UpdateSettingsController) Handle(ctx http.Context) http.Response {
 	}
 
 	if err := c.updateAction.Execute(req.Settings); err != nil {
+		facades.Log().Errorf("update settings error: %v", err)
 		return ctx.Response().Json(500, map[string]string{"error": "failed to update settings"})
 	}
 
