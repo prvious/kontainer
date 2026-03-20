@@ -204,142 +204,53 @@ describe("StatusBar", () => {
         navigatedTo = null;
     });
 
-    it("renders cluster name from active profile", async () => {
+    it("renders task count", async () => {
         mockAllInvokes();
         renderWithProviders();
-
         await waitFor(() => {
-            expect(screen.getByText("production-swarm")).toBeInTheDocument();
+            expect(screen.getByTestId("status-tasks")).toHaveTextContent("42 TASKS");
         });
     });
 
-    it("renders node count", async () => {
-        mockAllInvokes();
-        renderWithProviders();
-
-        await waitFor(() => {
-            expect(screen.getByText("3 nodes")).toBeInTheDocument();
-        });
-    });
-
-    it("renders task count as running/desired", async () => {
-        mockAllInvokes();
-        renderWithProviders();
-
-        await waitFor(() => {
-            expect(screen.getByText("42/42 tasks")).toBeInTheDocument();
-        });
-    });
-
-    it("renders aggregated CPU and MEM percentages", async () => {
+    it("renders aggregated CPU and MEM", async () => {
         mockAllInvokes();
         renderWithProviders();
 
         // Average CPU: (25 + 45) / 2 = 35%
-        // Average MEM: (37.5 + 62.5) / 2 = 50%
         await waitFor(() => {
-            expect(screen.getByTestId("cpu-value")).toHaveTextContent("35%");
+            expect(screen.getByTestId("cpu-value")).toHaveTextContent("CPU 35%");
         });
-        expect(screen.getByTestId("mem-value")).toHaveTextContent("50%");
+        // MEM: (3G + 10G) used, (8G + 16G) total -> "MEM 13.0/24G"
+        expect(screen.getByTestId("mem-value")).toHaveTextContent("MEM 13.0/24G");
     });
 
-    it("shows warning style when nodes are down", async () => {
-        const nodesWithDown: NodeItem[] = [
-            ...sampleNodes.slice(0, 2),
-            {
-                id: "node3",
-                hostname: "worker-2",
-                role: "worker",
-                status: "down",
-                availability: "active",
-                engineVersion: "24.0.7",
-                os: "linux",
-                architecture: "x86_64",
-                ip: "10.0.0.3",
-                leader: false,
-                updatedAt: new Date().toISOString(),
-            },
-        ];
-
-        mockAllInvokes(nodesWithDown);
-        renderWithProviders();
-
-        await waitFor(() => {
-            expect(screen.getByText("2/3 nodes")).toBeInTheDocument();
-        });
-
-        const nodeButton = screen.getByTestId("status-nodes");
-        expect(nodeButton).toHaveClass("text-warning");
-    });
-
-    it("shows warning style when tasks running < desired", async () => {
-        const degradedTasks: TaskStats = {
-            total: 50,
-            running: 35,
-            failed: 0,
-            preparing: 5,
-            complete: 10,
-            desiredRunning: 42,
-        };
-
+    it("renders degraded task count", async () => {
+        const degradedTasks: TaskStats = { total: 50, running: 35, failed: 0, preparing: 5, complete: 10, desiredRunning: 42 };
         mockAllInvokes(sampleNodes, degradedTasks);
         renderWithProviders();
-
         await waitFor(() => {
-            expect(screen.getByText("35/42 tasks")).toBeInTheDocument();
+            expect(screen.getByTestId("status-tasks")).toHaveTextContent("35 TASKS");
         });
-
-        const taskButton = screen.getByTestId("status-tasks");
-        expect(taskButton).toHaveClass("text-warning");
     });
 
-    it("shows destructive style when tasks have failures", async () => {
-        const failedTasks: TaskStats = {
-            total: 50,
-            running: 40,
-            failed: 5,
-            preparing: 0,
-            complete: 5,
-            desiredRunning: 42,
-        };
-
+    it("shows red when tasks have failures", async () => {
+        const failedTasks: TaskStats = { total: 50, running: 40, failed: 5, preparing: 0, complete: 5, desiredRunning: 42 };
         mockAllInvokes(sampleNodes, failedTasks);
         renderWithProviders();
-
         await waitFor(() => {
-            expect(screen.getByText("40/42 tasks")).toBeInTheDocument();
+            expect(screen.getByTestId("status-tasks")).toHaveTextContent("40 TASKS");
         });
-
-        const taskButton = screen.getByTestId("status-tasks");
-        expect(taskButton).toHaveClass("text-destructive");
+        expect(screen.getByTestId("status-tasks")).toHaveClass("text-accent-red");
     });
 
     it("shows dashes when data is loading", async () => {
         vi.mocked(invoke).mockImplementation(() => new Promise(() => {}));
         renderWithProviders();
-
         await waitFor(() => {
             expect(screen.getByTestId("cpu-value")).toHaveTextContent("--");
         });
         expect(screen.getByTestId("mem-value")).toHaveTextContent("--");
-        expect(screen.getByTestId("status-nodes")).toHaveTextContent("--");
         expect(screen.getByTestId("status-tasks")).toHaveTextContent("--");
-    });
-
-    it("navigates to /nodes when clicking node count", async () => {
-        mockAllInvokes();
-        const user = userEvent.setup();
-        renderWithProviders();
-
-        await waitFor(() => {
-            expect(screen.getByText("3 nodes")).toBeInTheDocument();
-        });
-
-        await user.click(screen.getByTestId("status-nodes"));
-
-        await waitFor(() => {
-            expect(navigatedTo).toBe("/nodes");
-        });
     });
 
     it("navigates to /tasks when clicking task count", async () => {
@@ -348,7 +259,7 @@ describe("StatusBar", () => {
         renderWithProviders();
 
         await waitFor(() => {
-            expect(screen.getByText("42/42 tasks")).toBeInTheDocument();
+            expect(screen.getByTestId("status-tasks")).toHaveTextContent("42 TASKS");
         });
 
         await user.click(screen.getByTestId("status-tasks"));
@@ -399,7 +310,7 @@ describe("StatusBar", () => {
         );
 
         await waitFor(() => {
-            expect(screen.getByTestId("cpu-value")).toBeInTheDocument();
+            expect(screen.getByTestId("cpu-value")).toHaveTextContent("CPU");
         });
 
         await user.click(screen.getByTestId("status-cpu"));
@@ -450,7 +361,7 @@ describe("StatusBar", () => {
         );
 
         await waitFor(() => {
-            expect(screen.getByTestId("mem-value")).toBeInTheDocument();
+            expect(screen.getByTestId("mem-value")).toHaveTextContent("MEM");
         });
 
         await user.click(screen.getByTestId("status-mem"));
