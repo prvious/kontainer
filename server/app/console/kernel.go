@@ -3,6 +3,7 @@ package console
 import (
 	"context"
 
+	"github.com/goravel/framework/contracts/console"
 	"github.com/goravel/framework/contracts/schedule"
 
 	"github.com/prvious/kontainer/server/app/actions/metrics"
@@ -11,6 +12,10 @@ import (
 )
 
 type Kernel struct{}
+
+func (kernel *Kernel) Commands() []console.Command {
+	return []console.Command{}
+}
 
 func (kernel *Kernel) Schedule() []schedule.Event {
 	var events []schedule.Event
