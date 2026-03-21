@@ -42,48 +42,18 @@ func (a *CompleteSetupAction) Execute() error {
 	facades.Log().Info("JWT secret loaded into user guard — auth system now active")
 
 	// Register OAuth providers now that credentials exist in the DB
-	if err := a.registerOAuthProviders(); err != nil {
-		return fmt.Errorf("failed to register OAuth providers: %w", err)
-	}
-
-	return nil
-}
-
-func (a *CompleteSetupAction) registerOAuthProviders() error {
 	registry, err := facades.App().Make("auth.provider_registry")
 	if err != nil {
-		return fmt.Errorf("resolve provider registry: %w", err)
+		return fmt.Errorf("failed to resolve provider registry: %w", err)
 	}
 	providerRegistry, ok := registry.(*authproviders.ProviderRegistry)
 	if !ok {
 		return fmt.Errorf("auth.provider_registry is not *ProviderRegistry")
 	}
-
-	configs := map[string]string{}
-	for _, key := range []string{"github_client_id", "github_client_secret", "github_org"} {
-		var ac models.AppConfig
-		if err := facades.Orm().Query().Where("key", key).First(&ac); err != nil {
-			continue
-		}
-		configs[key] = ac.Value
+	if err := authproviders.RegisterGitHubFromDB(providerRegistry); err != nil {
+		return fmt.Errorf("failed to register OAuth providers: %w", err)
 	}
-
-	clientID := configs["github_client_id"]
-	clientSecret := configs["github_client_secret"]
-	if clientID == "" || clientSecret == "" {
-		return fmt.Errorf("GitHub OAuth credentials not found in app_configs")
-	}
-
-	agentURL := facades.Config().GetString("cluster.agent_url", "http://localhost:3000")
-	org := configs["github_org"]
-
-	providerRegistry.Register(authproviders.NewGitHubProvider(
-		clientID,
-		clientSecret,
-		agentURL+"/auth/github/callback",
-		org,
-	))
-
 	facades.Log().Info("GitHub OAuth provider registered after setup completion")
+
 	return nil
 }

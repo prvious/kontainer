@@ -55,32 +55,10 @@ func (r *AuthServiceProvider) registerOAuthProviders(app foundation.Application)
 		return
 	}
 
-	configs := map[string]string{}
-	for _, key := range []string{"github_client_id", "github_client_secret", "github_org"} {
-		var ac models.AppConfig
-		if err := facades.Orm().Query().Where("key", key).First(&ac); err != nil {
-			facades.Log().Warningf("Failed to load OAuth config key %q: %v", key, err)
-			continue
-		}
-		configs[key] = ac.Value
-	}
-
-	clientID := configs["github_client_id"]
-	clientSecret := configs["github_client_secret"]
-	if clientID == "" || clientSecret == "" {
+	if err := authproviders.RegisterGitHubFromDB(providerRegistry); err != nil {
 		facades.Log().Warning("GitHub OAuth credentials not found — OAuth disabled until setup completes")
 		return
 	}
-
-	agentURL := facades.Config().GetString("cluster.agent_url", "http://localhost:3000")
-	org := configs["github_org"]
-
-	providerRegistry.Register(authproviders.NewGitHubProvider(
-		clientID,
-		clientSecret,
-		agentURL+"/auth/github/callback",
-		org,
-	))
 
 	facades.Log().Info("GitHub OAuth provider registered")
 }
