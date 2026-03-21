@@ -66,8 +66,12 @@ export function LoginScreen() {
     }
 
     async function handleSavedConnection(profileId: string) {
-        await switchProfile(profileId);
-        navigate({ to: redirectTo || "/" });
+        try {
+            await switchProfile(profileId);
+            navigate({ to: redirectTo || "/" });
+        } catch (err) {
+            setErrorMessage(err instanceof Error ? err.message : "Failed to connect to saved cluster");
+        }
     }
 
     if (setupRequired) {
@@ -131,12 +135,7 @@ export function LoginScreen() {
                         <div className='h-px flex-1 bg-border' />
                     </div>
 
-                    <Button
-                        type='button'
-                        disabled={isConnecting}
-                        onClick={handleConnectWithGithub}
-                        className='h-11 w-full gap-2'
-                    >
+                    <Button type='button' disabled={isConnecting} onClick={handleConnectWithGithub} className='h-11 w-full gap-2'>
                         {isConnecting ? (
                             <>
                                 <Loader2 className='size-4 animate-spin' />

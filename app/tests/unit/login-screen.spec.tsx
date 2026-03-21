@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, act } from "@testing-library/react";
+import { render, screen, act, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -220,6 +220,40 @@ describe("LoginScreen", () => {
 
         await act(async () => {
             resolvePing!();
+        });
+    });
+
+    it("shows error when saved connection fails to switch", async () => {
+        const testProfile = {
+            id: "profile-1",
+            label: "My Cluster",
+            agentUrl: "http://cluster.example.com",
+            userId: "u1",
+            userName: "Test User",
+            userEmail: "test@example.com",
+            userAvatarUrl: "",
+            userProvider: "github",
+            token: "jwt-abc",
+            expiresAt: Math.floor(Date.now() / 1000) + 3600,
+        };
+
+        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+            if (cmd === "load_profiles") return { profiles: [testProfile], activeProfileId: null };
+            if (cmd === "set_active_profile") throw new Error("Profile switch failed");
+            return undefined;
+        });
+
+        await renderLoginScreen();
+
+        // The saved connection should appear
+        expect(screen.getByText("My Cluster")).toBeInTheDocument();
+
+        const user = userEvent.setup();
+        await user.click(screen.getByText("My Cluster"));
+
+        // Should show error message instead of navigating
+        await waitFor(() => {
+            expect(screen.getByText(/profile switch failed/i)).toBeInTheDocument();
         });
     });
 });
