@@ -60,7 +60,7 @@ export function LoginScreen() {
             await login(url, undefined, "github");
             navigate({ to: redirectTo || "/" });
         } catch (err) {
-            setErrorMessage(err instanceof Error ? err.message : "Authentication failed");
+            setErrorMessage(typeof err === "string" ? err : err instanceof Error ? err.message : "Authentication failed");
             setAuthenticatingProvider(null);
         }
     }
@@ -70,7 +70,7 @@ export function LoginScreen() {
             await switchProfile(profileId);
             navigate({ to: redirectTo || "/" });
         } catch (err) {
-            setErrorMessage(err instanceof Error ? err.message : "Failed to connect to saved cluster");
+            setErrorMessage(typeof err === "string" ? err : err instanceof Error ? err.message : "Failed to connect to saved cluster");
         }
     }
 

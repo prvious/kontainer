@@ -40,9 +40,15 @@ export function SetupWizard({ agentUrl, onComplete, onBack }: SetupWizardProps) 
             if (result.step === "github_connected") {
                 // Already connected — complete setup
                 setActiveStep("done");
-                await invoke("setup_complete", { url: agentUrl, token: setupToken });
-                setIsLoading(false);
-                onComplete();
+                try {
+                    await invoke("setup_complete", { url: agentUrl, token: setupToken });
+                    setIsLoading(false);
+                    onComplete();
+                } catch (completeErr) {
+                    setIsLoading(false);
+                    setError(typeof completeErr === "string" ? completeErr : "Failed to complete setup");
+                    setActiveStep("token");
+                }
                 return;
             }
         } catch (err) {

@@ -73,9 +73,13 @@ export function ClusterSwitcher({ variant = "sidebar" }: { variant?: "sidebar" |
 
     async function handleSwitch(profileId: string) {
         if (profileId === activeProfileId) return;
-        await switchProfile(profileId);
-        queryClient.clear();
-        setOpen(false);
+        try {
+            await switchProfile(profileId);
+            queryClient.clear();
+            setOpen(false);
+        } catch {
+            // Keep popover open so user sees the switch failed
+        }
     }
 
     const trigger =
