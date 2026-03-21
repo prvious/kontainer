@@ -1,13 +1,10 @@
-import { Search, Bell, ChevronDown } from "lucide-react";
+import { Search, Bell } from "lucide-react";
 import { Logo } from "@/components/logo";
-import { useAuth } from "@/hooks/use-auth";
 import { useCommandPalette } from "@/hooks/use-command-palette";
+import { ClusterSwitcher } from "@/components/cluster-switcher";
 
 export function DashboardHeader() {
-    const { profiles, activeProfileId } = useAuth();
     const { setOpen } = useCommandPalette();
-    const activeProfile = profiles.find((p) => p.id === activeProfileId);
-    const clusterName = activeProfile?.label ?? "No cluster";
 
     return (
         <header data-tauri-drag-region className='flex h-[38px] shrink-0 items-center justify-between border-b border-border bg-titlebar-bg/90 px-4'>
@@ -17,12 +14,8 @@ export function DashboardHeader() {
                 <Logo />
             </div>
 
-            {/* Center: cluster selector */}
-            <button className='flex items-center gap-2 text-text-secondary transition-colors hover:text-foreground' onClick={() => setOpen(true)}>
-                <span className='animate-pulse-dot size-[7px] shrink-0 rounded-full bg-accent-green' />
-                <span className='font-mono text-[11px] font-medium tracking-[0.5px]'>{clusterName}</span>
-                <ChevronDown className='size-3 text-muted-foreground' />
-            </button>
+            {/* Center: cluster switcher */}
+            <ClusterSwitcher variant='titlebar' />
 
             {/* Right: utility icons */}
             <div className='flex items-center gap-4'>

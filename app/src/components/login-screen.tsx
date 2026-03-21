@@ -1,39 +1,14 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
-import { AlertTriangle, CheckCircle2, Globe, Loader2, Shield, WifiOff } from "lucide-react";
+import { Container, ChevronRight, Link as LinkIcon, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
 import { SetupWizard } from "@/components/setup-wizard";
+import { AuthenticatingScreen } from "@/components/authenticating-screen";
 
 const routeApi = getRouteApi("/login");
-
-type ConnectionStatus = "idle" | "connecting" | "online" | "offline" | "error";
-
-const statusConfig = {
-    idle: {
-        icon: Globe,
-        color: "text-muted-foreground",
-    },
-    connecting: {
-        icon: Loader2,
-        color: "text-primary",
-    },
-    online: {
-        icon: CheckCircle2,
-        color: "text-success",
-    },
-    offline: {
-        icon: WifiOff,
-        color: "text-destructive",
-    },
-    error: {
-        icon: AlertTriangle,
-        color: "text-warning",
-    },
-} as const;
 
 function GitHubIcon({ className }: { className?: string }) {
     return (
@@ -44,72 +19,60 @@ function GitHubIcon({ className }: { className?: string }) {
 }
 
 export function LoginScreen() {
-    const { login } = useAuth();
+    const { login, profiles, switchProfile } = useAuth();
     const navigate = useNavigate();
     const { redirect: redirectTo } = routeApi.useSearch();
     const [agentUrl, setAgentUrl] = useState("http://localhost:3000");
-    const [status, setStatus] = useState<ConnectionStatus>("idle");
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
-    const [providers, setProviders] = useState<string[]>([]);
+    const [isConnecting, setIsConnecting] = useState(false);
     const [authenticatingProvider, setAuthenticatingProvider] = useState<string | null>(null);
     const [setupRequired, setSetupRequired] = useState(false);
 
     function handleUrlChange(e: React.ChangeEvent<HTMLInputElement>) {
         setAgentUrl(e.target.value);
-        if (status !== "idle") {
-            setStatus("idle");
-            setErrorMessage(null);
-            setProviders([]);
-            setAuthenticatingProvider(null);
-        }
+        setErrorMessage(null);
     }
 
-    async function handleConnect(e: React.FormEvent) {
-        e.preventDefault();
+    async function handleConnectWithGithub() {
         const url = agentUrl.replace(/\/+$/, "");
-
-        setStatus("connecting");
+        setIsConnecting(true);
         setErrorMessage(null);
-        setProviders([]);
-        setAuthenticatingProvider(null);
 
+        // Step 1: Ping agent to check if it's reachable and if setup is needed
         try {
             const pingResult = await invoke<{ app: string; status: string }>("ping_agent", { url });
             if (pingResult.status === "setup_required") {
                 setSetupRequired(true);
+                setIsConnecting(false);
                 return;
             }
         } catch (err) {
-            setStatus("offline");
-            setErrorMessage(typeof err === "string" ? err : "Could not reach the cluster");
+            setIsConnecting(false);
+            setErrorMessage(typeof err === "string" ? err : "Could not reach the agent");
             return;
         }
 
-        setStatus("online");
+        // Step 2: Start OAuth directly with GitHub (skip fetch_providers)
+        setAuthenticatingProvider("github");
+        setIsConnecting(false);
 
         try {
-            const result = await invoke<string[]>("fetch_providers", { url });
-            setProviders(result);
-        } catch (err) {
-            setStatus("error");
-            setErrorMessage(typeof err === "string" ? err : "Failed to fetch auth providers");
-        }
-    }
-
-    async function handleProviderClick(provider: string) {
-        const url = agentUrl.replace(/\/+$/, "");
-        setAuthenticatingProvider(provider);
-        try {
-            await login(url, undefined, provider);
+            await login(url, undefined, "github");
             navigate({ to: redirectTo || "/" });
         } catch (err) {
-            setErrorMessage(err instanceof Error ? err.message : "Authentication failed");
+            setErrorMessage(typeof err === "string" ? err : err instanceof Error ? err.message : "Authentication failed");
             setAuthenticatingProvider(null);
         }
     }
 
-    const currentStatus = statusConfig[status];
-    const StatusIcon = currentStatus.icon;
+    async function handleSavedConnection(profileId: string) {
+        try {
+            await switchProfile(profileId);
+            navigate({ to: redirectTo || "/" });
+        } catch (err) {
+            setErrorMessage(typeof err === "string" ? err : err instanceof Error ? err.message : "Failed to connect to saved cluster");
+        }
+    }
 
     if (setupRequired) {
         return (
@@ -117,107 +80,106 @@ export function LoginScreen() {
                 agentUrl={agentUrl.replace(/\/+$/, "")}
                 onComplete={() => {
                     setSetupRequired(false);
-                    setStatus("idle");
                 }}
                 onBack={() => {
                     setSetupRequired(false);
-                    setStatus("idle");
                 }}
             />
         );
     }
 
+    if (authenticatingProvider) {
+        return (
+            <AuthenticatingScreen
+                provider={authenticatingProvider}
+                agentUrl={agentUrl.replace(/\/+$/, "")}
+                step='auth'
+                onCancel={() => setAuthenticatingProvider(null)}
+            />
+        );
+    }
+
+    const dotColors = ["bg-accent-green", "bg-accent-cyan", "bg-accent-orange", "bg-accent-purple", "bg-accent-red"];
+
     return (
-        <div className='flex h-screen p-2 pt-10'>
-            <div data-tauri-drag-region className='grain flex flex-1 flex-col items-center justify-center overflow-hidden rounded-xl bg-background shadow-sm'>
-                <div className='w-full max-w-sm px-6'>
-                    <h1 className='text-lg font-semibold'>Connect to Cluster</h1>
-                    <p className='mt-1 text-sm text-muted-foreground'>Enter your agent URL to get started.</p>
-
-                    <form onSubmit={handleConnect} className='mt-6'>
-                        <Label htmlFor='cluster-url' className='mb-2'>
-                            Agent URL
-                        </Label>
-                        <div className='relative'>
-                            <Input
-                                id='cluster-url'
-                                type='url'
-                                placeholder='http://localhost:3000'
-                                value={agentUrl}
-                                onChange={handleUrlChange}
-                                required
-                                className='h-9 pr-9 font-mono text-sm'
-                            />
-                            <div className='absolute top-1/2 right-3 -translate-y-1/2'>
-                                <StatusIcon className={`size-3.5 ${currentStatus.color} ${status === "connecting" ? "animate-spin" : ""}`} />
-                            </div>
-                        </div>
-
-                        {/* Error message */}
-                        {(status === "offline" || status === "error") && errorMessage && (
-                            <p className={`mt-2 text-xs ${currentStatus.color}`}>{errorMessage}</p>
-                        )}
-
-                        {/* Connect / Retry Button */}
-                        {status !== "online" && (
-                            <Button type='submit' disabled={status === "connecting"} size='sm' className='mt-3 w-full'>
-                                {status === "connecting" ? (
-                                    <>
-                                        <Loader2 className='size-3.5 animate-spin' />
-                                        Connecting...
-                                    </>
-                                ) : status === "offline" || status === "error" ? (
-                                    "Retry"
-                                ) : (
-                                    "Connect"
-                                )}
-                            </Button>
-                        )}
-                    </form>
-
-                    {/* Auth Providers */}
-                    {status === "online" && providers.length > 0 && (
-                        <div className='mt-6'>
-                            <div className='flex items-center gap-3'>
-                                <div className='h-px flex-1 bg-border' />
-                                <span className='text-xs text-muted-foreground'>Authenticate</span>
-                                <div className='h-px flex-1 bg-border' />
-                            </div>
-
-                            <div className='mt-3 flex flex-col gap-2'>
-                                {providers.map((provider) => {
-                                    const isAuthenticating = authenticatingProvider === provider;
-                                    const isDisabled = authenticatingProvider !== null;
-                                    const ProviderIcon = provider === "github" ? GitHubIcon : Shield;
-
-                                    return (
-                                        <Button
-                                            key={provider}
-                                            type='button'
-                                            variant='outline'
-                                            size='sm'
-                                            disabled={isDisabled}
-                                            onClick={() => handleProviderClick(provider)}
-                                            className='w-full'
-                                        >
-                                            {isAuthenticating ? (
-                                                <>
-                                                    <Loader2 className='size-3.5 animate-spin' />
-                                                    Authenticating...
-                                                </>
-                                            ) : (
-                                                <>
-                                                    <ProviderIcon className='size-4' />
-                                                    {provider.charAt(0).toUpperCase() + provider.slice(1)}
-                                                </>
-                                            )}
-                                        </Button>
-                                    );
-                                })}
-                            </div>
-                        </div>
-                    )}
+        <div className='flex flex-1 items-center justify-center'>
+            <div className='flex w-[480px] flex-col gap-8 border border-border bg-card p-10'>
+                {/* Logo section */}
+                <div className='flex flex-col items-center gap-3'>
+                    <div className='flex size-14 items-center justify-center border border-accent-green bg-accent-green-20'>
+                        <Container className='size-7 text-accent-green' />
+                    </div>
+                    <span className='text-[28px] font-bold text-foreground'>kontainer</span>
+                    <span className='font-mono text-xs font-medium text-text-secondary'>Connect to your infrastructure agent</span>
                 </div>
+
+                {/* Agent URL + Connect with GitHub */}
+                <div className='flex flex-col gap-4'>
+                    <label className='font-mono text-[10px] font-semibold tracking-[1px] text-muted-foreground'>AGENT URL</label>
+                    <div className='relative'>
+                        <LinkIcon className='absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-muted-foreground' />
+                        <Input
+                            type='url'
+                            placeholder='https://agent.kontainer.dev'
+                            value={agentUrl}
+                            onChange={handleUrlChange}
+                            className='h-11 bg-bg-elevated pl-10 font-mono text-[13px]'
+                        />
+                    </div>
+
+                    {errorMessage && <p className='font-mono text-xs text-accent-red'>{errorMessage}</p>}
+
+                    <div className='flex items-center gap-3'>
+                        <div className='h-px flex-1 bg-border' />
+                        <span className='font-mono text-[10px] text-muted-foreground'>authenticate with</span>
+                        <div className='h-px flex-1 bg-border' />
+                    </div>
+
+                    <Button type='button' disabled={isConnecting} onClick={handleConnectWithGithub} className='h-11 w-full gap-2'>
+                        {isConnecting ? (
+                            <>
+                                <Loader2 className='size-4 animate-spin' />
+                                Connecting...
+                            </>
+                        ) : (
+                            <>
+                                <GitHubIcon className='size-4' />
+                                Connect with GitHub
+                            </>
+                        )}
+                    </Button>
+                </div>
+
+                {/* Saved connections */}
+                {profiles.length > 0 && (
+                    <div className='flex flex-col gap-3'>
+                        <div className='flex items-center justify-between'>
+                            <span className='font-mono text-[10px] font-semibold tracking-[1px] text-muted-foreground'>SAVED CONNECTIONS</span>
+                            <span className='rounded bg-bg-elevated px-2 py-0.5 font-mono text-[10px] text-muted-foreground'>
+                                {profiles.length} AGENT{profiles.length !== 1 ? "S" : ""}
+                            </span>
+                        </div>
+                        <div className='overflow-hidden border border-border bg-bg-elevated'>
+                            {profiles.map((profile, i) => (
+                                <button
+                                    key={profile.id}
+                                    onClick={() => handleSavedConnection(profile.id)}
+                                    className='flex w-full items-center gap-3 border-b border-border px-3.5 py-3 text-left last:border-b-0 hover:bg-bg-subtle'
+                                >
+                                    <span className={`size-2 shrink-0 rounded-full ${dotColors[i % dotColors.length]}`} />
+                                    <div className='flex flex-1 flex-col gap-0.5 overflow-hidden'>
+                                        <span className='truncate text-sm font-semibold text-foreground'>{profile.label}</span>
+                                        <span className='truncate font-mono text-[11px] text-muted-foreground'>{profile.agentUrl}</span>
+                                    </div>
+                                    <ChevronRight className='size-3.5 shrink-0 text-muted-foreground' />
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
+
+                {/* Version footer */}
+                <p className='text-center font-mono text-[10px] text-muted-foreground'>kontainer desktop v1.0.0</p>
             </div>
         </div>
     );

@@ -7,8 +7,13 @@ export interface AuthUser {
 }
 
 export interface ParsedToken {
-    user: AuthUser;
+    userId: string;
     expiresAt: number;
+}
+
+export interface CheckAuthResponse {
+    user: AuthUser;
+    status: string;
 }
 
 export interface AuthState {

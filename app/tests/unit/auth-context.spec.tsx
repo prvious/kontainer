@@ -6,10 +6,15 @@ import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { AuthProvider } from "@/contexts/auth-context";
 import { useAuth } from "@/hooks/use-auth";
-import type { ParsedToken } from "@/types/auth";
+import type { CheckAuthResponse, ParsedToken } from "@/types/auth";
 import type { StoredProfiles } from "@/types/connection";
 
 const mockParsedToken: ParsedToken = {
+    userId: "123",
+    expiresAt: 9999999999,
+};
+
+const mockCheckAuthResponse: CheckAuthResponse = {
     user: {
         id: "123",
         name: "Jane Doe",
@@ -17,7 +22,7 @@ const mockParsedToken: ParsedToken = {
         avatarUrl: "https://example.com/avatar.png",
         provider: "github",
     },
-    expiresAt: 9999999999,
+    status: "ok",
 };
 
 const emptyProfiles: StoredProfiles = {
@@ -146,6 +151,7 @@ describe("AuthProvider", () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_profiles") return savedProfile;
             if (cmd === "parse_auth_token") return mockParsedToken;
+            if (cmd === "check_auth") return mockCheckAuthResponse;
             if (cmd === "save_profile") return undefined;
             if (cmd === "auth_listen") {
                 // Background task delivers token immediately
@@ -163,6 +169,10 @@ describe("AuthProvider", () => {
         });
 
         expect(invoke).toHaveBeenCalledWith("parse_auth_token", {
+            token: "fake.jwt.token",
+        });
+        expect(invoke).toHaveBeenCalledWith("check_auth", {
+            url: "http://localhost:3000",
             token: "fake.jwt.token",
         });
         expect(invoke).toHaveBeenCalledWith("save_profile", expect.objectContaining({ input: expect.objectContaining({ agentUrl: "http://localhost:3000" }) }));
@@ -195,6 +205,7 @@ describe("AuthProvider", () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_profiles") return savedProfile;
             if (cmd === "parse_auth_token") return mockParsedToken;
+            if (cmd === "check_auth") return mockCheckAuthResponse;
             if (cmd === "auth_listen") {
                 tokenCallback?.({ payload: { token: "fake.jwt.token" } });
                 return undefined;
@@ -234,6 +245,7 @@ describe("AuthProvider", () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_profiles") return emptyProfiles;
             if (cmd === "parse_auth_token") return mockParsedToken;
+            if (cmd === "check_auth") return mockCheckAuthResponse;
             if (cmd === "auth_listen") {
                 tokenCallback?.({ payload: { token: "fake.jwt.token" } });
                 return undefined;
@@ -267,7 +279,7 @@ describe("AuthProvider", () => {
         consoleSpy.mockRestore();
     });
 
-    it("handles parse_auth_token failure gracefully", async () => {
+    it("rejects login when parse_auth_token fails", async () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_profiles") return emptyProfiles;
             if (cmd === "auth_listen") {
@@ -277,7 +289,6 @@ describe("AuthProvider", () => {
             if (cmd === "parse_auth_token") throw new Error("parse failed");
             return undefined;
         });
-        const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
         renderWithProvider();
         await act(async () => {});
@@ -287,9 +298,7 @@ describe("AuthProvider", () => {
         });
 
         expect(screen.getByTestId("user")).toHaveTextContent("none");
-        expect(consoleSpy).toHaveBeenCalledWith("Failed to parse auth token:", expect.any(Error));
-
-        consoleSpy.mockRestore();
+        expect(screen.getByTestId("loginError")).toHaveTextContent("parse failed");
     });
 
     it("rejects login promise on auth_listen error", async () => {
@@ -400,6 +409,30 @@ describe("AuthProvider", () => {
         expect(screen.getByTestId("user")).toHaveTextContent("Alice Dev");
         expect(screen.getByTestId("agentUrl")).toHaveTextContent("https://dev.example.com");
         expect(screen.getByTestId("activeProfileId")).toHaveTextContent("profile-2");
+    });
+
+    it("rejects login when check_auth fails after parse succeeds", async () => {
+        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+            if (cmd === "load_profiles") return emptyProfiles;
+            if (cmd === "auth_listen") {
+                tokenCallback?.({ payload: { token: "valid.jwt.token" } });
+                return undefined;
+            }
+            if (cmd === "parse_auth_token") return mockParsedToken;
+            if (cmd === "check_auth") throw "auth_failed";
+            return undefined;
+        });
+
+        renderWithProvider();
+        await act(async () => {});
+
+        await act(async () => {
+            screen.getByText("Login").click();
+        });
+
+        // login() should reject and the error should surface to the caller
+        expect(screen.getByTestId("user")).toHaveTextContent("none");
+        expect(screen.getByTestId("loginError")).toHaveTextContent("auth_failed");
     });
 
     it("removeProfile deletes a non-active profile", async () => {

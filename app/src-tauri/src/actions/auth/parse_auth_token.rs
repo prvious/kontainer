@@ -1,6 +1,6 @@
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 
-use super::{AuthUser, JwtPayload, ParsedToken};
+use super::{JwtPayload, ParsedToken};
 
 #[tauri::command]
 pub fn parse_auth_token(token: &str) -> Result<ParsedToken, String> {
@@ -17,13 +17,7 @@ pub fn parse_auth_token(token: &str) -> Result<ParsedToken, String> {
         serde_json::from_slice(&payload_bytes).map_err(|e| format!("json parse error: {e}"))?;
 
     Ok(ParsedToken {
-        user: AuthUser {
-            id: payload.user_id,
-            name: payload.name,
-            email: payload.email,
-            avatar_url: payload.avatar_url,
-            provider: payload.provider,
-        },
+        user_id: payload.key,
         expires_at: payload.exp,
     })
 }

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"fmt"
 	nethttp "net/http"
 
 	contractshttp "github.com/goravel/framework/contracts/http"
@@ -23,7 +24,7 @@ func (c *MeController) Handle(ctx contractshttp.Context) contractshttp.Response 
 
 	return ctx.Response().Json(nethttp.StatusOK, map[string]any{
 		"user": map[string]any{
-			"id":        user.ID,
+			"id":        fmt.Sprintf("%d", user.ID),
 			"name":      user.Name,
 			"email":     user.Email,
 			"avatarUrl": user.AvatarURL,

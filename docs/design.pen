@@ -19678,11 +19678,16 @@
           "name": "tbConnect",
           "x": 0,
           "y": 2,
+          "padding": [
+            0,
+            20
+          ],
           "descendants": {
             "MyiUe": {
               "width": "fit_content",
               "height": "fill_container",
-              "x": 16
+              "x": 20,
+              "gap": 16
             },
             "KO6Uj": {
               "width": "fit_content",
@@ -19698,7 +19703,7 @@
             "xOCjW": {
               "width": "fit_content",
               "height": "fit_content",
-              "x": 64,
+              "x": 68,
               "y": 10.5
             },
             "dHGQY": {
@@ -19709,28 +19714,48 @@
             },
             "olNaM": {
               "width": "fit_content",
-              "height": "fit_content",
-              "x": 720,
-              "y": 11.5
+              "height": 22,
+              "x": 1228,
+              "y": 8,
+              "layoutPosition": "absolute",
+              "gap": 6,
+              "fill": "$--bg-elevated",
+              "stroke": {
+                "align": "inside",
+                "thickness": 1,
+                "fill": "$--border"
+              },
+              "padding": [
+                6,
+                10
+              ]
             },
             "A2Upo": {
-              "y": 4
+              "y": 8,
+              "width": 6,
+              "height": 6
             },
             "ISaFY": {
-              "x": 15
+              "x": 22,
+              "fill": "$--text-muted",
+              "fontSize": 10
             },
             "IQgfk": {
-              "x": 116,
-              "y": 1.5
+              "x": 113,
+              "y": 6,
+              "fill": "$--text-secondary",
+              "width": 10,
+              "height": 10
             },
             "0Tc5Y": {
               "width": "fit_content",
               "height": "fit_content",
-              "x": 1380,
-              "y": 12
+              "x": 1378,
+              "y": 12,
+              "gap": 14
             },
             "HcSCw": {
-              "x": 30
+              "x": 28
             }
           }
         },
@@ -19756,7 +19781,7 @@
                 "fill": "$--border"
               },
               "layout": "vertical",
-              "gap": 32,
+              "gap": 24,
               "padding": 40,
               "alignItems": "center",
               "children": [
@@ -20360,7 +20385,7 @@
       "id": "hO63m",
       "x": 3080,
       "y": 1000,
-      "name": "Kontainer — Authenticating",
+      "name": "Kontainer — GitHub OAuth",
       "clip": true,
       "width": 1440,
       "height": 900,
@@ -20372,7 +20397,10 @@
           "type": "ref",
           "ref": "09e1f",
           "width": "fill_container",
-          "name": "acAuth"
+          "name": "acAuth",
+          "height": 2,
+          "x": 0,
+          "y": 0
         },
         {
           "id": "D56q5",
@@ -20382,6 +20410,7 @@
           "name": "tbAuth",
           "x": 0,
           "y": 2,
+          "height": 38,
           "descendants": {
             "MyiUe": {
               "width": "fit_content",
@@ -20452,24 +20481,38 @@
               "type": "frame",
               "id": "uP3B9",
               "name": "Auth Card",
-              "width": 500,
+              "width": 560,
               "fill": "$--bg-card",
+              "cornerRadius": 16,
               "stroke": {
                 "thickness": 1,
                 "fill": "$--border"
               },
+              "effect": {
+                "type": "shadow",
+                "shadowType": "outer",
+                "color": "$--accent-cyan-20",
+                "offset": {
+                  "x": 0,
+                  "y": 12
+                },
+                "blur": 24
+              },
               "layout": "vertical",
-              "gap": 24,
-              "padding": 40,
+              "gap": 28,
+              "padding": [
+                48,
+                44
+              ],
               "alignItems": "center",
               "children": [
                 {
                   "type": "icon_font",
                   "id": "hBBpT",
                   "name": "loaderIcon",
-                  "width": 32,
-                  "height": 32,
-                  "iconFontName": "loader",
+                  "width": 36,
+                  "height": 36,
+                  "iconFontName": "shield-check",
                   "iconFontFamily": "lucide",
                   "fill": "$--accent-green"
                 },
@@ -20478,9 +20521,9 @@
                   "id": "n8y0Q",
                   "name": "title",
                   "fill": "$--text-primary",
-                  "content": "Authenticating...",
+                  "content": "Continue with GitHub",
                   "fontFamily": "$--font-display",
-                  "fontSize": 20,
+                  "fontSize": 24,
                   "fontWeight": "700"
                 },
                 {
@@ -20488,7 +20531,11 @@
                   "id": "rbCTm",
                   "name": "subtitle",
                   "fill": "$--text-secondary",
-                  "content": "Waiting for GitHub authorization",
+                  "textGrowth": "fixed-width",
+                  "width": 360,
+                  "content": "Agent already configured. Opening browser for OAuth sign-in.",
+                  "lineHeight": 1.45,
+                  "textAlign": "center",
                   "fontFamily": "$--font-mono",
                   "fontSize": 13,
                   "fontWeight": "normal"
@@ -20498,7 +20545,8 @@
                   "id": "JTrA3",
                   "name": "Steps Row",
                   "width": "fill_container",
-                  "justifyContent": "center",
+                  "gap": 16,
+                  "justifyContent": "space_between",
                   "alignItems": "center",
                   "children": [
                     {
@@ -20506,7 +20554,7 @@
                       "id": "cAREc",
                       "name": "Step 1 - Browser Opened",
                       "layout": "vertical",
-                      "gap": 8,
+                      "gap": 10,
                       "alignItems": "center",
                       "children": [
                         {
@@ -20526,7 +20574,7 @@
                           "fill": "$--accent-green",
                           "content": "Browser Opened",
                           "fontFamily": "$--font-mono",
-                          "fontSize": 11,
+                          "fontSize": 12,
                           "fontWeight": "normal"
                         }
                       ]
@@ -20535,7 +20583,7 @@
                       "type": "frame",
                       "id": "aRvhU",
                       "name": "Connector 1",
-                      "width": 40,
+                      "width": "fill_container",
                       "height": 1,
                       "fill": "$--border-light",
                       "stroke": {
@@ -20548,7 +20596,7 @@
                       "id": "h1JbQ",
                       "name": "Step 2 - GitHub Auth",
                       "layout": "vertical",
-                      "gap": 8,
+                      "gap": 10,
                       "alignItems": "center",
                       "children": [
                         {
@@ -20566,10 +20614,10 @@
                           "id": "xFtQ4",
                           "name": "step2label",
                           "fill": "$--accent-orange",
-                          "content": "GitHub Auth",
+                          "content": "GitHub Sign In",
                           "fontFamily": "$--font-mono",
-                          "fontSize": 11,
-                          "fontWeight": "normal"
+                          "fontSize": 12,
+                          "fontWeight": "600"
                         }
                       ]
                     },
@@ -20577,7 +20625,7 @@
                       "type": "frame",
                       "id": "M692g",
                       "name": "Connector 2",
-                      "width": 40,
+                      "width": "fill_container",
                       "height": 1,
                       "fill": "$--border-light",
                       "stroke": {
@@ -20590,7 +20638,7 @@
                       "id": "ExjXs",
                       "name": "Step 3 - Receiving Token",
                       "layout": "vertical",
-                      "gap": 8,
+                      "gap": 10,
                       "alignItems": "center",
                       "children": [
                         {
@@ -20608,9 +20656,9 @@
                           "id": "CC8Gp",
                           "name": "step3label",
                           "fill": "$--text-muted",
-                          "content": "Receiving Token",
+                          "content": "Token Received",
                           "fontFamily": "$--font-mono",
-                          "fontSize": 11,
+                          "fontSize": 12,
                           "fontWeight": "normal"
                         }
                       ]
@@ -20623,12 +20671,12 @@
                   "name": "infoText",
                   "fill": "$--text-muted",
                   "textGrowth": "fixed-width",
-                  "width": 400,
-                  "content": "A browser window has been opened. Complete the authorization to continue.",
-                  "lineHeight": 1.5,
+                  "width": 420,
+                  "content": "Your browser will open GitHub sign-in. After approval, Kontainer will receive the token automatically.",
+                  "lineHeight": 1.6,
                   "textAlign": "center",
                   "fontFamily": "$--font-mono",
-                  "fontSize": 11,
+                  "fontSize": 12,
                   "fontWeight": "normal"
                 },
                 {
@@ -20636,6 +20684,10 @@
                   "type": "ref",
                   "ref": "BSMVd",
                   "name": "cancelBtn",
+                  "padding": [
+                    12,
+                    18
+                  ],
                   "descendants": {
                     "SET7p": {
                       "content": "Cancel"
@@ -20647,9 +20699,9 @@
                   "id": "5TYE6",
                   "name": "agentUrl",
                   "fill": "$--text-muted",
-                  "content": "Connecting to https://agent.kontainer.dev",
+                  "content": "OAuth via https://agent.kontainer.dev/auth/github",
                   "fontFamily": "$--font-mono",
-                  "fontSize": 10,
+                  "fontSize": 11,
                   "fontWeight": "normal"
                 }
               ]
@@ -54743,6 +54795,466 @@
           "iconFontName": "more-vertical",
           "iconFontFamily": "lucide",
           "fill": "$--text-muted"
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "JRxs4",
+      "x": 6160,
+      "y": 1000,
+      "name": "Kontainer — GitHub App Setup",
+      "clip": true,
+      "width": 1440,
+      "height": 900,
+      "fill": "$--bg-deep",
+      "layout": "vertical",
+      "children": [
+        {
+          "id": "gzuI6",
+          "type": "ref",
+          "ref": "09e1f",
+          "width": "fill_container",
+          "name": "acAuth",
+          "height": 2,
+          "x": 0,
+          "y": 0
+        },
+        {
+          "id": "HilvI",
+          "type": "ref",
+          "ref": "iHwhS",
+          "width": "fill_container",
+          "name": "tbAuth",
+          "x": 0,
+          "y": 2,
+          "height": 38,
+          "descendants": {
+            "MyiUe": {
+              "width": "fit_content",
+              "height": "fill_container",
+              "x": 16
+            },
+            "KO6Uj": {
+              "width": "fit_content",
+              "height": "fit_content",
+              "y": 13
+            },
+            "E9SOM": {
+              "x": 20
+            },
+            "oIpaq": {
+              "x": 40
+            },
+            "xOCjW": {
+              "width": "fit_content",
+              "height": "fit_content",
+              "x": 64,
+              "y": 10.5
+            },
+            "dHGQY": {
+              "y": 0.5
+            },
+            "ysAgp": {
+              "x": 24
+            },
+            "olNaM": {
+              "width": "fit_content",
+              "height": "fit_content",
+              "x": 720,
+              "y": 11.5
+            },
+            "A2Upo": {
+              "y": 4
+            },
+            "ISaFY": {
+              "x": 15
+            },
+            "IQgfk": {
+              "x": 116,
+              "y": 1.5
+            },
+            "0Tc5Y": {
+              "width": "fit_content",
+              "height": "fit_content",
+              "x": 1380,
+              "y": 12
+            },
+            "HcSCw": {
+              "x": 30
+            }
+          }
+        },
+        {
+          "type": "frame",
+          "id": "VFLjp",
+          "name": "Body",
+          "width": "fill_container",
+          "height": "fill_container",
+          "fill": "$--bg-deep",
+          "justifyContent": "center",
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "frame",
+              "id": "wnTc9",
+              "name": "Manifest Card",
+              "width": 560,
+              "fill": "$--bg-card",
+              "stroke": {
+                "thickness": 1,
+                "fill": "$--border"
+              },
+              "layout": "vertical",
+              "gap": 28,
+              "padding": [
+                40,
+                40,
+                32,
+                40
+              ],
+              "children": [
+                {
+                  "id": "VpTI7",
+                  "type": "ref",
+                  "ref": "Wbday",
+                  "fill": "$--accent-orange-20",
+                  "stroke": {
+                    "align": "inside",
+                    "thickness": 1,
+                    "fill": "$--accent-orange"
+                  },
+                  "descendants": {
+                    "aqfcW": {
+                      "enabled": false
+                    },
+                    "ES0Cg": {
+                      "content": "FIRST-TIME SETUP",
+                      "fill": "$--accent-orange"
+                    }
+                  }
+                },
+                {
+                  "type": "text",
+                  "id": "Cg9NC",
+                  "fill": "$--text-primary",
+                  "content": "Create your GitHub App manifest",
+                  "fontFamily": "$--font-display",
+                  "fontSize": 22,
+                  "fontWeight": "700"
+                },
+                {
+                  "type": "text",
+                  "id": "6QtRV",
+                  "fill": "$--text-secondary",
+                  "textGrowth": "fixed-width",
+                  "width": 480,
+                  "content": "Kontainer will open your browser to GitHub so you can create the app in your organization. Before that, you must confirm the agent-generated setup token so nobody with the URL can hijack the cluster.",
+                  "lineHeight": 1.45,
+                  "fontFamily": "$--font-mono",
+                  "fontSize": 12,
+                  "fontWeight": "500"
+                },
+                {
+                  "type": "frame",
+                  "id": "z1IP7",
+                  "width": "fill_container",
+                  "layout": "vertical",
+                  "gap": 14,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "xTcz2",
+                      "fill": "$--text-muted",
+                      "content": "GITHUB APP NAME",
+                      "fontFamily": "$--font-mono",
+                      "fontSize": 10,
+                      "fontWeight": "600",
+                      "letterSpacing": 1
+                    },
+                    {
+                      "type": "frame",
+                      "id": "BYLx5",
+                      "width": "fill_container",
+                      "height": 44,
+                      "fill": "$--bg-elevated",
+                      "stroke": {
+                        "align": "inside",
+                        "thickness": 1,
+                        "fill": "$--border"
+                      },
+                      "gap": 10,
+                      "padding": [
+                        0,
+                        16
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon_font",
+                          "id": "On5Oo",
+                          "width": 16,
+                          "height": 16,
+                          "iconFontName": "badge-plus",
+                          "iconFontFamily": "lucide",
+                          "fill": "$--text-muted"
+                        },
+                        {
+                          "type": "text",
+                          "id": "X7T3Y",
+                          "fill": "$--text-primary",
+                          "content": "kontainer-prod-app",
+                          "fontFamily": "$--font-mono",
+                          "fontSize": 13,
+                          "fontWeight": "500"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "YmQyq",
+                      "name": "tokenLabel",
+                      "fill": "$--text-muted",
+                      "content": "SETUP TOKEN",
+                      "fontFamily": "JetBrains Mono",
+                      "fontSize": 10,
+                      "fontWeight": "600",
+                      "letterSpacing": 1
+                    },
+                    {
+                      "type": "frame",
+                      "id": "uYF5U",
+                      "name": "tokenInput",
+                      "width": "fill_container",
+                      "height": 44,
+                      "fill": "$--bg-elevated",
+                      "stroke": {
+                        "align": "inside",
+                        "thickness": 1,
+                        "fill": "$--border"
+                      },
+                      "gap": 10,
+                      "padding": [
+                        0,
+                        16
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon_font",
+                          "id": "SYgHk",
+                          "name": "tokenIcon",
+                          "width": 16,
+                          "height": 16,
+                          "iconFontName": "shield-ellipsis",
+                          "iconFontFamily": "lucide",
+                          "fill": "$--text-muted"
+                        },
+                        {
+                          "type": "text",
+                          "id": "J5uYN",
+                          "name": "tokenText",
+                          "fill": "$--text-primary",
+                          "content": "kst_live_29FD-88XQ-1A7C",
+                          "fontFamily": "JetBrains Mono",
+                          "fontSize": 13,
+                          "fontWeight": "500"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "vwsFN",
+                  "width": "fill_container",
+                  "justifyContent": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "XbkPr",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "jt84Z",
+                          "layout": "vertical",
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon_font",
+                              "id": "LwzKE",
+                              "width": 24,
+                              "height": 24,
+                              "iconFontName": "shield-check",
+                              "iconFontFamily": "lucide",
+                              "fill": "$--accent-green"
+                            },
+                            {
+                              "type": "text",
+                              "id": "5oXZ5",
+                              "fill": "$--accent-green",
+                              "content": "Setup Token",
+                              "fontFamily": "$--font-mono",
+                              "fontSize": 11,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "3e6xI",
+                          "width": 40,
+                          "height": 1,
+                          "fill": "$--border-light",
+                          "stroke": {
+                            "thickness": 1,
+                            "fill": "$--border-light"
+                          }
+                        },
+                        {
+                          "type": "frame",
+                          "id": "KSmQU",
+                          "name": "returnStep",
+                          "layout": "vertical",
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon_font",
+                              "id": "WdHRi",
+                              "name": "returnIcon",
+                              "width": 24,
+                              "height": 24,
+                              "iconFontName": "github",
+                              "iconFontFamily": "lucide",
+                              "fill": "$--accent-orange"
+                            },
+                            {
+                              "type": "text",
+                              "id": "gSpp6",
+                              "name": "returnText",
+                              "fill": "$--accent-orange",
+                              "content": "Create App",
+                              "fontFamily": "JetBrains Mono",
+                              "fontSize": 11,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "mDcW1",
+                          "name": "connector3",
+                          "width": 40,
+                          "height": 1,
+                          "fill": "$--border-light",
+                          "stroke": {
+                            "thickness": 1,
+                            "fill": "$--border-light"
+                          }
+                        },
+                        {
+                          "type": "frame",
+                          "id": "EBLJO",
+                          "name": "finalStep",
+                          "layout": "vertical",
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon_font",
+                              "id": "LciG8",
+                              "name": "finalIcon",
+                              "width": 24,
+                              "height": 24,
+                              "iconFontName": "key-round",
+                              "iconFontFamily": "lucide",
+                              "fill": "$--text-muted"
+                            },
+                            {
+                              "type": "text",
+                              "id": "9H6Sp",
+                              "name": "finalText",
+                              "fill": "$--text-muted",
+                              "content": "Return Token",
+                              "fontFamily": "JetBrains Mono",
+                              "fontSize": 11,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "csOwu",
+                  "fill": "$--text-muted",
+                  "textGrowth": "fixed-width",
+                  "width": 480,
+                  "content": "Use the one-time setup token generated by the agent, then choose a unique app name for your org. GitHub will ask you to confirm permissions before redirecting back to the agent.",
+                  "lineHeight": 1.45,
+                  "textAlign": "center",
+                  "fontFamily": "$--font-mono",
+                  "fontSize": 11,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "frame",
+                  "id": "hXT3H",
+                  "gap": 12,
+                  "padding": [
+                    4,
+                    0,
+                    0,
+                    0
+                  ],
+                  "justifyContent": "center",
+                  "children": [
+                    {
+                      "id": "PV8ln",
+                      "type": "ref",
+                      "ref": "BSMVd",
+                      "descendants": {
+                        "SET7p": {
+                          "content": "Cancel"
+                        }
+                      }
+                    },
+                    {
+                      "id": "j1WVo",
+                      "type": "ref",
+                      "ref": "z5Rrz",
+                      "descendants": {
+                        "5CDhw": {
+                          "enabled": true,
+                          "iconFontName": "external-link"
+                        },
+                        "s5gz3": {
+                          "content": "Validate Token & Start"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "JqC5Q",
+                  "fill": "$--text-muted",
+                  "textGrowth": "fixed-width",
+                  "width": 480,
+                  "content": "Manifest setup via https://agent.kontainer.dev/github/app-manifest with setup token verification",
+                  "textAlign": "center",
+                  "fontFamily": "$--font-mono",
+                  "fontSize": 10,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
         }
       ]
     }
