@@ -11,6 +11,7 @@ pub mod set_active_profile;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct JwtPayload {
     pub key: String,
     pub exp: u64,
