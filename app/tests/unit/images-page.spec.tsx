@@ -10,14 +10,11 @@ import { useState, useMemo } from "react";
 import { useImages } from "@/hooks/use-images";
 import { useRemoveImage } from "@/hooks/use-remove-image";
 import { usePruneImages } from "@/hooks/use-prune-images";
-import { useClusterMetrics } from "@/hooks/use-cluster-metrics";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Progress } from "@/components/ui/progress";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { PageHeader } from "@/components/page-header";
+import { TableShell } from "@/components/table-shell";
+import { ColumnHeaders } from "@/components/column-headers";
 import {
     AlertDialog,
     AlertDialogAction,
@@ -29,11 +26,10 @@ import {
     AlertDialogTitle,
     AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { AlertCircle, ChevronDown, HardDrive, Search, Trash2, Eraser } from "lucide-react";
+import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group";
+import { AlertCircle, ChevronDown, HardDrive, Trash2 } from "lucide-react";
 import type { ImageItem, ClusterImagesResponse } from "@/types/images";
-import type { ClusterMetricsResponse } from "@/types/metrics";
 
 function formatBytes(bytes: number): string {
     if (bytes <= 0) return "0 B";
@@ -54,29 +50,126 @@ function formatRelativeTime(unix: number): string {
     return `${days}d ago`;
 }
 
+function shortId(id: string): string {
+    const raw = id.startsWith("sha256:") ? id.slice(7) : id;
+    return raw.slice(0, 12);
+}
+
+const IMAGE_COLUMNS = [
+    { label: "REPOSITORY" },
+    { label: "TAG", width: 100 },
+    { label: "IMAGE ID", width: 120 },
+    { label: "SIZE", width: 80, align: "right" as const },
+    { label: "NODE", width: 100 },
+    { label: "CREATED", width: 100, align: "right" as const },
+    { label: "", width: 60 },
+];
+
 function LoadingSkeleton() {
     return (
-        <Card>
-            <CardContent className='p-0'>
+        <div className='flex flex-col gap-6 p-6'>
+            <div className='flex items-center justify-between'>
+                <div className='flex flex-col gap-1'>
+                    <Skeleton className='h-7 w-24' />
+                    <Skeleton className='h-3 w-40' />
+                </div>
+                <Skeleton className='h-7 w-28' />
+            </div>
+            <div className='flex flex-col overflow-hidden border border-border'>
+                <div className='flex items-center justify-between border-b border-border px-4 py-3'>
+                    <Skeleton className='h-4 w-32' />
+                    <Skeleton className='h-7 w-48' />
+                </div>
                 <div className='space-y-0'>
                     {[1, 2, 3, 4, 5].map((i) => (
-                        <div key={i} className='flex items-center gap-4 border-b px-4 py-3 last:border-0'>
-                            <Skeleton className='h-4 w-4' />
-                            <Skeleton className='h-4 w-40' />
+                        <div key={i} className='flex items-center gap-3 border-b border-border px-4 py-2.5 last:border-0'>
+                            <Skeleton className='h-3 w-40' />
+                            <Skeleton className='h-3 w-16' />
+                            <Skeleton className='h-3 w-24' />
+                            <Skeleton className='ml-auto h-3 w-14' />
                         </div>
                     ))}
                 </div>
-            </CardContent>
-        </Card>
+            </div>
+        </div>
+    );
+}
+
+interface ImageRowProps {
+    img: ImageItem;
+    onDelete: (img: ImageItem, force: boolean) => void;
+    onForceDelete: (img: ImageItem) => void;
+}
+
+function ImageRow({ img, onDelete, onForceDelete }: ImageRowProps) {
+    const fullTag = img.tags.length > 0 ? img.tags[0] : null;
+    const colonIdx = fullTag ? fullTag.lastIndexOf(":") : -1;
+    const repository = fullTag ? (colonIdx > 0 ? fullTag.slice(0, colonIdx) : fullTag) : "<none>";
+    const tag = fullTag && colonIdx > 0 ? fullTag.slice(colonIdx + 1) : null;
+
+    return (
+        <div className='flex items-center border-b border-border px-4 py-2.5 hover:bg-bg-elevated/50'>
+            <div style={{ flex: 1 }}>
+                <span className='font-mono text-xs'>{repository}</span>
+            </div>
+            <div style={{ width: 100 }}>
+                <span className='font-mono text-[11px] text-muted-foreground'>{tag ?? <span className='opacity-40'>—</span>}</span>
+            </div>
+            <div style={{ width: 120 }}>
+                <span className='truncate font-mono text-[11px] text-muted-foreground' title={img.id}>
+                    {shortId(img.id)}
+                </span>
+            </div>
+            <div style={{ width: 80 }} className='text-right'>
+                <span className='font-mono text-[11px] text-muted-foreground'>{formatBytes(img.size)}</span>
+            </div>
+            <div style={{ width: 100 }}>
+                <span className='font-mono text-[11px] text-muted-foreground'>{img.hostname}</span>
+            </div>
+            <div style={{ width: 100 }} className='text-right'>
+                <span className='font-mono text-[11px] text-muted-foreground'>{formatRelativeTime(img.created)}</span>
+            </div>
+            <div style={{ width: 60 }} className='flex items-center justify-end'>
+                <ButtonGroup>
+                    <AlertDialog>
+                        <AlertDialogTrigger render={<Button variant='destructive' size='xs' data-testid={`delete-${img.id}`} />}>Delete</AlertDialogTrigger>
+                        <AlertDialogContent>
+                            <AlertDialogHeader>
+                                <AlertDialogTitle>Delete image?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                    Remove {repository} from {img.hostname}.
+                                </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => onDelete(img, false)} render={<Button variant='destructive' />}>
+                                    Delete
+                                </AlertDialogAction>
+                            </AlertDialogFooter>
+                        </AlertDialogContent>
+                    </AlertDialog>
+                    <ButtonGroupSeparator />
+                    <DropdownMenu>
+                        <DropdownMenuTrigger render={<Button variant='destructive' size='icon-xs' />}>
+                            <ChevronDown className='size-3' />
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align='end'>
+                            <DropdownMenuItem variant='destructive' onClick={() => onForceDelete(img)}>
+                                <Trash2 />
+                                Force Delete
+                            </DropdownMenuItem>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                </ButtonGroup>
+            </div>
+        </div>
     );
 }
 
 function ImagesTestComponent() {
     const [search, setSearch] = useState("");
-    const [selected, setSelected] = useState<Set<string>>(new Set());
     const [forceDeleteTarget, setForceDeleteTarget] = useState<ImageItem | null>(null);
     const { data: imagesData, isLoading, error } = useImages();
-    const { data: metricsData } = useClusterMetrics();
     const removeImage = useRemoveImage();
     const pruneImages = usePruneImages();
 
@@ -88,239 +181,79 @@ function ImagesTestComponent() {
     const filteredImages = useMemo(() => {
         if (!search) return allImages;
         const q = search.toLowerCase();
-        return allImages.filter(
-            (img) => img.tags.some((t) => t.toLowerCase().includes(q)) || img.id.toLowerCase().includes(q) || img.hostname.toLowerCase().includes(q),
-        );
+        return allImages.filter((img) => img.tags.some((t) => t.toLowerCase().includes(q)) || img.hostname.toLowerCase().includes(q));
     }, [allImages, search]);
-
-    const agents = metricsData?.agents ?? [];
-
-    function toggleSelect(key: string) {
-        setSelected((prev) => {
-            const next = new Set(prev);
-            if (next.has(key)) next.delete(key);
-            else next.add(key);
-            return next;
-        });
-    }
-
-    function toggleSelectAll() {
-        if (selected.size === filteredImages.length) {
-            setSelected(new Set());
-        } else {
-            setSelected(new Set(filteredImages.map((img) => `${img.nodeId}:${img.id}`)));
-        }
-    }
 
     function handleDelete(img: ImageItem, force: boolean) {
         removeImage.mutate({ imageId: img.id, nodeId: img.nodeId, force });
     }
 
-    function handleBulkDelete(force: boolean) {
-        for (const key of selected) {
-            const [nodeId, imageId] = key.split(":");
-            removeImage.mutate({ imageId, nodeId, force });
-        }
-        setSelected(new Set());
-    }
+    const nodeCount = imagesData?.nodes?.length ?? 0;
+    const subtitle = `${allImages.length} ${allImages.length === 1 ? "image" : "images"} across ${nodeCount} ${nodeCount === 1 ? "node" : "nodes"}`;
 
     if (isLoading) return <LoadingSkeleton />;
 
     if (error) {
         return (
-            <div className='flex flex-col items-center justify-center gap-2 py-12 text-sm text-destructive'>
-                <AlertCircle className='size-5' />
+            <div className='flex flex-col items-center justify-center gap-2 py-12 text-xs text-destructive'>
+                <AlertCircle className='size-4' />
                 <p>Failed to load images</p>
             </div>
         );
     }
 
     return (
-        <div className='p-6'>
-            <div className='mb-6 flex items-center justify-between'>
-                <div>
-                    <h1 className='text-xl font-semibold tracking-tight'>Images</h1>
-                    <p className='mt-1 text-sm text-muted-foreground'>
-                        {allImages.length} images across {imagesData?.nodes?.length ?? 0} nodes
-                    </p>
-                </div>
-                <div className='flex items-center gap-2'>
-                    <div className='relative'>
-                        <Search className='absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground' />
-                        <Input placeholder='Search images...' value={search} onChange={(e) => setSearch(e.target.value)} className='h-8 w-56 pl-8 text-sm' />
-                    </div>
+        <div className='flex h-full flex-col gap-6 p-6'>
+            <PageHeader title='IMAGES' subtitle={subtitle}>
+                <Button variant='outline' size='sm' disabled className='h-7 font-mono text-[11px] text-muted-foreground'>
+                    PULL IMAGE
+                </Button>
+            </PageHeader>
+
+            <TableShell
+                title='LOCAL IMAGES'
+                count={filteredImages.length}
+                searchValue={search}
+                onSearchChange={setSearch}
+                searchPlaceholder='Search images...'
+                filterSlot={
                     <AlertDialog>
-                        <AlertDialogTrigger render={<Button variant='outline' size='sm' data-testid='prune-btn' />}>
-                            <Eraser className='size-3.5' />
-                            Prune
+                        <AlertDialogTrigger
+                            render={<Button variant='outline' size='sm' data-testid='prune-btn' className='h-7 font-mono text-[11px] text-muted-foreground' />}
+                        >
+                            PRUNE
                         </AlertDialogTrigger>
                         <AlertDialogContent>
                             <AlertDialogHeader>
                                 <AlertDialogTitle>Prune unused images?</AlertDialogTitle>
-                                <AlertDialogDescription>This will remove all unused images to reclaim disk space.</AlertDialogDescription>
+                                <AlertDialogDescription>
+                                    This will remove all unused images across all nodes to reclaim disk space. This action cannot be undone.
+                                </AlertDialogDescription>
                             </AlertDialogHeader>
                             <AlertDialogFooter>
                                 <AlertDialogCancel>Cancel</AlertDialogCancel>
                                 <AlertDialogAction onClick={() => pruneImages.mutate()} render={<Button variant='destructive' />}>
-                                    Prune All
+                                    {pruneImages.isPending ? "Pruning..." : "Prune All"}
                                 </AlertDialogAction>
                             </AlertDialogFooter>
                         </AlertDialogContent>
                     </AlertDialog>
-                </div>
-            </div>
-
-            {/* Storage cards */}
-            {agents.length > 0 && (
-                <div className='mb-6 grid gap-3' data-testid='storage-cards'>
-                    {agents.map((agent) => (
-                        <Card key={agent.nodeId}>
-                            <CardContent className='p-3'>
-                                <span className='text-xs font-medium'>{agent.hostname}</span>
-                                <Progress value={agent.node.diskPercent} className='my-1 h-1.5' />
-                                <p className='text-[10px] text-muted-foreground'>
-                                    {formatBytes(agent.node.diskUsed)} / {formatBytes(agent.node.diskTotal)}
-                                </p>
-                            </CardContent>
-                        </Card>
-                    ))}
-                </div>
-            )}
-
-            {/* Bulk actions */}
-            {selected.size > 0 && (
-                <div className='mb-4 flex items-center gap-3 rounded-lg border bg-muted/50 px-4 py-2' data-testid='bulk-bar'>
-                    <span className='text-sm font-medium'>{selected.size} selected</span>
-                    <div className='ml-auto flex items-center gap-2'>
-                        <AlertDialog>
-                            <AlertDialogTrigger render={<Button variant='outline' size='sm' data-testid='bulk-delete-btn' />}>
-                                <Trash2 className='size-3.5' />
-                                Delete Selected
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                                <AlertDialogHeader>
-                                    <AlertDialogTitle>Delete {selected.size} images?</AlertDialogTitle>
-                                    <AlertDialogDescription>This will remove the selected images.</AlertDialogDescription>
-                                </AlertDialogHeader>
-                                <AlertDialogFooter>
-                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                    <AlertDialogAction onClick={() => handleBulkDelete(false)} render={<Button variant='destructive' />}>
-                                        Delete
-                                    </AlertDialogAction>
-                                </AlertDialogFooter>
-                            </AlertDialogContent>
-                        </AlertDialog>
+                }
+            >
+                <ColumnHeaders columns={IMAGE_COLUMNS} />
+                {filteredImages.length === 0 ? (
+                    <div className='flex flex-col items-center justify-center gap-1.5 py-12 text-xs text-muted-foreground'>
+                        <HardDrive className='size-4' />
+                        <p>{search ? "No images match your filter" : "No images found"}</p>
                     </div>
-                </div>
-            )}
-
-            {filteredImages.length === 0 ? (
-                <div className='flex flex-col items-center justify-center gap-2 py-12 text-sm text-muted-foreground'>
-                    <HardDrive className='size-5' />
-                    <p>{search ? "No images match your search" : "No images found"}</p>
-                </div>
-            ) : (
-                <Card>
-                    <CardContent className='p-0'>
-                        <Table>
-                            <TableHeader>
-                                <TableRow>
-                                    <TableHead className='w-10'>
-                                        <Checkbox
-                                            checked={selected.size === filteredImages.length && filteredImages.length > 0}
-                                            onCheckedChange={toggleSelectAll}
-                                            data-testid='select-all'
-                                        />
-                                    </TableHead>
-                                    <TableHead>Image</TableHead>
-                                    <TableHead>Size</TableHead>
-                                    <TableHead>Created</TableHead>
-                                    <TableHead>Node</TableHead>
-                                    <TableHead className='w-24' />
-                                </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                                {filteredImages.map((img) => {
-                                    const key = `${img.nodeId}:${img.id}`;
-                                    const fullTag = img.tags.length > 0 ? img.tags[0] : null;
-                                    const colonIdx = fullTag ? fullTag.lastIndexOf(":") : -1;
-                                    const imageName = fullTag ? (colonIdx > 0 ? fullTag.slice(0, colonIdx) : fullTag) : "<none>";
-                                    const imageTag = fullTag && colonIdx > 0 ? fullTag.slice(colonIdx + 1) : null;
-                                    return (
-                                        <TableRow key={key}>
-                                            <TableCell>
-                                                <Checkbox
-                                                    checked={selected.has(key)}
-                                                    onCheckedChange={() => toggleSelect(key)}
-                                                    data-testid={`select-${img.id}`}
-                                                />
-                                            </TableCell>
-                                            <TableCell>
-                                                <div className='flex flex-col gap-0.5'>
-                                                    <span className='text-sm font-medium'>{imageName}</span>
-                                                    <span className='font-mono text-[11px] text-muted-foreground'>{imageTag ?? img.id}</span>
-                                                </div>
-                                            </TableCell>
-                                            <TableCell>
-                                                <span className='font-mono text-xs'>{formatBytes(img.size)}</span>
-                                            </TableCell>
-                                            <TableCell>
-                                                <span className='text-xs'>{formatRelativeTime(img.created)}</span>
-                                            </TableCell>
-                                            <TableCell>
-                                                <div className='flex flex-col gap-0.5'>
-                                                    <span className='text-sm font-medium'>{img.hostname}</span>
-                                                    <span className='font-mono text-[11px] text-muted-foreground'>{img.nodeId}</span>
-                                                </div>
-                                            </TableCell>
-                                            <TableCell>
-                                                <ButtonGroup>
-                                                    <AlertDialog>
-                                                        <AlertDialogTrigger
-                                                            render={<Button variant='destructive' size='xs' data-testid={`delete-${img.id}`} />}
-                                                        >
-                                                            Delete
-                                                        </AlertDialogTrigger>
-                                                        <AlertDialogContent>
-                                                            <AlertDialogHeader>
-                                                                <AlertDialogTitle>Delete image?</AlertDialogTitle>
-                                                                <AlertDialogDescription>
-                                                                    Remove {imageName} from {img.hostname}.
-                                                                </AlertDialogDescription>
-                                                            </AlertDialogHeader>
-                                                            <AlertDialogFooter>
-                                                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                                                <AlertDialogAction
-                                                                    onClick={() => handleDelete(img, false)}
-                                                                    render={<Button variant='destructive' />}
-                                                                >
-                                                                    Delete
-                                                                </AlertDialogAction>
-                                                            </AlertDialogFooter>
-                                                        </AlertDialogContent>
-                                                    </AlertDialog>
-                                                    <ButtonGroupSeparator />
-                                                    <DropdownMenu>
-                                                        <DropdownMenuTrigger render={<Button variant='destructive' size='icon-xs' />}>
-                                                            <ChevronDown className='size-3' />
-                                                        </DropdownMenuTrigger>
-                                                        <DropdownMenuContent align='end'>
-                                                            <DropdownMenuItem variant='destructive' onClick={() => setForceDeleteTarget(img)}>
-                                                                <Trash2 />
-                                                                Force Delete
-                                                            </DropdownMenuItem>
-                                                        </DropdownMenuContent>
-                                                    </DropdownMenu>
-                                                </ButtonGroup>
-                                            </TableCell>
-                                        </TableRow>
-                                    );
-                                })}
-                            </TableBody>
-                        </Table>
-                    </CardContent>
-                </Card>
-            )}
+                ) : (
+                    <div>
+                        {filteredImages.map((img) => (
+                            <ImageRow key={`${img.nodeId}:${img.id}`} img={img} onDelete={handleDelete} onForceDelete={setForceDeleteTarget} />
+                        ))}
+                    </div>
+                )}
+            </TableShell>
 
             {/* Force Delete confirmation dialog (controlled) */}
             <AlertDialog open={!!forceDeleteTarget} onOpenChange={(open) => !open && setForceDeleteTarget(null)}>
@@ -380,44 +313,6 @@ const sampleImages: ClusterImagesResponse = {
             images: [{ id: "ghi789jkl012", tags: [], size: 30000000, created: Math.floor(Date.now() / 1000) - 7200, nodeId: "node-2", hostname: "worker-1" }],
         },
     ],
-};
-
-const sampleMetrics: ClusterMetricsResponse = {
-    agents: [
-        {
-            timestamp: new Date().toISOString(),
-            nodeId: "node-1",
-            hostname: "manager-1",
-            node: {
-                cpus: 4,
-                memoryTotal: 8000000000,
-                memoryUsed: 4000000000,
-                memoryPercent: 50,
-                cpuPercent: 25,
-                diskTotal: 100000000000,
-                diskUsed: 45000000000,
-                diskPercent: 45,
-            },
-            containers: [],
-        },
-        {
-            timestamp: new Date().toISOString(),
-            nodeId: "node-2",
-            hostname: "worker-1",
-            node: {
-                cpus: 2,
-                memoryTotal: 4000000000,
-                memoryUsed: 2000000000,
-                memoryPercent: 50,
-                cpuPercent: 10,
-                diskTotal: 50000000000,
-                diskUsed: 30000000000,
-                diskPercent: 60,
-            },
-            containers: [],
-        },
-    ],
-    history: [],
 };
 
 function createTestQueryClient() {
@@ -481,10 +376,9 @@ describe("ImagesPage", () => {
         });
     });
 
-    it("renders image list with mock data", async () => {
+    it("renders flat image list with repository and tag columns", async () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "list_images") return sampleImages;
-            if (cmd === "list_cluster_metrics") return sampleMetrics;
             return undefined;
         });
 
@@ -496,16 +390,32 @@ describe("ImagesPage", () => {
 
         expect(screen.getByText("redis")).toBeInTheDocument();
         expect(screen.getByText("<none>")).toBeInTheDocument();
-        // Tag is shown as accent text under the name
+        // Tag column shows the tag portion
         expect(screen.getByText("latest")).toBeInTheDocument();
-        // Untagged images show the ID as accent text
-        expect(screen.getByText("ghi789jkl012")).toBeInTheDocument();
+        expect(screen.getByText("7")).toBeInTheDocument();
     });
 
-    it("shows total image count", async () => {
+    it("shows image ID truncated to 12 chars without sha256: prefix", async () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "list_images") return sampleImages;
-            if (cmd === "list_cluster_metrics") return sampleMetrics;
+            return undefined;
+        });
+
+        renderWithProviders();
+
+        await waitFor(() => {
+            expect(screen.getByText("nginx")).toBeInTheDocument();
+        });
+
+        // shortId("abc123def456") = "abc123def456" (already 12 chars)
+        expect(screen.getByText("abc123def456")).toBeInTheDocument();
+        // sha256: prefix should not appear
+        expect(screen.queryByText(/sha256:/)).not.toBeInTheDocument();
+    });
+
+    it("shows subtitle with total image and node counts", async () => {
+        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+            if (cmd === "list_images") return sampleImages;
             return undefined;
         });
 
@@ -516,10 +426,27 @@ describe("ImagesPage", () => {
         });
     });
 
+    it("shows node hostname in NODE column", async () => {
+        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+            if (cmd === "list_images") return sampleImages;
+            return undefined;
+        });
+
+        renderWithProviders();
+
+        await waitFor(() => {
+            expect(screen.getByText("nginx")).toBeInTheDocument();
+        });
+
+        const managerEntries = screen.getAllByText("manager-1");
+        expect(managerEntries.length).toBeGreaterThanOrEqual(1);
+        const workerEntries = screen.getAllByText("worker-1");
+        expect(workerEntries.length).toBeGreaterThanOrEqual(1);
+    });
+
     it("search filters images by tag", async () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "list_images") return sampleImages;
-            if (cmd === "list_cluster_metrics") return sampleMetrics;
             return undefined;
         });
 
@@ -537,78 +464,9 @@ describe("ImagesPage", () => {
         expect(screen.queryByText("redis")).not.toBeInTheDocument();
     });
 
-    it("storage stats cards render per-node disk info", async () => {
-        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === "list_images") return sampleImages;
-            if (cmd === "list_cluster_metrics") return sampleMetrics;
-            return undefined;
-        });
-
-        renderWithProviders();
-
-        await waitFor(() => {
-            expect(screen.getByTestId("storage-cards")).toBeInTheDocument();
-        });
-
-        // Storage cards should contain disk usage text
-        const storageCards = screen.getByTestId("storage-cards");
-        expect(storageCards).toBeInTheDocument();
-        // Both node hostnames appear in the cards
-        const allManager = screen.getAllByText("manager-1");
-        expect(allManager.length).toBeGreaterThanOrEqual(1);
-        const allWorker = screen.getAllByText("worker-1");
-        expect(allWorker.length).toBeGreaterThanOrEqual(1);
-    });
-
-    it("select single image shows bulk bar", async () => {
-        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === "list_images") return sampleImages;
-            if (cmd === "list_cluster_metrics") return sampleMetrics;
-            return undefined;
-        });
-
-        renderWithProviders();
-
-        await waitFor(() => {
-            expect(screen.getByText("nginx")).toBeInTheDocument();
-        });
-
-        const user = userEvent.setup();
-        const checkbox = screen.getByTestId("select-abc123def456");
-        await user.click(checkbox);
-
-        await waitFor(() => {
-            expect(screen.getByTestId("bulk-bar")).toBeInTheDocument();
-            expect(screen.getByText("1 selected")).toBeInTheDocument();
-        });
-    });
-
-    it("select all updates count", async () => {
-        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === "list_images") return sampleImages;
-            if (cmd === "list_cluster_metrics") return sampleMetrics;
-            return undefined;
-        });
-
-        renderWithProviders();
-
-        await waitFor(() => {
-            expect(screen.getByText("nginx")).toBeInTheDocument();
-        });
-
-        const user = userEvent.setup();
-        const selectAll = screen.getByTestId("select-all");
-        await user.click(selectAll);
-
-        await waitFor(() => {
-            expect(screen.getByText("3 selected")).toBeInTheDocument();
-        });
-    });
-
     it("shows empty state when no images", async () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "list_images") return { nodes: [] };
-            if (cmd === "list_cluster_metrics") return { agents: [], history: [] };
             return undefined;
         });
 
@@ -622,7 +480,6 @@ describe("ImagesPage", () => {
     it("shows error state when fetch fails", async () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "list_images") throw new Error("network error");
-            if (cmd === "list_cluster_metrics") return { agents: [], history: [] };
             return undefined;
         });
 
@@ -644,7 +501,6 @@ describe("ImagesPage", () => {
     it("delete confirmation dialog appears", async () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "list_images") return sampleImages;
-            if (cmd === "list_cluster_metrics") return sampleMetrics;
             return undefined;
         });
 
@@ -666,7 +522,6 @@ describe("ImagesPage", () => {
     it("prune confirmation dialog appears", async () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "list_images") return sampleImages;
-            if (cmd === "list_cluster_metrics") return sampleMetrics;
             return undefined;
         });
 
@@ -685,10 +540,9 @@ describe("ImagesPage", () => {
         });
     });
 
-    it("shows node hostname and nodeId", async () => {
+    it("column headers are rendered", async () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "list_images") return sampleImages;
-            if (cmd === "list_cluster_metrics") return sampleMetrics;
             return undefined;
         });
 
@@ -698,11 +552,28 @@ describe("ImagesPage", () => {
             expect(screen.getByText("nginx")).toBeInTheDocument();
         });
 
-        // hostname appears in storage cards and table rows
-        const managerEntries = screen.getAllByText("manager-1");
-        expect(managerEntries.length).toBeGreaterThanOrEqual(1);
-        // nodeId appears under hostname in the table
-        const nodeIds = screen.getAllByText("node-1");
-        expect(nodeIds.length).toBeGreaterThanOrEqual(1);
+        expect(screen.getByText("REPOSITORY")).toBeInTheDocument();
+        expect(screen.getByText("TAG")).toBeInTheDocument();
+        expect(screen.getByText("IMAGE ID")).toBeInTheDocument();
+        expect(screen.getByText("SIZE")).toBeInTheDocument();
+        expect(screen.getByText("NODE")).toBeInTheDocument();
+        expect(screen.getByText("CREATED")).toBeInTheDocument();
+    });
+
+    it("PULL IMAGE button is rendered and disabled", async () => {
+        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+            if (cmd === "list_images") return sampleImages;
+            return undefined;
+        });
+
+        renderWithProviders();
+
+        await waitFor(() => {
+            expect(screen.getByText("nginx")).toBeInTheDocument();
+        });
+
+        const pullBtn = screen.getByText("PULL IMAGE");
+        expect(pullBtn).toBeInTheDocument();
+        expect(pullBtn.closest("button")).toBeDisabled();
     });
 });

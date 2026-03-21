@@ -26,6 +26,26 @@ Items displayed in the UI with fake/placeholder data or NOOP buttons. Each needs
 
 - **Log streams count** — Shows static "-- STREAMS". Not connected to any log stream count. Needs tracking of active log stream subscriptions.
 
+## List Pages
+
+- **CREATE SERVICE button** — NOOP on Services page. No service creation endpoint exists. Needs a create/deploy service API.
+
+- **DEPLOY STACK button** — NOOP on Stacks page. No stack deployment endpoint exists. Needs a deploy stack API (compose file upload or similar).
+
+- **ADD NODE button** — NOOP on Nodes page. No node join endpoint exists. Needs a node join/invite mechanism.
+
+- **CREATE NETWORK button** — NOOP on Networks page. No network creation endpoint exists. Needs a create network API.
+
+- **CREATE VOLUME button** — NOOP on Volumes page. No volume creation endpoint exists. Needs a create volume API.
+
+- **PULL IMAGE button** — NOOP on Images page. No image pull endpoint exists. Needs a pull image API.
+
+- **Container status/sort filter dropdowns** — Containers page has NOOP filter buttons. Needs frontend filter logic for status and sort order.
+
+- **Stack-level CPU/MEM aggregation** — Stacks page shows "—" for CPU/MEM columns. Requires a two-hop join (ContainerMetrics → ServiceItem → Stack) which adds complexity. Could be computed client-side or via a dedicated agent endpoint.
+
+- **Network subnet column** — Networks page shows "—" for subnet. The agent's network list response doesn't include subnet/IPAM data.
+
 ## Sidebar
 
 - **Agent version/uptime card** — Shows static "AGENT -- / uptime: --". No agent health endpoint returns version or uptime. Needs a `/api/health` or `/ping` extension with version and uptime fields.

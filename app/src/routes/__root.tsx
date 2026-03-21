@@ -6,6 +6,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { AppearanceProvider } from "@/contexts/appearance-context";
 import { SettingsProvider } from "@/contexts/settings-context";
 import { queryClient } from "@/lib/query-client";
+import { Toaster } from "@/components/ui/sonner";
 import type { AuthContextValue } from "@/contexts/auth-context-value";
 
 export interface RouterContext {
@@ -18,6 +19,7 @@ export const Route = createRootRouteWithContext<RouterContext>()({
             <SettingsProvider>
                 <QueryClientProvider client={queryClient}>
                     <Outlet />
+                    <Toaster />
                     {/* <TanStackDevtools
                         config={{
                             position: "top-left",

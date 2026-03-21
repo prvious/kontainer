@@ -7,107 +7,82 @@ import { AuthContext } from "@/contexts/auth-context-value";
 import type { AuthContextValue } from "@/contexts/auth-context-value";
 import type { NodeItem } from "@/types/nodes";
 import { useNodes } from "@/hooks/use-nodes";
-import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AlertCircle, Server } from "lucide-react";
 
-function StatusDot({ node }: { node: NodeItem }) {
-    if (node.status === "down" || node.status === "disconnected") {
-        return <span className='animate-pulse-dot size-2 rounded-full bg-destructive' title={node.status} />;
+function RoleBadges({ node }: { node: NodeItem }) {
+    if (node.role === "manager" && node.leader) {
+        return <Badge className='h-4 border-0 bg-emerald-500/15 px-1.5 font-mono text-[10px] text-emerald-500 hover:bg-emerald-500/15'>LEADER</Badge>;
     }
-    if (node.availability === "drain" || node.availability === "pause") {
-        return <span className='size-2 rounded-full bg-amber-500' title={node.availability} />;
-    }
-    return <span className='size-2 rounded-full bg-success' title='ready' />;
-}
-
-function RoleBadge({ node }: { node: NodeItem }) {
     if (node.role === "manager") {
-        return <Badge variant='default'>{node.leader ? "manager (leader)" : "manager"}</Badge>;
+        return <Badge className='h-4 border-0 bg-cyan-500/15 px-1.5 font-mono text-[10px] text-cyan-500 hover:bg-cyan-500/15'>MANAGER</Badge>;
     }
-    return <Badge variant='secondary'>worker</Badge>;
+    return <Badge className='h-4 border-0 bg-muted px-1.5 font-mono text-[10px] text-muted-foreground hover:bg-muted'>WORKER</Badge>;
 }
 
 function AvailabilityBadge({ availability }: { availability: string }) {
     if (availability === "drain") {
-        return <Badge variant='destructive'>drain</Badge>;
+        return <span className='font-mono text-[10px] font-medium text-orange-500'>DRAIN</span>;
     }
     if (availability === "pause") {
-        return <Badge variant='secondary'>pause</Badge>;
+        return <span className='font-mono text-[10px] font-medium text-amber-500'>PAUSE</span>;
     }
-    return <Badge variant='default'>active</Badge>;
+    return <span className='font-mono text-[10px] font-medium text-emerald-500'>ACTIVE</span>;
 }
 
-function NodesTable({ nodes }: { nodes: NodeItem[] }) {
+function NodeCard({ node }: { node: NodeItem }) {
     return (
-        <Table>
-            <TableHeader>
-                <TableRow>
-                    <TableHead className='w-8' />
-                    <TableHead>Hostname</TableHead>
-                    <TableHead>Role</TableHead>
-                    <TableHead>Availability</TableHead>
-                    <TableHead>IP</TableHead>
-                    <TableHead>Engine</TableHead>
-                    <TableHead>OS / Arch</TableHead>
-                    <TableHead className='text-right'>Updated</TableHead>
-                </TableRow>
-            </TableHeader>
-            <TableBody>
-                {nodes.map((node) => (
-                    <TableRow key={node.id}>
-                        <TableCell>
-                            <StatusDot node={node} />
-                        </TableCell>
-                        <TableCell className='font-medium'>{node.hostname}</TableCell>
-                        <TableCell>
-                            <RoleBadge node={node} />
-                        </TableCell>
-                        <TableCell>
-                            <AvailabilityBadge availability={node.availability} />
-                        </TableCell>
-                        <TableCell>
-                            <span className='font-mono text-xs text-muted-foreground'>{node.ip}</span>
-                        </TableCell>
-                        <TableCell>
-                            <span className='font-mono text-xs text-muted-foreground'>{node.engineVersion}</span>
-                        </TableCell>
-                        <TableCell>
-                            <span className='text-xs text-muted-foreground'>
-                                {node.os}/{node.architecture}
-                            </span>
-                        </TableCell>
-                        <TableCell className='text-right'>
-                            <span className='text-xs text-muted-foreground'>just now</span>
-                        </TableCell>
-                    </TableRow>
-                ))}
-            </TableBody>
-        </Table>
+        <div className='flex min-w-[300px] flex-1 flex-col gap-3 border border-border bg-card p-4' data-testid='node-card'>
+            <div className='flex items-start justify-between'>
+                <div className='flex flex-col gap-1.5'>
+                    <span className='font-mono text-sm font-bold text-foreground'>{node.hostname}</span>
+                    <div className='flex items-center gap-1.5'>
+                        <RoleBadges node={node} />
+                        <AvailabilityBadge availability={node.availability} />
+                    </div>
+                </div>
+            </div>
+            <div className='grid grid-cols-2 gap-x-4 gap-y-1.5'>
+                <div className='flex flex-col'>
+                    <span className='font-mono text-[9px] font-bold tracking-[0.5px] text-muted-foreground uppercase'>IP</span>
+                    <span className='font-mono text-[11px] text-foreground'>{node.ip}</span>
+                </div>
+                <div className='flex flex-col'>
+                    <span className='font-mono text-[9px] font-bold tracking-[0.5px] text-muted-foreground uppercase'>Docker</span>
+                    <span className='font-mono text-[11px] text-foreground'>{node.engineVersion}</span>
+                </div>
+                <div className='flex flex-col'>
+                    <span className='font-mono text-[9px] font-bold tracking-[0.5px] text-muted-foreground uppercase'>OS</span>
+                    <span className='font-mono text-[11px] text-foreground'>{node.os}</span>
+                </div>
+                <div className='flex flex-col'>
+                    <span className='font-mono text-[9px] font-bold tracking-[0.5px] text-muted-foreground uppercase'>Arch</span>
+                    <span className='font-mono text-[11px] text-foreground'>{node.architecture}</span>
+                </div>
+            </div>
+        </div>
     );
 }
 
 function LoadingSkeleton() {
     return (
-        <div className='p-6'>
-            <Card>
-                <CardContent className='p-0'>
-                    <div className='space-y-0'>
-                        {[1, 2, 3, 4, 5].map((i) => (
-                            <div key={i} className='flex items-center gap-4 border-b px-4 py-3 last:border-0'>
-                                <Skeleton className='size-2 rounded-full' />
-                                <Skeleton className='h-4 w-32' />
-                                <Skeleton className='h-5 w-20' />
-                                <Skeleton className='h-5 w-16' />
-                                <Skeleton className='h-4 w-24' />
-                                <Skeleton className='ml-auto h-4 w-16' />
-                            </div>
-                        ))}
+        <div className='flex flex-col gap-6 p-6'>
+            <div className='flex items-center justify-between'>
+                <div className='flex flex-col gap-1'>
+                    <Skeleton className='h-7 w-24' />
+                    <Skeleton className='h-3 w-56' />
+                </div>
+                <Skeleton className='h-7 w-28' />
+            </div>
+            <div className='flex flex-wrap gap-4'>
+                {[1, 2, 3].map((i) => (
+                    <div key={i} className='flex min-w-[300px] flex-1 flex-col gap-3 border border-border bg-card p-4'>
+                        <Skeleton className='h-4 w-32' />
+                        <Skeleton className='h-4 w-16 rounded-full' />
                     </div>
-                </CardContent>
-            </Card>
+                ))}
+            </div>
         </div>
     );
 }
@@ -121,8 +96,8 @@ function NodesTestComponent() {
 
     if (error) {
         return (
-            <div className='flex flex-col items-center justify-center gap-2 py-12 text-sm text-destructive'>
-                <AlertCircle className='size-5' />
+            <div className='flex flex-col items-center justify-center gap-2 py-12 text-xs text-destructive'>
+                <AlertCircle className='size-4' />
                 <p>Failed to load nodes</p>
             </div>
         );
@@ -130,19 +105,19 @@ function NodesTestComponent() {
 
     if (!nodes || nodes.length === 0) {
         return (
-            <div className='flex flex-col items-center justify-center gap-2 py-12 text-sm text-muted-foreground'>
-                <Server className='size-5' />
+            <div className='flex flex-col items-center justify-center gap-2 py-12 text-xs text-muted-foreground'>
+                <Server className='size-4' />
                 <p>No nodes found</p>
             </div>
         );
     }
 
     return (
-        <Card>
-            <CardContent className='p-0'>
-                <NodesTable nodes={nodes} />
-            </CardContent>
-        </Card>
+        <div className='flex flex-wrap gap-4'>
+            {nodes.map((node) => (
+                <NodeCard key={node.id} node={node} />
+            ))}
+        </div>
     );
 }
 
@@ -236,7 +211,7 @@ describe("NodesList", () => {
         });
     });
 
-    it("renders nodes after loading", async () => {
+    it("renders node cards after loading", async () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "list_nodes") return { nodes: sampleNodes };
             return undefined;
@@ -251,8 +226,24 @@ describe("NodesList", () => {
         expect(screen.getByText("worker-1")).toBeInTheDocument();
         expect(screen.getByText("10.0.0.1")).toBeInTheDocument();
         expect(screen.getByText("10.0.0.2")).toBeInTheDocument();
-        expect(screen.getByText("manager (leader)")).toBeInTheDocument();
-        expect(screen.getByText("worker")).toBeInTheDocument();
+
+        const cards = document.querySelectorAll('[data-testid="node-card"]');
+        expect(cards.length).toBe(2);
+    });
+
+    it("renders role badges correctly", async () => {
+        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+            if (cmd === "list_nodes") return { nodes: sampleNodes };
+            return undefined;
+        });
+
+        renderWithProviders();
+
+        await waitFor(() => {
+            expect(screen.getByText("LEADER")).toBeInTheDocument();
+        });
+
+        expect(screen.getByText("WORKER")).toBeInTheDocument();
     });
 
     it("shows empty state when no nodes", async () => {
@@ -289,7 +280,7 @@ describe("NodesList", () => {
         expect(invoke).not.toHaveBeenCalledWith("list_nodes", expect.anything());
     });
 
-    it("renders leader badge for manager leader node", async () => {
+    it("renders LEADER badge for manager leader node", async () => {
         const leaderNode: NodeItem = {
             id: "leader-node",
             hostname: "leader-host",
@@ -312,11 +303,11 @@ describe("NodesList", () => {
         renderWithProviders();
 
         await waitFor(() => {
-            expect(screen.getByText("manager (leader)")).toBeInTheDocument();
+            expect(screen.getByText("LEADER")).toBeInTheDocument();
         });
     });
 
-    it("renders drain availability badge", async () => {
+    it("renders DRAIN availability badge", async () => {
         const drainNode: NodeItem = {
             id: "drain-node",
             hostname: "drain-host",
@@ -339,7 +330,25 @@ describe("NodesList", () => {
         renderWithProviders();
 
         await waitFor(() => {
-            expect(screen.getByText("drain")).toBeInTheDocument();
+            expect(screen.getByText("DRAIN")).toBeInTheDocument();
         });
+    });
+
+    it("renders hostname and node info on card", async () => {
+        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+            if (cmd === "list_nodes") return { nodes: [sampleNodes[0]] };
+            return undefined;
+        });
+
+        renderWithProviders();
+
+        await waitFor(() => {
+            expect(screen.getByText("manager-1")).toBeInTheDocument();
+        });
+
+        expect(screen.getByText("10.0.0.1")).toBeInTheDocument();
+        expect(screen.getByText("24.0.7")).toBeInTheDocument();
+        expect(screen.getByText("linux")).toBeInTheDocument();
+        expect(screen.getByText("x86_64")).toBeInTheDocument();
     });
 });

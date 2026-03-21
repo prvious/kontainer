@@ -8,6 +8,7 @@ export interface NetworkItem {
     name: string;
     driver: string;
     scope: string;
+    subnet?: string;
     internal: boolean;
     attachable: boolean;
     ingress: boolean;

@@ -2,9 +2,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { AuthContext } from "@/contexts/auth-context-value";
 import type { AuthContextValue } from "@/contexts/auth-context-value";
-import { StacksList } from "@/components/stacks-list";
+import { StacksPage } from "@/routes/_authenticated/stacks/index";
 
 function createTestQueryClient() {
     return new QueryClient({
@@ -24,13 +25,33 @@ const mockAuth: AuthContextValue = {
     logout: vi.fn(),
 };
 
+function createTestRouter() {
+    const rootRoute = createRootRoute({});
+    const indexRoute = createRoute({
+        getParentRoute: () => rootRoute,
+        path: "/",
+        component: StacksPage,
+    });
+    const stackDetailRoute = createRoute({
+        getParentRoute: () => rootRoute,
+        path: "/stacks/$stackName",
+        component: () => <div>detail</div>,
+    });
+    const routeTree = rootRoute.addChildren([indexRoute, stackDetailRoute]);
+    return createRouter({
+        routeTree,
+        history: createMemoryHistory({ initialEntries: ["/"] }),
+    });
+}
+
 function renderWithProviders() {
     const queryClient = createTestQueryClient();
+    const router = createTestRouter();
 
     return render(
         <AuthContext value={mockAuth}>
             <QueryClientProvider client={queryClient}>
-                <StacksList />
+                <RouterProvider router={router} />
             </QueryClientProvider>
         </AuthContext>,
     );
@@ -60,8 +81,11 @@ describe("List Stacks", () => {
         });
 
         expect(screen.getByText("monitoring")).toBeInTheDocument();
-        expect(screen.getByText("3")).toBeInTheDocument();
-        expect(screen.getByText("2")).toBeInTheDocument();
+        // service counts appear in the table rows
+        const threes = screen.getAllByText("3");
+        expect(threes.length).toBeGreaterThan(0);
+        const twos = screen.getAllByText("2");
+        expect(twos.length).toBeGreaterThan(0);
     });
 
     it("shows replica badges with correct counts", async () => {
@@ -106,7 +130,7 @@ describe("List Stacks", () => {
         });
     });
 
-    it("renders table headers", async () => {
+    it("renders column headers", async () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "list_stacks")
                 return {
@@ -118,11 +142,27 @@ describe("List Stacks", () => {
         renderWithProviders();
 
         await waitFor(() => {
-            expect(screen.getByText("Stack")).toBeInTheDocument();
+            expect(screen.getByText("NAME")).toBeInTheDocument();
         });
 
-        expect(screen.getByText("Services")).toBeInTheDocument();
-        expect(screen.getByText("Replicas")).toBeInTheDocument();
-        expect(screen.getByText("Updated")).toBeInTheDocument();
+        expect(screen.getByText("STATUS")).toBeInTheDocument();
+        expect(screen.getByText("SERVICES")).toBeInTheDocument();
+        expect(screen.getByText("REPLICAS")).toBeInTheDocument();
+        expect(screen.getByText("LAST DEPLOY")).toBeInTheDocument();
+    });
+
+    it("renders page header with title", async () => {
+        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+            if (cmd === "list_stacks") return { stacks: [] };
+            return undefined;
+        });
+
+        renderWithProviders();
+
+        await waitFor(() => {
+            expect(screen.getByText("STACKS")).toBeInTheDocument();
+        });
+
+        expect(screen.getByText("DEPLOY STACK")).toBeInTheDocument();
     });
 });
