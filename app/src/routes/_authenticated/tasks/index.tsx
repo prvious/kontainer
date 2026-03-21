@@ -1,13 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTasks } from "@/hooks/use-tasks";
 import { useNodes } from "@/hooks/use-nodes";
 import { useClusterMetrics } from "@/hooks/use-cluster-metrics";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { PageHeader } from "@/components/page-header";
 import { TableShell } from "@/components/table-shell";
+import { TableToolbar } from "@/components/table-toolbar";
 import { ColumnHeaders } from "@/components/column-headers";
-import { AlertCircle, Container, ScrollText, Terminal } from "lucide-react";
+import { AlertCircle, Container, RefreshCw, ScrollText, Terminal } from "lucide-react";
 import { useState, useMemo } from "react";
 import type { TaskItem } from "@/types/tasks";
 import type { ContainerMetrics } from "@/types/metrics";
@@ -159,6 +162,7 @@ function LoadingSkeleton() {
 }
 
 function TasksPage() {
+    const queryClient = useQueryClient();
     const { data: tasks, isLoading, error } = useTasks();
     const { data: nodes } = useNodes();
     const { data: metricsData } = useClusterMetrics();
@@ -201,9 +205,24 @@ function TasksPage() {
 
     return (
         <div className='flex h-full flex-col gap-6 p-6'>
-            <PageHeader title='CONTAINERS' subtitle={subtitle} />
+            <PageHeader title='CONTAINERS' subtitle={subtitle}>
+                <Button
+                    variant='outline'
+                    size='sm'
+                    className='h-7 font-mono text-[11px]'
+                    onClick={() => {
+                        queryClient.invalidateQueries({ queryKey: ["tasks"] });
+                        queryClient.invalidateQueries({ queryKey: ["cluster-metrics"] });
+                    }}
+                >
+                    <RefreshCw className='size-3.5' />
+                    REFRESH
+                </Button>
+            </PageHeader>
 
-            <TableShell title='ALL CONTAINERS' count={filtered.length} searchValue={search} onSearchChange={setSearch} searchPlaceholder='Search containers...'>
+            <TableToolbar searchValue={search} onSearchChange={setSearch} searchPlaceholder='Search containers...' />
+
+            <TableShell title='ALL CONTAINERS' count={filtered.length}>
                 <ColumnHeaders columns={CONTAINER_COLUMNS} />
                 {filtered.length === 0 ? (
                     <div className='flex flex-col items-center justify-center gap-1.5 py-12 text-xs text-muted-foreground'>

@@ -1,11 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { useVolumes } from "@/hooks/use-volumes";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/page-header";
 import { TableShell } from "@/components/table-shell";
+import { TableToolbar } from "@/components/table-toolbar";
 import { ColumnHeaders } from "@/components/column-headers";
-import { AlertCircle, HardDrive, MoreHorizontal } from "lucide-react";
+import { AlertCircle, HardDrive, MoreHorizontal, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import type { VolumeItem } from "@/types/volumes";
 
@@ -97,6 +99,7 @@ function LoadingSkeleton() {
 }
 
 function VolumesPage() {
+    const queryClient = useQueryClient();
     const { data: volumes, isLoading, error } = useVolumes();
     const [search, setSearch] = useState("");
 
@@ -127,12 +130,25 @@ function VolumesPage() {
     return (
         <div className='flex h-full flex-col gap-6 p-6'>
             <PageHeader title='VOLUMES' subtitle={subtitle}>
+                <Button
+                    variant='outline'
+                    size='sm'
+                    className='h-7 font-mono text-[11px]'
+                    onClick={() => {
+                        queryClient.invalidateQueries({ queryKey: ["volumes"] });
+                    }}
+                >
+                    <RefreshCw className='size-3.5' />
+                    REFRESH
+                </Button>
                 <Button variant='outline' size='sm' disabled className='h-7 font-mono text-[11px] text-muted-foreground'>
                     CREATE VOLUME
                 </Button>
             </PageHeader>
 
-            <TableShell title='ALL VOLUMES' count={filtered.length} searchValue={search} onSearchChange={setSearch} searchPlaceholder='Search volumes...'>
+            <TableToolbar searchValue={search} onSearchChange={setSearch} searchPlaceholder='Search volumes...' />
+
+            <TableShell title='ALL VOLUMES' count={filtered.length}>
                 <ColumnHeaders columns={VOLUME_COLUMNS} />
                 {filtered.length === 0 ? (
                     <div className='flex flex-col items-center justify-center gap-1.5 py-12 text-xs text-muted-foreground'>

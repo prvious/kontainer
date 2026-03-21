@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { useStacks } from "@/hooks/use-stacks";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -6,8 +7,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import { PageHeader } from "@/components/page-header";
 import { TableShell } from "@/components/table-shell";
+import { TableToolbar } from "@/components/table-toolbar";
 import { ColumnHeaders } from "@/components/column-headers";
-import { AlertCircle, ArrowUpRight, Layers, Plus } from "lucide-react";
+import { AlertCircle, ArrowUpRight, Layers, Plus, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import type { StackItem } from "@/types/stacks";
 
@@ -121,6 +123,7 @@ function LoadingSkeleton() {
 }
 
 export function StacksPage() {
+    const queryClient = useQueryClient();
     const { data: stacks, isLoading, error } = useStacks();
     const [search, setSearch] = useState("");
 
@@ -144,13 +147,26 @@ export function StacksPage() {
     return (
         <div className='flex h-full flex-col gap-6 overflow-y-auto p-6'>
             <PageHeader title='STACKS' subtitle={`${total} stacks · ${healthy} healthy`}>
+                <Button
+                    variant='outline'
+                    size='sm'
+                    className='h-7 font-mono text-[11px]'
+                    onClick={() => {
+                        queryClient.invalidateQueries({ queryKey: ["stacks"] });
+                    }}
+                >
+                    <RefreshCw className='size-3.5' />
+                    REFRESH
+                </Button>
                 <Button variant='ghost' size='sm' className='h-7 px-3 text-[11px]' disabled>
                     <Plus className='size-3' />
                     DEPLOY STACK
                 </Button>
             </PageHeader>
 
-            <TableShell title='DEPLOYED STACKS' count={filtered.length} searchValue={search} onSearchChange={setSearch} searchPlaceholder='Search stacks...'>
+            <TableToolbar searchValue={search} onSearchChange={setSearch} searchPlaceholder='Search stacks...' />
+
+            <TableShell title='DEPLOYED STACKS' count={filtered.length}>
                 {filtered.length === 0 ? (
                     <div className='flex flex-col items-center justify-center gap-1.5 py-12 text-xs text-muted-foreground'>
                         <Layers className='size-4' />

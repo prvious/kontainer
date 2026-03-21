@@ -1,12 +1,14 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { useServices } from "@/hooks/use-services";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/page-header";
 import { TableShell } from "@/components/table-shell";
+import { TableToolbar } from "@/components/table-toolbar";
 import { ColumnHeaders } from "@/components/column-headers";
-import { AlertCircle, ArrowUpRight, Container, MoreHorizontal } from "lucide-react";
+import { AlertCircle, ArrowUpRight, Container, MoreHorizontal, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import type { ServiceItem } from "@/types/services";
 
@@ -126,6 +128,7 @@ function LoadingSkeleton() {
 }
 
 function ServicesPage() {
+    const queryClient = useQueryClient();
     const { data: services, isLoading, error } = useServices();
     const [search, setSearch] = useState("");
 
@@ -157,17 +160,27 @@ function ServicesPage() {
     return (
         <div className='flex h-full flex-col gap-6 p-6'>
             <PageHeader title='SERVICES' subtitle={subtitle}>
+                <Button
+                    variant='outline'
+                    size='sm'
+                    className='h-7 font-mono text-[11px]'
+                    onClick={() => {
+                        queryClient.invalidateQueries({ queryKey: ["services"] });
+                    }}
+                >
+                    <RefreshCw className='size-3.5' />
+                    REFRESH
+                </Button>
                 <Button variant='outline' size='sm' disabled className='h-7 font-mono text-[11px] text-muted-foreground'>
                     CREATE SERVICE
                 </Button>
             </PageHeader>
 
+            <TableToolbar searchValue={search} onSearchChange={setSearch} searchPlaceholder='Search services...' />
+
             <TableShell
                 title='SWARM SERVICES'
                 count={filtered.length}
-                searchValue={search}
-                onSearchChange={setSearch}
-                searchPlaceholder='Search services...'
                 filterSlot={
                     <Button variant='outline' size='sm' disabled className='h-7 font-mono text-[11px] text-muted-foreground'>
                         FILTER

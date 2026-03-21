@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { useState, useMemo } from "react";
 import { useImages } from "@/hooks/use-images";
 import { useRemoveImage } from "@/hooks/use-remove-image";
@@ -7,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/page-header";
 import { TableShell } from "@/components/table-shell";
+import { TableToolbar } from "@/components/table-toolbar";
 import { ColumnHeaders } from "@/components/column-headers";
 import {
     AlertDialog,
@@ -21,7 +23,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group";
-import { AlertCircle, ChevronDown, HardDrive, Trash2 } from "lucide-react";
+import { AlertCircle, ChevronDown, HardDrive, RefreshCw, Trash2 } from "lucide-react";
 import type { ImageItem } from "@/types/images";
 
 function formatBytes(bytes: number): string {
@@ -160,6 +162,7 @@ function ImageRow({ img, onDelete, onForceDelete }: ImageRowProps) {
 }
 
 function ImagesPage() {
+    const queryClient = useQueryClient();
     const [search, setSearch] = useState("");
     const [forceDeleteTarget, setForceDeleteTarget] = useState<ImageItem | null>(null);
     const { data: imagesData, isLoading, error } = useImages();
@@ -200,17 +203,27 @@ function ImagesPage() {
     return (
         <div className='flex h-full flex-col gap-6 p-6'>
             <PageHeader title='IMAGES' subtitle={subtitle}>
+                <Button
+                    variant='outline'
+                    size='sm'
+                    className='h-7 font-mono text-[11px]'
+                    onClick={() => {
+                        queryClient.invalidateQueries({ queryKey: ["images"] });
+                    }}
+                >
+                    <RefreshCw className='size-3.5' />
+                    REFRESH
+                </Button>
                 <Button variant='outline' size='sm' disabled className='h-7 font-mono text-[11px] text-muted-foreground'>
                     PULL IMAGE
                 </Button>
             </PageHeader>
 
+            <TableToolbar searchValue={search} onSearchChange={setSearch} searchPlaceholder='Search images...' />
+
             <TableShell
                 title='LOCAL IMAGES'
                 count={filteredImages.length}
-                searchValue={search}
-                onSearchChange={setSearch}
-                searchPlaceholder='Search images...'
                 filterSlot={
                     <AlertDialog>
                         <AlertDialogTrigger

@@ -376,4 +376,54 @@ describe("TasksPage", () => {
 
         expect(invoke).not.toHaveBeenCalledWith("list_tasks", expect.anything());
     });
+
+    it("renders REFRESH button in header", async () => {
+        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+            if (cmd === "list_tasks") return { tasks: sampleTasks };
+            if (cmd === "list_nodes") return { nodes: [] };
+            if (cmd === "list_cluster_metrics") return emptyMetrics;
+            return undefined;
+        });
+
+        renderWithProviders();
+
+        await waitFor(() => {
+            expect(screen.getByText("REFRESH")).toBeInTheDocument();
+        });
+    });
+
+    it("renders toolbar with search, filters, and sort", async () => {
+        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+            if (cmd === "list_tasks") return { tasks: sampleTasks };
+            if (cmd === "list_nodes") return { nodes: [] };
+            if (cmd === "list_cluster_metrics") return emptyMetrics;
+            return undefined;
+        });
+
+        renderWithProviders();
+
+        await waitFor(() => {
+            expect(screen.getByPlaceholderText(/search containers/i)).toBeInTheDocument();
+        });
+        expect(screen.getByText("Filters (3)")).toBeInTheDocument();
+        expect(screen.getByText("Sort: Recent activity")).toBeInTheDocument();
+    });
+
+    it("renders filter chips", async () => {
+        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+            if (cmd === "list_tasks") return { tasks: sampleTasks };
+            if (cmd === "list_nodes") return { nodes: [] };
+            if (cmd === "list_cluster_metrics") return emptyMetrics;
+            return undefined;
+        });
+
+        renderWithProviders();
+
+        await waitFor(() => {
+            expect(screen.getByText("status: running")).toBeInTheDocument();
+        });
+        expect(screen.getByText("node: leader-1")).toBeInTheDocument();
+        expect(screen.getByText("ports: published")).toBeInTheDocument();
+        expect(screen.getByText("Clear filters")).toBeInTheDocument();
+    });
 });
