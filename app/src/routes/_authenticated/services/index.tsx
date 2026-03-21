@@ -1,10 +1,12 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useServices } from "@/hooks/use-services";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { AlertCircle, ArrowUpRight, Container, Layers, Search } from "lucide-react";
+import { PageHeader } from "@/components/page-header";
+import { TableShell } from "@/components/table-shell";
+import { ColumnHeaders } from "@/components/column-headers";
+import { AlertCircle, ArrowUpRight, Container, MoreHorizontal } from "lucide-react";
 import { useState } from "react";
 import type { ServiceItem } from "@/types/services";
 
@@ -30,93 +32,94 @@ function StatusDot({ service }: { service: ServiceItem }) {
 function ReplicasBadge({ service }: { service: ServiceItem }) {
     if (service.replicasDesired === -1) {
         return (
-            <Badge variant='secondary' className='h-4 px-1.5 text-[10px]'>
+            <Badge variant='secondary' className='h-4 px-1.5 font-mono text-[10px]'>
                 global
             </Badge>
         );
     }
-    const healthy = service.replicasRunning === service.replicasDesired && service.replicasDesired > 0;
+    const healthy = service.replicasRunning >= service.replicasDesired && service.replicasDesired > 0;
     return (
-        <Badge variant={healthy ? "default" : "destructive"} className='h-4 px-1.5 font-mono text-[10px]'>
+        <Badge
+            className={`h-4 px-1.5 font-mono text-[10px] ${healthy ? "bg-success/20 text-success hover:bg-success/20" : "bg-destructive/20 text-destructive hover:bg-destructive/20"}`}
+        >
             {service.replicasRunning}/{service.replicasDesired}
         </Badge>
     );
 }
 
-function ServicesTable({ services }: { services: ServiceItem[] }) {
+const SERVICE_COLUMNS = [
+    { label: "STATUS", width: 70 },
+    { label: "NAME" },
+    { label: "IMAGE", width: 200 },
+    { label: "STACK", width: 100 },
+    { label: "REPLICAS", width: 80 },
+    { label: "UPDATED", width: 100, align: "right" as const },
+    { label: "", width: 60 },
+];
+
+function ServiceRow({ service }: { service: ServiceItem }) {
     return (
-        <Table>
-            <TableHeader>
-                <TableRow className='bg-muted/40 hover:bg-muted/40'>
-                    <TableHead className='h-7 w-6 pr-0 pl-3' />
-                    <TableHead className='h-7 text-[11px]'>Name</TableHead>
-                    <TableHead className='h-7 text-[11px]'>Image</TableHead>
-                    <TableHead className='h-7 text-[11px]'>Stack</TableHead>
-                    <TableHead className='h-7 text-[11px]'>Replicas</TableHead>
-                    <TableHead className='h-7 text-right text-[11px]'>Updated</TableHead>
-                </TableRow>
-            </TableHeader>
-            <TableBody>
-                {services.map((svc) => (
-                    <TableRow key={svc.id} className='group'>
-                        <TableCell className='py-1.5 pr-0 pl-3'>
-                            <StatusDot service={svc} />
-                        </TableCell>
-                        <TableCell className='py-1.5'>
-                            <Link
-                                to='/services/$serviceId'
-                                params={{ serviceId: svc.id }}
-                                className='inline-flex items-center gap-1 text-xs font-medium hover:underline'
-                            >
-                                {svc.name}
-                                <ArrowUpRight className='size-3 opacity-0 transition-opacity group-hover:opacity-100' />
-                            </Link>
-                        </TableCell>
-                        <TableCell className='py-1.5'>
-                            <span className='font-mono text-[11px] text-muted-foreground'>{svc.image}</span>
-                        </TableCell>
-                        <TableCell className='py-1.5'>
-                            {svc.stack ? (
-                                <span className='inline-flex items-center gap-1 text-[11px]'>
-                                    <Layers className='size-3 text-muted-foreground' />
-                                    {svc.stack}
-                                </span>
-                            ) : (
-                                <span className='text-[11px] text-muted-foreground'>-</span>
-                            )}
-                        </TableCell>
-                        <TableCell className='py-1.5'>
-                            <ReplicasBadge service={svc} />
-                        </TableCell>
-                        <TableCell className='py-1.5 text-right'>
-                            <span className='font-mono text-[11px] text-muted-foreground'>{formatRelativeTime(svc.updatedAt)}</span>
-                        </TableCell>
-                    </TableRow>
-                ))}
-            </TableBody>
-        </Table>
+        <div className='flex items-center border-b border-border px-4 py-2.5 hover:bg-bg-elevated/50'>
+            <div style={{ width: 70 }} className='flex items-center'>
+                <StatusDot service={service} />
+            </div>
+            <div style={{ flex: 1 }} className='flex items-center'>
+                <Link
+                    to='/services/$serviceId'
+                    params={{ serviceId: service.id }}
+                    className='group inline-flex items-center gap-1 font-mono text-xs font-medium hover:underline'
+                >
+                    {service.name}
+                    <ArrowUpRight className='size-3 opacity-0 transition-opacity group-hover:opacity-100' />
+                </Link>
+            </div>
+            <div style={{ width: 200 }}>
+                <span className='font-mono text-[11px] text-muted-foreground'>{service.image}</span>
+            </div>
+            <div style={{ width: 100 }}>
+                <span className='font-mono text-[11px] text-muted-foreground'>{service.stack || <span className='opacity-30'>—</span>}</span>
+            </div>
+            <div style={{ width: 80 }}>
+                <ReplicasBadge service={service} />
+            </div>
+            <div style={{ width: 100 }} className='text-right'>
+                <span className='font-mono text-[11px] text-muted-foreground'>{formatRelativeTime(service.updatedAt)}</span>
+            </div>
+            <div style={{ width: 60 }} className='flex items-center justify-end'>
+                <button className='flex size-6 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-bg-elevated hover:opacity-100 focus:opacity-100'>
+                    <MoreHorizontal className='size-3.5' />
+                </button>
+            </div>
+        </div>
     );
 }
 
 function LoadingSkeleton() {
     return (
-        <div className='flex flex-col'>
-            <div className='flex h-10 items-center gap-3 border-b border-border px-3'>
-                <Skeleton className='h-4 w-16' />
-                <Skeleton className='h-4 w-8 rounded-full' />
-                <div className='flex-1' />
-                <Skeleton className='h-6 w-40' />
+        <div className='flex flex-col gap-6 p-6'>
+            <div className='flex items-center justify-between'>
+                <div className='flex flex-col gap-1'>
+                    <Skeleton className='h-7 w-28' />
+                    <Skeleton className='h-3 w-48' />
+                </div>
+                <Skeleton className='h-7 w-32' />
             </div>
-            <div className='space-y-0'>
-                {[1, 2, 3, 4, 5].map((i) => (
-                    <div key={i} className='flex items-center gap-3 border-b border-border px-3 py-2 last:border-0'>
-                        <Skeleton className='size-1.5 rounded-full' />
-                        <Skeleton className='h-3 w-28' />
-                        <Skeleton className='h-3 w-40' />
-                        <Skeleton className='h-3 w-16' />
-                        <Skeleton className='ml-auto h-4 w-12 rounded-full' />
-                    </div>
-                ))}
+            <div className='flex flex-col overflow-hidden border border-border'>
+                <div className='flex items-center justify-between border-b border-border px-4 py-3'>
+                    <Skeleton className='h-4 w-32' />
+                    <Skeleton className='h-7 w-48' />
+                </div>
+                <div className='space-y-0'>
+                    {[1, 2, 3, 4, 5].map((i) => (
+                        <div key={i} className='flex items-center gap-3 border-b border-border px-4 py-2.5 last:border-0'>
+                            <Skeleton className='size-1.5 rounded-full' />
+                            <Skeleton className='h-3 w-28' />
+                            <Skeleton className='h-3 w-40' />
+                            <Skeleton className='h-3 w-16' />
+                            <Skeleton className='ml-auto h-4 w-12 rounded-full' />
+                        </div>
+                    ))}
+                </div>
             </div>
         </div>
     );
@@ -146,32 +149,45 @@ function ServicesPage() {
         );
     }
 
+    const serviceCount = services?.length ?? 0;
+    const stackCount = new Set((services ?? []).map((s) => s.stack).filter(Boolean)).size;
+    const totalReplicas = (services ?? []).reduce((sum, s) => sum + (s.replicasDesired === -1 ? s.replicasRunning : s.replicasRunning), 0);
+    const subtitle = `${serviceCount} ${serviceCount === 1 ? "service" : "services"} · ${stackCount} ${stackCount === 1 ? "stack" : "stacks"} · ${totalReplicas} replicas running`;
+
     return (
-        <div className='flex h-full flex-col'>
-            <div className='flex h-10 shrink-0 items-center gap-3 border-b border-border px-3'>
-                <h1 className='text-xs font-semibold'>Services</h1>
-                <span className='rounded-md bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground'>{services?.length ?? 0}</span>
-                <div className='flex-1' />
-                <div className='relative'>
-                    <Search className='absolute top-1/2 left-2 size-3 -translate-y-1/2 text-muted-foreground' />
-                    <Input
-                        placeholder='Filter services...'
-                        value={search}
-                        onChange={(e) => setSearch(e.target.value)}
-                        className='h-6 w-48 rounded-sm border-border bg-transparent pl-7 text-[11px] focus-visible:ring-1'
-                    />
-                </div>
-            </div>
-            <div className='flex-1 overflow-y-auto'>
+        <div className='flex h-full flex-col gap-6 p-6'>
+            <PageHeader title='SERVICES' subtitle={subtitle}>
+                <Button variant='outline' size='sm' disabled className='h-7 font-mono text-[11px] text-muted-foreground'>
+                    CREATE SERVICE
+                </Button>
+            </PageHeader>
+
+            <TableShell
+                title='SWARM SERVICES'
+                count={filtered.length}
+                searchValue={search}
+                onSearchChange={setSearch}
+                searchPlaceholder='Search services...'
+                filterSlot={
+                    <Button variant='outline' size='sm' disabled className='h-7 font-mono text-[11px] text-muted-foreground'>
+                        FILTER
+                    </Button>
+                }
+            >
+                <ColumnHeaders columns={SERVICE_COLUMNS} />
                 {filtered.length === 0 ? (
                     <div className='flex flex-col items-center justify-center gap-1.5 py-12 text-xs text-muted-foreground'>
                         <Container className='size-4' />
                         <p>{search ? "No services match your filter" : "No services found"}</p>
                     </div>
                 ) : (
-                    <ServicesTable services={filtered} />
+                    <div>
+                        {filtered.map((svc) => (
+                            <ServiceRow key={svc.id} service={svc} />
+                        ))}
+                    </div>
                 )}
-            </div>
+            </TableShell>
         </div>
     );
 }
