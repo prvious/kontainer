@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { ExternalLink, Github, Key, Loader2, Tag } from "lucide-react";
+import { Building2, ExternalLink, Github, Key, Loader2, Tag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -15,6 +15,7 @@ type SetupStep = "token" | "app" | "done";
 
 export function SetupWizard({ agentUrl, onComplete, onBack }: SetupWizardProps) {
     const [setupToken, setSetupToken] = useState("");
+    const [orgName, setOrgName] = useState("");
     const [error, setError] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [activeStep, setActiveStep] = useState<SetupStep>("token");
@@ -63,7 +64,7 @@ export function SetupWizard({ agentUrl, onComplete, onBack }: SetupWizardProps) 
             const result = await invoke<{ setupUrl: string }>("setup_github_connect", {
                 url: agentUrl,
                 token: setupToken,
-                org: null,
+                org: orgName.trim() || null,
             });
 
             await openUrl(result.setupUrl);
@@ -138,6 +139,19 @@ export function SetupWizard({ agentUrl, onComplete, onBack }: SetupWizardProps) 
 
                 {/* Inputs */}
                 <div className='flex flex-col gap-3.5'>
+                    <label className='font-mono text-[10px] font-semibold tracking-[1px] text-muted-foreground'>GITHUB ORGANIZATION</label>
+                    <div className='relative'>
+                        <Building2 className='absolute top-1/2 left-4 size-4 -translate-y-1/2 text-muted-foreground' />
+                        <Input
+                            type='text'
+                            placeholder='Leave blank for personal account'
+                            value={orgName}
+                            onChange={(e) => setOrgName(e.target.value)}
+                            disabled={isLoading}
+                            className='h-11 bg-bg-elevated pl-11 font-mono text-[13px]'
+                        />
+                    </div>
+
                     <label className='font-mono text-[10px] font-semibold tracking-[1px] text-muted-foreground'>SETUP TOKEN</label>
                     <div className='relative'>
                         <Key className='absolute top-1/2 left-4 size-4 -translate-y-1/2 text-muted-foreground' />
