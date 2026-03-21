@@ -37,7 +37,7 @@ func Setup() {
 		router.Get("github/callback", callbackCtrl.Handle)
 
 		router.Middleware(middleware.SetupToken(setupToken)).Group(func(r route.Router) {
-			r.Post("manifest", manifestCtrl.Handle)
+			r.Post("github/manifest", manifestCtrl.Handle)
 			r.Post("complete", completeCtrl.Handle)
 		})
 	})
