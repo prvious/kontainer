@@ -14,7 +14,6 @@ interface SetupWizardProps {
 type SetupStep = "token" | "app" | "done";
 
 export function SetupWizard({ agentUrl, onComplete, onBack }: SetupWizardProps) {
-    const [appName, setAppName] = useState("kontainer-prod-app");
     const [setupToken, setSetupToken] = useState("");
     const [error, setError] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
@@ -64,23 +63,39 @@ export function SetupWizard({ agentUrl, onComplete, onBack }: SetupWizardProps) 
             await openUrl(result.setupUrl);
 
             // Step 3: Poll for completion
+            let consecutiveFailures = 0;
+
             pollingRef.current = setInterval(async () => {
                 try {
                     const status = await invoke<{ step: string }>("setup_verify_token", {
                         url: agentUrl,
                         token: setupToken,
                     });
+                    consecutiveFailures = 0;
                     if (status.step === "github_connected") {
                         if (pollingRef.current) clearInterval(pollingRef.current);
                         pollingRef.current = null;
                         setActiveStep("done");
 
-                        await invoke("setup_complete", { url: agentUrl, token: setupToken });
-                        setIsLoading(false);
-                        onComplete();
+                        try {
+                            await invoke("setup_complete", { url: agentUrl, token: setupToken });
+                            setIsLoading(false);
+                            onComplete();
+                        } catch (err) {
+                            setIsLoading(false);
+                            setError(typeof err === "string" ? err : "Failed to complete setup");
+                            setActiveStep("token");
+                        }
                     }
-                } catch {
-                    // Keep polling
+                } catch (err) {
+                    consecutiveFailures++;
+                    if (consecutiveFailures >= 5) {
+                        if (pollingRef.current) clearInterval(pollingRef.current);
+                        pollingRef.current = null;
+                        setIsLoading(false);
+                        setActiveStep("token");
+                        setError(typeof err === "string" ? err : "Lost connection to agent");
+                    }
                 }
             }, 2000);
         } catch (err) {
@@ -117,18 +132,6 @@ export function SetupWizard({ agentUrl, onComplete, onBack }: SetupWizardProps) 
 
                 {/* Inputs */}
                 <div className='flex flex-col gap-3.5'>
-                    <label className='font-mono text-[10px] font-semibold tracking-[1px] text-muted-foreground'>GITHUB APP NAME</label>
-                    <div className='relative'>
-                        <Tag className='absolute top-1/2 left-4 size-4 -translate-y-1/2 text-muted-foreground' />
-                        <Input
-                            type='text'
-                            value={appName}
-                            onChange={(e) => setAppName(e.target.value)}
-                            disabled={isLoading}
-                            className='h-11 bg-bg-elevated pl-11 font-mono text-[13px]'
-                        />
-                    </div>
-
                     <label className='font-mono text-[10px] font-semibold tracking-[1px] text-muted-foreground'>SETUP TOKEN</label>
                     <div className='relative'>
                         <Key className='absolute top-1/2 left-4 size-4 -translate-y-1/2 text-muted-foreground' />
@@ -183,11 +186,7 @@ export function SetupWizard({ agentUrl, onComplete, onBack }: SetupWizardProps) 
                     <Button variant='outline' onClick={onBack} disabled={isLoading} className='h-10 px-4'>
                         Cancel
                     </Button>
-                    <Button
-                        disabled={isLoading || !setupToken.trim()}
-                        onClick={handleValidateAndStart}
-                        className='h-10 gap-2 px-4'
-                    >
+                    <Button disabled={isLoading || !setupToken.trim()} onClick={handleValidateAndStart} className='h-10 gap-2 px-4'>
                         {isLoading ? (
                             <>
                                 <Loader2 className='size-3.5 animate-spin' />

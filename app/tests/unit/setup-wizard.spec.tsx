@@ -164,15 +164,60 @@ describe("SetupWizard", () => {
         expect(screen.getByText("Create your GitHub App manifest")).toBeInTheDocument();
     });
 
-    it("renders GITHUB APP NAME input with default value", () => {
+    it("does not render a dead appName input", () => {
         render(<SetupWizard {...defaultProps} />);
-        expect(screen.getByText("GITHUB APP NAME")).toBeInTheDocument();
-        expect(screen.getByDisplayValue("kontainer-prod-app")).toBeInTheDocument();
+        expect(screen.queryByText("GITHUB APP NAME")).not.toBeInTheDocument();
+        expect(screen.queryByDisplayValue("kontainer-prod-app")).not.toBeInTheDocument();
     });
 
     it("disables Validate Token & Start button when token is empty", () => {
         render(<SetupWizard {...defaultProps} />);
         const button = screen.getByRole("button", { name: /validate token & start/i });
         expect(button).toBeDisabled();
+    });
+
+    it("shows error after consecutive polling failures", async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        let callCount = 0;
+
+        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+            if (cmd === "setup_verify_token") {
+                callCount++;
+                // First call succeeds (returns pending so we start GitHub connect flow)
+                if (callCount === 1) return { step: "pending" };
+                // All subsequent polling calls fail
+                throw "Connection lost";
+            }
+            if (cmd === "setup_github_connect") {
+                return { setupUrl: "http://localhost:3000/setup/github/start?token=abc" };
+            }
+            return undefined;
+        });
+
+        const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+        render(<SetupWizard {...defaultProps} />);
+
+        const input = screen.getByPlaceholderText("kst_live_29f0-8d0z-1d7c");
+        await user.type(input, "ktsetup_abc123");
+        await user.click(screen.getByRole("button", { name: /validate token & start/i }));
+
+        // Wait for initial flow to complete (verify token + github connect + openUrl)
+        await act(async () => {});
+
+        // Advance through 5 polling intervals (5 * 2000ms = 10000ms)
+        for (let i = 0; i < 5; i++) {
+            await act(async () => {
+                vi.advanceTimersByTime(2000);
+            });
+            // Let microtasks (the rejected promise in setInterval callback) resolve
+            await act(async () => {});
+        }
+
+        // After 5 consecutive failures, error should be shown
+        expect(screen.getByText("Connection lost")).toBeInTheDocument();
+        // Loading state should be cleared (button re-enabled)
+        expect(screen.getByRole("button", { name: /validate token & start/i })).not.toBeDisabled();
+
+        vi.useRealTimers();
     });
 });
