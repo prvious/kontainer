@@ -7,11 +7,13 @@ import { AuthContext } from "@/contexts/auth-context-value";
 import type { AuthContextValue } from "@/contexts/auth-context-value";
 import type { VolumeItem } from "@/types/volumes";
 import { useVolumes } from "@/hooks/use-volumes";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { PageHeader } from "@/components/page-header";
+import { TableShell } from "@/components/table-shell";
+import { ColumnHeaders } from "@/components/column-headers";
 import { AlertCircle, HardDrive } from "lucide-react";
+import { useState } from "react";
 
 function formatBytes(bytes: number): string {
     if (bytes < 0) return "-";
@@ -22,107 +24,98 @@ function formatBytes(bytes: number): string {
     return `${value.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
-function VolumesTable({ volumes }: { volumes: VolumeItem[] }) {
-    return (
-        <Table>
-            <TableHeader>
-                <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Driver</TableHead>
-                    <TableHead>Scope</TableHead>
-                    <TableHead>Stack</TableHead>
-                    <TableHead>Size</TableHead>
-                    <TableHead>Refs</TableHead>
-                    <TableHead className='text-right'>Created</TableHead>
-                </TableRow>
-            </TableHeader>
-            <TableBody>
-                {volumes.map((vol) => (
-                    <TableRow key={vol.name}>
-                        <TableCell className='font-medium'>
-                            <div className='flex flex-col gap-0.5'>
-                                <span>{vol.name}</span>
-                                <span className='truncate font-mono text-[10px] text-muted-foreground'>{vol.mountpoint}</span>
-                            </div>
-                        </TableCell>
-                        <TableCell>
-                            <span className='font-mono text-xs text-muted-foreground'>{vol.driver}</span>
-                        </TableCell>
-                        <TableCell>
-                            <span className='text-xs text-muted-foreground'>{vol.scope}</span>
-                        </TableCell>
-                        <TableCell>
-                            {vol.stack ? <Badge variant='secondary'>{vol.stack}</Badge> : <span className='text-xs text-muted-foreground'>-</span>}
-                        </TableCell>
-                        <TableCell>
-                            <span className='font-mono text-xs text-muted-foreground'>{formatBytes(vol.sizeBytes)}</span>
-                        </TableCell>
-                        <TableCell>
-                            <span className='font-mono text-xs text-muted-foreground'>{vol.refCount >= 0 ? vol.refCount : "-"}</span>
-                        </TableCell>
-                        <TableCell className='text-right'>
-                            <span className='text-xs text-muted-foreground'>just now</span>
-                        </TableCell>
-                    </TableRow>
-                ))}
-            </TableBody>
-        </Table>
-    );
-}
-
-function LoadingSkeleton() {
-    return (
-        <div className='p-6'>
-            <Card>
-                <CardContent className='p-0'>
-                    <div className='space-y-0'>
-                        {[1, 2, 3, 4, 5].map((i) => (
-                            <div key={i} className='flex items-center gap-4 border-b px-4 py-3 last:border-0'>
-                                <Skeleton className='h-4 w-40' />
-                                <Skeleton className='h-4 w-16' />
-                                <Skeleton className='h-4 w-16' />
-                                <Skeleton className='h-5 w-20' />
-                                <Skeleton className='ml-auto h-4 w-16' />
-                            </div>
-                        ))}
-                    </div>
-                </CardContent>
-            </Card>
-        </div>
-    );
-}
+const VOLUME_COLUMNS = [
+    { label: "NAME" },
+    { label: "DRIVER", width: 100 },
+    { label: "MOUNTPOINT" },
+    { label: "SIZE", width: 80, align: "right" as const },
+    { label: "CREATED", width: 100, align: "right" as const },
+    { label: "", width: 60 },
+];
 
 function VolumesTestComponent() {
     const { data: volumes, isLoading, error } = useVolumes();
+    const [search, setSearch] = useState("");
+
+    const filtered = (volumes ?? []).filter(
+        (vol) =>
+            vol.name.toLowerCase().includes(search.toLowerCase()) ||
+            vol.driver.toLowerCase().includes(search.toLowerCase()) ||
+            vol.stack.toLowerCase().includes(search.toLowerCase()),
+    );
 
     if (isLoading) {
-        return <LoadingSkeleton />;
+        return (
+            <div className='flex flex-col gap-6 p-6'>
+                <Skeleton className='h-7 w-28' />
+                <div className='space-y-0'>
+                    {[1, 2, 3].map((i) => (
+                        <div key={i} className='flex items-center gap-3 border-b px-4 py-2.5'>
+                            <Skeleton className='h-3 w-32' />
+                            <Skeleton className='h-3 w-16' />
+                        </div>
+                    ))}
+                </div>
+            </div>
+        );
     }
 
     if (error) {
         return (
-            <div className='flex flex-col items-center justify-center gap-2 py-12 text-sm text-destructive'>
-                <AlertCircle className='size-5' />
+            <div className='flex flex-col items-center justify-center gap-2 py-12 text-xs text-destructive'>
+                <AlertCircle className='size-4' />
                 <p>Failed to load volumes</p>
             </div>
         );
     }
 
-    if (!volumes || volumes.length === 0) {
-        return (
-            <div className='flex flex-col items-center justify-center gap-2 py-12 text-sm text-muted-foreground'>
-                <HardDrive className='size-5' />
-                <p>No volumes found</p>
-            </div>
-        );
-    }
+    const volumeCount = volumes?.length ?? 0;
+    const driverCount = new Set((volumes ?? []).map((v) => v.driver).filter(Boolean)).size;
+    const subtitle = `${volumeCount} ${volumeCount === 1 ? "volume" : "volumes"} · ${driverCount} ${driverCount === 1 ? "driver" : "drivers"}`;
 
     return (
-        <Card>
-            <CardContent className='p-0'>
-                <VolumesTable volumes={volumes} />
-            </CardContent>
-        </Card>
+        <div className='flex h-full flex-col gap-6 p-6'>
+            <PageHeader title='VOLUMES' subtitle={subtitle}>
+                <Button variant='outline' size='sm' disabled className='h-7 font-mono text-[11px] text-muted-foreground'>
+                    CREATE VOLUME
+                </Button>
+            </PageHeader>
+
+            <TableShell
+                title='ALL VOLUMES'
+                count={filtered.length}
+                searchValue={search}
+                onSearchChange={setSearch}
+                searchPlaceholder='Search volumes...'
+            >
+                <ColumnHeaders columns={VOLUME_COLUMNS} />
+                {filtered.length === 0 ? (
+                    <div className='flex flex-col items-center justify-center gap-1.5 py-12 text-xs text-muted-foreground'>
+                        <HardDrive className='size-4' />
+                        <p>{search ? "No volumes match your filter" : "No volumes found"}</p>
+                    </div>
+                ) : (
+                    <div>
+                        {filtered.map((vol) => (
+                            <div key={vol.name} className='flex items-center border-b border-border px-4 py-2.5'>
+                                <div style={{ flex: 1 }}>
+                                    <span className='font-mono text-xs font-medium'>{vol.name}</span>
+                                </div>
+                                <div style={{ width: 100 }}>
+                                    <span className='font-mono text-[11px] text-muted-foreground'>{vol.driver}</span>
+                                </div>
+                                <div style={{ flex: 1 }} className='min-w-0 pr-4'>
+                                    <span className='block truncate font-mono text-[11px] text-muted-foreground'>{vol.mountpoint}</span>
+                                </div>
+                                <div style={{ width: 80 }} className='text-right'>
+                                    <span className='font-mono text-[11px] text-muted-foreground'>{formatBytes(vol.sizeBytes)}</span>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </TableShell>
+        </div>
     );
 }
 
@@ -223,14 +216,15 @@ describe("VolumesList", () => {
         renderWithProviders();
 
         await waitFor(() => {
-            expect(screen.getByText("db-data")).toBeInTheDocument();
+            expect(screen.getByText("VOLUMES")).toBeInTheDocument();
         });
 
+        expect(screen.getByText("ALL VOLUMES")).toBeInTheDocument();
+        expect(screen.getByText("db-data")).toBeInTheDocument();
         expect(screen.getByText("cache-vol")).toBeInTheDocument();
-        expect(screen.getByText("myapp")).toBeInTheDocument();
     });
 
-    it("shows size and ref count for volumes with usage data", async () => {
+    it("shows size for volumes with usage data", async () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "list_volumes") return { volumes: sampleVolumes };
             return undefined;
@@ -243,7 +237,6 @@ describe("VolumesList", () => {
         });
 
         expect(screen.getByText("1.0 MB")).toBeInTheDocument();
-        expect(screen.getByText("2")).toBeInTheDocument();
     });
 
     it("shows dash for volumes without usage data", async () => {
@@ -273,9 +266,8 @@ describe("VolumesList", () => {
             expect(screen.getByText("no-usage-vol")).toBeInTheDocument();
         });
 
-        // Both size and refs should show "-"
         const dashes = screen.getAllByText("-");
-        expect(dashes.length).toBeGreaterThanOrEqual(2);
+        expect(dashes.length).toBeGreaterThanOrEqual(1);
     });
 
     it("shows empty state when no volumes", async () => {
@@ -312,7 +304,7 @@ describe("VolumesList", () => {
         expect(invoke).not.toHaveBeenCalledWith("list_volumes", expect.anything());
     });
 
-    it("shows stack badge for volumes with stack label", async () => {
+    it("shows column headers for volume table", async () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "list_volumes") return { volumes: sampleVolumes };
             return undefined;
@@ -321,7 +313,27 @@ describe("VolumesList", () => {
         renderWithProviders();
 
         await waitFor(() => {
-            expect(screen.getByText("myapp")).toBeInTheDocument();
+            expect(screen.getByText("NAME")).toBeInTheDocument();
         });
+
+        expect(screen.getByText("DRIVER")).toBeInTheDocument();
+        expect(screen.getByText("MOUNTPOINT")).toBeInTheDocument();
+        expect(screen.getByText("SIZE")).toBeInTheDocument();
+        expect(screen.getByText("CREATED")).toBeInTheDocument();
+    });
+
+    it("shows subtitle with volume and driver counts", async () => {
+        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+            if (cmd === "list_volumes") return { volumes: sampleVolumes };
+            return undefined;
+        });
+
+        renderWithProviders();
+
+        await waitFor(() => {
+            expect(screen.getByText(/2 volumes/)).toBeInTheDocument();
+        });
+
+        expect(screen.getByText(/1 driver/)).toBeInTheDocument();
     });
 });
