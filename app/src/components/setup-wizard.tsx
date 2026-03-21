@@ -180,14 +180,13 @@ export function SetupWizard({ agentUrl, onComplete, onBack }: SetupWizardProps) 
 
                 {/* Actions */}
                 <div className='flex items-center justify-center gap-3'>
-                    <Button variant='outline' size='sm' onClick={onBack} disabled={isLoading}>
+                    <Button variant='outline' onClick={onBack} disabled={isLoading} className='h-10 px-4'>
                         Cancel
                     </Button>
                     <Button
-                        size='sm'
                         disabled={isLoading || !setupToken.trim()}
                         onClick={handleValidateAndStart}
-                        className='gap-2 bg-primary text-primary-foreground hover:bg-primary/90'
+                        className='h-10 gap-2 px-4'
                     >
                         {isLoading ? (
                             <>
