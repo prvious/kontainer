@@ -1,9 +1,9 @@
-import { useMemo } from 'react';
-import { ScrollText, Terminal } from 'lucide-react';
-import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import type { TaskItem } from '@/types/tasks';
-import type { ContainerMetrics } from '@/types/metrics';
+import { useMemo } from "react";
+import { ScrollText, Terminal } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import type { TaskItem } from "@/types/tasks";
+import type { ContainerMetrics } from "@/types/metrics";
 
 interface ContainersTableProps {
     tasks: TaskItem[];
@@ -19,7 +19,7 @@ function formatMemory(bytes: number): string {
 
 function formatUptime(timestamp: string): string {
     const seconds = Math.floor((Date.now() - new Date(timestamp).getTime()) / 1000);
-    if (seconds < 60) return 'just now';
+    if (seconds < 60) return "just now";
     const minutes = Math.floor(seconds / 60);
     if (minutes < 60) return `${minutes}m`;
     const hours = Math.floor(minutes / 60);
@@ -30,21 +30,21 @@ function formatUptime(timestamp: string): string {
 
 function statusInfo(state: string): { label: string; dotColor: string; textColor: string } {
     const s = state.toLowerCase();
-    if (s === 'running') return { label: 'UP', dotColor: 'bg-accent-green', textColor: 'text-accent-green' };
-    if (s === 'paused' || s === 'preparing' || s === 'pending' || s === 'assigned' || s === 'accepted')
-        return { label: 'PAUSE', dotColor: 'bg-accent-orange', textColor: 'text-accent-orange' };
-    return { label: 'EXIT', dotColor: 'bg-accent-red', textColor: 'text-accent-red' };
+    if (s === "running") return { label: "UP", dotColor: "bg-accent-green", textColor: "text-accent-green" };
+    if (s === "paused" || s === "preparing" || s === "pending" || s === "assigned" || s === "accepted")
+        return { label: "PAUSE", dotColor: "bg-accent-orange", textColor: "text-accent-orange" };
+    return { label: "EXIT", dotColor: "bg-accent-red", textColor: "text-accent-red" };
 }
 
 const columns = [
-    { label: 'STATUS', width: 'w-[70px]' },
-    { label: 'NAME', width: 'flex-1 min-w-0' },
-    { label: 'IMAGE', width: 'w-[200px]' },
-    { label: 'CPU', width: 'w-[60px]', align: 'text-right' },
-    { label: 'MEM', width: 'w-[70px]', align: 'text-right' },
-    { label: 'PORTS', width: 'w-[100px]' },
-    { label: 'UPTIME', width: 'w-[80px]', align: 'text-right' },
-    { label: '', width: 'w-[60px]' },
+    { label: "STATUS", width: "w-[70px]" },
+    { label: "NAME", width: "flex-1 min-w-0" },
+    { label: "IMAGE", width: "w-[200px]" },
+    { label: "CPU", width: "w-[60px]", align: "text-right" },
+    { label: "MEM", width: "w-[70px]", align: "text-right" },
+    { label: "PORTS", width: "w-[100px]" },
+    { label: "UPTIME", width: "w-[80px]", align: "text-right" },
+    { label: "", width: "w-[60px]" },
 ] as const;
 
 export function ContainersTable({ tasks, containerMetrics, search }: ContainersTableProps) {
@@ -60,8 +60,8 @@ export function ContainersTable({ tasks, containerMetrics, search }: ContainersT
             <div className='flex items-center bg-bg-elevated px-4 py-2'>
                 {columns.map((col) => (
                     <div
-                        key={col.label || 'actions'}
-                        className={`font-mono text-[9px] font-bold uppercase tracking-[0.5px] text-muted-foreground ${col.width} ${'align' in col ? col.align : ''}`}
+                        key={col.label || "actions"}
+                        className={`font-mono text-[9px] font-bold tracking-[0.5px] text-muted-foreground uppercase ${col.width} ${"align" in col ? col.align : ""}`}
                     >
                         {col.label}
                     </div>
@@ -75,13 +75,10 @@ export function ContainersTable({ tasks, containerMetrics, search }: ContainersT
                 filteredTasks.map((task) => {
                     const status = statusInfo(task.state);
                     const metrics = containerMetrics.get(task.containerId);
-                    const isError = task.state.toLowerCase().includes('failed') || task.state.toLowerCase().includes('rejected');
+                    const isError = task.state.toLowerCase().includes("failed") || task.state.toLowerCase().includes("rejected");
 
                     return (
-                        <div
-                            key={task.id}
-                            className={`flex items-center border-b border-border px-4 py-2.5 ${isError ? 'bg-accent-red/5' : ''}`}
-                        >
+                        <div key={task.id} className={`flex items-center border-b border-border px-4 py-2.5 ${isError ? "bg-accent-red/5" : ""}`}>
                             {/* STATUS */}
                             <div className='flex w-[70px] items-center gap-1.5'>
                                 <span className={`size-1.5 shrink-0 rounded-full ${status.dotColor}`} />
@@ -101,9 +98,7 @@ export function ContainersTable({ tasks, containerMetrics, search }: ContainersT
                             {/* CPU */}
                             <div className='w-[60px] text-right'>
                                 {metrics ? (
-                                    <span
-                                        className={`font-mono text-xs ${metrics.cpuPercent > 8 ? 'text-accent-orange' : 'text-foreground'}`}
-                                    >
+                                    <span className={`font-mono text-xs ${metrics.cpuPercent > 8 ? "text-accent-orange" : "text-foreground"}`}>
                                         {metrics.cpuPercent.toFixed(1)}%
                                     </span>
                                 ) : (
@@ -114,9 +109,7 @@ export function ContainersTable({ tasks, containerMetrics, search }: ContainersT
                             {/* MEM */}
                             <div className='w-[70px] text-right'>
                                 {metrics ? (
-                                    <span
-                                        className={`font-mono text-xs ${metrics.memoryUsed >= 1e9 ? 'text-accent-orange' : 'text-foreground'}`}
-                                    >
+                                    <span className={`font-mono text-xs ${metrics.memoryUsed >= 1e9 ? "text-accent-orange" : "text-foreground"}`}>
                                         {formatMemory(metrics.memoryUsed)}
                                     </span>
                                 ) : (

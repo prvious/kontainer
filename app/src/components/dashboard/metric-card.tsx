@@ -27,7 +27,7 @@ export function MetricCard({ icon: Icon, iconColor, label, value, subtitle, bar,
 
             {/* Value + subtitle */}
             <div className='flex items-end gap-2'>
-                <span className='text-[32px] font-bold leading-none tracking-tight text-foreground'>{value}</span>
+                <span className='text-[32px] leading-none font-bold tracking-tight text-foreground'>{value}</span>
                 {subtitle && <span className='mb-1 font-mono text-[11px] tracking-[0.3px] text-muted-foreground'>{subtitle}</span>}
             </div>
 
