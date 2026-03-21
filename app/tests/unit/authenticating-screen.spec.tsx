@@ -16,18 +16,18 @@ describe("AuthenticatingScreen", () => {
     });
 
     it("renders provider label capitalized", () => {
-        render(<AuthenticatingScreen {...defaultProps} provider="github" />);
+        render(<AuthenticatingScreen {...defaultProps} provider='github' />);
         expect(screen.getByText("Github Auth")).toBeInTheDocument();
     });
 
     it("shows current step as active", () => {
-        render(<AuthenticatingScreen {...defaultProps} step="auth" />);
+        render(<AuthenticatingScreen {...defaultProps} step='auth' />);
         const authStepLabel = screen.getByText("Github Auth");
         expect(authStepLabel).toHaveClass("text-accent-orange");
     });
 
     it("marks previous steps as completed", () => {
-        render(<AuthenticatingScreen {...defaultProps} step="auth" />);
+        render(<AuthenticatingScreen {...defaultProps} step='auth' />);
         const browserStepLabel = screen.getByText("Browser Opened");
         expect(browserStepLabel).toHaveClass("text-accent-green");
     });
@@ -43,7 +43,7 @@ describe("AuthenticatingScreen", () => {
     });
 
     it("renders agent URL in footer", () => {
-        render(<AuthenticatingScreen {...defaultProps} agentUrl="https://test.dev" />);
+        render(<AuthenticatingScreen {...defaultProps} agentUrl='https://test.dev' />);
         expect(screen.getByText(/https:\/\/test\.dev/)).toBeInTheDocument();
     });
 });
