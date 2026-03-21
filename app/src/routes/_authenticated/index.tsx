@@ -50,13 +50,13 @@ function DashboardPage() {
     const { profiles, activeProfileId } = useAuth();
     const clusterName = profiles.find((p) => p.id === activeProfileId)?.label ?? "Cluster";
 
-    const { data: tasks, isLoading: tasksLoading, error: tasksError, refetch: refetchTasks } = useTasks();
+    const { data: tasks, isLoading: tasksLoading, error: tasksError } = useTasks();
     const { data: taskStats, isLoading: taskStatsLoading, error: taskStatsError } = useTaskStats();
-    const { data: metricsData } = useClusterMetrics();
+    const { data: metricsData, isLoading: metricsLoading, error: metricsError } = useClusterMetrics();
     const { data: nodes, isLoading: nodesLoading, error: nodesError } = useNodes();
 
-    const isLoading = tasksLoading || taskStatsLoading || nodesLoading;
-    const error = tasksError || taskStatsError || nodesError;
+    const isLoading = tasksLoading || taskStatsLoading || nodesLoading || metricsLoading;
+    const error = tasksError || taskStatsError || nodesError || metricsError;
 
     if (isLoading) return <LoadingSkeleton />;
 
@@ -65,7 +65,16 @@ function DashboardPage() {
             <div className='flex flex-1 flex-col items-center justify-center gap-3 text-sm text-muted-foreground'>
                 <AlertTriangle className='size-6 text-destructive' />
                 <p>Failed to connect to agent</p>
-                <Button variant='outline' size='sm' onClick={() => refetchTasks()}>
+                <Button
+                    variant='outline'
+                    size='sm'
+                    onClick={() => {
+                        queryClient.invalidateQueries({ queryKey: ["tasks"] });
+                        queryClient.invalidateQueries({ queryKey: ["taskStats"] });
+                        queryClient.invalidateQueries({ queryKey: ["nodes"] });
+                        queryClient.invalidateQueries({ queryKey: ["cluster-metrics"] });
+                    }}
+                >
                     <RefreshCw className='size-3.5' /> Retry
                 </Button>
             </div>
@@ -86,7 +95,7 @@ function DashboardPage() {
     }
 
     // Compute cluster-level CPU
-    const avgCpu = agents.length > 0 ? agents.reduce((sum, a) => sum + a.node.cpuPercent, 0) / agents.length : 0;
+    const avgCpu = agents.length > 0 ? agents.reduce((sum, a) => sum + a.node.cpuPercent, 0) / agents.length : null;
 
     // Compute cluster-level memory
     const totalMemUsed = agents.reduce((sum, a) => sum + a.node.memoryUsed, 0);
@@ -107,7 +116,16 @@ function DashboardPage() {
                     </p>
                 </div>
                 <div className='flex items-center gap-2'>
-                    <Button variant='outline' size='sm' onClick={() => queryClient.invalidateQueries()}>
+                    <Button
+                        variant='outline'
+                        size='sm'
+                        onClick={() => {
+                            queryClient.invalidateQueries({ queryKey: ["tasks"] });
+                            queryClient.invalidateQueries({ queryKey: ["taskStats"] });
+                            queryClient.invalidateQueries({ queryKey: ["nodes"] });
+                            queryClient.invalidateQueries({ queryKey: ["cluster-metrics"] });
+                        }}
+                    >
                         <RefreshCw className='size-3.5' /> REFRESH
                     </Button>
                     <Button variant='secondary' size='sm' disabled className='opacity-50'>
@@ -136,15 +154,15 @@ function DashboardPage() {
                     icon={Cpu}
                     iconColor='text-accent-cyan'
                     label='CPU USAGE'
-                    value={`${avgCpu.toFixed(1)}%`}
+                    value={avgCpu !== null ? `${avgCpu.toFixed(1)}%` : "--"}
                     subtitle={`avg across ${nodeItems.length} node${nodeItems.length !== 1 ? "s" : ""}`}
-                    bar={{ percent: avgCpu, color: "bg-accent-cyan" }}
+                    bar={{ percent: avgCpu ?? 0, color: "bg-accent-cyan" }}
                 />
                 <MetricCard
                     icon={MemoryStick}
                     iconColor='text-[#A78BFA]'
                     label='MEMORY'
-                    value={`${usedGB} GB`}
+                    value={totalMemTotal > 0 ? `${usedGB} GB` : "--"}
                     subtitle={`/ ${totalGB} GB`}
                     bar={{ percent: memPercent, color: "bg-[#A78BFA]" }}
                 />
@@ -166,7 +184,7 @@ function DashboardPage() {
                 {/* Table Header */}
                 <div className='flex items-center justify-between border-b border-border px-4 py-3'>
                     <div className='flex items-center gap-3'>
-                        <span className='font-mono text-[11px] font-bold tracking-[0.5px] text-foreground'>RUNNING CONTAINERS</span>
+                        <span className='font-mono text-[11px] font-bold tracking-[0.5px] text-foreground'>ALL CONTAINERS</span>
                         <span className='rounded bg-bg-elevated px-1.5 py-0.5 font-mono text-[10px] font-medium text-muted-foreground'>{taskItems.length}</span>
                     </div>
                     <div className='flex items-center gap-2'>

@@ -1,6 +1,5 @@
 import { useMemo } from "react";
 import { ScrollText, Terminal } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { TaskItem } from "@/types/tasks";
 import type { ContainerMetrics } from "@/types/metrics";
@@ -12,13 +11,16 @@ interface ContainersTableProps {
 }
 
 function formatMemory(bytes: number): string {
+    if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
     if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
     if (bytes >= 1e6) return `${Math.round(bytes / 1e6)} MB`;
     return `${Math.round(bytes / 1e3)} KB`;
 }
 
 function formatUptime(timestamp: string): string {
-    const seconds = Math.floor((Date.now() - new Date(timestamp).getTime()) / 1000);
+    const ms = Date.now() - new Date(timestamp).getTime();
+    if (!Number.isFinite(ms) || ms < 0) return "--";
+    const seconds = Math.floor(ms / 1000);
     if (seconds < 60) return "just now";
     const minutes = Math.floor(seconds / 60);
     if (minutes < 60) return `${minutes}m`;
@@ -131,20 +133,16 @@ export function ContainersTable({ tasks, containerMetrics, search }: ContainersT
                             <div className='flex w-[60px] items-center justify-end gap-1'>
                                 <TooltipProvider>
                                     <Tooltip>
-                                        <TooltipTrigger>
-                                            <Button variant='ghost' size='icon-xs' className='text-muted-foreground hover:text-foreground'>
-                                                <Terminal className='size-3' />
-                                            </Button>
+                                        <TooltipTrigger className='inline-flex size-6 items-center justify-center rounded text-muted-foreground hover:text-foreground'>
+                                            <Terminal className='size-3' />
                                         </TooltipTrigger>
                                         <TooltipContent>Terminal</TooltipContent>
                                     </Tooltip>
                                 </TooltipProvider>
                                 <TooltipProvider>
                                     <Tooltip>
-                                        <TooltipTrigger>
-                                            <Button variant='ghost' size='icon-xs' className='text-muted-foreground hover:text-foreground'>
-                                                <ScrollText className='size-3' />
-                                            </Button>
+                                        <TooltipTrigger className='inline-flex size-6 items-center justify-center rounded text-muted-foreground hover:text-foreground'>
+                                            <ScrollText className='size-3' />
                                         </TooltipTrigger>
                                         <TooltipContent>Logs</TooltipContent>
                                     </Tooltip>
