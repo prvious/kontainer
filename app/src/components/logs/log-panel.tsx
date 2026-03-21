@@ -40,26 +40,15 @@ export function LogPanel({ serviceId, visible, logFilter }: LogPanelProps) {
         error: "bg-destructive",
     }[status];
 
-    const emptyMessage =
-        status === "connecting"
-            ? "Connecting..."
-            : logs.length === 0 && status === "connected"
-              ? "Waiting for logs..."
-              : "No logs";
+    const emptyMessage = status === "connecting" ? "Connecting..." : logs.length === 0 && status === "connected" ? "Waiting for logs..." : "No logs";
 
     return (
         <div className='flex flex-col' style={{ display: visible ? "flex" : "none" }}>
             {/* Column header */}
             <div className='flex items-center bg-bg-elevated px-4 py-1.5'>
-                <span className='w-[100px] shrink-0 font-mono text-[10px] font-bold uppercase tracking-wide text-muted-foreground'>
-                    Timestamp
-                </span>
-                <span className='w-[70px] shrink-0 font-mono text-[10px] font-bold uppercase tracking-wide text-muted-foreground'>
-                    Level
-                </span>
-                <span className='min-w-0 flex-1 font-mono text-[10px] font-bold uppercase tracking-wide text-muted-foreground'>
-                    Message
-                </span>
+                <span className='w-[100px] shrink-0 font-mono text-[10px] font-bold tracking-wide text-muted-foreground uppercase'>Timestamp</span>
+                <span className='w-[70px] shrink-0 font-mono text-[10px] font-bold tracking-wide text-muted-foreground uppercase'>Level</span>
+                <span className='min-w-0 flex-1 font-mono text-[10px] font-bold tracking-wide text-muted-foreground uppercase'>Message</span>
             </div>
 
             {/* Scrollable log area */}

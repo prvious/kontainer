@@ -46,6 +46,10 @@ Items displayed in the UI with fake/placeholder data or NOOP buttons. Each needs
 
 - **Network subnet column** — Networks page shows "—" for subnet. The agent's network list response doesn't include subnet/IPAM data.
 
+## Logs Page
+
+- **Structured log level parsing** — The LEVEL column shows "OUT"/"ERR" (stdout/stderr). Parsing log levels (INFO, WARN, ERROR, DEBUG) from log lines requires structured logging or pattern matching. Needs either structured log output from services or a configurable log format parser.
+
 ## Sidebar
 
 - **Agent version/uptime card** — Shows static "AGENT -- / uptime: --". No agent health endpoint returns version or uptime. Needs a `/api/health` or `/ping` extension with version and uptime fields.

@@ -26,8 +26,8 @@ export function LogStreamTabs({ streams, activeStreamId, onSelect, onClose, onAd
                         onClick={() => onSelect(stream.id)}
                         className={`flex items-center gap-2 px-4 py-2.5 font-mono text-[11px] ${
                             isActive
-                                ? "border-b-2 border-b-accent-green bg-bg-elevated font-semibold text-accent-green"
-                                : "border-r border-r-border font-medium text-text-secondary hover:text-foreground"
+                                ? 'border-b-2 border-b-accent-green bg-bg-elevated font-semibold text-accent-green'
+                                : 'border-r border-r-border font-medium text-text-secondary hover:text-foreground'
                         }`}
                     >
                         <span className={`size-1.5 rounded-full ${stream.color}`} />
@@ -43,10 +43,7 @@ export function LogStreamTabs({ streams, activeStreamId, onSelect, onClose, onAd
                     </button>
                 );
             })}
-            <button
-                onClick={onAdd}
-                className='flex size-9 items-center justify-center text-muted-foreground hover:text-foreground'
-            >
+            <button onClick={onAdd} className='flex size-9 items-center justify-center text-muted-foreground hover:text-foreground'>
                 <Plus className='size-3.5' />
             </button>
         </div>

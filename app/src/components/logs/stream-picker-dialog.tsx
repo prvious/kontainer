@@ -1,10 +1,10 @@
-import { useMemo, useState } from 'react';
-import { Search } from 'lucide-react';
-import { useServices } from '@/hooks/use-services';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { Skeleton } from '@/components/ui/skeleton';
-import type { ServiceItem } from '@/types/services';
+import { useMemo, useState } from "react";
+import { Search } from "lucide-react";
+import { useServices } from "@/hooks/use-services";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Skeleton } from "@/components/ui/skeleton";
+import type { ServiceItem } from "@/types/services";
 
 interface StreamPickerDialogProps {
     open: boolean;
@@ -13,26 +13,16 @@ interface StreamPickerDialogProps {
     excludeServiceIds?: string[];
 }
 
-function ServicePickerRow({
-    service,
-    excluded,
-    onSelect,
-}: {
-    service: ServiceItem;
-    excluded: boolean;
-    onSelect: () => void;
-}) {
+function ServicePickerRow({ service, excluded, onSelect }: { service: ServiceItem; excluded: boolean; onSelect: () => void }) {
     const isGlobal = service.replicasDesired === -1;
-    const replicasLabel = isGlobal ? 'global' : `${service.replicasRunning}/${service.replicasDesired}`;
+    const replicasLabel = isGlobal ? "global" : `${service.replicasRunning}/${service.replicasDesired}`;
 
     return (
         <button
             onClick={excluded ? undefined : onSelect}
             disabled={excluded}
             className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left transition-colors ${
-                excluded
-                    ? 'cursor-not-allowed opacity-40'
-                    : 'hover:bg-accent'
+                excluded ? 'cursor-not-allowed opacity-40' : "hover:bg-accent"
             }`}
         >
             <span className='mt-0.5 size-2 shrink-0 rounded-full bg-accent-green' />
@@ -69,7 +59,7 @@ function SkeletonRows() {
 }
 
 export function StreamPickerDialog({ open, onOpenChange, onSelect, excludeServiceIds = [] }: StreamPickerDialogProps) {
-    const [search, setSearch] = useState('');
+    const [search, setSearch] = useState("");
 
     const { data: services, isLoading } = useServices();
 
@@ -77,9 +67,7 @@ export function StreamPickerDialog({ open, onOpenChange, onSelect, excludeServic
         if (!services) return [];
         const query = search.trim().toLowerCase();
         if (!query) return services;
-        return services.filter(
-            (svc) => svc.name.toLowerCase().includes(query) || svc.image.toLowerCase().includes(query),
-        );
+        return services.filter((svc) => svc.name.toLowerCase().includes(query) || svc.image.toLowerCase().includes(query));
     }, [services, search]);
 
     const excludedSet = useMemo(() => new Set(excludeServiceIds), [excludeServiceIds]);
@@ -127,12 +115,7 @@ export function StreamPickerDialog({ open, onOpenChange, onSelect, excludeServic
                     ) : (
                         <div className='p-1'>
                             {filtered.map((svc) => (
-                                <ServicePickerRow
-                                    key={svc.id}
-                                    service={svc}
-                                    excluded={excludedSet.has(svc.id)}
-                                    onSelect={() => handleSelect(svc)}
-                                />
+                                <ServicePickerRow key={svc.id} service={svc} excluded={excludedSet.has(svc.id)} onSelect={() => handleSelect(svc)} />
                             ))}
                         </div>
                     )}

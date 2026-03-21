@@ -1,21 +1,21 @@
-import { useState } from 'react';
-import { createFileRoute } from '@tanstack/react-router';
-import { Plus, ScrollText, Search } from 'lucide-react';
-import { PageHeader } from '@/components/page-header';
-import { LogStreamTabs } from '@/components/logs/log-stream-tabs';
-import type { LogStream } from '@/components/logs/log-stream-tabs';
-import { LogPanel } from '@/components/logs/log-panel';
-import { StreamPickerDialog } from '@/components/logs/stream-picker-dialog';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { useState } from "react";
+import { createFileRoute } from "@tanstack/react-router";
+import { Plus, ScrollText, Search } from "lucide-react";
+import { PageHeader } from "@/components/page-header";
+import { LogStreamTabs } from "@/components/logs/log-stream-tabs";
+import type { LogStream } from "@/components/logs/log-stream-tabs";
+import { LogPanel } from "@/components/logs/log-panel";
+import { StreamPickerDialog } from "@/components/logs/stream-picker-dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
-const TAB_COLORS = ['bg-accent-green', 'bg-accent-cyan', 'bg-accent-orange', 'bg-accent-purple', 'bg-accent-red'];
+const TAB_COLORS = ["bg-accent-green", "bg-accent-cyan", "bg-accent-orange", "bg-accent-purple", "bg-accent-red"];
 
 function LogsPage() {
     const [streams, setStreams] = useState<LogStream[]>([]);
     const [activeStreamId, setActiveStreamId] = useState<string | null>(null);
     const [pickerOpen, setPickerOpen] = useState(false);
-    const [logFilter, setLogFilter] = useState('');
+    const [logFilter, setLogFilter] = useState("");
 
     function handleAddStream(service: { id: string; name: string }) {
         const newStream: LogStream = {
@@ -77,12 +77,7 @@ function LogsPage() {
                     />
                     <div className='flex flex-1 flex-col overflow-hidden rounded-b-lg border-x border-b border-border'>
                         {streams.map((stream) => (
-                            <LogPanel
-                                key={stream.id}
-                                serviceId={stream.serviceId}
-                                visible={stream.id === activeStreamId}
-                                logFilter={logFilter}
-                            />
+                            <LogPanel key={stream.id} serviceId={stream.serviceId} visible={stream.id === activeStreamId} logFilter={logFilter} />
                         ))}
                     </div>
                 </>
@@ -98,16 +93,11 @@ function LogsPage() {
                 </div>
             )}
 
-            <StreamPickerDialog
-                open={pickerOpen}
-                onOpenChange={setPickerOpen}
-                onSelect={handleAddStream}
-                excludeServiceIds={streams.map((s) => s.serviceId)}
-            />
+            <StreamPickerDialog open={pickerOpen} onOpenChange={setPickerOpen} onSelect={handleAddStream} excludeServiceIds={streams.map((s) => s.serviceId)} />
         </div>
     );
 }
 
-export const Route = createFileRoute('/_authenticated/logs/')({
+export const Route = createFileRoute("/_authenticated/logs/")({
     component: LogsPage,
 });
