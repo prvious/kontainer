@@ -40,7 +40,7 @@ function ReplicasBadge({ service }: { service: ServiceItem }) {
     const healthy = service.replicasRunning >= service.replicasDesired && service.replicasDesired > 0;
     return (
         <Badge
-            className={`h-4 px-1.5 font-mono text-[10px] ${healthy ? "bg-success/20 text-success hover:bg-success/20" : "bg-destructive/20 text-destructive hover:bg-destructive/20"}`}
+            className={`h-4 px-1.5 font-mono text-[10px] ${healthy ? 'bg-success/20 text-success hover:bg-success/20' : 'bg-destructive/20 text-destructive hover:bg-destructive/20'}`}
         >
             {service.replicasRunning}/{service.replicasDesired}
         </Badge>

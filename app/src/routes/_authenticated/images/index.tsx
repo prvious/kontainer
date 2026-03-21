@@ -125,9 +125,7 @@ function ImageRow({ img, onDelete, onForceDelete }: ImageRowProps) {
             <div style={{ width: 60 }} className='flex items-center justify-end'>
                 <ButtonGroup>
                     <AlertDialog>
-                        <AlertDialogTrigger render={<Button variant='destructive' size='xs' data-testid={`delete-${img.id}`} />}>
-                            Delete
-                        </AlertDialogTrigger>
+                        <AlertDialogTrigger render={<Button variant='destructive' size='xs' data-testid={`delete-${img.id}`} />}>Delete</AlertDialogTrigger>
                         <AlertDialogContent>
                             <AlertDialogHeader>
                                 <AlertDialogTitle>Delete image?</AlertDialogTitle>
@@ -176,9 +174,7 @@ function ImagesPage() {
     const filteredImages = useMemo(() => {
         if (!search) return allImages;
         const q = search.toLowerCase();
-        return allImages.filter(
-            (img) => img.tags.some((t) => t.toLowerCase().includes(q)) || img.hostname.toLowerCase().includes(q),
-        );
+        return allImages.filter((img) => img.tags.some((t) => t.toLowerCase().includes(q)) || img.hostname.toLowerCase().includes(q));
     }, [allImages, search]);
 
     function handleDelete(img: ImageItem, force: boolean) {
@@ -217,7 +213,9 @@ function ImagesPage() {
                 searchPlaceholder='Search images...'
                 filterSlot={
                     <AlertDialog>
-                        <AlertDialogTrigger render={<Button variant='outline' size='sm' data-testid='prune-btn' className='h-7 font-mono text-[11px] text-muted-foreground' />}>
+                        <AlertDialogTrigger
+                            render={<Button variant='outline' size='sm' data-testid='prune-btn' className='h-7 font-mono text-[11px] text-muted-foreground' />}
+                        >
                             PRUNE
                         </AlertDialogTrigger>
                         <AlertDialogContent>
@@ -246,12 +244,7 @@ function ImagesPage() {
                 ) : (
                     <div>
                         {filteredImages.map((img) => (
-                            <ImageRow
-                                key={`${img.nodeId}:${img.id}`}
-                                img={img}
-                                onDelete={handleDelete}
-                                onForceDelete={setForceDeleteTarget}
-                            />
+                            <ImageRow key={`${img.nodeId}:${img.id}`} img={img} onDelete={handleDelete} onForceDelete={setForceDeleteTarget} />
                         ))}
                     </div>
                 )}

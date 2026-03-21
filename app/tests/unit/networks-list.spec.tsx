@@ -69,13 +69,7 @@ function NetworksTestComponent() {
         <div className='flex h-full flex-col gap-6 p-6'>
             <PageHeader title='NETWORKS' subtitle={subtitle} />
 
-            <TableShell
-                title='ALL NETWORKS'
-                count={filtered.length}
-                searchValue={search}
-                onSearchChange={setSearch}
-                searchPlaceholder='Search networks...'
-            >
+            <TableShell title='ALL NETWORKS' count={filtered.length} searchValue={search} onSearchChange={setSearch} searchPlaceholder='Search networks...'>
                 <ColumnHeaders columns={NETWORK_COLUMNS} />
                 {filtered.length === 0 ? (
                     <div className='flex flex-col items-center justify-center gap-1.5 py-12 text-xs text-muted-foreground'>

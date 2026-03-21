@@ -104,13 +104,7 @@ function ServicesTestComponent() {
         <div className='flex h-full flex-col gap-6 p-6'>
             <PageHeader title='SERVICES' subtitle={subtitle} />
 
-            <TableShell
-                title='SWARM SERVICES'
-                count={filtered.length}
-                searchValue={search}
-                onSearchChange={setSearch}
-                searchPlaceholder='Search services...'
-            >
+            <TableShell title='SWARM SERVICES' count={filtered.length} searchValue={search} onSearchChange={setSearch} searchPlaceholder='Search services...'>
                 <ColumnHeaders columns={SERVICE_COLUMNS} />
                 {filtered.length === 0 ? (
                     <div className='flex flex-col items-center justify-center gap-1.5 py-12 text-xs text-muted-foreground'>

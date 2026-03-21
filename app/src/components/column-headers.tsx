@@ -17,7 +17,7 @@ export function ColumnHeaders({ columns }: ColumnHeadersProps) {
                     className={`font-mono text-[9px] font-bold tracking-[0.5px] text-muted-foreground uppercase ${
                         col.align === "right" ? "text-right" : col.align === "center" ? "text-center" : ""
                     }`}
-                    style={{ width: typeof col.width === "number" ? col.width : col.width ?? "auto", flex: col.width ? undefined : 1 }}
+                    style={{ width: typeof col.width === "number" ? col.width : (col.width ?? "auto"), flex: col.width ? undefined : 1 }}
                 >
                     {col.label}
                 </span>

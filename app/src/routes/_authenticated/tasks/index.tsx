@@ -1,19 +1,19 @@
-import { createFileRoute } from '@tanstack/react-router';
-import { useTasks } from '@/hooks/use-tasks';
-import { useNodes } from '@/hooks/use-nodes';
-import { useClusterMetrics } from '@/hooks/use-cluster-metrics';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
-import { PageHeader } from '@/components/page-header';
-import { TableShell } from '@/components/table-shell';
-import { ColumnHeaders } from '@/components/column-headers';
-import { AlertCircle, Container, ScrollText, Terminal } from 'lucide-react';
-import { useState, useMemo } from 'react';
-import type { TaskItem } from '@/types/tasks';
-import type { ContainerMetrics } from '@/types/metrics';
+import { createFileRoute } from "@tanstack/react-router";
+import { useTasks } from "@/hooks/use-tasks";
+import { useNodes } from "@/hooks/use-nodes";
+import { useClusterMetrics } from "@/hooks/use-cluster-metrics";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { PageHeader } from "@/components/page-header";
+import { TableShell } from "@/components/table-shell";
+import { ColumnHeaders } from "@/components/column-headers";
+import { AlertCircle, Container, ScrollText, Terminal } from "lucide-react";
+import { useState, useMemo } from "react";
+import type { TaskItem } from "@/types/tasks";
+import type { ContainerMetrics } from "@/types/metrics";
 
 function formatMemory(bytes: number): string {
-    if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+    if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
     if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
     if (bytes >= 1e6) return `${Math.round(bytes / 1e6)} MB`;
     return `${Math.round(bytes / 1e3)} KB`;
@@ -21,9 +21,9 @@ function formatMemory(bytes: number): string {
 
 function formatUptime(timestamp: string): string {
     const ms = Date.now() - new Date(timestamp).getTime();
-    if (!Number.isFinite(ms) || ms < 0) return '--';
+    if (!Number.isFinite(ms) || ms < 0) return "--";
     const seconds = Math.floor(ms / 1000);
-    if (seconds < 60) return 'just now';
+    if (seconds < 60) return "just now";
     const minutes = Math.floor(seconds / 60);
     if (minutes < 60) return `${minutes}m`;
     const hours = Math.floor(minutes / 60);
@@ -34,29 +34,29 @@ function formatUptime(timestamp: string): string {
 
 function statusInfo(state: string): { label: string; dotColor: string; textColor: string } {
     const s = state.toLowerCase();
-    if (s === 'running') return { label: 'UP', dotColor: 'bg-accent-green', textColor: 'text-accent-green' };
-    if (['paused', 'preparing', 'pending', 'assigned', 'accepted'].includes(s))
-        return { label: 'PAUSE', dotColor: 'bg-accent-orange', textColor: 'text-accent-orange' };
-    return { label: 'EXIT', dotColor: 'bg-accent-red', textColor: 'text-accent-red' };
+    if (s === "running") return { label: "UP", dotColor: "bg-accent-green", textColor: "text-accent-green" };
+    if (["paused", "preparing", "pending", "assigned", "accepted"].includes(s))
+        return { label: "PAUSE", dotColor: "bg-accent-orange", textColor: "text-accent-orange" };
+    return { label: "EXIT", dotColor: "bg-accent-red", textColor: "text-accent-red" };
 }
 
 const CONTAINER_COLUMNS = [
-    { label: 'STATUS', width: 70 },
-    { label: 'NAME' },
-    { label: 'IMAGE', width: 200 },
-    { label: 'CPU', width: 60, align: 'right' as const },
-    { label: 'MEM', width: 70, align: 'right' as const },
-    { label: 'PORTS', width: 100 },
-    { label: 'UPTIME', width: 80, align: 'right' as const },
-    { label: '', width: 60 },
+    { label: "STATUS", width: 70 },
+    { label: "NAME" },
+    { label: "IMAGE", width: 200 },
+    { label: "CPU", width: 60, align: "right" as const },
+    { label: "MEM", width: 70, align: "right" as const },
+    { label: "PORTS", width: 100 },
+    { label: "UPTIME", width: 80, align: "right" as const },
+    { label: "", width: 60 },
 ];
 
 function TaskRow({ task, metrics }: { task: TaskItem; metrics: ContainerMetrics | undefined }) {
     const status = statusInfo(task.state);
-    const isError = task.state.toLowerCase().includes('failed') || task.state.toLowerCase().includes('rejected');
+    const isError = task.state.toLowerCase().includes("failed") || task.state.toLowerCase().includes("rejected");
 
     return (
-        <div className={`flex items-center border-b border-border px-4 py-2.5 hover:bg-bg-elevated/50 ${isError ? 'bg-accent-red/5' : ''}`}>
+        <div className={`flex items-center border-b border-border px-4 py-2.5 hover:bg-bg-elevated/50 ${isError ? "bg-accent-red/5" : ""}`}>
             {/* STATUS */}
             <div style={{ width: 70 }} className='flex items-center gap-1.5'>
                 <span className={`size-1.5 shrink-0 rounded-full ${status.dotColor}`} />
@@ -76,7 +76,7 @@ function TaskRow({ task, metrics }: { task: TaskItem; metrics: ContainerMetrics 
             {/* CPU */}
             <div style={{ width: 60 }} className='text-right'>
                 {metrics ? (
-                    <span className={`font-mono text-xs ${metrics.cpuPercent > 8 ? 'text-accent-orange' : 'text-foreground'}`}>
+                    <span className={`font-mono text-xs ${metrics.cpuPercent > 8 ? "text-accent-orange" : "text-foreground"}`}>
                         {metrics.cpuPercent.toFixed(1)}%
                     </span>
                 ) : (
@@ -87,7 +87,7 @@ function TaskRow({ task, metrics }: { task: TaskItem; metrics: ContainerMetrics 
             {/* MEM */}
             <div style={{ width: 70 }} className='text-right'>
                 {metrics ? (
-                    <span className={`font-mono text-xs ${metrics.memoryUsed >= 1e9 ? 'text-accent-orange' : 'text-foreground'}`}>
+                    <span className={`font-mono text-xs ${metrics.memoryUsed >= 1e9 ? "text-accent-orange" : "text-foreground"}`}>
                         {formatMemory(metrics.memoryUsed)}
                     </span>
                 ) : (
@@ -162,7 +162,7 @@ function TasksPage() {
     const { data: tasks, isLoading, error } = useTasks();
     const { data: nodes } = useNodes();
     const { data: metricsData } = useClusterMetrics();
-    const [search, setSearch] = useState('');
+    const [search, setSearch] = useState("");
 
     const containerMetrics = useMemo(() => {
         const map = new Map<string, ContainerMetrics>();
@@ -179,12 +179,7 @@ function TasksPage() {
         const all = tasks ?? [];
         if (!search) return all;
         const q = search.toLowerCase();
-        return all.filter(
-            (task) =>
-                task.serviceName.toLowerCase().includes(q) ||
-                task.image.toLowerCase().includes(q) ||
-                task.state.toLowerCase().includes(q),
-        );
+        return all.filter((task) => task.serviceName.toLowerCase().includes(q) || task.image.toLowerCase().includes(q) || task.state.toLowerCase().includes(q));
     }, [tasks, search]);
 
     if (isLoading) {
@@ -200,26 +195,20 @@ function TasksPage() {
         );
     }
 
-    const runningCount = (tasks ?? []).filter((t) => t.state.toLowerCase() === 'running').length;
+    const runningCount = (tasks ?? []).filter((t) => t.state.toLowerCase() === "running").length;
     const nodeCount = nodes?.length ?? 0;
-    const subtitle = `Running ${runningCount} containers across ${nodeCount} ${nodeCount === 1 ? 'node' : 'nodes'}`;
+    const subtitle = `Running ${runningCount} containers across ${nodeCount} ${nodeCount === 1 ? "node" : "nodes"}`;
 
     return (
         <div className='flex h-full flex-col gap-6 p-6'>
             <PageHeader title='CONTAINERS' subtitle={subtitle} />
 
-            <TableShell
-                title='ALL CONTAINERS'
-                count={filtered.length}
-                searchValue={search}
-                onSearchChange={setSearch}
-                searchPlaceholder='Search containers...'
-            >
+            <TableShell title='ALL CONTAINERS' count={filtered.length} searchValue={search} onSearchChange={setSearch} searchPlaceholder='Search containers...'>
                 <ColumnHeaders columns={CONTAINER_COLUMNS} />
                 {filtered.length === 0 ? (
                     <div className='flex flex-col items-center justify-center gap-1.5 py-12 text-xs text-muted-foreground'>
                         <Container className='size-4' />
-                        <p>{search ? 'No containers match your filter' : 'No containers found'}</p>
+                        <p>{search ? "No containers match your filter" : "No containers found"}</p>
                     </div>
                 ) : (
                     <div>
@@ -233,6 +222,6 @@ function TasksPage() {
     );
 }
 
-export const Route = createFileRoute('/_authenticated/tasks/')({
+export const Route = createFileRoute("/_authenticated/tasks/")({
     component: TasksPage,
 });

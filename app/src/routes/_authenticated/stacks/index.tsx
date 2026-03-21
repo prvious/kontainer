@@ -13,7 +13,7 @@ import type { StackItem } from "@/types/stacks";
 
 function formatRelativeTime(iso: string): string {
     const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-    if (seconds < 60) return 'just now';
+    if (seconds < 60) return "just now";
     const minutes = Math.floor(seconds / 60);
     if (minutes < 60) return `${minutes}m ago`;
     const hours = Math.floor(minutes / 60);
@@ -24,27 +24,27 @@ function formatRelativeTime(iso: string): string {
 
 function HealthDot({ stack }: { stack: StackItem }) {
     const healthy = stack.runningReplicas >= stack.desiredReplicas && stack.desiredReplicas > 0;
-    return <span className={`size-1.5 rounded-full ${healthy ? 'bg-success' : 'animate-pulse-dot bg-destructive'}`} />;
+    return <span className={`size-1.5 rounded-full ${healthy ? "bg-success" : 'animate-pulse-dot bg-destructive'}`} />;
 }
 
 function ReplicasBadge({ stack }: { stack: StackItem }) {
     const healthy = stack.runningReplicas === stack.desiredReplicas && stack.desiredReplicas > 0;
     return (
-        <Badge variant={healthy ? 'default' : 'destructive'} className='h-4 px-1.5 font-mono text-[10px]'>
+        <Badge variant={healthy ? "default" : "destructive"} className='h-4 px-1.5 font-mono text-[10px]'>
             {stack.runningReplicas}/{stack.desiredReplicas}
         </Badge>
     );
 }
 
 const COLUMNS = [
-    { label: 'STATUS', width: 70 },
-    { label: 'NAME' },
-    { label: 'SERVICES', width: 80, align: 'right' as const },
-    { label: 'REPLICAS', width: 80 },
-    { label: 'CPU', width: 60, align: 'right' as const },
-    { label: 'MEM', width: 70, align: 'right' as const },
-    { label: 'LAST DEPLOY', width: 100, align: 'right' as const },
-    { label: 'Actions', width: 60 },
+    { label: "STATUS", width: 70 },
+    { label: "NAME" },
+    { label: "SERVICES", width: 80, align: "right" as const },
+    { label: "REPLICAS", width: 80 },
+    { label: "CPU", width: 60, align: "right" as const },
+    { label: "MEM", width: 70, align: "right" as const },
+    { label: "LAST DEPLOY", width: 100, align: "right" as const },
+    { label: "Actions", width: 60 },
 ];
 
 function StacksTable({ stacks }: { stacks: StackItem[] }) {
@@ -122,7 +122,7 @@ function LoadingSkeleton() {
 
 export function StacksPage() {
     const { data: stacks, isLoading, error } = useStacks();
-    const [search, setSearch] = useState('');
+    const [search, setSearch] = useState("");
 
     const total = stacks?.length ?? 0;
     const healthy = (stacks ?? []).filter((s) => s.runningReplicas >= s.desiredReplicas && s.desiredReplicas > 0).length;
@@ -150,17 +150,11 @@ export function StacksPage() {
                 </Button>
             </PageHeader>
 
-            <TableShell
-                title='DEPLOYED STACKS'
-                count={filtered.length}
-                searchValue={search}
-                onSearchChange={setSearch}
-                searchPlaceholder='Search stacks...'
-            >
+            <TableShell title='DEPLOYED STACKS' count={filtered.length} searchValue={search} onSearchChange={setSearch} searchPlaceholder='Search stacks...'>
                 {filtered.length === 0 ? (
                     <div className='flex flex-col items-center justify-center gap-1.5 py-12 text-xs text-muted-foreground'>
                         <Layers className='size-4' />
-                        <p>{search ? 'No stacks match your filter' : 'No stacks found'}</p>
+                        <p>{search ? "No stacks match your filter" : "No stacks found"}</p>
                     </div>
                 ) : (
                     <>
@@ -173,6 +167,6 @@ export function StacksPage() {
     );
 }
 
-export const Route = createFileRoute('/_authenticated/stacks/')({
+export const Route = createFileRoute("/_authenticated/stacks/")({
     component: StacksPage,
 });

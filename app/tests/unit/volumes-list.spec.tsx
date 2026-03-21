@@ -81,13 +81,7 @@ function VolumesTestComponent() {
                 </Button>
             </PageHeader>
 
-            <TableShell
-                title='ALL VOLUMES'
-                count={filtered.length}
-                searchValue={search}
-                onSearchChange={setSearch}
-                searchPlaceholder='Search volumes...'
-            >
+            <TableShell title='ALL VOLUMES' count={filtered.length} searchValue={search} onSearchChange={setSearch} searchPlaceholder='Search volumes...'>
                 <ColumnHeaders columns={VOLUME_COLUMNS} />
                 {filtered.length === 0 ? (
                     <div className='flex flex-col items-center justify-center gap-1.5 py-12 text-xs text-muted-foreground'>

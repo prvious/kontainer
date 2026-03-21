@@ -20,10 +20,7 @@ const NETWORK_COLUMNS = [
 ];
 
 function NetworkRow({ network }: { network: NetworkItem }) {
-    const scopeClass =
-        network.scope === "swarm"
-            ? "text-cyan-400"
-            : "text-muted-foreground";
+    const scopeClass = network.scope === "swarm" ? "text-cyan-400" : "text-muted-foreground";
 
     return (
         <div className='flex items-center border-b border-border px-4 py-2.5 hover:bg-bg-elevated/50'>
@@ -45,9 +42,7 @@ function NetworkRow({ network }: { network: NetworkItem }) {
                 <span className={`font-mono text-[11px] ${scopeClass}`}>{network.scope}</span>
             </div>
             <div style={{ width: 120 }}>
-                <span className='font-mono text-[11px] text-muted-foreground'>
-                    {network.subnet ?? <span className='opacity-30'>—</span>}
-                </span>
+                <span className='font-mono text-[11px] text-muted-foreground'>{network.subnet ?? <span className='opacity-30'>—</span>}</span>
             </div>
             <div style={{ width: 60 }} className='flex items-center justify-end'>
                 <button className='flex size-6 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-bg-elevated hover:opacity-100 focus:opacity-100'>
@@ -126,13 +121,7 @@ function NetworksPage() {
                 </Button>
             </PageHeader>
 
-            <TableShell
-                title='ALL NETWORKS'
-                count={filtered.length}
-                searchValue={search}
-                onSearchChange={setSearch}
-                searchPlaceholder='Search networks...'
-            >
+            <TableShell title='ALL NETWORKS' count={filtered.length} searchValue={search} onSearchChange={setSearch} searchPlaceholder='Search networks...'>
                 <ColumnHeaders columns={NETWORK_COLUMNS} />
                 {filtered.length === 0 ? (
                     <div className='flex flex-col items-center justify-center gap-1.5 py-12 text-xs text-muted-foreground'>

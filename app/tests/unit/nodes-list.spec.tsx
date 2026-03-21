@@ -1,46 +1,31 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
-import { invoke } from '@tauri-apps/api/core';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider } from '@tanstack/react-router';
-import { AuthContext } from '@/contexts/auth-context-value';
-import type { AuthContextValue } from '@/contexts/auth-context-value';
-import type { NodeItem } from '@/types/nodes';
-import { useNodes } from '@/hooks/use-nodes';
-import { useClusterMetrics } from '@/hooks/use-cluster-metrics';
-import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
-import { Skeleton } from '@/components/ui/skeleton';
-import { PageHeader } from '@/components/page-header';
-import { AlertCircle, Server } from 'lucide-react';
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import { invoke } from "@tauri-apps/api/core";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider } from "@tanstack/react-router";
+import { AuthContext } from "@/contexts/auth-context-value";
+import type { AuthContextValue } from "@/contexts/auth-context-value";
+import type { NodeItem } from "@/types/nodes";
+import { useNodes } from "@/hooks/use-nodes";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { AlertCircle, Server } from "lucide-react";
 
 function RoleBadges({ node }: { node: NodeItem }) {
-    if (node.role === 'manager' && node.leader) {
-        return (
-            <Badge className='h-4 border-0 bg-emerald-500/15 px-1.5 font-mono text-[10px] text-emerald-500 hover:bg-emerald-500/15'>
-                LEADER
-            </Badge>
-        );
+    if (node.role === "manager" && node.leader) {
+        return <Badge className='h-4 border-0 bg-emerald-500/15 px-1.5 font-mono text-[10px] text-emerald-500 hover:bg-emerald-500/15'>LEADER</Badge>;
     }
-    if (node.role === 'manager') {
-        return (
-            <Badge className='h-4 border-0 bg-cyan-500/15 px-1.5 font-mono text-[10px] text-cyan-500 hover:bg-cyan-500/15'>
-                MANAGER
-            </Badge>
-        );
+    if (node.role === "manager") {
+        return <Badge className='h-4 border-0 bg-cyan-500/15 px-1.5 font-mono text-[10px] text-cyan-500 hover:bg-cyan-500/15'>MANAGER</Badge>;
     }
-    return (
-        <Badge className='h-4 border-0 bg-muted px-1.5 font-mono text-[10px] text-muted-foreground hover:bg-muted'>
-            WORKER
-        </Badge>
-    );
+    return <Badge className='h-4 border-0 bg-muted px-1.5 font-mono text-[10px] text-muted-foreground hover:bg-muted'>WORKER</Badge>;
 }
 
 function AvailabilityBadge({ availability }: { availability: string }) {
-    if (availability === 'drain') {
+    if (availability === "drain") {
         return <span className='font-mono text-[10px] font-medium text-orange-500'>DRAIN</span>;
     }
-    if (availability === 'pause') {
+    if (availability === "pause") {
         return <span className='font-mono text-[10px] font-medium text-amber-500'>PAUSE</span>;
     }
     return <span className='font-mono text-[10px] font-medium text-emerald-500'>ACTIVE</span>;
@@ -145,10 +130,10 @@ function createTestQueryClient() {
 }
 
 const mockAuth: AuthContextValue = {
-    user: { id: '1', name: 'Test', email: 'test@test.com', avatarUrl: '', provider: 'github' },
-    token: 'test-jwt',
+    user: { id: "1", name: "Test", email: "test@test.com", avatarUrl: "", provider: "github" },
+    token: "test-jwt",
     expiresAt: Math.floor(Date.now() / 1000) + 9999,
-    agentUrl: 'http://localhost:3000',
+    agentUrl: "http://localhost:3000",
     isLoading: false,
     login: vi.fn(),
     logout: vi.fn(),
@@ -158,13 +143,13 @@ function createTestRouter() {
     const rootRoute = createRootRoute({});
     const indexRoute = createRoute({
         getParentRoute: () => rootRoute,
-        path: '/',
+        path: "/",
         component: NodesTestComponent,
     });
     const routeTree = rootRoute.addChildren([indexRoute]);
     return createRouter({
         routeTree,
-        history: createMemoryHistory({ initialEntries: ['/'] }),
+        history: createMemoryHistory({ initialEntries: ["/"] }),
     });
 }
 
@@ -184,39 +169,39 @@ function renderWithProviders(authOverrides: Partial<AuthContextValue> = {}) {
 
 const sampleNodes: NodeItem[] = [
     {
-        id: 'node1',
-        hostname: 'manager-1',
-        role: 'manager',
-        status: 'ready',
-        availability: 'active',
-        engineVersion: '24.0.7',
-        os: 'linux',
-        architecture: 'x86_64',
-        ip: '10.0.0.1',
+        id: "node1",
+        hostname: "manager-1",
+        role: "manager",
+        status: "ready",
+        availability: "active",
+        engineVersion: "24.0.7",
+        os: "linux",
+        architecture: "x86_64",
+        ip: "10.0.0.1",
         leader: true,
         updatedAt: new Date().toISOString(),
     },
     {
-        id: 'node2',
-        hostname: 'worker-1',
-        role: 'worker',
-        status: 'ready',
-        availability: 'active',
-        engineVersion: '24.0.7',
-        os: 'linux',
-        architecture: 'aarch64',
-        ip: '10.0.0.2',
+        id: "node2",
+        hostname: "worker-1",
+        role: "worker",
+        status: "ready",
+        availability: "active",
+        engineVersion: "24.0.7",
+        os: "linux",
+        architecture: "aarch64",
+        ip: "10.0.0.2",
         leader: false,
         updatedAt: new Date().toISOString(),
     },
 ];
 
-describe('NodesList', () => {
+describe("NodesList", () => {
     beforeEach(() => {
         vi.clearAllMocks();
     });
 
-    it('shows loading skeleton initially', async () => {
+    it("shows loading skeleton initially", async () => {
         vi.mocked(invoke).mockImplementation(() => new Promise(() => {}));
         renderWithProviders();
 
@@ -226,144 +211,144 @@ describe('NodesList', () => {
         });
     });
 
-    it('renders node cards after loading', async () => {
+    it("renders node cards after loading", async () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === 'list_nodes') return { nodes: sampleNodes };
+            if (cmd === "list_nodes") return { nodes: sampleNodes };
             return undefined;
         });
 
         renderWithProviders();
 
         await waitFor(() => {
-            expect(screen.getByText('manager-1')).toBeInTheDocument();
+            expect(screen.getByText("manager-1")).toBeInTheDocument();
         });
 
-        expect(screen.getByText('worker-1')).toBeInTheDocument();
-        expect(screen.getByText('10.0.0.1')).toBeInTheDocument();
-        expect(screen.getByText('10.0.0.2')).toBeInTheDocument();
+        expect(screen.getByText("worker-1")).toBeInTheDocument();
+        expect(screen.getByText("10.0.0.1")).toBeInTheDocument();
+        expect(screen.getByText("10.0.0.2")).toBeInTheDocument();
 
         const cards = document.querySelectorAll('[data-testid="node-card"]');
         expect(cards.length).toBe(2);
     });
 
-    it('renders role badges correctly', async () => {
+    it("renders role badges correctly", async () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === 'list_nodes') return { nodes: sampleNodes };
+            if (cmd === "list_nodes") return { nodes: sampleNodes };
             return undefined;
         });
 
         renderWithProviders();
 
         await waitFor(() => {
-            expect(screen.getByText('LEADER')).toBeInTheDocument();
+            expect(screen.getByText("LEADER")).toBeInTheDocument();
         });
 
-        expect(screen.getByText('WORKER')).toBeInTheDocument();
+        expect(screen.getByText("WORKER")).toBeInTheDocument();
     });
 
-    it('shows empty state when no nodes', async () => {
+    it("shows empty state when no nodes", async () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === 'list_nodes') return { nodes: [] };
+            if (cmd === "list_nodes") return { nodes: [] };
             return undefined;
         });
 
         renderWithProviders();
 
         await waitFor(() => {
-            expect(screen.getByText('No nodes found')).toBeInTheDocument();
+            expect(screen.getByText("No nodes found")).toBeInTheDocument();
         });
     });
 
-    it('shows error state when fetch fails', async () => {
+    it("shows error state when fetch fails", async () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === 'list_nodes') throw new Error('network error');
+            if (cmd === "list_nodes") throw new Error("network error");
             return undefined;
         });
 
         renderWithProviders();
 
         await waitFor(() => {
-            expect(screen.getByText('Failed to load nodes')).toBeInTheDocument();
+            expect(screen.getByText("Failed to load nodes")).toBeInTheDocument();
         });
     });
 
-    it('does not fetch when auth is missing', () => {
+    it("does not fetch when auth is missing", () => {
         vi.mocked(invoke).mockImplementation(async () => ({ nodes: [] }));
 
         renderWithProviders({ token: null, agentUrl: null });
 
-        expect(invoke).not.toHaveBeenCalledWith('list_nodes', expect.anything());
+        expect(invoke).not.toHaveBeenCalledWith("list_nodes", expect.anything());
     });
 
-    it('renders LEADER badge for manager leader node', async () => {
+    it("renders LEADER badge for manager leader node", async () => {
         const leaderNode: NodeItem = {
-            id: 'leader-node',
-            hostname: 'leader-host',
-            role: 'manager',
-            status: 'ready',
-            availability: 'active',
-            engineVersion: '24.0.7',
-            os: 'linux',
-            architecture: 'x86_64',
-            ip: '10.0.0.10',
+            id: "leader-node",
+            hostname: "leader-host",
+            role: "manager",
+            status: "ready",
+            availability: "active",
+            engineVersion: "24.0.7",
+            os: "linux",
+            architecture: "x86_64",
+            ip: "10.0.0.10",
             leader: true,
             updatedAt: new Date().toISOString(),
         };
 
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === 'list_nodes') return { nodes: [leaderNode] };
+            if (cmd === "list_nodes") return { nodes: [leaderNode] };
             return undefined;
         });
 
         renderWithProviders();
 
         await waitFor(() => {
-            expect(screen.getByText('LEADER')).toBeInTheDocument();
+            expect(screen.getByText("LEADER")).toBeInTheDocument();
         });
     });
 
-    it('renders DRAIN availability badge', async () => {
+    it("renders DRAIN availability badge", async () => {
         const drainNode: NodeItem = {
-            id: 'drain-node',
-            hostname: 'drain-host',
-            role: 'worker',
-            status: 'ready',
-            availability: 'drain',
-            engineVersion: '24.0.7',
-            os: 'linux',
-            architecture: 'x86_64',
-            ip: '10.0.0.20',
+            id: "drain-node",
+            hostname: "drain-host",
+            role: "worker",
+            status: "ready",
+            availability: "drain",
+            engineVersion: "24.0.7",
+            os: "linux",
+            architecture: "x86_64",
+            ip: "10.0.0.20",
             leader: false,
             updatedAt: new Date().toISOString(),
         };
 
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === 'list_nodes') return { nodes: [drainNode] };
+            if (cmd === "list_nodes") return { nodes: [drainNode] };
             return undefined;
         });
 
         renderWithProviders();
 
         await waitFor(() => {
-            expect(screen.getByText('DRAIN')).toBeInTheDocument();
+            expect(screen.getByText("DRAIN")).toBeInTheDocument();
         });
     });
 
-    it('renders hostname and node info on card', async () => {
+    it("renders hostname and node info on card", async () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === 'list_nodes') return { nodes: [sampleNodes[0]] };
+            if (cmd === "list_nodes") return { nodes: [sampleNodes[0]] };
             return undefined;
         });
 
         renderWithProviders();
 
         await waitFor(() => {
-            expect(screen.getByText('manager-1')).toBeInTheDocument();
+            expect(screen.getByText("manager-1")).toBeInTheDocument();
         });
 
-        expect(screen.getByText('10.0.0.1')).toBeInTheDocument();
-        expect(screen.getByText('24.0.7')).toBeInTheDocument();
-        expect(screen.getByText('linux')).toBeInTheDocument();
-        expect(screen.getByText('x86_64')).toBeInTheDocument();
+        expect(screen.getByText("10.0.0.1")).toBeInTheDocument();
+        expect(screen.getByText("24.0.7")).toBeInTheDocument();
+        expect(screen.getByText("linux")).toBeInTheDocument();
+        expect(screen.getByText("x86_64")).toBeInTheDocument();
     });
 });

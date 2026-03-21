@@ -1,59 +1,47 @@
-import { createFileRoute } from '@tanstack/react-router';
-import { useNodes } from '@/hooks/use-nodes';
-import { useClusterMetrics } from '@/hooks/use-cluster-metrics';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Progress } from '@/components/ui/progress';
-import { Skeleton } from '@/components/ui/skeleton';
-import { PageHeader } from '@/components/page-header';
-import { NodeActions } from '@/components/node-actions';
-import { AlertCircle, AlertTriangle, Search, Server } from 'lucide-react';
-import { useMemo, useState } from 'react';
-import type { NodeItem } from '@/types/nodes';
-import type { AgentMetricsSnapshot } from '@/types/metrics';
+import { createFileRoute } from "@tanstack/react-router";
+import { useNodes } from "@/hooks/use-nodes";
+import { useClusterMetrics } from "@/hooks/use-cluster-metrics";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
+import { Skeleton } from "@/components/ui/skeleton";
+import { PageHeader } from "@/components/page-header";
+import { NodeActions } from "@/components/node-actions";
+import { AlertCircle, AlertTriangle, Search, Server } from "lucide-react";
+import { useMemo, useState } from "react";
+import type { NodeItem } from "@/types/nodes";
+import type { AgentMetricsSnapshot } from "@/types/metrics";
 
 function formatBytes(bytes: number): string {
-    if (bytes === 0) return '0 B';
+    if (bytes === 0) return "0 B";
     const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    const sizes = ["B", "KB", "MB", "GB", "TB"];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
 }
 
 function metricsColorClass(pct: number): string {
-    if (pct >= 85) return 'text-destructive';
-    if (pct >= 60) return 'text-amber-500';
-    return 'text-success';
+    if (pct >= 85) return "text-destructive";
+    if (pct >= 60) return "text-amber-500";
+    return "text-success";
 }
 
 function RoleBadges({ node }: { node: NodeItem }) {
-    if (node.role === 'manager' && node.leader) {
-        return (
-            <Badge className='h-4 border-0 bg-emerald-500/15 px-1.5 font-mono text-[10px] text-emerald-500 hover:bg-emerald-500/15'>
-                LEADER
-            </Badge>
-        );
+    if (node.role === "manager" && node.leader) {
+        return <Badge className='h-4 border-0 bg-emerald-500/15 px-1.5 font-mono text-[10px] text-emerald-500 hover:bg-emerald-500/15'>LEADER</Badge>;
     }
-    if (node.role === 'manager') {
-        return (
-            <Badge className='h-4 border-0 bg-cyan-500/15 px-1.5 font-mono text-[10px] text-cyan-500 hover:bg-cyan-500/15'>
-                MANAGER
-            </Badge>
-        );
+    if (node.role === "manager") {
+        return <Badge className='h-4 border-0 bg-cyan-500/15 px-1.5 font-mono text-[10px] text-cyan-500 hover:bg-cyan-500/15'>MANAGER</Badge>;
     }
-    return (
-        <Badge className='h-4 border-0 bg-muted px-1.5 font-mono text-[10px] text-muted-foreground hover:bg-muted'>
-            WORKER
-        </Badge>
-    );
+    return <Badge className='h-4 border-0 bg-muted px-1.5 font-mono text-[10px] text-muted-foreground hover:bg-muted'>WORKER</Badge>;
 }
 
 function AvailabilityBadge({ availability }: { availability: string }) {
-    if (availability === 'drain') {
+    if (availability === "drain") {
         return <span className='font-mono text-[10px] font-medium text-orange-500'>DRAIN</span>;
     }
-    if (availability === 'pause') {
+    if (availability === "pause") {
         return <span className='font-mono text-[10px] font-medium text-amber-500'>PAUSE</span>;
     }
     return <span className='font-mono text-[10px] font-medium text-emerald-500'>ACTIVE</span>;
@@ -73,7 +61,7 @@ function MetricsBar({ label, percent, detail }: { label: string; percent: number
 }
 
 function NodeCard({ node, metrics }: { node: NodeItem; metrics?: AgentMetricsSnapshot }) {
-    const isUnhealthy = node.status !== 'ready';
+    const isUnhealthy = node.status !== "ready";
     const containerCount = metrics?.containers.length ?? 0;
 
     return (
@@ -94,9 +82,7 @@ function NodeCard({ node, metrics }: { node: NodeItem; metrics?: AgentMetricsSna
             {isUnhealthy && (
                 <div className='flex items-center gap-2 rounded bg-amber-500/10 px-3 py-2'>
                     <AlertTriangle className='size-3.5 text-amber-500' />
-                    <span className='font-mono text-[11px] font-medium text-amber-500'>
-                        Node status: {node.status}
-                    </span>
+                    <span className='font-mono text-[11px] font-medium text-amber-500'>Node status: {node.status}</span>
                 </div>
             )}
 
@@ -123,11 +109,7 @@ function NodeCard({ node, metrics }: { node: NodeItem; metrics?: AgentMetricsSna
             {/* Metrics */}
             {metrics ? (
                 <div className='flex flex-col gap-2 border-t border-border pt-3'>
-                    <MetricsBar
-                        label='CPU'
-                        percent={metrics.node.cpuPercent}
-                        detail={`${metrics.node.cpus} cores`}
-                    />
+                    <MetricsBar label='CPU' percent={metrics.node.cpuPercent} detail={`${metrics.node.cpus} cores`} />
                     <MetricsBar
                         label='MEM'
                         percent={metrics.node.memoryPercent}
@@ -143,7 +125,7 @@ function NodeCard({ node, metrics }: { node: NodeItem; metrics?: AgentMetricsSna
             {/* Container count */}
             <div className='border-t border-border pt-2'>
                 <span className='font-mono text-[11px] text-muted-foreground'>
-                    {containerCount} {containerCount === 1 ? 'container' : 'containers'}
+                    {containerCount} {containerCount === 1 ? "container" : "containers"}
                 </span>
             </div>
         </div>
@@ -190,7 +172,7 @@ function LoadingSkeleton() {
 function NodesPage() {
     const { data: nodes, isLoading, error } = useNodes();
     const { data: metricsData } = useClusterMetrics();
-    const [search, setSearch] = useState('');
+    const [search, setSearch] = useState("");
 
     const metricsMap = useMemo(() => {
         const map: Record<string, AgentMetricsSnapshot> = {};
@@ -222,7 +204,7 @@ function NodesPage() {
     }
 
     const nodeCount = nodes?.length ?? 0;
-    const subtitle = `${nodeCount} ${nodeCount === 1 ? 'node' : 'nodes'} · Docker Swarm cluster`;
+    const subtitle = `${nodeCount} ${nodeCount === 1 ? "node" : "nodes"} · Docker Swarm cluster`;
 
     return (
         <div className='flex h-full flex-col gap-6 p-6'>
@@ -250,7 +232,7 @@ function NodesPage() {
             {filtered.length === 0 ? (
                 <div className='flex flex-col items-center justify-center gap-1.5 py-12 text-xs text-muted-foreground'>
                     <Server className='size-4' />
-                    <p>{search ? 'No nodes match your filter' : 'No nodes found'}</p>
+                    <p>{search ? "No nodes match your filter" : "No nodes found"}</p>
                 </div>
             ) : (
                 <div className='flex flex-wrap gap-4'>
@@ -263,6 +245,6 @@ function NodesPage() {
     );
 }
 
-export const Route = createFileRoute('/_authenticated/nodes/')({
+export const Route = createFileRoute("/_authenticated/nodes/")({
     component: NodesPage,
 });
