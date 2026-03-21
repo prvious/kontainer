@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
-import { useLogStream } from "@/hooks/use-log-stream";
+import { useServiceLogs } from "@/hooks/use-service-logs";
 import { LogEntryRow } from "@/components/logs/log-entry-row";
 
 const DEFAULT_OPTIONS = {
@@ -16,21 +16,21 @@ interface LogPanelProps {
 }
 
 export function LogPanel({ serviceId, visible, logFilter }: LogPanelProps) {
-    const { logs, status } = useLogStream(`/api/services/${serviceId}/logs`, DEFAULT_OPTIONS);
+    const { logs, status } = useServiceLogs(serviceId, DEFAULT_OPTIONS);
 
     const scrollRef = useRef<HTMLDivElement>(null);
 
     // Auto-scroll to bottom when new logs arrive
     useEffect(() => {
-        if (scrollRef.current) {
+        if (visible && scrollRef.current) {
             scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
         }
-    }, [logs]);
+    }, [logs, visible]);
 
     const filteredLogs = useMemo(() => {
         if (!logFilter) return logs;
         const lower = logFilter.toLowerCase();
-        return logs.filter((entry) => entry.line.toLowerCase().includes(lower));
+        return logs.filter((entry) => (entry.line ?? "").toLowerCase().includes(lower));
     }, [logs, logFilter]);
 
     const statusDotColor = {

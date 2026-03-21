@@ -61,7 +61,7 @@ function SkeletonRows() {
 export function StreamPickerDialog({ open, onOpenChange, onSelect, excludeServiceIds = [] }: StreamPickerDialogProps) {
     const [search, setSearch] = useState("");
 
-    const { data: services, isLoading } = useServices();
+    const { data: services, isLoading, error } = useServices();
 
     const filtered = useMemo(() => {
         if (!services) return [];
@@ -104,6 +104,11 @@ export function StreamPickerDialog({ open, onOpenChange, onSelect, excludeServic
                 <ScrollArea className='max-h-80'>
                     {isLoading ? (
                         <SkeletonRows />
+                    ) : error ? (
+                        <div className='px-4 py-8 text-center'>
+                            <p className='text-sm text-destructive'>Failed to load services</p>
+                            <p className='mt-1 text-xs text-muted-foreground'>Check your connection and try again</p>
+                        </div>
                     ) : !hasServices ? (
                         <div className='px-4 py-8 text-center'>
                             <p className='text-sm text-muted-foreground'>No services found</p>

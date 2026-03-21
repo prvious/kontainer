@@ -18,24 +18,29 @@ function LogsPage() {
     const [logFilter, setLogFilter] = useState("");
 
     function handleAddStream(service: { id: string; name: string }) {
-        const newStream: LogStream = {
-            id: crypto.randomUUID(),
-            serviceId: service.id,
-            serviceName: service.name,
-            color: TAB_COLORS[streams.length % TAB_COLORS.length],
-        };
-        setStreams((prev) => [...prev, newStream]);
-        setActiveStreamId(newStream.id);
+        const id = crypto.randomUUID();
+        setStreams((prev) => [
+            ...prev,
+            {
+                id,
+                serviceId: service.id,
+                serviceName: service.name,
+                color: TAB_COLORS[prev.length % TAB_COLORS.length],
+            },
+        ]);
+        setActiveStreamId(id);
         setPickerOpen(false);
     }
 
-    function handleCloseStream(id: string) {
+    function handleCloseStream(closeId: string) {
+        let nextStreams: LogStream[] = [];
         setStreams((prev) => {
-            const next = prev.filter((s) => s.id !== id);
-            if (activeStreamId === id) {
-                setActiveStreamId(next.length > 0 ? next[next.length - 1].id : null);
-            }
-            return next;
+            nextStreams = prev.filter((s) => s.id !== closeId);
+            return nextStreams;
+        });
+        setActiveStreamId((currentActive) => {
+            if (currentActive !== closeId) return currentActive;
+            return nextStreams.length > 0 ? nextStreams[nextStreams.length - 1].id : null;
         });
     }
 
