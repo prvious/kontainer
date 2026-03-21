@@ -234,7 +234,7 @@ describe("DashboardOverview", () => {
         renderWithProviders();
 
         await waitFor(() => {
-            expect(screen.getByText("RUNNING CONTAINERS")).toBeInTheDocument();
+            expect(screen.getByText("ALL CONTAINERS")).toBeInTheDocument();
         });
     });
 
