@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getRouteApi, useNavigate } from "@tanstack/react-router";
-import { Container, ChevronRight, Link as LinkIcon, Loader2, Shield } from "lucide-react";
+import { Container, ChevronRight, Link as LinkIcon, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useAuth } from "@/hooks/use-auth";
@@ -9,8 +9,6 @@ import { SetupWizard } from "@/components/setup-wizard";
 import { AuthenticatingScreen } from "@/components/authenticating-screen";
 
 const routeApi = getRouteApi("/login");
-
-type ConnectionStatus = "idle" | "connecting" | "online" | "offline" | "error";
 
 function GitHubIcon({ className }: { className?: string }) {
     return (
@@ -25,58 +23,41 @@ export function LoginScreen() {
     const navigate = useNavigate();
     const { redirect: redirectTo } = routeApi.useSearch();
     const [agentUrl, setAgentUrl] = useState("http://localhost:3000");
-    const [status, setStatus] = useState<ConnectionStatus>("idle");
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
-    const [providers, setProviders] = useState<string[]>([]);
+    const [isConnecting, setIsConnecting] = useState(false);
     const [authenticatingProvider, setAuthenticatingProvider] = useState<string | null>(null);
     const [setupRequired, setSetupRequired] = useState(false);
 
     function handleUrlChange(e: React.ChangeEvent<HTMLInputElement>) {
         setAgentUrl(e.target.value);
-        if (status !== "idle") {
-            setStatus("idle");
-            setErrorMessage(null);
-            setProviders([]);
-            setAuthenticatingProvider(null);
-        }
+        setErrorMessage(null);
     }
 
-    async function handleConnect(e: React.FormEvent) {
-        e.preventDefault();
+    async function handleConnectWithGithub() {
         const url = agentUrl.replace(/\/+$/, "");
-        setStatus("connecting");
+        setIsConnecting(true);
         setErrorMessage(null);
-        setProviders([]);
-        setAuthenticatingProvider(null);
 
+        // Step 1: Ping agent to check if it's reachable and if setup is needed
         try {
             const pingResult = await invoke<{ app: string; status: string }>("ping_agent", { url });
             if (pingResult.status === "setup_required") {
                 setSetupRequired(true);
+                setIsConnecting(false);
                 return;
             }
         } catch (err) {
-            setStatus("offline");
-            setErrorMessage(typeof err === "string" ? err : "Could not reach the cluster");
+            setIsConnecting(false);
+            setErrorMessage(typeof err === "string" ? err : "Could not reach the agent");
             return;
         }
 
-        setStatus("online");
+        // Step 2: Start OAuth directly with GitHub (skip fetch_providers)
+        setAuthenticatingProvider("github");
+        setIsConnecting(false);
 
         try {
-            const result = await invoke<string[]>("fetch_providers", { url });
-            setProviders(result);
-        } catch (err) {
-            setStatus("error");
-            setErrorMessage(typeof err === "string" ? err : "Failed to fetch auth providers");
-        }
-    }
-
-    async function handleProviderClick(provider: string) {
-        const url = agentUrl.replace(/\/+$/, "");
-        setAuthenticatingProvider(provider);
-        try {
-            await login(url, undefined, provider);
+            await login(url, undefined, "github");
             navigate({ to: redirectTo || "/" });
         } catch (err) {
             setErrorMessage(err instanceof Error ? err.message : "Authentication failed");
@@ -95,11 +76,9 @@ export function LoginScreen() {
                 agentUrl={agentUrl.replace(/\/+$/, "")}
                 onComplete={() => {
                     setSetupRequired(false);
-                    setStatus("idle");
                 }}
                 onBack={() => {
                     setSetupRequired(false);
-                    setStatus("idle");
                 }}
             />
         );
@@ -130,8 +109,8 @@ export function LoginScreen() {
                     <span className='font-mono text-xs font-medium text-text-secondary'>Connect to your infrastructure agent</span>
                 </div>
 
-                {/* Connect form */}
-                <form onSubmit={handleConnect} className='flex flex-col gap-4'>
+                {/* Agent URL + Connect with GitHub */}
+                <div className='flex flex-col gap-4'>
                     <label className='font-mono text-[10px] font-semibold tracking-[1px] text-muted-foreground'>AGENT URL</label>
                     <div className='relative'>
                         <LinkIcon className='absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-muted-foreground' />
@@ -140,59 +119,46 @@ export function LoginScreen() {
                             placeholder='https://agent.kontainer.dev'
                             value={agentUrl}
                             onChange={handleUrlChange}
-                            required
                             className='h-11 bg-bg-elevated pl-10 font-mono text-[13px]'
                         />
                     </div>
 
-                    {/* Error message */}
-                    {(status === "offline" || status === "error") && errorMessage && <p className='font-mono text-xs text-accent-red'>{errorMessage}</p>}
+                    {errorMessage && <p className='font-mono text-xs text-accent-red'>{errorMessage}</p>}
 
-                    {/* Provider buttons or Connect button */}
-                    {status === "online" && providers.length > 0 ? (
-                        <>
-                            <div className='flex items-center gap-3'>
-                                <div className='h-px flex-1 bg-border' />
-                                <span className='font-mono text-[10px] text-muted-foreground'>authenticate with</span>
-                                <div className='h-px flex-1 bg-border' />
-                            </div>
-                            {providers.map((provider) => {
-                                const ProviderIcon = provider === "github" ? GitHubIcon : Shield;
-                                return (
-                                    <Button
-                                        key={provider}
-                                        type='button'
-                                        onClick={() => handleProviderClick(provider)}
-                                        className='h-11 w-full gap-2 bg-primary font-medium text-primary-foreground hover:bg-primary/90'
-                                    >
-                                        <ProviderIcon className='size-4' />
-                                        Connect with {provider.charAt(0).toUpperCase() + provider.slice(1)}
-                                    </Button>
-                                );
-                            })}
-                        </>
-                    ) : (
-                        <Button type='submit' disabled={status === "connecting"} className='h-11 w-full'>
-                            {status === "connecting" ? (
-                                <>
-                                    <Loader2 className='size-4 animate-spin' />
-                                    Connecting...
-                                </>
-                            ) : status === "offline" || status === "error" ? (
-                                "Retry"
-                            ) : (
-                                "Connect"
-                            )}
-                        </Button>
-                    )}
-                </form>
+                    <div className='flex items-center gap-3'>
+                        <div className='h-px flex-1 bg-border' />
+                        <span className='font-mono text-[10px] text-muted-foreground'>authenticate with</span>
+                        <div className='h-px flex-1 bg-border' />
+                    </div>
+
+                    <Button
+                        type='button'
+                        disabled={isConnecting}
+                        onClick={handleConnectWithGithub}
+                        className='h-11 w-full gap-2 bg-primary font-medium text-primary-foreground hover:bg-primary/90'
+                    >
+                        {isConnecting ? (
+                            <>
+                                <Loader2 className='size-4 animate-spin' />
+                                Connecting...
+                            </>
+                        ) : (
+                            <>
+                                <GitHubIcon className='size-4' />
+                                Connect with GitHub
+                            </>
+                        )}
+                    </Button>
+                </div>
 
                 {/* Saved connections */}
                 {profiles.length > 0 && (
                     <div className='flex flex-col gap-3'>
                         <div className='flex items-center justify-between'>
                             <span className='font-mono text-[10px] font-semibold tracking-[1px] text-muted-foreground'>SAVED CONNECTIONS</span>
-                            <span className='rounded bg-bg-elevated px-2 py-0.5 font-mono text-[10px] text-muted-foreground'>{profiles.length} AGENTS</span>
+                            <span className='rounded bg-bg-elevated px-2 py-0.5 font-mono text-[10px] text-muted-foreground'>
+                                {profiles.length} AGENT{profiles.length !== 1 ? "S" : ""}
+                            </span>
                         </div>
                         <div className='overflow-hidden border border-border bg-bg-elevated'>
                             {profiles.map((profile, i) => (

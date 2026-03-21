@@ -1,10 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { ArrowLeft, CheckCircle2, Github, Key, Loader2 } from "lucide-react";
+import { ExternalLink, Github, Key, Loader2, Tag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 
 interface SetupWizardProps {
     agentUrl: string;
@@ -12,16 +11,14 @@ interface SetupWizardProps {
     onBack: () => void;
 }
 
-type Step = "token" | "github" | "confirm";
-
-const STEPS: Step[] = ["token", "github", "confirm"];
+type SetupStep = "token" | "app" | "done";
 
 export function SetupWizard({ agentUrl, onComplete, onBack }: SetupWizardProps) {
-    const [step, setStep] = useState<Step>("token");
+    const [appName, setAppName] = useState("kontainer-prod-app");
     const [setupToken, setSetupToken] = useState("");
     const [error, setError] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
-    const [githubOrg, setGithubOrg] = useState("");
+    const [activeStep, setActiveStep] = useState<SetupStep>("token");
     const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     useEffect(() => {
@@ -30,11 +27,11 @@ export function SetupWizard({ agentUrl, onComplete, onBack }: SetupWizardProps) 
         };
     }, []);
 
-    async function handleVerifyToken(e: React.FormEvent) {
-        e.preventDefault();
+    async function handleValidateAndStart() {
         setError(null);
         setIsLoading(true);
 
+        // Step 1: Verify setup token
         try {
             const result = await invoke<{ step: string }>("setup_verify_token", {
                 url: agentUrl,
@@ -42,30 +39,31 @@ export function SetupWizard({ agentUrl, onComplete, onBack }: SetupWizardProps) 
             });
 
             if (result.step === "github_connected") {
-                setStep("confirm");
-            } else {
-                setStep("github");
+                // Already connected — complete setup
+                setActiveStep("done");
+                await invoke("setup_complete", { url: agentUrl, token: setupToken });
+                setIsLoading(false);
+                onComplete();
+                return;
             }
         } catch (err) {
-            setError(typeof err === "string" ? err : "Failed to verify token");
-        } finally {
             setIsLoading(false);
+            setError(typeof err === "string" ? err : "Invalid setup token");
+            return;
         }
-    }
 
-    async function handleConnectGithub() {
-        setError(null);
-        setIsLoading(true);
-
+        // Step 2: Start GitHub App manifest flow
+        setActiveStep("app");
         try {
             const result = await invoke<{ setupUrl: string }>("setup_github_connect", {
                 url: agentUrl,
                 token: setupToken,
-                org: githubOrg.trim() || null,
+                org: null,
             });
 
             await openUrl(result.setupUrl);
 
+            // Step 3: Poll for completion
             pollingRef.current = setInterval(async () => {
                 try {
                     const status = await invoke<{ step: string }>("setup_verify_token", {
@@ -75,8 +73,11 @@ export function SetupWizard({ agentUrl, onComplete, onBack }: SetupWizardProps) 
                     if (status.step === "github_connected") {
                         if (pollingRef.current) clearInterval(pollingRef.current);
                         pollingRef.current = null;
+                        setActiveStep("done");
+
+                        await invoke("setup_complete", { url: agentUrl, token: setupToken });
                         setIsLoading(false);
-                        setStep("confirm");
+                        onComplete();
                     }
                 } catch {
                     // Keep polling
@@ -84,153 +85,126 @@ export function SetupWizard({ agentUrl, onComplete, onBack }: SetupWizardProps) 
             }, 2000);
         } catch (err) {
             setIsLoading(false);
+            setActiveStep("token");
             setError(typeof err === "string" ? err : "Failed to start GitHub setup");
         }
     }
 
-    async function handleComplete() {
-        setError(null);
-        setIsLoading(true);
+    const steps: { id: SetupStep; label: string; icon: typeof Key }[] = [
+        { id: "token", label: "Setup Token", icon: Key },
+        { id: "app", label: "Create App", icon: Github },
+        { id: "done", label: "Retrieve Token", icon: Tag },
+    ];
 
-        try {
-            await invoke("setup_complete", {
-                url: agentUrl,
-                token: setupToken,
-            });
-            onComplete();
-        } catch (err) {
-            setIsLoading(false);
-            setError(typeof err === "string" ? err : "Failed to complete setup");
-        }
-    }
-
-    const currentStepIndex = STEPS.indexOf(step);
+    const currentIdx = steps.findIndex((s) => s.id === activeStep);
 
     return (
-        <div className='flex h-screen p-2 pt-10'>
-            <div data-tauri-drag-region className='grain flex flex-1 flex-col items-center justify-center overflow-hidden rounded-xl bg-background shadow-sm'>
-                <div className='w-full max-w-sm px-6'>
-                    <button type='button' onClick={onBack} className='mb-4 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground'>
-                        <ArrowLeft className='size-3' />
-                        Back
-                    </button>
+        <div className='flex flex-1 items-center justify-center'>
+            <div className='flex w-[560px] flex-col gap-7 border border-border bg-card px-10 pt-10 pb-8'>
+                {/* Badge */}
+                <span className='w-fit rounded border border-accent-orange bg-accent-orange-20 px-2.5 py-1 font-mono text-[10px] font-semibold text-accent-orange'>
+                    FIRST-TIME SETUP
+                </span>
 
-                    <h1 className='text-lg font-semibold'>Agent Setup</h1>
-                    <p className='mt-1 text-sm text-muted-foreground'>{agentUrl}</p>
+                {/* Title */}
+                <h1 className='text-[22px] font-bold text-foreground'>Create your GitHub App manifest</h1>
 
-                    {/* Step indicators */}
-                    <div className='mt-4 flex items-center gap-2'>
-                        {STEPS.map((s, i) => (
-                            <div key={s} className='flex items-center gap-2'>
-                                {i > 0 && <div className='h-px w-4 bg-border' />}
-                                <div
-                                    className={`flex size-6 items-center justify-center rounded-full text-xs font-medium ${
-                                        step === s
-                                            ? 'bg-primary text-primary-foreground'
-                                            : currentStepIndex > i
-                                              ? 'bg-primary/20 text-primary'
-                                              : 'bg-muted text-muted-foreground'
-                                    }`}
-                                >
-                                    {currentStepIndex > i ? <CheckCircle2 className='size-3.5' /> : i + 1}
-                                </div>
-                            </div>
-                        ))}
+                {/* Description */}
+                <p className='font-mono text-xs leading-relaxed font-medium text-text-secondary'>
+                    Kontainer will open your browser to GitHub so you can create the app in your organization. Before that, you must confirm the agent-generated
+                    setup token so nobody with the URL can hijack the cluster.
+                </p>
+
+                {/* Inputs */}
+                <div className='flex flex-col gap-3.5'>
+                    <label className='font-mono text-[10px] font-semibold tracking-[1px] text-muted-foreground'>GITHUB APP NAME</label>
+                    <div className='relative'>
+                        <Tag className='absolute top-1/2 left-4 size-4 -translate-y-1/2 text-muted-foreground' />
+                        <Input
+                            type='text'
+                            value={appName}
+                            onChange={(e) => setAppName(e.target.value)}
+                            disabled={isLoading}
+                            className='h-11 bg-bg-elevated pl-11 font-mono text-[13px]'
+                        />
                     </div>
 
-                    {/* Step 1: Token */}
-                    {step === "token" && (
-                        <form onSubmit={handleVerifyToken} className='mt-6'>
-                            <p className='mb-4 text-sm text-muted-foreground'>Enter the setup token shown in your agent's logs.</p>
-                            <Label htmlFor='setup-token' className='mb-2'>
-                                Setup Token
-                            </Label>
-                            <div className='relative'>
-                                <Input
-                                    id='setup-token'
-                                    type='text'
-                                    placeholder='ktsetup_...'
-                                    value={setupToken}
-                                    onChange={(e) => setSetupToken(e.target.value)}
-                                    required
-                                    className='h-9 pr-9 font-mono text-sm'
-                                />
-                                <div className='absolute top-1/2 right-3 -translate-y-1/2'>
-                                    <Key className='size-3.5 text-muted-foreground' />
-                                </div>
-                            </div>
-                            {error && <p className='mt-2 text-xs text-destructive'>{error}</p>}
-                            <Button type='submit' disabled={isLoading} size='sm' className='mt-3 w-full'>
-                                {isLoading ? (
-                                    <>
-                                        <Loader2 className='size-3.5 animate-spin' />
-                                        Verifying...
-                                    </>
-                                ) : (
-                                    "Verify"
-                                )}
-                            </Button>
-                        </form>
-                    )}
-
-                    {/* Step 2: GitHub */}
-                    {step === "github" && (
-                        <div className='mt-6'>
-                            <p className='mb-4 text-sm text-muted-foreground'>Connect a GitHub account or organization to manage access to this agent.</p>
-                            <div className='mb-4'>
-                                <Label htmlFor='github-org' className='mb-2'>
-                                    Organization <span className='text-muted-foreground'>(optional)</span>
-                                </Label>
-                                <Input
-                                    id='github-org'
-                                    type='text'
-                                    placeholder='Leave blank for personal account'
-                                    value={githubOrg}
-                                    onChange={(e) => setGithubOrg(e.target.value)}
-                                    disabled={isLoading}
-                                    className='h-9 font-mono text-sm'
-                                />
-                            </div>
-                            {error && <p className='mb-2 text-xs text-destructive'>{error}</p>}
-                            <Button type='button' variant='outline' size='sm' disabled={isLoading} onClick={handleConnectGithub} className='w-full'>
-                                {isLoading ? (
-                                    <>
-                                        <Loader2 className='size-3.5 animate-spin' />
-                                        Waiting for GitHub...
-                                    </>
-                                ) : (
-                                    <>
-                                        <Github className='size-4' />
-                                        Connect GitHub
-                                    </>
-                                )}
-                            </Button>
-                            {isLoading && <p className='mt-2 text-xs text-muted-foreground'>Complete the setup in your browser, then return here.</p>}
-                        </div>
-                    )}
-
-                    {/* Step 3: Confirm */}
-                    {step === "confirm" && (
-                        <div className='mt-6'>
-                            <div className='flex items-center gap-2 rounded-md border border-border bg-muted/50 p-3'>
-                                <CheckCircle2 className='size-4 text-success' />
-                                <span className='text-sm'>GitHub App connected</span>
-                            </div>
-                            <p className='mt-3 text-sm text-muted-foreground'>All members of the connected organization will be able to log in.</p>
-                            {error && <p className='mt-2 text-xs text-destructive'>{error}</p>}
-                            <Button type='button' size='sm' disabled={isLoading} onClick={handleComplete} className='mt-4 w-full'>
-                                {isLoading ? (
-                                    <>
-                                        <Loader2 className='size-3.5 animate-spin' />
-                                        Completing setup...
-                                    </>
-                                ) : (
-                                    "Complete Setup"
-                                )}
-                            </Button>
-                        </div>
-                    )}
+                    <label className='font-mono text-[10px] font-semibold tracking-[1px] text-muted-foreground'>SETUP TOKEN</label>
+                    <div className='relative'>
+                        <Key className='absolute top-1/2 left-4 size-4 -translate-y-1/2 text-muted-foreground' />
+                        <Input
+                            type='text'
+                            placeholder='kst_live_29f0-8d0z-1d7c'
+                            value={setupToken}
+                            onChange={(e) => setSetupToken(e.target.value)}
+                            disabled={isLoading}
+                            className='h-11 bg-bg-elevated pl-11 font-mono text-[13px]'
+                        />
+                    </div>
                 </div>
+
+                {/* Step indicators */}
+                <div className='flex items-center justify-center gap-6'>
+                    {steps.map((s, i) => {
+                        const isCompleted = i < currentIdx;
+                        const isCurrent = i === currentIdx;
+                        const Icon = s.icon;
+
+                        return (
+                            <div key={s.id} className='flex flex-col items-center gap-2'>
+                                <Icon
+                                    className={`size-5 ${
+                                        isCompleted ? "text-accent-green" : isCurrent ? 'animate-pulse text-accent-orange' : "text-muted-foreground"
+                                    }`}
+                                />
+                                <span
+                                    className={`font-mono text-[10px] font-semibold ${
+                                        isCompleted ? "text-accent-green" : isCurrent ? "text-accent-orange" : "text-muted-foreground"
+                                    }`}
+                                >
+                                    {s.label}
+                                </span>
+                            </div>
+                        );
+                    })}
+                </div>
+
+                {/* Helper text */}
+                <p className='text-center font-mono text-[11px] leading-relaxed text-muted-foreground'>
+                    Use the one-time setup token generated by the agent, then choose a unique app name for your org. GitHub will ask you to confirm permissions
+                    before redirecting back to the agent.
+                </p>
+
+                {/* Error */}
+                {error && <p className='text-center font-mono text-xs text-accent-red'>{error}</p>}
+
+                {/* Actions */}
+                <div className='flex items-center justify-center gap-3'>
+                    <Button variant='outline' size='sm' onClick={onBack} disabled={isLoading}>
+                        Cancel
+                    </Button>
+                    <Button
+                        size='sm'
+                        disabled={isLoading || !setupToken.trim()}
+                        onClick={handleValidateAndStart}
+                        className='gap-2 bg-primary text-primary-foreground hover:bg-primary/90'
+                    >
+                        {isLoading ? (
+                            <>
+                                <Loader2 className='size-3.5 animate-spin' />
+                                {activeStep === "app" ? "Waiting for GitHub..." : "Validating..."}
+                            </>
+                        ) : (
+                            <>
+                                <ExternalLink className='size-3.5' />
+                                Validate Token & Start
+                            </>
+                        )}
+                    </Button>
+                </div>
+
+                {/* Footer */}
+                <p className='text-center font-mono text-[10px] text-muted-foreground'>Manifest setup via {agentUrl}/github/app-manifest</p>
             </div>
         </div>
     );
