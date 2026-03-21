@@ -3,14 +3,11 @@ import { useState, useMemo } from "react";
 import { useImages } from "@/hooks/use-images";
 import { useRemoveImage } from "@/hooks/use-remove-image";
 import { usePruneImages } from "@/hooks/use-prune-images";
-import { useClusterMetrics } from "@/hooks/use-cluster-metrics";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Progress } from "@/components/ui/progress";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { PageHeader } from "@/components/page-header";
+import { TableShell } from "@/components/table-shell";
+import { ColumnHeaders } from "@/components/column-headers";
 import {
     AlertDialog,
     AlertDialogAction,
@@ -22,9 +19,9 @@ import {
     AlertDialogTitle,
     AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { AlertCircle, ChevronDown, Eraser, HardDrive, Search, Trash2 } from "lucide-react";
+import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group";
+import { AlertCircle, ChevronDown, HardDrive, Trash2 } from "lucide-react";
 import type { ImageItem } from "@/types/images";
 
 function formatBytes(bytes: number): string {
@@ -46,26 +43,119 @@ function formatRelativeTime(unix: number): string {
     return `${days}d ago`;
 }
 
+function shortId(id: string): string {
+    const raw = id.startsWith("sha256:") ? id.slice(7) : id;
+    return raw.slice(0, 12);
+}
+
+const IMAGE_COLUMNS = [
+    { label: "REPOSITORY" },
+    { label: "TAG", width: 100 },
+    { label: "IMAGE ID", width: 120 },
+    { label: "SIZE", width: 80, align: "right" as const },
+    { label: "NODE", width: 100 },
+    { label: "CREATED", width: 100, align: "right" as const },
+    { label: "", width: 60 },
+];
+
 function LoadingSkeleton() {
     return (
-        <div className='flex flex-col'>
-            <div className='flex h-10 items-center gap-3 border-b border-border px-3'>
-                <Skeleton className='h-4 w-14' />
-                <Skeleton className='h-4 w-8 rounded-full' />
-                <div className='flex-1' />
-                <Skeleton className='h-6 w-40' />
-                <Skeleton className='h-6 w-16' />
+        <div className='flex flex-col gap-6 p-6'>
+            <div className='flex items-center justify-between'>
+                <div className='flex flex-col gap-1'>
+                    <Skeleton className='h-7 w-24' />
+                    <Skeleton className='h-3 w-40' />
+                </div>
+                <Skeleton className='h-7 w-28' />
             </div>
-            <div className='space-y-0'>
-                {[1, 2, 3, 4, 5].map((i) => (
-                    <div key={i} className='flex items-center gap-3 border-b border-border px-3 py-2 last:border-0'>
-                        <Skeleton className='size-3' />
-                        <Skeleton className='h-3 w-36' />
-                        <Skeleton className='h-3 w-16' />
-                        <Skeleton className='h-3 w-14' />
-                        <Skeleton className='ml-auto h-3 w-14' />
-                    </div>
-                ))}
+            <div className='flex flex-col overflow-hidden border border-border'>
+                <div className='flex items-center justify-between border-b border-border px-4 py-3'>
+                    <Skeleton className='h-4 w-32' />
+                    <Skeleton className='h-7 w-48' />
+                </div>
+                <div className='space-y-0'>
+                    {[1, 2, 3, 4, 5].map((i) => (
+                        <div key={i} className='flex items-center gap-3 border-b border-border px-4 py-2.5 last:border-0'>
+                            <Skeleton className='h-3 w-40' />
+                            <Skeleton className='h-3 w-16' />
+                            <Skeleton className='h-3 w-24' />
+                            <Skeleton className='ml-auto h-3 w-14' />
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+interface ImageRowProps {
+    img: ImageItem;
+    onDelete: (img: ImageItem, force: boolean) => void;
+    onForceDelete: (img: ImageItem) => void;
+}
+
+function ImageRow({ img, onDelete, onForceDelete }: ImageRowProps) {
+    const fullTag = img.tags.length > 0 ? img.tags[0] : null;
+    const colonIdx = fullTag ? fullTag.lastIndexOf(":") : -1;
+    const repository = fullTag ? (colonIdx > 0 ? fullTag.slice(0, colonIdx) : fullTag) : "<none>";
+    const tag = fullTag && colonIdx > 0 ? fullTag.slice(colonIdx + 1) : null;
+
+    return (
+        <div className='flex items-center border-b border-border px-4 py-2.5 hover:bg-bg-elevated/50'>
+            <div style={{ flex: 1 }}>
+                <span className='font-mono text-xs'>{repository}</span>
+            </div>
+            <div style={{ width: 100 }}>
+                <span className='font-mono text-[11px] text-muted-foreground'>{tag ?? <span className='opacity-40'>—</span>}</span>
+            </div>
+            <div style={{ width: 120 }}>
+                <span className='truncate font-mono text-[11px] text-muted-foreground' title={img.id}>
+                    {shortId(img.id)}
+                </span>
+            </div>
+            <div style={{ width: 80 }} className='text-right'>
+                <span className='font-mono text-[11px] text-muted-foreground'>{formatBytes(img.size)}</span>
+            </div>
+            <div style={{ width: 100 }}>
+                <span className='font-mono text-[11px] text-muted-foreground'>{img.hostname}</span>
+            </div>
+            <div style={{ width: 100 }} className='text-right'>
+                <span className='font-mono text-[11px] text-muted-foreground'>{formatRelativeTime(img.created)}</span>
+            </div>
+            <div style={{ width: 60 }} className='flex items-center justify-end'>
+                <ButtonGroup>
+                    <AlertDialog>
+                        <AlertDialogTrigger render={<Button variant='destructive' size='xs' data-testid={`delete-${img.id}`} />}>
+                            Delete
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                            <AlertDialogHeader>
+                                <AlertDialogTitle>Delete image?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                    Remove <strong>{repository}</strong> from {img.hostname}. This will fail if the image is in use.
+                                </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => onDelete(img, false)} render={<Button variant='destructive' />}>
+                                    Delete
+                                </AlertDialogAction>
+                            </AlertDialogFooter>
+                        </AlertDialogContent>
+                    </AlertDialog>
+                    <ButtonGroupSeparator />
+                    <DropdownMenu>
+                        <DropdownMenuTrigger render={<Button variant='destructive' size='icon-xs' />}>
+                            <ChevronDown className='size-3' />
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align='end'>
+                            <DropdownMenuItem variant='destructive' onClick={() => onForceDelete(img)}>
+                                <Trash2 />
+                                Force Delete
+                            </DropdownMenuItem>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                </ButtonGroup>
             </div>
         </div>
     );
@@ -73,10 +163,8 @@ function LoadingSkeleton() {
 
 function ImagesPage() {
     const [search, setSearch] = useState("");
-    const [selected, setSelected] = useState<Set<string>>(new Set());
     const [forceDeleteTarget, setForceDeleteTarget] = useState<ImageItem | null>(null);
     const { data: imagesData, isLoading, error } = useImages();
-    const { data: metricsData } = useClusterMetrics();
     const removeImage = useRemoveImage();
     const pruneImages = usePruneImages();
 
@@ -89,40 +177,16 @@ function ImagesPage() {
         if (!search) return allImages;
         const q = search.toLowerCase();
         return allImages.filter(
-            (img) => img.tags.some((t) => t.toLowerCase().includes(q)) || img.id.toLowerCase().includes(q) || img.hostname.toLowerCase().includes(q),
+            (img) => img.tags.some((t) => t.toLowerCase().includes(q)) || img.hostname.toLowerCase().includes(q),
         );
     }, [allImages, search]);
-
-    const agents = metricsData?.agents ?? [];
-
-    function toggleSelect(key: string) {
-        setSelected((prev) => {
-            const next = new Set(prev);
-            if (next.has(key)) next.delete(key);
-            else next.add(key);
-            return next;
-        });
-    }
-
-    function toggleSelectAll() {
-        if (selected.size === filteredImages.length) {
-            setSelected(new Set());
-        } else {
-            setSelected(new Set(filteredImages.map((img) => `${img.nodeId}:${img.id}`)));
-        }
-    }
 
     function handleDelete(img: ImageItem, force: boolean) {
         removeImage.mutate({ imageId: img.id, nodeId: img.nodeId, force });
     }
 
-    function handleBulkDelete(force: boolean) {
-        for (const key of selected) {
-            const [nodeId, imageId] = key.split(":");
-            removeImage.mutate({ imageId, nodeId, force });
-        }
-        setSelected(new Set());
-    }
+    const nodeCount = imagesData?.nodes?.length ?? 0;
+    const subtitle = `${allImages.length} ${allImages.length === 1 ? "image" : "images"} across ${nodeCount} ${nodeCount === 1 ? "node" : "nodes"}`;
 
     if (isLoading) {
         return <LoadingSkeleton />;
@@ -138,215 +202,60 @@ function ImagesPage() {
     }
 
     return (
-        <div className='flex h-full flex-col'>
-            {/* Toolbar */}
-            <div className='flex h-10 shrink-0 items-center gap-3 border-b border-border px-3'>
-                <h1 className='text-xs font-semibold'>Images</h1>
-                <span className='rounded-md bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground'>{allImages.length}</span>
-                <div className='flex-1' />
-                <div className='relative'>
-                    <Search className='absolute top-1/2 left-2 size-3 -translate-y-1/2 text-muted-foreground' />
-                    <Input
-                        placeholder='Filter images...'
-                        value={search}
-                        onChange={(e) => setSearch(e.target.value)}
-                        className='h-6 w-48 rounded-sm border-border bg-transparent pl-7 text-[11px] focus-visible:ring-1'
-                    />
-                </div>
-                <AlertDialog>
-                    <AlertDialogTrigger render={<Button variant='ghost' size='sm' className='h-6 px-2 text-[11px]' />}>
-                        <Eraser className='size-3' />
-                        Prune
-                    </AlertDialogTrigger>
-                    <AlertDialogContent>
-                        <AlertDialogHeader>
-                            <AlertDialogTitle>Prune unused images?</AlertDialogTitle>
-                            <AlertDialogDescription>
-                                This will remove all unused images across all nodes to reclaim disk space. This action cannot be undone.
-                            </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                            <AlertDialogCancel>Cancel</AlertDialogCancel>
-                            <AlertDialogAction onClick={() => pruneImages.mutate()} render={<Button variant='destructive' />}>
-                                {pruneImages.isPending ? "Pruning..." : "Prune All"}
-                            </AlertDialogAction>
-                        </AlertDialogFooter>
-                    </AlertDialogContent>
-                </AlertDialog>
-            </div>
+        <div className='flex h-full flex-col gap-6 p-6'>
+            <PageHeader title='IMAGES' subtitle={subtitle}>
+                <Button variant='outline' size='sm' disabled className='h-7 font-mono text-[11px] text-muted-foreground'>
+                    PULL IMAGE
+                </Button>
+            </PageHeader>
 
-            <div className='flex-1 overflow-y-auto'>
-                {/* Storage cards */}
-                {agents.length > 0 && (
-                    <div className='border-b border-border px-3 py-2'>
-                        <div className='grid gap-2' style={{ gridTemplateColumns: `repeat(${Math.min(agents.length, 4)}, minmax(0, 1fr))` }}>
-                            {agents.map((agent) => (
-                                <Card key={agent.nodeId}>
-                                    <CardContent className='p-2'>
-                                        <div className='mb-1 flex items-center justify-between'>
-                                            <span className='truncate text-[11px] font-medium'>{agent.hostname}</span>
-                                            <span className='font-mono text-[10px] text-muted-foreground'>{Math.round(agent.node.diskPercent)}%</span>
-                                        </div>
-                                        <Progress value={agent.node.diskPercent} className='mb-1 h-1' />
-                                        <p className='text-[10px] text-muted-foreground'>
-                                            {formatBytes(agent.node.diskUsed)} / {formatBytes(agent.node.diskTotal)}
-                                        </p>
-                                    </CardContent>
-                                </Card>
-                            ))}
-                        </div>
-                    </div>
-                )}
-
-                {/* Bulk action bar */}
-                {selected.size > 0 && (
-                    <div className='flex items-center gap-3 border-b border-border bg-muted/30 px-3 py-1.5'>
-                        <span className='text-[11px] font-medium'>{selected.size} selected</span>
-                        <div className='ml-auto flex items-center gap-2'>
-                            <AlertDialog>
-                                <AlertDialogTrigger render={<Button variant='outline' size='sm' className='h-6 px-2 text-[11px]' />}>
-                                    <Trash2 className='size-3' />
-                                    Delete
-                                </AlertDialogTrigger>
-                                <AlertDialogContent>
-                                    <AlertDialogHeader>
-                                        <AlertDialogTitle>Delete {selected.size} images?</AlertDialogTitle>
-                                        <AlertDialogDescription>
-                                            This will remove the selected images. Images in use by containers will fail to delete.
-                                        </AlertDialogDescription>
-                                    </AlertDialogHeader>
-                                    <AlertDialogFooter>
-                                        <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                        <AlertDialogAction onClick={() => handleBulkDelete(false)} render={<Button variant='destructive' />}>
-                                            Delete
-                                        </AlertDialogAction>
-                                    </AlertDialogFooter>
-                                </AlertDialogContent>
-                            </AlertDialog>
-                            <AlertDialog>
-                                <AlertDialogTrigger render={<Button variant='destructive' size='sm' className='h-6 px-2 text-[11px]' />}>
-                                    <Trash2 className='size-3' />
-                                    Force
-                                </AlertDialogTrigger>
-                                <AlertDialogContent>
-                                    <AlertDialogHeader>
-                                        <AlertDialogTitle>Force delete {selected.size} images?</AlertDialogTitle>
-                                        <AlertDialogDescription>
-                                            This will forcefully remove the selected images, even if they are being used by containers. This may break running
-                                            containers.
-                                        </AlertDialogDescription>
-                                    </AlertDialogHeader>
-                                    <AlertDialogFooter>
-                                        <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                        <AlertDialogAction onClick={() => handleBulkDelete(true)} render={<Button variant='destructive' />}>
-                                            Force Delete
-                                        </AlertDialogAction>
-                                    </AlertDialogFooter>
-                                </AlertDialogContent>
-                            </AlertDialog>
-                            <Button variant='ghost' size='sm' className='h-6 px-2 text-[11px]' onClick={() => setSelected(new Set())}>
-                                Clear
-                            </Button>
-                        </div>
-                    </div>
-                )}
-
-                {/* Table */}
+            <TableShell
+                title='LOCAL IMAGES'
+                count={filteredImages.length}
+                searchValue={search}
+                onSearchChange={setSearch}
+                searchPlaceholder='Search images...'
+                filterSlot={
+                    <AlertDialog>
+                        <AlertDialogTrigger render={<Button variant='outline' size='sm' data-testid='prune-btn' className='h-7 font-mono text-[11px] text-muted-foreground' />}>
+                            PRUNE
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                            <AlertDialogHeader>
+                                <AlertDialogTitle>Prune unused images?</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                    This will remove all unused images across all nodes to reclaim disk space. This action cannot be undone.
+                                </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction onClick={() => pruneImages.mutate()} render={<Button variant='destructive' />}>
+                                    {pruneImages.isPending ? "Pruning..." : "Prune All"}
+                                </AlertDialogAction>
+                            </AlertDialogFooter>
+                        </AlertDialogContent>
+                    </AlertDialog>
+                }
+            >
+                <ColumnHeaders columns={IMAGE_COLUMNS} />
                 {filteredImages.length === 0 ? (
                     <div className='flex flex-col items-center justify-center gap-1.5 py-12 text-xs text-muted-foreground'>
                         <HardDrive className='size-4' />
                         <p>{search ? "No images match your filter" : "No images found"}</p>
                     </div>
                 ) : (
-                    <Table>
-                        <TableHeader>
-                            <TableRow className='bg-muted/40 hover:bg-muted/40'>
-                                <TableHead className='h-7 w-8'>
-                                    <Checkbox
-                                        checked={selected.size === filteredImages.length && filteredImages.length > 0}
-                                        onCheckedChange={toggleSelectAll}
-                                    />
-                                </TableHead>
-                                <TableHead className='h-7 text-[11px]'>Image</TableHead>
-                                <TableHead className='h-7 text-[11px]'>Size</TableHead>
-                                <TableHead className='h-7 text-[11px]'>Created</TableHead>
-                                <TableHead className='h-7 text-[11px]'>Node</TableHead>
-                                <TableHead className='h-7 w-20' />
-                            </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                            {filteredImages.map((img) => {
-                                const key = `${img.nodeId}:${img.id}`;
-                                const fullTag = img.tags.length > 0 ? img.tags[0] : null;
-                                const colonIdx = fullTag ? fullTag.lastIndexOf(":") : -1;
-                                const imageName = fullTag ? (colonIdx > 0 ? fullTag.slice(0, colonIdx) : fullTag) : "<none>";
-                                const imageTag = fullTag && colonIdx > 0 ? fullTag.slice(colonIdx + 1) : null;
-                                return (
-                                    <TableRow key={key}>
-                                        <TableCell className='py-1.5'>
-                                            <Checkbox checked={selected.has(key)} onCheckedChange={() => toggleSelect(key)} />
-                                        </TableCell>
-                                        <TableCell className='py-1.5'>
-                                            <div className='flex flex-col gap-0'>
-                                                <span className='text-xs font-medium'>{imageName}</span>
-                                                <span className='font-mono text-[10px] text-muted-foreground'>{imageTag ?? img.id}</span>
-                                            </div>
-                                        </TableCell>
-                                        <TableCell className='py-1.5'>
-                                            <span className='font-mono text-[11px] text-muted-foreground'>{formatBytes(img.size)}</span>
-                                        </TableCell>
-                                        <TableCell className='py-1.5'>
-                                            <span className='font-mono text-[11px] text-muted-foreground'>{formatRelativeTime(img.created)}</span>
-                                        </TableCell>
-                                        <TableCell className='py-1.5'>
-                                            <div className='flex flex-col gap-0'>
-                                                <span className='text-xs font-medium'>{img.hostname}</span>
-                                                <span className='font-mono text-[10px] text-muted-foreground'>{img.nodeId}</span>
-                                            </div>
-                                        </TableCell>
-                                        <TableCell className='py-1.5'>
-                                            <ButtonGroup>
-                                                <AlertDialog>
-                                                    <AlertDialogTrigger render={<Button variant='destructive' size='xs' />}>Delete</AlertDialogTrigger>
-                                                    <AlertDialogContent>
-                                                        <AlertDialogHeader>
-                                                            <AlertDialogTitle>Delete image?</AlertDialogTitle>
-                                                            <AlertDialogDescription>
-                                                                Remove <strong>{imageName}</strong> from {img.hostname}. This will fail if the image is in use.
-                                                            </AlertDialogDescription>
-                                                        </AlertDialogHeader>
-                                                        <AlertDialogFooter>
-                                                            <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                                            <AlertDialogAction
-                                                                onClick={() => handleDelete(img, false)}
-                                                                render={<Button variant='destructive' />}
-                                                            >
-                                                                Delete
-                                                            </AlertDialogAction>
-                                                        </AlertDialogFooter>
-                                                    </AlertDialogContent>
-                                                </AlertDialog>
-                                                <ButtonGroupSeparator />
-                                                <DropdownMenu>
-                                                    <DropdownMenuTrigger render={<Button variant='destructive' size='icon-xs' />}>
-                                                        <ChevronDown className='size-3' />
-                                                    </DropdownMenuTrigger>
-                                                    <DropdownMenuContent align='end'>
-                                                        <DropdownMenuItem variant='destructive' onClick={() => setForceDeleteTarget(img)}>
-                                                            <Trash2 />
-                                                            Force Delete
-                                                        </DropdownMenuItem>
-                                                    </DropdownMenuContent>
-                                                </DropdownMenu>
-                                            </ButtonGroup>
-                                        </TableCell>
-                                    </TableRow>
-                                );
-                            })}
-                        </TableBody>
-                    </Table>
+                    <div>
+                        {filteredImages.map((img) => (
+                            <ImageRow
+                                key={`${img.nodeId}:${img.id}`}
+                                img={img}
+                                onDelete={handleDelete}
+                                onForceDelete={setForceDeleteTarget}
+                            />
+                        ))}
+                    </div>
                 )}
-            </div>
+            </TableShell>
 
             {/* Force Delete confirmation dialog (controlled) */}
             <AlertDialog open={!!forceDeleteTarget} onOpenChange={(open) => !open && setForceDeleteTarget(null)}>
