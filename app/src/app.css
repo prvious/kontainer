@@ -18,13 +18,13 @@
     --popover: #0a0a0a;
     --popover-foreground: #ffffff;
 
-    /* Primary = accent green */
-    --primary: #00ff88;
-    --primary-foreground: #000000;
+    /* Primary = white buttons */
+    --primary: #ffffff;
+    --primary-foreground: #0c0c0c;
 
-    /* Secondary & muted */
-    --secondary: #1a1a1a;
-    --secondary-foreground: #ffffff;
+    /* Secondary = accent green */
+    --secondary: #00ff88;
+    --secondary-foreground: #0c0c0c;
     --muted: #141414;
     --muted-foreground: #6a6a6a;
     --accent: #141414;
@@ -36,7 +36,7 @@
     /* Borders & input */
     --border: #2f2f2f;
     --input: #2f2f2f;
-    --ring: #00ff88;
+    --ring: #ffffff;
 
     /* Charts */
     --chart-1: #00d4ff;
@@ -119,13 +119,13 @@
     --color-success-foreground: var(--success-foreground);
     --color-warning: var(--warning);
     --color-warning-foreground: var(--warning-foreground);
-    --radius-sm: calc(var(--radius) - 4px);
-    --radius-md: calc(var(--radius) - 2px);
-    --radius-lg: var(--radius);
-    --radius-xl: calc(var(--radius) + 4px);
-    --radius-2xl: calc(var(--radius) + 8px);
-    --radius-3xl: calc(var(--radius) + 12px);
-    --radius-4xl: calc(var(--radius) + 16px);
+    --radius-sm: 0px;
+    --radius-md: 0px;
+    --radius-lg: 0px;
+    --radius-xl: 0px;
+    --radius-2xl: 0px;
+    --radius-3xl: 0px;
+    --radius-4xl: 0px;
     --color-accent-green: var(--accent-green);
     --color-accent-green-20: var(--accent-green-20);
     --color-accent-cyan: var(--accent-cyan);
