@@ -98,22 +98,23 @@ export function useLogStream(path: string, options: LogOptions) {
             try {
                 const data = JSON.parse(ev.data);
                 if (data.error) {
+                    console.warn("[useLogStream] server error:", data.error);
                     setStatus("error");
                     return;
                 }
                 const entry: LogEntry = {
                     id: nextLogId++,
-                    stream: data.stream,
-                    timestamp: data.timestamp || "",
-                    line: data.line,
+                    stream: data.stream === "stderr" ? "stderr" : "stdout",
+                    timestamp: data.timestamp ?? "",
+                    line: typeof data.line === "string" ? data.line : String(data.line ?? ""),
                 };
                 if (isPausedRef.current) {
                     pauseBufferRef.current.push(entry);
                 } else {
                     appendLogs([entry]);
                 }
-            } catch {
-                // ignore malformed messages
+            } catch (err) {
+                console.warn("[useLogStream] failed to parse WebSocket message:", err);
             }
         };
 
