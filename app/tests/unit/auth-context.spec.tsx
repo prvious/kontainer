@@ -279,7 +279,7 @@ describe("AuthProvider", () => {
         consoleSpy.mockRestore();
     });
 
-    it("handles parse_auth_token failure gracefully", async () => {
+    it("rejects login when parse_auth_token fails", async () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_profiles") return emptyProfiles;
             if (cmd === "auth_listen") {
@@ -289,7 +289,6 @@ describe("AuthProvider", () => {
             if (cmd === "parse_auth_token") throw new Error("parse failed");
             return undefined;
         });
-        const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
         renderWithProvider();
         await act(async () => {});
@@ -299,9 +298,7 @@ describe("AuthProvider", () => {
         });
 
         expect(screen.getByTestId("user")).toHaveTextContent("none");
-        expect(consoleSpy).toHaveBeenCalledWith("Failed to handle auth token:", expect.any(Error));
-
-        consoleSpy.mockRestore();
+        expect(screen.getByTestId("loginError")).toHaveTextContent("parse failed");
     });
 
     it("rejects login promise on auth_listen error", async () => {
@@ -412,6 +409,30 @@ describe("AuthProvider", () => {
         expect(screen.getByTestId("user")).toHaveTextContent("Alice Dev");
         expect(screen.getByTestId("agentUrl")).toHaveTextContent("https://dev.example.com");
         expect(screen.getByTestId("activeProfileId")).toHaveTextContent("profile-2");
+    });
+
+    it("rejects login when check_auth fails after parse succeeds", async () => {
+        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+            if (cmd === "load_profiles") return emptyProfiles;
+            if (cmd === "auth_listen") {
+                tokenCallback?.({ payload: { token: "valid.jwt.token" } });
+                return undefined;
+            }
+            if (cmd === "parse_auth_token") return mockParsedToken;
+            if (cmd === "check_auth") throw "auth_failed";
+            return undefined;
+        });
+
+        renderWithProvider();
+        await act(async () => {});
+
+        await act(async () => {
+            screen.getByText("Login").click();
+        });
+
+        // login() should reject and the error should surface to the caller
+        expect(screen.getByTestId("user")).toHaveTextContent("none");
+        expect(screen.getByTestId("loginError")).toHaveTextContent("auth_failed");
     });
 
     it("removeProfile deletes a non-active profile", async () => {

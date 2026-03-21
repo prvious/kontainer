@@ -51,60 +51,55 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             const data = await invoke<StoredProfiles>("load_profiles");
             setProfiles(data.profiles);
             setActiveProfileId(data.activeProfileId);
-        } catch {
+        } catch (err) {
+            console.error("Failed to reload profiles after logout:", err);
             setProfiles([]);
             setActiveProfileId(null);
         }
     }, [clearState]);
 
     const handleToken = useCallback(async (jwt: string, loginAgentUrl: string) => {
+        // These MUST succeed — let errors propagate to caller
+        const parsed = await invoke<ParsedToken>("parse_auth_token", { token: jwt });
+        const authResponse = await invoke<CheckAuthResponse>("check_auth", {
+            url: loginAgentUrl,
+            token: jwt,
+        });
+
+        const profileId = crypto.randomUUID();
+        const label = pendingLabelRef.current;
+
+        setUser(authResponse.user);
+        setToken(jwt);
+        setExpiresAt(parsed.expiresAt);
+        setAgentUrl(loginAgentUrl);
+
         try {
-            // Step 1: Get expiry from JWT claims
-            const parsed = await invoke<ParsedToken>("parse_auth_token", { token: jwt });
-
-            // Step 2: Get user info from agent's /api/me
-            const authResponse = await invoke<CheckAuthResponse>("check_auth", {
-                url: loginAgentUrl,
-                token: jwt,
+            await invoke("save_profile", {
+                input: {
+                    id: profileId,
+                    label,
+                    agentUrl: loginAgentUrl,
+                    userId: authResponse.user.id,
+                    userName: authResponse.user.name,
+                    userEmail: authResponse.user.email,
+                    userAvatarUrl: authResponse.user.avatarUrl,
+                    userProvider: authResponse.user.provider,
+                    token: jwt,
+                    expiresAt: parsed.expiresAt,
+                },
             });
-
-            const profileId = crypto.randomUUID();
-            const label = pendingLabelRef.current;
-
-            setUser(authResponse.user);
-            setToken(jwt);
-            setExpiresAt(parsed.expiresAt);
-            setAgentUrl(loginAgentUrl);
-
-            try {
-                await invoke("save_profile", {
-                    input: {
-                        id: profileId,
-                        label,
-                        agentUrl: loginAgentUrl,
-                        userId: authResponse.user.id,
-                        userName: authResponse.user.name,
-                        userEmail: authResponse.user.email,
-                        userAvatarUrl: authResponse.user.avatarUrl,
-                        userProvider: authResponse.user.provider,
-                        token: jwt,
-                        expiresAt: parsed.expiresAt,
-                    },
-                });
-            } catch (err) {
-                console.error("Failed to save profile:", err);
-            }
-
-            // Reload profiles
-            try {
-                const data = await invoke<StoredProfiles>("load_profiles");
-                setProfiles(data.profiles);
-                setActiveProfileId(data.activeProfileId);
-            } catch {
-                setActiveProfileId(profileId);
-            }
         } catch (err) {
-            console.error("Failed to handle auth token:", err);
+            console.error("Failed to save profile:", err);
+        }
+
+        try {
+            const data = await invoke<StoredProfiles>("load_profiles");
+            setProfiles(data.profiles);
+            setActiveProfileId(data.activeProfileId);
+        } catch (err) {
+            console.error("Failed to reload profiles:", err);
+            setActiveProfileId(profileId);
         }
     }, []);
 
@@ -217,6 +212,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 }
             } catch (err) {
                 console.error("Failed to switch profile:", err);
+                throw err;
             }
         },
         [applyProfile],
