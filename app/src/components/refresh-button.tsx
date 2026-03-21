@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { useQueryClient, useIsFetching } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -9,15 +9,17 @@ interface RefreshButtonProps {
 
 export function RefreshButton({ queryKeys }: RefreshButtonProps) {
     const queryClient = useQueryClient();
-    const isFetching = useIsFetching({
-        predicate: (query) => queryKeys.some((key) => key.every((k, i) => query.queryKey[i] === k)),
-    });
+
+    const matchesKeys = useMemo(
+        () => (query: { queryKey: readonly unknown[] }) => queryKeys.some((key) => key.every((k, i) => query.queryKey[i] === k)),
+        [queryKeys],
+    );
+
+    const isFetching = useIsFetching({ predicate: matchesKeys });
 
     const handleRefresh = useCallback(() => {
-        for (const key of queryKeys) {
-            queryClient.invalidateQueries({ queryKey: key });
-        }
-    }, [queryClient, queryKeys]);
+        queryClient.invalidateQueries({ predicate: matchesKeys });
+    }, [queryClient, matchesKeys]);
 
     return (
         <Button variant='outline' size='sm' disabled={isFetching > 0} onClick={handleRefresh} className='h-7 font-mono text-[11px]'>
