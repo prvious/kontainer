@@ -135,7 +135,7 @@ export function LoginScreen() {
                         type='button'
                         disabled={isConnecting}
                         onClick={handleConnectWithGithub}
-                        className='h-11 w-full gap-2 bg-primary font-medium text-primary-foreground hover:bg-primary/90'
+                        className='h-11 w-full gap-2'
                     >
                         {isConnecting ? (
                             <>
