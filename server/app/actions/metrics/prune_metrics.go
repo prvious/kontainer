@@ -17,6 +17,6 @@ func NewPruneMetricsAction(retention time.Duration) *PruneMetricsAction {
 
 func (a *PruneMetricsAction) Execute() error {
 	cutoff := time.Now().Add(-a.retention).UTC()
-	_, err := facades.Orm().Query().Where("timestamp < ?", cutoff).Delete(&models.NodeMetric{})
+	_, err := facades.Orm().Query().Where("timestamp < ?", cutoff).Delete(&models.Metric{})
 	return err
 }

@@ -38,7 +38,7 @@ func (a *CollectAndStoreAction) Execute(ctx context.Context) {
 	if err != nil {
 		facades.Log().Errorf("metrics collector: local collect error: %v", err)
 	} else {
-		if err := a.persistNodeMetrics(localSnapshot); err != nil {
+		if err := a.persistMetrics(localSnapshot); err != nil {
 			facades.Log().Errorf("metrics collector: local insert error: %v", err)
 		}
 	}
@@ -52,20 +52,10 @@ func (a *CollectAndStoreAction) Execute(ctx context.Context) {
 			facades.Log().Errorf("metrics collector: follower %s (%s) error: %v", follower.NodeID, follower.Address, err)
 			continue
 		}
-		if err := a.persistNodeMetrics(snapshot); err != nil {
+		if err := a.persistMetrics(snapshot); err != nil {
 			facades.Log().Errorf("metrics collector: follower insert error: %v", err)
 		}
 	}
-}
-
-// NodeID returns the leader's node ID so callers can skip self in fan-out loops.
-func (a *CollectAndStoreAction) NodeID() string {
-	return a.nodeID
-}
-
-// CollectLocal gathers local metrics. Exported for reuse.
-func (a *CollectAndStoreAction) CollectLocal(ctx context.Context) (AgentMetricsSnapshot, error) {
-	return a.collectLocal(ctx)
 }
 
 func (a *CollectAndStoreAction) collectLocal(ctx context.Context) (AgentMetricsSnapshot, error) {
@@ -113,7 +103,7 @@ func (a *CollectAndStoreAction) FetchFollowerMetrics(ctx context.Context, addres
 			CPUs: int(resp.Node.Cpus), CPUPercent: resp.Node.CpuPercent,
 			MemoryTotal: uint64(resp.Node.MemoryTotal), MemoryUsed: uint64(resp.Node.MemoryUsed),
 			MemoryPercent: resp.Node.MemoryPercent,
-			DiskTotal: uint64(resp.Node.DiskTotal), DiskUsed: uint64(resp.Node.DiskUsed),
+			DiskTotal:     uint64(resp.Node.DiskTotal), DiskUsed: uint64(resp.Node.DiskUsed),
 			DiskPercent: resp.Node.DiskPercent,
 		}
 	}
@@ -130,12 +120,31 @@ func (a *CollectAndStoreAction) FetchFollowerMetrics(ctx context.Context, addres
 	return snapshot, nil
 }
 
-func (a *CollectAndStoreAction) persistNodeMetrics(s AgentMetricsSnapshot) error {
-	metric := &models.NodeMetric{
-		Timestamp: s.Timestamp, NodeID: s.NodeID, Hostname: s.Hostname,
-		CPUs: s.Node.CPUs, CPUPercent: s.Node.CPUPercent,
-		MemUsed: s.Node.MemoryUsed, MemTotal: s.Node.MemoryTotal, MemPercent: s.Node.MemoryPercent,
-		DiskUsed: s.Node.DiskUsed, DiskTotal: s.Node.DiskTotal, DiskPercent: s.Node.DiskPercent,
+func (a *CollectAndStoreAction) persistMetrics(s AgentMetricsSnapshot) error {
+	nodeRow := &models.Metric{
+		Timestamp: s.Timestamp, Kind: "node",
+		NodeID: s.NodeID, SubjectID: s.NodeID, SubjectName: s.Hostname,
+		CPUPercent: s.Node.CPUPercent,
+		MemUsed:    int64(s.Node.MemoryUsed), MemTotal: int64(s.Node.MemoryTotal), MemPercent: s.Node.MemoryPercent,
+		CPUs:     s.Node.CPUs,
+		DiskUsed: int64(s.Node.DiskUsed), DiskTotal: int64(s.Node.DiskTotal), DiskPercent: s.Node.DiskPercent,
 	}
-	return facades.Orm().Query().Create(metric)
+	if err := facades.Orm().Query().Create(nodeRow); err != nil {
+		return err
+	}
+
+	for _, c := range s.Containers {
+		row := &models.Metric{
+			Timestamp: s.Timestamp, Kind: "container",
+			NodeID: s.NodeID, SubjectID: c.ContainerID, SubjectName: c.Name,
+			CPUPercent: c.CPUPercent,
+			MemUsed:    c.MemoryUsed, MemTotal: c.MemoryLimit, MemPercent: c.MemoryPercent,
+			ServiceID: c.ServiceID,
+		}
+		if err := facades.Orm().Query().Create(row); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

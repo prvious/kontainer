@@ -55,7 +55,7 @@ func (kernel *Kernel) Schedule() []schedule.Event {
 		}).EveryTenSeconds().SkipIfStillRunning())
 	}
 
-	// Metrics collection (every 30s) and pruning (every 5min)
+	// Metrics collection (every 60s) and pruning (every 5min)
 	collectorInstance, err := facades.App().Make("metrics.collector")
 	if err != nil {
 		facades.Log().Errorf("console kernel: failed to resolve metrics.collector: %v", err)
@@ -69,7 +69,7 @@ func (kernel *Kernel) Schedule() []schedule.Event {
 
 	events = append(events, facades.Schedule().Call(func() {
 		collector.Execute(context.Background())
-	}).EveryThirtySeconds().SkipIfStillRunning())
+	}).EveryMinute().SkipIfStillRunning())
 
 	prunerInstance, err := facades.App().Make("metrics.pruner")
 	if err != nil {

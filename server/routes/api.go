@@ -147,16 +147,9 @@ func Api() {
 			router.Delete("configs/{configID}", configControllers.NewRemoveConfigController(configActions.NewRemoveConfigAction(orchestrator)).Handle)
 		}
 
-		// Metrics
-		collector, collectorOk := resolve[*metricsActions.CollectAndStoreAction]("metrics.collector")
-		if collectorOk && registry != nil {
-			router.Get("metrics", metricsControllers.NewClusterMetricsController(metricsActions.NewGetClusterMetricsAction(collector, registry)).Handle)
-			router.Get("metrics/{nodeID}", metricsControllers.NewNodeMetricsController(metricsActions.NewGetNodeMetricsAction(collector, registry, leaderNodeID)).Handle)
-		} else {
-			metricsUnavailable := unavailableHandler("metrics unavailable")
-			router.Get("metrics", metricsUnavailable)
-			router.Get("metrics/{nodeID}", metricsUnavailable)
-		}
+		// Metrics (DB-only — no live collection dependencies)
+		router.Get("metrics", metricsControllers.NewClusterMetricsController(metricsActions.NewGetClusterMetricsAction()).Handle)
+		router.Get("metrics/{nodeID}", metricsControllers.NewNodeMetricsController(metricsActions.NewGetNodeMetricsAction()).Handle)
 
 		// Images
 		if orchestrator != nil && registry != nil && pool != nil {
