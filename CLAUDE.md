@@ -24,6 +24,9 @@ This project has domain-specific skills available. You MUST activate the relevan
 - `goravel-http` - Activates when building routes, controllers, middleware, request validation, request parsing, or HTTP responses.
 - `goravel-integrations` - Activates when working with gRPC, outbound HTTP clients, filesystem/storage, mail, or localization.
 - `vitest-tauri-testing` - Activates for frontend tests that mock Tauri IPC, events, windows, or other native-layer integrations.
+- `tanstack-query-best-practices` - Activates when building data-driven React components that fetch, cache, or mutate server state with TanStack Query.
+- `tanstack-router-best-practices` - Activates when adding or modifying routes, loaders, search params, or navigation logic with TanStack Router.
+- `react-useeffect` - Activates when writing or reviewing useEffect, deriving state from props, syncing with external systems, or deciding whether an Effect is the right tool.
 
 ## Hard Rules
 
@@ -36,6 +39,7 @@ This project has domain-specific skills available. You MUST activate the relevan
 
 ## UI Rules
 
+- For ANY React work, you MUST load `react-useeffect`, `tanstack-query-best-practices`, and `tanstack-router-best-practices` skills before writing code. No exceptions.
 - For UI work, load the `frontend-ui` skill before writing code.
 - Use Shadcn UI components whenever an equivalent exists.
 - If a needed Shadcn component is missing, install it with the Shadcn CLI, then use it.
@@ -71,6 +75,7 @@ Use the action-per-file pattern for discrete operations.
 - Keep Rust and TypeScript types in sync for any data crossing the Tauri boundary.
 - For serialized Rust structs sent to TypeScript, use `#[serde(rename_all = "camelCase")]` unless a sibling pattern clearly differs.
 - Session state is stored locally in `session.json` via `tauri-plugin-store`.
+- Always use TanStack Query to call Tauri commands from React — wrap `invoke` calls in `useQuery`/`useMutation` hooks instead of calling them directly in components or effects.
 
 ## Architecture Notes
 
