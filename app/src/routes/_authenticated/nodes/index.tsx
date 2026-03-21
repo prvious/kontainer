@@ -1,5 +1,4 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useQueryClient } from "@tanstack/react-query";
 import { useNodes } from "@/hooks/use-nodes";
 import { useClusterMetrics } from "@/hooks/use-cluster-metrics";
 import { Badge } from "@/components/ui/badge";
@@ -9,7 +8,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/page-header";
 import { TableToolbar } from "@/components/table-toolbar";
 import { NodeActions } from "@/components/node-actions";
-import { AlertCircle, AlertTriangle, RefreshCw, Server } from "lucide-react";
+import { RefreshButton } from "@/components/refresh-button";
+import { AlertCircle, AlertTriangle, Server } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { NodeItem } from "@/types/nodes";
 import type { AgentMetricsSnapshot } from "@/types/metrics";
@@ -171,7 +171,6 @@ function LoadingSkeleton() {
 }
 
 function NodesPage() {
-    const queryClient = useQueryClient();
     const { data: nodes, isLoading, error } = useNodes();
     const { data: metricsData } = useClusterMetrics();
     const [search, setSearch] = useState("");
@@ -211,18 +210,7 @@ function NodesPage() {
     return (
         <div className='flex h-full flex-col gap-6 p-6'>
             <PageHeader title='NODES' subtitle={subtitle}>
-                <Button
-                    variant='outline'
-                    size='sm'
-                    className='h-7 font-mono text-[11px]'
-                    onClick={() => {
-                        queryClient.invalidateQueries({ queryKey: ["nodes"] });
-                        queryClient.invalidateQueries({ queryKey: ["cluster-metrics"] });
-                    }}
-                >
-                    <RefreshCw className='size-3.5' />
-                    REFRESH
-                </Button>
+                <RefreshButton queryKeys={[["nodes"], ["cluster-metrics"]]} />
                 <Button variant='outline' size='sm' disabled className='h-7 font-mono text-[11px] text-muted-foreground'>
                     ADD NODE
                 </Button>

@@ -1,5 +1,4 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useQueryClient } from "@tanstack/react-query";
 import { useStacks } from "@/hooks/use-stacks";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,7 +8,8 @@ import { PageHeader } from "@/components/page-header";
 import { TableShell } from "@/components/table-shell";
 import { TableToolbar } from "@/components/table-toolbar";
 import { ColumnHeaders } from "@/components/column-headers";
-import { AlertCircle, ArrowUpRight, Layers, Plus, RefreshCw } from "lucide-react";
+import { RefreshButton } from "@/components/refresh-button";
+import { AlertCircle, ArrowUpRight, Layers, Plus } from "lucide-react";
 import { useState } from "react";
 import type { StackItem } from "@/types/stacks";
 
@@ -123,7 +123,6 @@ function LoadingSkeleton() {
 }
 
 export function StacksPage() {
-    const queryClient = useQueryClient();
     const { data: stacks, isLoading, error } = useStacks();
     const [search, setSearch] = useState("");
 
@@ -147,17 +146,7 @@ export function StacksPage() {
     return (
         <div className='flex h-full flex-col gap-6 overflow-y-auto p-6'>
             <PageHeader title='STACKS' subtitle={`${total} stacks · ${healthy} healthy`}>
-                <Button
-                    variant='outline'
-                    size='sm'
-                    className='h-7 font-mono text-[11px]'
-                    onClick={() => {
-                        queryClient.invalidateQueries({ queryKey: ["stacks"] });
-                    }}
-                >
-                    <RefreshCw className='size-3.5' />
-                    REFRESH
-                </Button>
+                <RefreshButton queryKeys={[["stacks"]]} />
                 <Button variant='ghost' size='sm' className='h-7 px-3 text-[11px]' disabled>
                     <Plus className='size-3' />
                     DEPLOY STACK

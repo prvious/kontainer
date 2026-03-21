@@ -1,5 +1,4 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useQueryClient } from "@tanstack/react-query";
 import { useNetworks } from "@/hooks/use-networks";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -7,7 +6,8 @@ import { PageHeader } from "@/components/page-header";
 import { TableShell } from "@/components/table-shell";
 import { TableToolbar } from "@/components/table-toolbar";
 import { ColumnHeaders } from "@/components/column-headers";
-import { AlertCircle, MoreHorizontal, Network, RefreshCw } from "lucide-react";
+import { RefreshButton } from "@/components/refresh-button";
+import { AlertCircle, MoreHorizontal, Network } from "lucide-react";
 import { useState } from "react";
 import type { NetworkItem } from "@/types/networks";
 
@@ -87,7 +87,6 @@ function LoadingSkeleton() {
 }
 
 function NetworksPage() {
-    const queryClient = useQueryClient();
     const { data: networks, isLoading, error } = useNetworks();
     const [search, setSearch] = useState("");
 
@@ -119,17 +118,7 @@ function NetworksPage() {
     return (
         <div className='flex h-full flex-col gap-6 p-6'>
             <PageHeader title='NETWORKS' subtitle={subtitle}>
-                <Button
-                    variant='outline'
-                    size='sm'
-                    className='h-7 font-mono text-[11px]'
-                    onClick={() => {
-                        queryClient.invalidateQueries({ queryKey: ["networks"] });
-                    }}
-                >
-                    <RefreshCw className='size-3.5' />
-                    REFRESH
-                </Button>
+                <RefreshButton queryKeys={[["networks"]]} />
                 <Button variant='outline' size='sm' disabled className='h-7 font-mono text-[11px] text-muted-foreground'>
                     CREATE NETWORK
                 </Button>
