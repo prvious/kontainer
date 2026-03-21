@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/goravel/framework/facades"
+
 	"github.com/prvious/kontainer/server/app/models"
 )
 
@@ -31,43 +32,42 @@ func (a *GetClusterMetricsAction) Execute(_ context.Context, rangeDuration time.
 }
 
 // latestSnapshots returns the most recent snapshot per node, including container metrics.
+// It queries node rows first, then fetches containers for the matched timestamps.
 func (a *GetClusterMetricsAction) latestSnapshots() ([]AgentMetricsSnapshot, error) {
 	cutoff := time.Now().Add(-2 * time.Minute).UTC()
-	var rows []models.Metric
+
+	// Step 1: Get latest node row per node_id.
+	var nodeRows []models.Metric
 	if err := facades.Orm().Query().
-		Where("timestamp >= ?", cutoff).
+		Where("kind = ? AND timestamp >= ?", models.MetricKindNode, cutoff).
 		OrderBy("timestamp", "desc").
-		Get(&rows); err != nil {
-		return nil, err
+		Limit(100).
+		Get(&nodeRows); err != nil {
+		return nil, fmt.Errorf("query latest node metrics: %w", err)
 	}
 
+	// Deduplicate: keep the most recent per node_id.
 	type nodeEntry struct {
 		snapshot AgentMetricsSnapshot
 		ts       time.Time
 	}
 	nodes := map[string]*nodeEntry{}
-	var containerRows []models.Metric
-
-	for _, r := range rows {
-		if r.Kind == "node" {
-			if existing, ok := nodes[r.NodeID]; ok {
-				if r.Timestamp.After(existing.ts) {
-					nodes[r.NodeID] = &nodeEntry{snapshot: nodeSnapshotFromRow(r), ts: r.Timestamp}
-				}
-			} else {
-				nodes[r.NodeID] = &nodeEntry{snapshot: nodeSnapshotFromRow(r), ts: r.Timestamp}
-			}
-		} else {
-			containerRows = append(containerRows, r)
+	for _, r := range nodeRows {
+		if _, ok := nodes[r.NodeID]; !ok {
+			nodes[r.NodeID] = &nodeEntry{snapshot: nodeSnapshotFromRow(r), ts: r.Timestamp}
 		}
 	}
 
-	for _, c := range containerRows {
-		entry, ok := nodes[c.NodeID]
-		if !ok {
-			continue
+	// Step 2: Fetch containers for those nodes' latest timestamps.
+	for nodeID, entry := range nodes {
+		var containerRows []models.Metric
+		if err := facades.Orm().Query().
+			Where("kind = ? AND node_id = ? AND timestamp = ?", models.MetricKindContainer, nodeID, entry.ts).
+			Limit(500).
+			Get(&containerRows); err != nil {
+			return nil, fmt.Errorf("query containers for node %s: %w", nodeID, err)
 		}
-		if c.Timestamp.Equal(entry.ts) {
+		for _, c := range containerRows {
 			entry.snapshot.Containers = append(entry.snapshot.Containers, containerMetricsFromRow(c))
 		}
 	}
@@ -83,10 +83,11 @@ func (a *GetClusterMetricsAction) latestSnapshots() ([]AgentMetricsSnapshot, err
 func (a *GetClusterMetricsAction) nodeHistory(since time.Time) ([]AgentMetricsSnapshot, error) {
 	var rows []models.Metric
 	if err := facades.Orm().Query().
-		Where("kind = ? AND timestamp >= ?", "node", since).
+		Where("kind = ? AND timestamp >= ?", models.MetricKindNode, since).
 		OrderBy("timestamp", "asc").
+		Limit(5000).
 		Get(&rows); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("query node history: %w", err)
 	}
 
 	history := make([]AgentMetricsSnapshot, 0, len(rows))

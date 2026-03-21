@@ -1,6 +1,11 @@
 package metrics
 
-import "time"
+import (
+	"errors"
+	"time"
+)
+
+var ErrNoRecentMetrics = errors.New("no recent metrics")
 
 type AgentMetricsSnapshot struct {
 	Timestamp  time.Time          `json:"timestamp"`

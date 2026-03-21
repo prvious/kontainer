@@ -6,6 +6,11 @@ import (
 	"github.com/goravel/framework/database/orm"
 )
 
+const (
+	MetricKindNode      = "node"
+	MetricKindContainer = "container"
+)
+
 type Metric struct {
 	orm.Model
 	Timestamp   time.Time `gorm:"not null" json:"timestamp"`

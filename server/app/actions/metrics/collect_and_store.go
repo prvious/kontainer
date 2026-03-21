@@ -2,8 +2,10 @@ package metrics
 
 import (
 	"context"
+	"fmt"
 	"time"
 
+	"github.com/goravel/framework/contracts/database/orm"
 	"github.com/goravel/framework/facades"
 	"github.com/prvious/kontainer/server/app/models"
 	"github.com/prvious/kontainer/server/app/services/cluster"
@@ -53,7 +55,7 @@ func (a *CollectAndStoreAction) Execute(ctx context.Context) {
 			continue
 		}
 		if err := a.persistMetrics(snapshot); err != nil {
-			facades.Log().Errorf("metrics collector: follower insert error: %v", err)
+			facades.Log().Errorf("metrics collector: follower %s (%s) insert error: %v", follower.NodeID, follower.Address, err)
 		}
 	}
 }
@@ -68,7 +70,7 @@ func (a *CollectAndStoreAction) collectLocal(ctx context.Context) (AgentMetricsS
 		return AgentMetricsSnapshot{}, err
 	}
 	return AgentMetricsSnapshot{
-		Timestamp: time.Now().UTC(), NodeID: a.nodeID, Hostname: a.hostname,
+		Timestamp: time.Now().Truncate(time.Second).UTC(), NodeID: a.nodeID, Hostname: a.hostname,
 		Node: nodeMetrics, Containers: containerMetrics,
 	}, nil
 }
@@ -93,6 +95,7 @@ func (a *CollectAndStoreAction) FetchFollowerMetrics(ctx context.Context, addres
 		facades.Log().Warningf("metrics: follower %s sent unparseable timestamp %q, using current time: %v", address, resp.Timestamp, err)
 		ts = time.Now().UTC()
 	}
+	ts = ts.Truncate(time.Second)
 
 	snapshot := AgentMetricsSnapshot{
 		Timestamp: ts, NodeID: resp.NodeId, Hostname: resp.Hostname,
@@ -120,31 +123,35 @@ func (a *CollectAndStoreAction) FetchFollowerMetrics(ctx context.Context, addres
 	return snapshot, nil
 }
 
+// persistMetrics writes node + container rows atomically. All rows in a
+// snapshot share the same timestamp so readers can join them by equality.
 func (a *CollectAndStoreAction) persistMetrics(s AgentMetricsSnapshot) error {
-	nodeRow := &models.Metric{
-		Timestamp: s.Timestamp, Kind: "node",
-		NodeID: s.NodeID, SubjectID: s.NodeID, SubjectName: s.Hostname,
-		CPUPercent: s.Node.CPUPercent,
-		MemUsed:    int64(s.Node.MemoryUsed), MemTotal: int64(s.Node.MemoryTotal), MemPercent: s.Node.MemoryPercent,
-		CPUs:     s.Node.CPUs,
-		DiskUsed: int64(s.Node.DiskUsed), DiskTotal: int64(s.Node.DiskTotal), DiskPercent: s.Node.DiskPercent,
-	}
-	if err := facades.Orm().Query().Create(nodeRow); err != nil {
-		return err
-	}
-
-	for _, c := range s.Containers {
-		row := &models.Metric{
-			Timestamp: s.Timestamp, Kind: "container",
-			NodeID: s.NodeID, SubjectID: c.ContainerID, SubjectName: c.Name,
-			CPUPercent: c.CPUPercent,
-			MemUsed:    c.MemoryUsed, MemTotal: c.MemoryLimit, MemPercent: c.MemoryPercent,
-			ServiceID: c.ServiceID,
+	return facades.Orm().Transaction(func(tx orm.Query) error {
+		nodeRow := &models.Metric{
+			Timestamp: s.Timestamp, Kind: models.MetricKindNode,
+			NodeID: s.NodeID, SubjectID: s.NodeID, SubjectName: s.Hostname,
+			CPUPercent: s.Node.CPUPercent,
+			MemUsed:    int64(s.Node.MemoryUsed), MemTotal: int64(s.Node.MemoryTotal), MemPercent: s.Node.MemoryPercent,
+			CPUs:     s.Node.CPUs,
+			DiskUsed: int64(s.Node.DiskUsed), DiskTotal: int64(s.Node.DiskTotal), DiskPercent: s.Node.DiskPercent,
 		}
-		if err := facades.Orm().Query().Create(row); err != nil {
-			return err
+		if err := tx.Create(nodeRow); err != nil {
+			return fmt.Errorf("insert node metric for %s: %w", s.NodeID, err)
 		}
-	}
 
-	return nil
+		for _, c := range s.Containers {
+			row := &models.Metric{
+				Timestamp: s.Timestamp, Kind: models.MetricKindContainer,
+				NodeID: s.NodeID, SubjectID: c.ContainerID, SubjectName: c.Name,
+				CPUPercent: c.CPUPercent,
+				MemUsed:    c.MemoryUsed, MemTotal: c.MemoryLimit, MemPercent: c.MemoryPercent,
+				ServiceID: c.ServiceID,
+			}
+			if err := tx.Create(row); err != nil {
+				return fmt.Errorf("insert container metric %s on node %s: %w", c.ContainerID, s.NodeID, err)
+			}
+		}
+
+		return nil
+	})
 }
