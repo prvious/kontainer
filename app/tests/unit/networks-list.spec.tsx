@@ -7,126 +7,96 @@ import { AuthContext } from "@/contexts/auth-context-value";
 import type { AuthContextValue } from "@/contexts/auth-context-value";
 import type { NetworkItem } from "@/types/networks";
 import { useNetworks } from "@/hooks/use-networks";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { PageHeader } from "@/components/page-header";
+import { TableShell } from "@/components/table-shell";
+import { ColumnHeaders } from "@/components/column-headers";
 import { AlertCircle, Network } from "lucide-react";
+import { useState } from "react";
 
-function NetworksTable({ networks }: { networks: NetworkItem[] }) {
-    return (
-        <Table>
-            <TableHeader>
-                <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Driver</TableHead>
-                    <TableHead>Scope</TableHead>
-                    <TableHead>Flags</TableHead>
-                    <TableHead>Services</TableHead>
-                    <TableHead className='text-right'>Created</TableHead>
-                </TableRow>
-            </TableHeader>
-            <TableBody>
-                {networks.map((net) => (
-                    <TableRow key={net.id}>
-                        <TableCell className='font-medium'>
-                            <div className='flex items-center gap-2'>
-                                {net.name}
-                                {net.ingress && (
-                                    <Badge variant='secondary' className='text-[10px]'>
-                                        ingress
-                                    </Badge>
-                                )}
-                            </div>
-                        </TableCell>
-                        <TableCell>
-                            <span className='font-mono text-xs text-muted-foreground'>{net.driver}</span>
-                        </TableCell>
-                        <TableCell>
-                            <span className='text-xs text-muted-foreground'>{net.scope}</span>
-                        </TableCell>
-                        <TableCell>
-                            <div className='flex items-center gap-1'>
-                                {net.internal && <Badge variant='secondary'>internal</Badge>}
-                                {net.attachable && <Badge variant='secondary'>attachable</Badge>}
-                            </div>
-                        </TableCell>
-                        <TableCell>
-                            {net.services.length === 0 ? (
-                                <span className='text-xs text-muted-foreground'>-</span>
-                            ) : (
-                                <div className='flex flex-wrap gap-1'>
-                                    {net.services.map((svc) => (
-                                        <Badge key={svc.id} variant='default'>
-                                            {svc.name}
-                                        </Badge>
-                                    ))}
-                                </div>
-                            )}
-                        </TableCell>
-                        <TableCell className='text-right'>
-                            <span className='text-xs text-muted-foreground'>just now</span>
-                        </TableCell>
-                    </TableRow>
-                ))}
-            </TableBody>
-        </Table>
-    );
-}
-
-function LoadingSkeleton() {
-    return (
-        <div className='p-6'>
-            <Card>
-                <CardContent className='p-0'>
-                    <div className='space-y-0'>
-                        {[1, 2, 3, 4, 5].map((i) => (
-                            <div key={i} className='flex items-center gap-4 border-b px-4 py-3 last:border-0'>
-                                <Skeleton className='h-4 w-32' />
-                                <Skeleton className='h-4 w-16' />
-                                <Skeleton className='h-4 w-16' />
-                                <Skeleton className='h-5 w-20' />
-                                <Skeleton className='ml-auto h-4 w-16' />
-                            </div>
-                        ))}
-                    </div>
-                </CardContent>
-            </Card>
-        </div>
-    );
-}
+const NETWORK_COLUMNS = [
+    { label: "STATUS", width: 70 },
+    { label: "NAME" },
+    { label: "ID", width: 150 },
+    { label: "DRIVER", width: 100 },
+    { label: "SCOPE", width: 80 },
+    { label: "SUBNET", width: 120 },
+    { label: "", width: 60 },
+];
 
 function NetworksTestComponent() {
     const { data: networks, isLoading, error } = useNetworks();
+    const [search, setSearch] = useState("");
+
+    const filtered = (networks ?? []).filter(
+        (net) =>
+            net.name.toLowerCase().includes(search.toLowerCase()) ||
+            net.driver.toLowerCase().includes(search.toLowerCase()) ||
+            net.scope.toLowerCase().includes(search.toLowerCase()),
+    );
 
     if (isLoading) {
-        return <LoadingSkeleton />;
+        return (
+            <div className='flex flex-col gap-6 p-6'>
+                <Skeleton className='h-7 w-28' />
+                <div className='space-y-0'>
+                    {[1, 2, 3].map((i) => (
+                        <div key={i} className='flex items-center gap-3 border-b px-4 py-2.5'>
+                            <Skeleton className='size-1.5 rounded-full' />
+                            <Skeleton className='h-3 w-28' />
+                        </div>
+                    ))}
+                </div>
+            </div>
+        );
     }
 
     if (error) {
         return (
-            <div className='flex flex-col items-center justify-center gap-2 py-12 text-sm text-destructive'>
-                <AlertCircle className='size-5' />
+            <div className='flex flex-col items-center justify-center gap-2 py-12 text-xs text-destructive'>
+                <AlertCircle className='size-4' />
                 <p>Failed to load networks</p>
             </div>
         );
     }
 
-    if (!networks || networks.length === 0) {
-        return (
-            <div className='flex flex-col items-center justify-center gap-2 py-12 text-sm text-muted-foreground'>
-                <Network className='size-5' />
-                <p>No networks found</p>
-            </div>
-        );
-    }
+    const networkCount = networks?.length ?? 0;
+    const overlayCount = (networks ?? []).filter((n) => n.driver === "overlay").length;
+    const bridgeCount = (networks ?? []).filter((n) => n.driver === "bridge").length;
+    const subtitle = `${networkCount} ${networkCount === 1 ? "network" : "networks"} · ${overlayCount} overlay · ${bridgeCount} bridge`;
 
     return (
-        <Card>
-            <CardContent className='p-0'>
-                <NetworksTable networks={networks} />
-            </CardContent>
-        </Card>
+        <div className='flex h-full flex-col gap-6 p-6'>
+            <PageHeader title='NETWORKS' subtitle={subtitle} />
+
+            <TableShell
+                title='ALL NETWORKS'
+                count={filtered.length}
+                searchValue={search}
+                onSearchChange={setSearch}
+                searchPlaceholder='Search networks...'
+            >
+                <ColumnHeaders columns={NETWORK_COLUMNS} />
+                {filtered.length === 0 ? (
+                    <div className='flex flex-col items-center justify-center gap-1.5 py-12 text-xs text-muted-foreground'>
+                        <Network className='size-4' />
+                        <p>{search ? "No networks match your filter" : "No networks found"}</p>
+                    </div>
+                ) : (
+                    <div>
+                        {filtered.map((net) => (
+                            <div key={net.id} className='flex items-center border-b border-border px-4 py-2.5'>
+                                <span className='size-1.5 rounded-full bg-success' />
+                                <span className='ml-4 font-mono text-xs font-medium'>{net.name}</span>
+                                <span className='ml-4 font-mono text-[11px] text-muted-foreground'>{net.id.slice(0, 12)}</span>
+                                <span className='ml-4 font-mono text-[11px] text-muted-foreground'>{net.driver}</span>
+                                <span className='ml-4 font-mono text-[11px]'>{net.scope}</span>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </TableShell>
+        </div>
     );
 }
 
@@ -178,7 +148,7 @@ function renderWithProviders(authOverrides: Partial<AuthContextValue> = {}) {
 
 const sampleNetworks: NetworkItem[] = [
     {
-        id: "net1",
+        id: "net1aabbccddee",
         name: "my-overlay",
         driver: "overlay",
         scope: "swarm",
@@ -192,7 +162,18 @@ const sampleNetworks: NetworkItem[] = [
         createdAt: new Date().toISOString(),
     },
     {
-        id: "net-ingress",
+        id: "net2aabbccddee",
+        name: "bridge0",
+        driver: "bridge",
+        scope: "local",
+        internal: false,
+        attachable: false,
+        ingress: false,
+        services: [],
+        createdAt: new Date().toISOString(),
+    },
+    {
+        id: "net-ingress-id1",
         name: "ingress",
         driver: "overlay",
         scope: "swarm",
@@ -219,6 +200,21 @@ describe("NetworksList", () => {
         });
     });
 
+    it("renders page header and table shell after loading", async () => {
+        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+            if (cmd === "list_networks") return { networks: sampleNetworks };
+            return undefined;
+        });
+
+        renderWithProviders();
+
+        await waitFor(() => {
+            expect(screen.getByText("NETWORKS")).toBeInTheDocument();
+        });
+
+        expect(screen.getByText("ALL NETWORKS")).toBeInTheDocument();
+    });
+
     it("renders networks after loading", async () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "list_networks") return { networks: sampleNetworks };
@@ -231,13 +227,11 @@ describe("NetworksList", () => {
             expect(screen.getByText("my-overlay")).toBeInTheDocument();
         });
 
-        // "ingress" appears as both network name and badge, so use getAllByText
-        expect(screen.getAllByText("ingress").length).toBeGreaterThanOrEqual(1);
-        expect(screen.getByText("web")).toBeInTheDocument();
-        expect(screen.getByText("api")).toBeInTheDocument();
+        expect(screen.getByText("bridge0")).toBeInTheDocument();
+        expect(screen.getByText("ingress")).toBeInTheDocument();
     });
 
-    it("shows attached service badges for networks", async () => {
+    it("shows subtitle with driver counts", async () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "list_networks") return { networks: sampleNetworks };
             return undefined;
@@ -246,10 +240,8 @@ describe("NetworksList", () => {
         renderWithProviders();
 
         await waitFor(() => {
-            expect(screen.getByText("web")).toBeInTheDocument();
+            expect(screen.getByText(/3 networks · 2 overlay · 1 bridge/)).toBeInTheDocument();
         });
-
-        expect(screen.getByText("api")).toBeInTheDocument();
     });
 
     it("shows empty state when no networks", async () => {
@@ -286,7 +278,7 @@ describe("NetworksList", () => {
         expect(invoke).not.toHaveBeenCalledWith("list_networks", expect.anything());
     });
 
-    it("shows attachable badge for attachable networks", async () => {
+    it("renders column headers", async () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "list_networks") return { networks: sampleNetworks };
             return undefined;
@@ -295,34 +287,28 @@ describe("NetworksList", () => {
         renderWithProviders();
 
         await waitFor(() => {
-            expect(screen.getByText("attachable")).toBeInTheDocument();
+            expect(screen.getByText("STATUS")).toBeInTheDocument();
         });
+
+        expect(screen.getByText("NAME")).toBeInTheDocument();
+        expect(screen.getByText("DRIVER")).toBeInTheDocument();
+        expect(screen.getByText("SCOPE")).toBeInTheDocument();
+        expect(screen.getByText("SUBNET")).toBeInTheDocument();
     });
 
-    it("renders ingress badge on ingress network", async () => {
-        const ingressNet: NetworkItem = {
-            id: "net-ingress",
-            name: "ingress",
-            driver: "overlay",
-            scope: "swarm",
-            internal: false,
-            attachable: false,
-            ingress: true,
-            services: [],
-            createdAt: new Date().toISOString(),
-        };
-
+    it("renders swarm scope for overlay network", async () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === "list_networks") return { networks: [ingressNet] };
+            if (cmd === "list_networks") return { networks: sampleNetworks };
             return undefined;
         });
 
         renderWithProviders();
 
-        // "ingress" appears as network name + as badge text
         await waitFor(() => {
-            const matches = screen.getAllByText("ingress");
-            expect(matches.length).toBeGreaterThanOrEqual(2);
+            expect(screen.getByText("my-overlay")).toBeInTheDocument();
         });
+
+        expect(screen.getAllByText("swarm").length).toBeGreaterThanOrEqual(1);
+        expect(screen.getByText("local")).toBeInTheDocument();
     });
 });
