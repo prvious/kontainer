@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { SetupWizard } from "@/components/setup-wizard";
 
 describe("SetupWizard", () => {
@@ -17,14 +18,15 @@ describe("SetupWizard", () => {
 
     it("renders token input on initial step", () => {
         render(<SetupWizard {...defaultProps} />);
-        expect(screen.getByLabelText("Setup Token")).toBeInTheDocument();
-        expect(screen.getByRole("button", { name: "Verify" })).toBeInTheDocument();
+        expect(screen.getByText("SETUP TOKEN")).toBeInTheDocument();
+        expect(screen.getByPlaceholderText("kst_live_29f0-8d0z-1d7c")).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /validate token & start/i })).toBeInTheDocument();
     });
 
-    it("renders back button that calls onBack", async () => {
+    it("renders cancel button that calls onBack", async () => {
         render(<SetupWizard {...defaultProps} />);
         const user = userEvent.setup();
-        await user.click(screen.getByRole("button", { name: /back/i }));
+        await user.click(screen.getByRole("button", { name: /cancel/i }));
         expect(defaultProps.onBack).toHaveBeenCalled();
     });
 
@@ -34,71 +36,29 @@ describe("SetupWizard", () => {
         render(<SetupWizard {...defaultProps} />);
         const user = userEvent.setup();
 
-        const input = screen.getByLabelText("Setup Token");
+        const input = screen.getByPlaceholderText("kst_live_29f0-8d0z-1d7c");
         await user.type(input, "wrong_token");
-        await user.click(screen.getByRole("button", { name: "Verify" }));
+        await user.click(screen.getByRole("button", { name: /validate token & start/i }));
 
         await act(async () => {});
         expect(screen.getByText("Invalid setup token")).toBeInTheDocument();
     });
 
-    it("advances to github step on valid token with pending status", async () => {
-        vi.mocked(invoke).mockResolvedValueOnce({ step: "pending" });
-
-        render(<SetupWizard {...defaultProps} />);
-        const user = userEvent.setup();
-
-        const input = screen.getByLabelText("Setup Token");
-        await user.type(input, "ktsetup_abc123");
-        await user.click(screen.getByRole("button", { name: "Verify" }));
-
-        await act(async () => {});
-        expect(screen.getByRole("button", { name: /connect github/i })).toBeInTheDocument();
-    });
-
-    it("passes org to setup_github_connect when provided", async () => {
-        vi.mocked(invoke)
-            .mockResolvedValueOnce({ step: "pending" }) // verify token
-            .mockResolvedValueOnce({ setupUrl: "http://localhost:3000/setup/github/start?token=abc" }); // github connect
-
-        render(<SetupWizard {...defaultProps} />);
-        const user = userEvent.setup();
-
-        // Enter token and verify
-        const input = screen.getByLabelText("Setup Token");
-        await user.type(input, "ktsetup_abc123");
-        await user.click(screen.getByRole("button", { name: "Verify" }));
-        await act(async () => {});
-
-        // Enter org and connect
-        const orgInput = screen.getByLabelText(/organization/i);
-        await user.type(orgInput, "my-org");
-        await user.click(screen.getByRole("button", { name: /connect github/i }));
-        await act(async () => {});
-
-        expect(invoke).toHaveBeenCalledWith("setup_github_connect", {
-            url: "http://localhost:3000",
-            token: "ktsetup_abc123",
-            org: "my-org",
+    it("calls setup_github_connect on valid token with pending status", async () => {
+        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+            if (cmd === "setup_verify_token") return { step: "pending" };
+            if (cmd === "setup_github_connect") return { setupUrl: "http://localhost:3000/setup/github/start?token=abc" };
+            return undefined;
         });
-    });
-
-    it("passes null org when field is empty", async () => {
-        vi.mocked(invoke)
-            .mockResolvedValueOnce({ step: "pending" }) // verify token
-            .mockResolvedValueOnce({ setupUrl: "http://localhost:3000/setup/github/start?token=abc" }); // github connect
 
         render(<SetupWizard {...defaultProps} />);
         const user = userEvent.setup();
 
-        const input = screen.getByLabelText("Setup Token");
+        const input = screen.getByPlaceholderText("kst_live_29f0-8d0z-1d7c");
         await user.type(input, "ktsetup_abc123");
-        await user.click(screen.getByRole("button", { name: "Verify" }));
-        await act(async () => {});
+        await user.click(screen.getByRole("button", { name: /validate token & start/i }));
 
-        await user.click(screen.getByRole("button", { name: /connect github/i }));
         await act(async () => {});
-
         expect(invoke).toHaveBeenCalledWith("setup_github_connect", {
             url: "http://localhost:3000",
             token: "ktsetup_abc123",
@@ -106,38 +66,61 @@ describe("SetupWizard", () => {
         });
     });
 
-    it("resumes at confirm step if github already connected", async () => {
-        vi.mocked(invoke).mockResolvedValueOnce({ step: "github_connected" });
+    it("opens the setup URL after github connect", async () => {
+        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+            if (cmd === "setup_verify_token") return { step: "pending" };
+            if (cmd === "setup_github_connect") return { setupUrl: "http://localhost:3000/setup/github/start?token=abc" };
+            return undefined;
+        });
 
         render(<SetupWizard {...defaultProps} />);
         const user = userEvent.setup();
 
-        const input = screen.getByLabelText("Setup Token");
+        const input = screen.getByPlaceholderText("kst_live_29f0-8d0z-1d7c");
         await user.type(input, "ktsetup_abc123");
-        await user.click(screen.getByRole("button", { name: "Verify" }));
+        await user.click(screen.getByRole("button", { name: /validate token & start/i }));
 
         await act(async () => {});
-        expect(screen.getByRole("button", { name: /complete setup/i })).toBeInTheDocument();
+        expect(openUrl).toHaveBeenCalledWith("http://localhost:3000/setup/github/start?token=abc");
     });
 
-    it("calls setup_complete and onComplete on final step", async () => {
-        vi.mocked(invoke)
-            .mockResolvedValueOnce({ step: "github_connected" }) // verify token
-            .mockResolvedValueOnce(undefined); // setup_complete
+    it("passes null org to setup_github_connect", async () => {
+        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+            if (cmd === "setup_verify_token") return { step: "pending" };
+            if (cmd === "setup_github_connect") return { setupUrl: "http://localhost:3000/setup/github/start?token=abc" };
+            return undefined;
+        });
 
         render(<SetupWizard {...defaultProps} />);
         const user = userEvent.setup();
 
-        // Enter token and verify
-        const input = screen.getByLabelText("Setup Token");
+        const input = screen.getByPlaceholderText("kst_live_29f0-8d0z-1d7c");
         await user.type(input, "ktsetup_abc123");
-        await user.click(screen.getByRole("button", { name: "Verify" }));
-        await act(async () => {});
+        await user.click(screen.getByRole("button", { name: /validate token & start/i }));
 
-        // Complete setup
-        await user.click(screen.getByRole("button", { name: /complete setup/i }));
         await act(async () => {});
+        expect(invoke).toHaveBeenCalledWith("setup_github_connect", {
+            url: "http://localhost:3000",
+            token: "ktsetup_abc123",
+            org: null,
+        });
+    });
 
+    it("calls setup_complete and onComplete when github already connected", async () => {
+        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+            if (cmd === "setup_verify_token") return { step: "github_connected" };
+            if (cmd === "setup_complete") return undefined;
+            return undefined;
+        });
+
+        render(<SetupWizard {...defaultProps} />);
+        const user = userEvent.setup();
+
+        const input = screen.getByPlaceholderText("kst_live_29f0-8d0z-1d7c");
+        await user.type(input, "ktsetup_abc123");
+        await user.click(screen.getByRole("button", { name: /validate token & start/i }));
+
+        await act(async () => {});
         expect(invoke).toHaveBeenCalledWith("setup_complete", {
             url: "http://localhost:3000",
             token: "ktsetup_abc123",
@@ -145,8 +128,51 @@ describe("SetupWizard", () => {
         expect(defaultProps.onComplete).toHaveBeenCalled();
     });
 
-    it("displays agent URL", () => {
+    it("calls setup_complete with correct args", async () => {
+        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+            if (cmd === "setup_verify_token") return { step: "github_connected" };
+            if (cmd === "setup_complete") return undefined;
+            return undefined;
+        });
+
         render(<SetupWizard {...defaultProps} />);
-        expect(screen.getByText("http://localhost:3000")).toBeInTheDocument();
+        const user = userEvent.setup();
+
+        const input = screen.getByPlaceholderText("kst_live_29f0-8d0z-1d7c");
+        await user.type(input, "ktsetup_abc123");
+        await user.click(screen.getByRole("button", { name: /validate token & start/i }));
+
+        await act(async () => {});
+        expect(invoke).toHaveBeenCalledWith("setup_complete", {
+            url: "http://localhost:3000",
+            token: "ktsetup_abc123",
+        });
+    });
+
+    it("displays agent URL in footer", () => {
+        render(<SetupWizard {...defaultProps} />);
+        expect(screen.getByText(/http:\/\/localhost:3000/)).toBeInTheDocument();
+    });
+
+    it("renders FIRST-TIME SETUP badge", () => {
+        render(<SetupWizard {...defaultProps} />);
+        expect(screen.getByText("FIRST-TIME SETUP")).toBeInTheDocument();
+    });
+
+    it("renders the heading", () => {
+        render(<SetupWizard {...defaultProps} />);
+        expect(screen.getByText("Create your GitHub App manifest")).toBeInTheDocument();
+    });
+
+    it("renders GITHUB APP NAME input with default value", () => {
+        render(<SetupWizard {...defaultProps} />);
+        expect(screen.getByText("GITHUB APP NAME")).toBeInTheDocument();
+        expect(screen.getByDisplayValue("kontainer-prod-app")).toBeInTheDocument();
+    });
+
+    it("disables Validate Token & Start button when token is empty", () => {
+        render(<SetupWizard {...defaultProps} />);
+        const button = screen.getByRole("button", { name: /validate token & start/i });
+        expect(button).toBeDisabled();
     });
 });

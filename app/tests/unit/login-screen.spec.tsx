@@ -47,7 +47,6 @@ describe("LoginScreen", () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_profiles") return { profiles: [], activeProfileId: null };
             if (cmd === "ping_agent") return { app: "dev.kontainer.app", status: "ok" };
-            if (cmd === "fetch_providers") return ["github"];
             return undefined;
         });
     });
@@ -77,50 +76,35 @@ describe("LoginScreen", () => {
 
     it("renders the connect button", async () => {
         await renderLoginScreen();
-        expect(screen.getByRole("button", { name: /connect/i })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /connect with github/i })).toBeInTheDocument();
     });
 
     it("pings the agent on submit", async () => {
         await renderLoginScreen();
         const user = userEvent.setup();
 
-        const button = screen.getByRole("button", { name: /connect/i });
+        const button = screen.getByRole("button", { name: /connect with github/i });
         await user.click(button);
 
         expect(invoke).toHaveBeenCalledWith("ping_agent", { url: "http://localhost:3000" });
     });
 
-    it("shows auth providers after successful ping", async () => {
+    it("shows authenticate with divider always", async () => {
         await renderLoginScreen();
-        const user = userEvent.setup();
-
-        const button = screen.getByRole("button", { name: /connect/i });
-        await user.click(button);
-
         expect(screen.getByText("authenticate with")).toBeInTheDocument();
     });
 
-    it("fetches providers after successful ping", async () => {
+    it("shows Connect with GitHub button always", async () => {
         await renderLoginScreen();
-        const user = userEvent.setup();
-
-        const button = screen.getByRole("button", { name: /connect/i });
-        await user.click(button);
-
-        expect(invoke).toHaveBeenCalledWith("fetch_providers", { url: "http://localhost:3000" });
+        expect(screen.getByRole("button", { name: /connect with github/i })).toBeInTheDocument();
     });
 
-    it("shows provider buttons when online", async () => {
+    it("shows GitHub button without needing to ping first", async () => {
         await renderLoginScreen();
-        const user = userEvent.setup();
-
-        const button = screen.getByRole("button", { name: /connect/i });
-        await user.click(button);
-
-        expect(screen.getByRole("button", { name: /github/i })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /connect with github/i })).toBeInTheDocument();
     });
 
-    it("calls auth_listen when provider button is clicked", async () => {
+    it("calls auth_listen when Connect with GitHub is clicked", async () => {
         // Capture event callbacks
         let sessionIdCallback: ((event: { payload: { sessionId: string } }) => void) | null = null;
         let tokenCallback: ((event: { payload: { token: string } }) => void) | null = null;
@@ -134,7 +118,6 @@ describe("LoginScreen", () => {
         vi.mocked(invoke).mockImplementation(async (cmd: string) => {
             if (cmd === "load_profiles") return { profiles: [], activeProfileId: null };
             if (cmd === "ping_agent") return { app: "dev.kontainer.app", status: "ok" };
-            if (cmd === "fetch_providers") return ["github"];
             if (cmd === "auth_listen") {
                 // Background task delivers session ID
                 sessionIdCallback?.({ payload: { sessionId: "test-session" } });
@@ -146,16 +129,14 @@ describe("LoginScreen", () => {
         await renderLoginScreen();
         const user = userEvent.setup();
 
-        const connectButton = screen.getByRole("button", { name: /connect/i });
-        await user.click(connectButton);
-
-        const githubButton = screen.getByRole("button", { name: /github/i });
-        await user.click(githubButton);
+        // Single click triggers ping then OAuth
+        const button = screen.getByRole("button", { name: /connect with github/i });
+        await user.click(button);
 
         // auth_listen should be called
         expect(invoke).toHaveBeenCalledWith("auth_listen", { url: "http://localhost:3000" });
 
-        // session ID event fires synchronously in invoke mock → opens browser
+        // session ID event fires synchronously in invoke mock -> opens browser
         expect(openUrl).toHaveBeenCalledWith("http://localhost:3000/auth/github?session=test-session");
 
         // Clean up: deliver token so login() resolves
@@ -174,28 +155,33 @@ describe("LoginScreen", () => {
         await renderLoginScreen();
         const user = userEvent.setup();
 
-        const button = screen.getByRole("button", { name: /connect/i });
+        const button = screen.getByRole("button", { name: /connect with github/i });
         await user.click(button);
 
         expect(screen.getByText(/could not reach agent/i)).toBeInTheDocument();
     });
 
-    it("resets status when URL changes", async () => {
+    it("clears error message when URL changes", async () => {
+        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+            if (cmd === "load_profiles") return { profiles: [], activeProfileId: null };
+            if (cmd === "ping_agent") throw "Could not reach agent";
+            return undefined;
+        });
+
         await renderLoginScreen();
         const user = userEvent.setup();
 
-        // Connect first
-        const button = screen.getByRole("button", { name: /connect/i });
+        // Trigger an error first
+        const button = screen.getByRole("button", { name: /connect with github/i });
         await user.click(button);
 
-        expect(screen.getByText("authenticate with")).toBeInTheDocument();
+        expect(screen.getByText(/could not reach agent/i)).toBeInTheDocument();
 
-        // Change URL — should reset
+        // Change URL — error should clear
         const input = screen.getByPlaceholderText("https://agent.kontainer.dev");
         await user.type(input, "/new");
 
-        expect(screen.queryByText("authenticate with")).not.toBeInTheDocument();
-        expect(screen.getByRole("button", { name: /connect/i })).toBeInTheDocument();
+        expect(screen.queryByText(/could not reach agent/i)).not.toBeInTheDocument();
     });
 
     it("strips trailing slashes from agent URL", async () => {
@@ -206,7 +192,7 @@ describe("LoginScreen", () => {
         await user.clear(input);
         await user.type(input, "http://myserver:9090///");
 
-        const button = screen.getByRole("button", { name: /connect/i });
+        const button = screen.getByRole("button", { name: /connect with github/i });
         await user.click(button);
 
         expect(invoke).toHaveBeenCalledWith("ping_agent", { url: "http://myserver:9090" });
@@ -221,14 +207,13 @@ describe("LoginScreen", () => {
                     resolvePing = () => resolve({ app: "dev.kontainer.app", status: "ok" });
                 });
             }
-            if (cmd === "fetch_providers") return ["github"];
             return undefined;
         });
 
         await renderLoginScreen();
         const user = userEvent.setup();
 
-        const button = screen.getByRole("button", { name: /connect/i });
+        const button = screen.getByRole("button", { name: /connect with github/i });
         await user.click(button);
 
         expect(screen.getByText(/connecting/i)).toBeInTheDocument();
