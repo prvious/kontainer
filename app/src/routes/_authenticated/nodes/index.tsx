@@ -13,14 +13,9 @@ import { AlertCircle, AlertTriangle, Server } from "lucide-react";
 import { useMemo, useState } from "react";
 import type { NodeItem } from "@/types/nodes";
 import type { AgentMetricsSnapshot } from "@/types/metrics";
+import { formatBytes } from "@/lib/format-utils";
 
-function formatBytes(bytes: number): string {
-    if (bytes === 0) return "0 B";
-    const k = 1024;
-    const sizes = ["B", "KB", "MB", "GB", "TB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
-}
+const QUERY_KEYS: string[][] = [["nodes"], ["cluster-metrics"]];
 
 function metricsColorClass(pct: number): string {
     if (pct >= 85) return "text-destructive";
@@ -197,9 +192,10 @@ function NodesPage() {
 
     if (error) {
         return (
-            <div className='flex flex-col items-center justify-center gap-2 py-12 text-xs text-destructive'>
-                <AlertCircle className='size-4' />
-                <p>Failed to load nodes</p>
+            <div className='flex flex-col items-center justify-center gap-3 py-12'>
+                <AlertCircle className='size-5 text-destructive' />
+                <p className='text-sm text-destructive'>Failed to load nodes</p>
+                <RefreshButton queryKeys={QUERY_KEYS} />
             </div>
         );
     }
@@ -210,7 +206,7 @@ function NodesPage() {
     return (
         <div className='flex h-full flex-col gap-6 p-6'>
             <PageHeader title='NODES' subtitle={subtitle}>
-                <RefreshButton queryKeys={[["nodes"], ["cluster-metrics"]]} />
+                <RefreshButton queryKeys={QUERY_KEYS} />
                 <Button variant='outline' size='sm' disabled className='h-7 font-mono text-[11px] text-muted-foreground'>
                     ADD NODE
                 </Button>

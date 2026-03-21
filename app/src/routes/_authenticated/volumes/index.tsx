@@ -10,27 +10,9 @@ import { RefreshButton } from "@/components/refresh-button";
 import { AlertCircle, HardDrive, MoreHorizontal } from "lucide-react";
 import { useState } from "react";
 import type { VolumeItem } from "@/types/volumes";
+import { formatRelativeTime, formatBytes } from "@/lib/format-utils";
 
-function formatRelativeTime(iso: string): string {
-    if (!iso) return "-";
-    const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-    if (seconds < 60) return "just now";
-    const minutes = Math.floor(seconds / 60);
-    if (minutes < 60) return `${minutes}m ago`;
-    const hours = Math.floor(minutes / 60);
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(hours / 24);
-    return `${days}d ago`;
-}
-
-function formatBytes(bytes: number): string {
-    if (bytes < 0) return "-";
-    if (bytes === 0) return "0 B";
-    const units = ["B", "KB", "MB", "GB", "TB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(1024));
-    const value = bytes / Math.pow(1024, i);
-    return `${value.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
-}
+const QUERY_KEYS: string[][] = [["volumes"]];
 
 const VOLUME_COLUMNS = [
     { label: "NAME" },
@@ -106,7 +88,7 @@ function VolumesPage() {
         (vol) =>
             vol.name.toLowerCase().includes(search.toLowerCase()) ||
             vol.driver.toLowerCase().includes(search.toLowerCase()) ||
-            vol.stack.toLowerCase().includes(search.toLowerCase()),
+            (vol.stack?.toLowerCase().includes(search.toLowerCase()) ?? false),
     );
 
     if (isLoading) {
@@ -115,9 +97,10 @@ function VolumesPage() {
 
     if (error) {
         return (
-            <div className='flex flex-col items-center justify-center gap-2 py-12 text-xs text-destructive'>
-                <AlertCircle className='size-4' />
-                <p>Failed to load volumes</p>
+            <div className='flex flex-col items-center justify-center gap-3 py-12'>
+                <AlertCircle className='size-5 text-destructive' />
+                <p className='text-sm text-destructive'>Failed to load volumes</p>
+                <RefreshButton queryKeys={QUERY_KEYS} />
             </div>
         );
     }
@@ -129,7 +112,7 @@ function VolumesPage() {
     return (
         <div className='flex h-full flex-col gap-6 p-6'>
             <PageHeader title='VOLUMES' subtitle={subtitle}>
-                <RefreshButton queryKeys={[["volumes"]]} />
+                <RefreshButton queryKeys={QUERY_KEYS} />
                 <Button variant='outline' size='sm' disabled className='h-7 font-mono text-[11px] text-muted-foreground'>
                     CREATE VOLUME
                 </Button>

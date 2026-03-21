@@ -11,6 +11,8 @@ import { AlertCircle, MoreHorizontal, Network } from "lucide-react";
 import { useState } from "react";
 import type { NetworkItem } from "@/types/networks";
 
+const QUERY_KEYS: string[][] = [["networks"]];
+
 const NETWORK_COLUMNS = [
     { label: "STATUS", width: 70 },
     { label: "NAME" },
@@ -103,9 +105,10 @@ function NetworksPage() {
 
     if (error) {
         return (
-            <div className='flex flex-col items-center justify-center gap-2 py-12 text-xs text-destructive'>
-                <AlertCircle className='size-4' />
-                <p>Failed to load networks</p>
+            <div className='flex flex-col items-center justify-center gap-3 py-12'>
+                <AlertCircle className='size-5 text-destructive' />
+                <p className='text-sm text-destructive'>Failed to load networks</p>
+                <RefreshButton queryKeys={QUERY_KEYS} />
             </div>
         );
     }
@@ -118,7 +121,7 @@ function NetworksPage() {
     return (
         <div className='flex h-full flex-col gap-6 p-6'>
             <PageHeader title='NETWORKS' subtitle={subtitle}>
-                <RefreshButton queryKeys={[["networks"]]} />
+                <RefreshButton queryKeys={QUERY_KEYS} />
                 <Button variant='outline' size='sm' disabled className='h-7 font-mono text-[11px] text-muted-foreground'>
                     CREATE NETWORK
                 </Button>

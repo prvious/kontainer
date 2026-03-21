@@ -11,17 +11,9 @@ import { RefreshButton } from "@/components/refresh-button";
 import { AlertCircle, ArrowUpRight, Container, MoreHorizontal } from "lucide-react";
 import { useState } from "react";
 import type { ServiceItem } from "@/types/services";
+import { formatRelativeTime } from "@/lib/format-utils";
 
-function formatRelativeTime(iso: string): string {
-    const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-    if (seconds < 60) return "just now";
-    const minutes = Math.floor(seconds / 60);
-    if (minutes < 60) return `${minutes}m ago`;
-    const hours = Math.floor(minutes / 60);
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(hours / 24);
-    return `${days}d ago`;
-}
+const QUERY_KEYS: string[][] = [["services"]];
 
 function StatusDot({ service }: { service: ServiceItem }) {
     if (service.replicasDesired === -1) {
@@ -144,9 +136,10 @@ function ServicesPage() {
 
     if (error) {
         return (
-            <div className='flex flex-col items-center justify-center gap-2 py-12 text-xs text-destructive'>
-                <AlertCircle className='size-4' />
-                <p>Failed to load services</p>
+            <div className='flex flex-col items-center justify-center gap-3 py-12'>
+                <AlertCircle className='size-5 text-destructive' />
+                <p className='text-sm text-destructive'>Failed to load services</p>
+                <RefreshButton queryKeys={QUERY_KEYS} />
             </div>
         );
     }
@@ -159,7 +152,7 @@ function ServicesPage() {
     return (
         <div className='flex h-full flex-col gap-6 p-6'>
             <PageHeader title='SERVICES' subtitle={subtitle}>
-                <RefreshButton queryKeys={[["services"]]} />
+                <RefreshButton queryKeys={QUERY_KEYS} />
                 <Button variant='outline' size='sm' disabled className='h-7 font-mono text-[11px] text-muted-foreground'>
                     CREATE SERVICE
                 </Button>

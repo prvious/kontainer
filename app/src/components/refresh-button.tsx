@@ -17,8 +17,12 @@ export function RefreshButton({ queryKeys }: RefreshButtonProps) {
 
     const isFetching = useIsFetching({ predicate: matchesKeys });
 
-    const handleRefresh = useCallback(() => {
-        queryClient.invalidateQueries({ predicate: matchesKeys });
+    const handleRefresh = useCallback(async () => {
+        try {
+            await queryClient.invalidateQueries({ predicate: matchesKeys });
+        } catch {
+            // Individual queries handle their own errors
+        }
     }, [queryClient, matchesKeys]);
 
     return (

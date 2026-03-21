@@ -41,7 +41,7 @@ function VolumesTestComponent() {
         (vol) =>
             vol.name.toLowerCase().includes(search.toLowerCase()) ||
             vol.driver.toLowerCase().includes(search.toLowerCase()) ||
-            vol.stack.toLowerCase().includes(search.toLowerCase()),
+            (vol.stack?.toLowerCase().includes(search.toLowerCase()) ?? false),
     );
 
     if (isLoading) {

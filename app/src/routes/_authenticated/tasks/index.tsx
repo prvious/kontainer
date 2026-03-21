@@ -14,6 +14,8 @@ import { useState, useMemo } from "react";
 import type { TaskItem } from "@/types/tasks";
 import type { ContainerMetrics } from "@/types/metrics";
 
+const QUERY_KEYS: string[][] = [["tasks"], ["cluster-metrics"]];
+
 function formatMemory(bytes: number): string {
     if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
     if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
@@ -171,7 +173,9 @@ function TasksPage() {
         if (!metricsData?.agents) return map;
         for (const agent of metricsData.agents) {
             for (const c of agent.containers) {
-                map.set(c.containerId, c);
+                if (c.containerId) {
+                    map.set(c.containerId, c);
+                }
             }
         }
         return map;
@@ -190,9 +194,10 @@ function TasksPage() {
 
     if (error) {
         return (
-            <div className='flex flex-col items-center justify-center gap-2 py-12 text-xs text-destructive'>
-                <AlertCircle className='size-4' />
-                <p>Failed to load tasks</p>
+            <div className='flex flex-col items-center justify-center gap-3 py-12'>
+                <AlertCircle className='size-5 text-destructive' />
+                <p className='text-sm text-destructive'>Failed to load tasks</p>
+                <RefreshButton queryKeys={QUERY_KEYS} />
             </div>
         );
     }
@@ -204,7 +209,7 @@ function TasksPage() {
     return (
         <div className='flex h-full flex-col gap-6 p-6'>
             <PageHeader title='CONTAINERS' subtitle={subtitle}>
-                <RefreshButton queryKeys={[["tasks"], ["cluster-metrics"]]} />
+                <RefreshButton queryKeys={QUERY_KEYS} />
             </PageHeader>
 
             <TableToolbar searchValue={search} onSearchChange={setSearch} searchPlaceholder='Search containers...' />
@@ -219,7 +224,7 @@ function TasksPage() {
                 ) : (
                     <div>
                         {filtered.map((task) => (
-                            <TaskRow key={task.id} task={task} metrics={containerMetrics.get(task.containerId)} />
+                            <TaskRow key={task.id} task={task} metrics={task.containerId ? containerMetrics.get(task.containerId) : undefined} />
                         ))}
                     </div>
                 )}

@@ -3,7 +3,6 @@ import { useStacks } from "@/hooks/use-stacks";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import { PageHeader } from "@/components/page-header";
 import { TableShell } from "@/components/table-shell";
 import { TableToolbar } from "@/components/table-toolbar";
@@ -12,17 +11,9 @@ import { RefreshButton } from "@/components/refresh-button";
 import { AlertCircle, ArrowUpRight, Layers, Plus } from "lucide-react";
 import { useState } from "react";
 import type { StackItem } from "@/types/stacks";
+import { formatRelativeTime } from "@/lib/format-utils";
 
-function formatRelativeTime(iso: string): string {
-    const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-    if (seconds < 60) return "just now";
-    const minutes = Math.floor(seconds / 60);
-    if (minutes < 60) return `${minutes}m ago`;
-    const hours = Math.floor(minutes / 60);
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(hours / 24);
-    return `${days}d ago`;
-}
+const QUERY_KEYS: string[][] = [["stacks"]];
 
 function HealthDot({ stack }: { stack: StackItem }) {
     const healthy = stack.runningReplicas >= stack.desiredReplicas && stack.desiredReplicas > 0;
@@ -46,49 +37,43 @@ const COLUMNS = [
     { label: "CPU", width: 60, align: "right" as const },
     { label: "MEM", width: 70, align: "right" as const },
     { label: "LAST DEPLOY", width: 100, align: "right" as const },
-    { label: "Actions", width: 60 },
+    { label: "", width: 60 },
 ];
 
-function StacksTable({ stacks }: { stacks: StackItem[] }) {
+function StackRow({ stack }: { stack: StackItem }) {
     return (
-        <Table>
-            <TableBody>
-                {stacks.map((stack) => (
-                    <TableRow key={stack.name} className='group'>
-                        <TableCell className='py-1.5' style={{ width: 70 }}>
-                            <HealthDot stack={stack} />
-                        </TableCell>
-                        <TableCell className='py-1.5'>
-                            <Link
-                                to='/stacks/$stackName'
-                                params={{ stackName: stack.name }}
-                                className='inline-flex items-center gap-1 text-xs font-medium hover:underline'
-                            >
-                                <Layers className='size-3 text-muted-foreground' />
-                                {stack.name}
-                                <ArrowUpRight className='size-3 opacity-0 transition-opacity group-hover:opacity-100' />
-                            </Link>
-                        </TableCell>
-                        <TableCell className='py-1.5 text-right' style={{ width: 80 }}>
-                            <span className='font-mono text-[11px]'>{stack.services}</span>
-                        </TableCell>
-                        <TableCell className='py-1.5' style={{ width: 80 }}>
-                            <ReplicasBadge stack={stack} />
-                        </TableCell>
-                        <TableCell className='py-1.5 text-right' style={{ width: 60 }}>
-                            <span className='font-mono text-[11px] text-muted-foreground'>—</span>
-                        </TableCell>
-                        <TableCell className='py-1.5 text-right' style={{ width: 70 }}>
-                            <span className='font-mono text-[11px] text-muted-foreground'>—</span>
-                        </TableCell>
-                        <TableCell className='py-1.5 text-right' style={{ width: 100 }}>
-                            <span className='font-mono text-[11px] text-muted-foreground'>{formatRelativeTime(stack.updatedAt)}</span>
-                        </TableCell>
-                        <TableCell className='py-1.5' style={{ width: 60 }} />
-                    </TableRow>
-                ))}
-            </TableBody>
-        </Table>
+        <div className='group flex items-center border-b border-border px-4 py-2.5 hover:bg-bg-elevated/50'>
+            <div style={{ width: 70 }} className='flex items-center'>
+                <HealthDot stack={stack} />
+            </div>
+            <div style={{ flex: 1 }} className='flex items-center'>
+                <Link
+                    to='/stacks/$stackName'
+                    params={{ stackName: stack.name }}
+                    className='inline-flex items-center gap-1 font-mono text-xs font-medium hover:underline'
+                >
+                    <Layers className='size-3 text-muted-foreground' />
+                    {stack.name}
+                    <ArrowUpRight className='size-3 opacity-0 transition-opacity group-hover:opacity-100' />
+                </Link>
+            </div>
+            <div style={{ width: 80 }} className='text-right'>
+                <span className='font-mono text-[11px]'>{stack.services}</span>
+            </div>
+            <div style={{ width: 80 }}>
+                <ReplicasBadge stack={stack} />
+            </div>
+            <div style={{ width: 60 }} className='text-right'>
+                <span className='font-mono text-[11px] text-muted-foreground'>—</span>
+            </div>
+            <div style={{ width: 70 }} className='text-right'>
+                <span className='font-mono text-[11px] text-muted-foreground'>—</span>
+            </div>
+            <div style={{ width: 100 }} className='text-right'>
+                <span className='font-mono text-[11px] text-muted-foreground'>{formatRelativeTime(stack.updatedAt)}</span>
+            </div>
+            <div style={{ width: 60 }} />
+        </div>
     );
 }
 
@@ -136,9 +121,10 @@ export function StacksPage() {
 
     if (error) {
         return (
-            <div className='flex flex-col items-center justify-center gap-2 py-12 text-xs text-destructive'>
-                <AlertCircle className='size-4' />
-                <p>Failed to load stacks</p>
+            <div className='flex flex-col items-center justify-center gap-3 py-12'>
+                <AlertCircle className='size-5 text-destructive' />
+                <p className='text-sm text-destructive'>Failed to load stacks</p>
+                <RefreshButton queryKeys={QUERY_KEYS} />
             </div>
         );
     }
@@ -146,7 +132,7 @@ export function StacksPage() {
     return (
         <div className='flex h-full flex-col gap-6 overflow-y-auto p-6'>
             <PageHeader title='STACKS' subtitle={`${total} stacks · ${healthy} healthy`}>
-                <RefreshButton queryKeys={[["stacks"]]} />
+                <RefreshButton queryKeys={QUERY_KEYS} />
                 <Button variant='ghost' size='sm' className='h-7 px-3 text-[11px]' disabled>
                     <Plus className='size-3' />
                     DEPLOY STACK
@@ -164,7 +150,11 @@ export function StacksPage() {
                 ) : (
                     <>
                         <ColumnHeaders columns={COLUMNS} />
-                        <StacksTable stacks={filtered} />
+                        <div>
+                            {filtered.map((stack) => (
+                                <StackRow key={stack.name} stack={stack} />
+                            ))}
+                        </div>
                     </>
                 )}
             </TableShell>

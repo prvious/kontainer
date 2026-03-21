@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useMemo } from "react";
+import { toast } from "sonner";
 import { useImages } from "@/hooks/use-images";
 import { useRemoveImage } from "@/hooks/use-remove-image";
 import { usePruneImages } from "@/hooks/use-prune-images";
@@ -25,14 +26,9 @@ import { ButtonGroup, ButtonGroupSeparator } from "@/components/ui/button-group"
 import { RefreshButton } from "@/components/refresh-button";
 import { AlertCircle, ChevronDown, HardDrive, Trash2 } from "lucide-react";
 import type { ImageItem } from "@/types/images";
+import { formatBytes } from "@/lib/format-utils";
 
-function formatBytes(bytes: number): string {
-    if (bytes <= 0) return "0 B";
-    const units = ["B", "KB", "MB", "GB", "TB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(1024));
-    const value = bytes / Math.pow(1024, i);
-    return `${value.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
-}
+const QUERY_KEYS: string[][] = [["images"]];
 
 function formatRelativeTime(unix: number): string {
     const seconds = Math.floor(Date.now() / 1000 - unix);
@@ -180,7 +176,13 @@ function ImagesPage() {
     }, [allImages, search]);
 
     function handleDelete(img: ImageItem, force: boolean) {
-        removeImage.mutate({ imageId: img.id, nodeId: img.nodeId, force });
+        removeImage.mutate(
+            { imageId: img.id, nodeId: img.nodeId, force },
+            {
+                onSuccess: () => toast.success("Image removed"),
+                onError: (err) => toast.error(typeof err === "string" ? err : "Failed to remove image"),
+            },
+        );
     }
 
     const nodeCount = imagesData?.nodes?.length ?? 0;
@@ -192,9 +194,10 @@ function ImagesPage() {
 
     if (error) {
         return (
-            <div className='flex flex-col items-center justify-center gap-2 py-12 text-xs text-destructive'>
-                <AlertCircle className='size-4' />
-                <p>Failed to load images</p>
+            <div className='flex flex-col items-center justify-center gap-3 py-12'>
+                <AlertCircle className='size-5 text-destructive' />
+                <p className='text-sm text-destructive'>Failed to load images</p>
+                <RefreshButton queryKeys={QUERY_KEYS} />
             </div>
         );
     }
@@ -202,7 +205,7 @@ function ImagesPage() {
     return (
         <div className='flex h-full flex-col gap-6 p-6'>
             <PageHeader title='IMAGES' subtitle={subtitle}>
-                <RefreshButton queryKeys={[["images"]]} />
+                <RefreshButton queryKeys={QUERY_KEYS} />
                 <Button variant='outline' size='sm' disabled className='h-7 font-mono text-[11px] text-muted-foreground'>
                     PULL IMAGE
                 </Button>
@@ -229,7 +232,15 @@ function ImagesPage() {
                             </AlertDialogHeader>
                             <AlertDialogFooter>
                                 <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                <AlertDialogAction onClick={() => pruneImages.mutate()} render={<Button variant='destructive' />}>
+                                <AlertDialogAction
+                                    onClick={() =>
+                                        pruneImages.mutate(undefined, {
+                                            onSuccess: () => toast.success("Images pruned"),
+                                            onError: (err) => toast.error(typeof err === "string" ? err : "Failed to prune images"),
+                                        })
+                                    }
+                                    render={<Button variant='destructive' />}
+                                >
                                     {pruneImages.isPending ? "Pruning..." : "Prune All"}
                                 </AlertDialogAction>
                             </AlertDialogFooter>
