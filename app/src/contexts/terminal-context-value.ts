@@ -24,6 +24,8 @@ export interface TerminalContextValue {
     hasAnySessions: boolean;
     isMinimized: boolean;
     setMinimized: (minimized: boolean) => void;
+    showPanel: boolean;
+    setShowPanel: (show: boolean) => void;
 }
 
 export const TerminalContext = createContext<TerminalContextValue | null>(null);

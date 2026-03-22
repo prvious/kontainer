@@ -7,9 +7,11 @@ export function TerminalProvider({ children }: { children: React.ReactNode }) {
     const [sessions, setSessions] = useState<TerminalSession[]>([]);
     const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
     const [isMinimized, setMinimized] = useState(false);
+    const [showPanel, setShowPanel] = useState(false);
 
     const openExec = useCallback((target: ExecTarget) => {
         setMinimized(false);
+        setShowPanel(true);
         setSessions((prev) => {
             const existing = prev.find((s) => s.target.containerId === target.containerId);
             if (existing) {
@@ -25,6 +27,7 @@ export function TerminalProvider({ children }: { children: React.ReactNode }) {
     const closeSession = useCallback((sessionId: string) => {
         setSessions((prev) => {
             const next = prev.filter((s) => s.id !== sessionId);
+            if (next.length === 0) setShowPanel(false);
             setActiveSessionId((currentActive) => {
                 if (currentActive !== sessionId) return currentActive;
                 return next.length > 0 ? next[next.length - 1].id : null;
@@ -36,6 +39,7 @@ export function TerminalProvider({ children }: { children: React.ReactNode }) {
     const closeAllSessions = useCallback(() => {
         setSessions([]);
         setActiveSessionId(null);
+        setShowPanel(false);
     }, []);
 
     const switchSession = useCallback((sessionId: string) => {
@@ -46,10 +50,10 @@ export function TerminalProvider({ children }: { children: React.ReactNode }) {
 
     return (
         <TerminalContext
-            value={{ sessions, activeSessionId, openExec, closeSession, closeAllSessions, switchSession, hasAnySessions, isMinimized, setMinimized }}
+            value={{ sessions, activeSessionId, openExec, closeSession, closeAllSessions, switchSession, hasAnySessions, isMinimized, setMinimized, showPanel, setShowPanel }}
         >
             {children}
-            {hasAnySessions && <TerminalPanel />}
+            {showPanel && hasAnySessions && <TerminalPanel />}
         </TerminalContext>
     );
 }
