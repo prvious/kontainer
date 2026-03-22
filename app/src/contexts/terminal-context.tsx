@@ -9,9 +9,12 @@ export function TerminalProvider({ children }: { children: React.ReactNode }) {
     const [isMinimized, setMinimized] = useState(false);
     const [showPanel, setShowPanel] = useState(false);
 
-    const openExec = useCallback((target: ExecTarget) => {
-        setMinimized(false);
-        setShowPanel(true);
+    const openExec = useCallback((target: ExecTarget, options?: { showPanel?: boolean }) => {
+        const shouldShowPanel = options?.showPanel ?? true;
+        if (shouldShowPanel) {
+            setMinimized(false);
+            setShowPanel(true);
+        }
         setSessions((prev) => {
             const existing = prev.find((s) => s.target.containerId === target.containerId);
             if (existing) {

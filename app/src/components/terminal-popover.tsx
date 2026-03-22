@@ -4,7 +4,7 @@ import { Terminal, X } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useTerminal } from "@/hooks/use-terminal";
 
-const DOT_COLORS = ["bg-accent-green", "bg-cyan-400", "bg-orange-400", "bg-purple-400", "bg-red-400"] as const;
+const DOT_COLORS = ["bg-accent-green", "bg-accent-cyan", "bg-accent-orange", "bg-accent-purple", "bg-accent-red"] as const;
 
 export function TerminalPopover() {
     const [open, setOpen] = useState(false);
@@ -26,8 +26,7 @@ export function TerminalPopover() {
     function handleNewSession() {
         if (isOnExecRoute) return;
         setOpen(false);
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        void navigate({ to: "/exec" as any });
+        void navigate({ to: "/exec" });
     }
 
     const trigger = (

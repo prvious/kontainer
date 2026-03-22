@@ -68,7 +68,7 @@ function SkeletonRows() {
 export function ContainerPickerDialog({ open, onOpenChange, onSelect, excludeContainerIds = [] }: ContainerPickerDialogProps) {
     const [search, setSearch] = useState("");
 
-    const { data: tasks, isLoading, error } = useTasks();
+    const { data: tasks, isLoading, error, refetch } = useTasks();
 
     const filtered = useMemo(() => {
         if (!tasks) return [];
@@ -114,9 +114,14 @@ export function ContainerPickerDialog({ open, onOpenChange, onSelect, excludeCon
                     {isLoading ? (
                         <SkeletonRows />
                     ) : error ? (
-                        <div className='px-4 py-8 text-center'>
+                        <div className='flex flex-col items-center gap-2 px-4 py-8 text-center'>
                             <p className='text-sm text-destructive'>Failed to load containers</p>
-                            <p className='mt-1 text-xs text-muted-foreground'>Check your connection and try again</p>
+                            <p className='text-xs text-muted-foreground'>
+                                {typeof error === "string" ? error : error instanceof Error ? error.message : "Check your connection"}
+                            </p>
+                            <button onClick={() => refetch()} className='mt-1 font-mono text-xs font-semibold text-accent-cyan hover:underline'>
+                                Retry
+                            </button>
                         </div>
                     ) : !hasTasks ? (
                         <div className='px-4 py-8 text-center'>

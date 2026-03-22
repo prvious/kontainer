@@ -25,11 +25,7 @@ function ExecPage() {
     }
 
     function handleSelect(target: { containerId: string; nodeId: string; containerName: string }) {
-        openExec({
-            containerId: target.containerId,
-            nodeId: target.nodeId,
-            containerName: target.containerName,
-        });
+        openExec({ containerId: target.containerId, nodeId: target.nodeId, containerName: target.containerName }, { showPanel: false });
         setPickerOpen(false);
     }
 
