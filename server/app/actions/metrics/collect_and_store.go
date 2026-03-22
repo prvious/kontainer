@@ -101,14 +101,17 @@ func (a *CollectAndStoreAction) FetchFollowerMetrics(ctx context.Context, addres
 		Timestamp: ts, NodeID: resp.NodeId, Hostname: resp.Hostname,
 	}
 
-	if resp.Node != nil {
-		snapshot.Node = NodeMetrics{
-			CPUs: int(resp.Node.Cpus), CPUPercent: resp.Node.CpuPercent,
-			MemoryTotal: uint64(resp.Node.MemoryTotal), MemoryUsed: uint64(resp.Node.MemoryUsed),
-			MemoryPercent: resp.Node.MemoryPercent,
-			DiskTotal:     uint64(resp.Node.DiskTotal), DiskUsed: uint64(resp.Node.DiskUsed),
-			DiskPercent: resp.Node.DiskPercent,
-		}
+	if resp.Node == nil {
+		facades.Log().Warningf("metrics: follower %s (%s) returned nil node metrics, skipping snapshot", resp.NodeId, address)
+		return AgentMetricsSnapshot{}, fmt.Errorf("follower %s returned nil node metrics", address)
+	}
+
+	snapshot.Node = NodeMetrics{
+		CPUs: int(resp.Node.Cpus), CPUPercent: resp.Node.CpuPercent,
+		MemoryTotal: uint64(resp.Node.MemoryTotal), MemoryUsed: uint64(resp.Node.MemoryUsed),
+		MemoryPercent: resp.Node.MemoryPercent,
+		DiskTotal:     uint64(resp.Node.DiskTotal), DiskUsed: uint64(resp.Node.DiskUsed),
+		DiskPercent: resp.Node.DiskPercent,
 	}
 
 	for _, c := range resp.Containers {
