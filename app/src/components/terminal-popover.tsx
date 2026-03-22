@@ -33,9 +33,7 @@ export function TerminalPopover() {
     const trigger = (
         <button className='flex h-full items-center gap-[5px] px-2.5 text-text-secondary transition-colors hover:text-foreground'>
             <Terminal className='size-[11px] text-accent-green' />
-            <span className='font-mono text-[10px] font-medium'>
-                {sessions.length} TERMINALS
-            </span>
+            <span className='font-mono text-[10px] font-medium'>{sessions.length} TERMINALS</span>
         </button>
     );
 
@@ -46,20 +44,14 @@ export function TerminalPopover() {
             <PopoverContent side='top' align='end' className='w-[260px] border-border bg-card p-2'>
                 {/* Header */}
                 <div className='mb-2 flex items-center justify-between px-2 py-1'>
-                    <span className='font-mono text-[9px] font-medium tracking-widest text-muted-foreground uppercase'>
-                        Terminal Sessions
-                    </span>
-                    <span className='rounded bg-bg-elevated px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground'>
-                        {sessions.length}
-                    </span>
+                    <span className='font-mono text-[9px] font-medium tracking-widest text-muted-foreground uppercase'>Terminal Sessions</span>
+                    <span className='rounded bg-bg-elevated px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground'>{sessions.length}</span>
                 </div>
 
                 {/* Session list */}
                 <div className='max-h-56 overflow-y-auto'>
                     {sessions.length === 0 ? (
-                        <div className='px-2 py-4 text-center font-mono text-[11px] text-muted-foreground'>
-                            No terminal sessions
-                        </div>
+                        <div className='px-2 py-4 text-center font-mono text-[11px] text-muted-foreground'>No terminal sessions</div>
                     ) : (
                         <div className='space-y-0.5'>
                             {sessions.map((session, index) => {
@@ -71,9 +63,7 @@ export function TerminalPopover() {
                                         className='group flex w-full items-center gap-3 rounded px-2 py-2 text-left transition-colors hover:bg-bg-elevated'
                                     >
                                         <span className={`size-2 shrink-0 rounded-full ${DOT_COLORS[index % DOT_COLORS.length]}`} />
-                                        <span className='flex-1 truncate font-mono text-[11px] text-foreground'>
-                                            {name}
-                                        </span>
+                                        <span className='flex-1 truncate font-mono text-[11px] text-foreground'>{name}</span>
                                         <span
                                             className='shrink-0 rounded p-0.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 hover:text-destructive'
                                             role='button'

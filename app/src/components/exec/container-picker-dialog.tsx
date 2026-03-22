@@ -75,10 +75,7 @@ export function ContainerPickerDialog({ open, onOpenChange, onSelect, excludeCon
         const query = search.trim().toLowerCase();
         if (!query) return tasks;
         return tasks.filter(
-            (t) =>
-                t.serviceName.toLowerCase().includes(query) ||
-                t.image.toLowerCase().includes(query) ||
-                t.containerId.toLowerCase().includes(query),
+            (t) => t.serviceName.toLowerCase().includes(query) || t.image.toLowerCase().includes(query) || t.containerId.toLowerCase().includes(query),
         );
     }, [tasks, search]);
 

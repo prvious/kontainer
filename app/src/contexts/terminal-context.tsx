@@ -50,7 +50,19 @@ export function TerminalProvider({ children }: { children: React.ReactNode }) {
 
     return (
         <TerminalContext
-            value={{ sessions, activeSessionId, openExec, closeSession, closeAllSessions, switchSession, hasAnySessions, isMinimized, setMinimized, showPanel, setShowPanel }}
+            value={{
+                sessions,
+                activeSessionId,
+                openExec,
+                closeSession,
+                closeAllSessions,
+                switchSession,
+                hasAnySessions,
+                isMinimized,
+                setMinimized,
+                showPanel,
+                setShowPanel,
+            }}
         >
             {children}
             {showPanel && hasAnySessions && <TerminalPanel />}

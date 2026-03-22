@@ -52,11 +52,7 @@ function ExecPage() {
                     <ExecSessionTabs onAdd={openPicker} />
                     <div className='flex min-h-0 flex-1 flex-col overflow-hidden rounded-b-lg border-x border-b border-border'>
                         {sessions.map((session) => (
-                            <div
-                                key={session.id}
-                                className='flex-1'
-                                style={{ display: session.id === activeSessionId ? 'flex' : 'none' }}
-                            >
+                            <div key={session.id} className='flex-1' style={{ display: session.id === activeSessionId ? "flex" : "none" }}>
                                 <TerminalSessionView target={session.target} onStatusChange={() => {}} />
                             </div>
                         ))}

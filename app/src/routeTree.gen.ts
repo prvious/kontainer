@@ -22,6 +22,7 @@ import { Route as AuthenticatedNodesIndexRouteImport } from './routes/_authentic
 import { Route as AuthenticatedNetworksIndexRouteImport } from './routes/_authenticated/networks/index'
 import { Route as AuthenticatedLogsIndexRouteImport } from './routes/_authenticated/logs/index'
 import { Route as AuthenticatedImagesIndexRouteImport } from './routes/_authenticated/images/index'
+import { Route as AuthenticatedExecIndexRouteImport } from './routes/_authenticated/exec/index'
 import { Route as AuthenticatedConfigsIndexRouteImport } from './routes/_authenticated/configs/index'
 import { Route as AuthenticatedStacksStackNameRouteImport } from './routes/_authenticated/stacks/$stackName'
 import { Route as AuthenticatedServicesServiceIdRouteImport } from './routes/_authenticated/services/$serviceId'
@@ -98,6 +99,11 @@ const AuthenticatedImagesIndexRoute =
     path: '/images/',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
+const AuthenticatedExecIndexRoute = AuthenticatedExecIndexRouteImport.update({
+  id: '/exec/',
+  path: '/exec/',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
 const AuthenticatedConfigsIndexRoute =
   AuthenticatedConfigsIndexRouteImport.update({
     id: '/configs/',
@@ -130,6 +136,7 @@ export interface FileRoutesByFullPath {
   '/services/$serviceId': typeof AuthenticatedServicesServiceIdRoute
   '/stacks/$stackName': typeof AuthenticatedStacksStackNameRoute
   '/configs/': typeof AuthenticatedConfigsIndexRoute
+  '/exec/': typeof AuthenticatedExecIndexRoute
   '/images/': typeof AuthenticatedImagesIndexRoute
   '/logs/': typeof AuthenticatedLogsIndexRoute
   '/networks/': typeof AuthenticatedNetworksIndexRoute
@@ -148,6 +155,7 @@ export interface FileRoutesByTo {
   '/services/$serviceId': typeof AuthenticatedServicesServiceIdRoute
   '/stacks/$stackName': typeof AuthenticatedStacksStackNameRoute
   '/configs': typeof AuthenticatedConfigsIndexRoute
+  '/exec': typeof AuthenticatedExecIndexRoute
   '/images': typeof AuthenticatedImagesIndexRoute
   '/logs': typeof AuthenticatedLogsIndexRoute
   '/networks': typeof AuthenticatedNetworksIndexRoute
@@ -168,6 +176,7 @@ export interface FileRoutesById {
   '/_authenticated/services/$serviceId': typeof AuthenticatedServicesServiceIdRoute
   '/_authenticated/stacks/$stackName': typeof AuthenticatedStacksStackNameRoute
   '/_authenticated/configs/': typeof AuthenticatedConfigsIndexRoute
+  '/_authenticated/exec/': typeof AuthenticatedExecIndexRoute
   '/_authenticated/images/': typeof AuthenticatedImagesIndexRoute
   '/_authenticated/logs/': typeof AuthenticatedLogsIndexRoute
   '/_authenticated/networks/': typeof AuthenticatedNetworksIndexRoute
@@ -188,6 +197,7 @@ export interface FileRouteTypes {
     | '/services/$serviceId'
     | '/stacks/$stackName'
     | '/configs/'
+    | '/exec/'
     | '/images/'
     | '/logs/'
     | '/networks/'
@@ -206,6 +216,7 @@ export interface FileRouteTypes {
     | '/services/$serviceId'
     | '/stacks/$stackName'
     | '/configs'
+    | '/exec'
     | '/images'
     | '/logs'
     | '/networks'
@@ -225,6 +236,7 @@ export interface FileRouteTypes {
     | '/_authenticated/services/$serviceId'
     | '/_authenticated/stacks/$stackName'
     | '/_authenticated/configs/'
+    | '/_authenticated/exec/'
     | '/_authenticated/images/'
     | '/_authenticated/logs/'
     | '/_authenticated/networks/'
@@ -335,6 +347,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedImagesIndexRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/exec/': {
+      id: '/_authenticated/exec/'
+      path: '/exec'
+      fullPath: '/exec/'
+      preLoaderRoute: typeof AuthenticatedExecIndexRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/configs/': {
       id: '/_authenticated/configs/'
       path: '/configs'
@@ -372,6 +391,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedServicesServiceIdRoute: typeof AuthenticatedServicesServiceIdRoute
   AuthenticatedStacksStackNameRoute: typeof AuthenticatedStacksStackNameRoute
   AuthenticatedConfigsIndexRoute: typeof AuthenticatedConfigsIndexRoute
+  AuthenticatedExecIndexRoute: typeof AuthenticatedExecIndexRoute
   AuthenticatedImagesIndexRoute: typeof AuthenticatedImagesIndexRoute
   AuthenticatedLogsIndexRoute: typeof AuthenticatedLogsIndexRoute
   AuthenticatedNetworksIndexRoute: typeof AuthenticatedNetworksIndexRoute
@@ -390,6 +410,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedServicesServiceIdRoute: AuthenticatedServicesServiceIdRoute,
   AuthenticatedStacksStackNameRoute: AuthenticatedStacksStackNameRoute,
   AuthenticatedConfigsIndexRoute: AuthenticatedConfigsIndexRoute,
+  AuthenticatedExecIndexRoute: AuthenticatedExecIndexRoute,
   AuthenticatedImagesIndexRoute: AuthenticatedImagesIndexRoute,
   AuthenticatedLogsIndexRoute: AuthenticatedLogsIndexRoute,
   AuthenticatedNetworksIndexRoute: AuthenticatedNetworksIndexRoute,
