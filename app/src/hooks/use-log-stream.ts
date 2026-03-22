@@ -126,7 +126,7 @@ export function useLogStream(path: string, options: LogOptions) {
             backoffRef.current = Math.min(backoffRef.current * 2, MAX_BACKOFF);
             reconnectTimerRef.current = setTimeout(() => {
                 if (!unmountedRef.current) {
-                    connect();
+                    connectRef.current();
                 }
             }, delay);
         };
@@ -147,9 +147,12 @@ export function useLogStream(path: string, options: LogOptions) {
         connect();
     }, [clearLogs, connect]);
 
+    const connectRef = useRef(connect);
+    connectRef.current = connect;
+
     useEffect(() => {
         unmountedRef.current = false;
-        connect();
+        connectRef.current();
 
         return () => {
             unmountedRef.current = true;
@@ -162,7 +165,8 @@ export function useLogStream(path: string, options: LogOptions) {
                 wsRef.current = null;
             }
         };
-    }, [connect]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [path]);
 
     return { logs, status, isPaused, clearLogs, pause, resume, reconnect };
 }
