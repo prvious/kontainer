@@ -17,14 +17,14 @@ interface LogStreamTabsProps {
 
 export function LogStreamTabs({ streams, activeStreamId, onSelect, onClose, onAdd }: LogStreamTabsProps) {
     return (
-        <div className='flex items-center rounded-t-lg border border-border bg-card'>
+        <div className='flex items-center overflow-x-auto rounded-t-lg border border-border bg-card'>
             {streams.map((stream) => {
                 const isActive = stream.id === activeStreamId;
                 return (
                     <button
                         key={stream.id}
                         onClick={() => onSelect(stream.id)}
-                        className={`flex items-center gap-2 px-4 py-2.5 font-mono text-[11px] ${
+                        className={`flex shrink-0 items-center gap-2 px-4 py-2.5 font-mono text-[11px] ${
                             isActive
                                 ? 'border-b-2 border-b-accent-green bg-bg-elevated font-semibold text-accent-green'
                                 : 'border-r border-r-border font-medium text-text-secondary hover:text-foreground'
@@ -43,7 +43,7 @@ export function LogStreamTabs({ streams, activeStreamId, onSelect, onClose, onAd
                     </button>
                 );
             })}
-            <button onClick={onAdd} className='flex size-9 items-center justify-center text-muted-foreground hover:text-foreground'>
+            <button onClick={onAdd} className='flex size-9 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground'>
                 <Plus className='size-3.5' />
             </button>
         </div>
