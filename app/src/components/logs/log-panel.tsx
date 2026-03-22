@@ -43,7 +43,7 @@ export function LogPanel({ serviceId, visible, logFilter }: LogPanelProps) {
     const emptyMessage = status === "connecting" ? "Connecting..." : logs.length === 0 && status === "connected" ? "Waiting for logs..." : "No logs";
 
     return (
-        <div className='flex flex-col' style={{ display: visible ? "flex" : "none" }}>
+        <div className='flex min-h-0 flex-1 flex-col' style={{ display: visible ? "flex" : "none" }}>
             {/* Column header */}
             <div className='flex items-center bg-bg-elevated px-4 py-1.5'>
                 <span className='w-[100px] shrink-0 font-mono text-[10px] font-bold tracking-wide text-muted-foreground uppercase'>Timestamp</span>
