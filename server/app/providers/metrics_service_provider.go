@@ -43,7 +43,14 @@ func (p *MetricsServiceProvider) Register(app foundation.Application) {
 			return nil, fmt.Errorf("cluster.pool is not *cluster.GrpcPool")
 		}
 
-		nodeID := facades.Config().GetString("cluster.node_id", "")
+		nodeIDInstance, err := app.Make("docker.node_id")
+		if err != nil {
+			return nil, fmt.Errorf("metrics: failed to resolve docker.node_id: %w", err)
+		}
+		nodeID, ok := nodeIDInstance.(string)
+		if !ok {
+			return nil, fmt.Errorf("metrics: docker.node_id is not a string")
+		}
 		hostnameInstance, err := app.Make("docker.hostname")
 		if err != nil {
 			return nil, fmt.Errorf("metrics: failed to resolve hostname: %w", err)

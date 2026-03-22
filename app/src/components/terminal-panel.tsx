@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from "react";
+import { useMatches } from "@tanstack/react-router";
 import { TerminalSessionView } from "@/components/terminal-session-view";
 import { X, Minus, Maximize2 } from "lucide-react";
 import { useTerminal } from "@/hooks/use-terminal";
@@ -8,6 +9,8 @@ const DEFAULT_HEIGHT = 300;
 const MAX_HEIGHT_VH = 0.8;
 
 export function TerminalPanel() {
+    const matches = useMatches();
+    const currentPath = matches[matches.length - 1]?.fullPath ?? "/";
     const { sessions, activeSessionId, isMinimized, closeAllSessions, setMinimized } = useTerminal();
     const [panelHeight, setPanelHeight] = useState(DEFAULT_HEIGHT);
     const [isFullscreen, setIsFullscreen] = useState(false);
@@ -39,6 +42,8 @@ export function TerminalPanel() {
         },
         [panelHeight],
     );
+
+    if (currentPath.includes("/exec")) return null;
 
     const panelClasses = isFullscreen
         ? "fixed bottom-9 left-2 right-2 top-(--titlebar-inset) z-50 flex flex-col rounded-xl border border-border bg-background p-2 shadow-[0_-4px_20px_rgba(0,0,0,0.3)]"

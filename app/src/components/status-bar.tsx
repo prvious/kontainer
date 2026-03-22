@@ -1,8 +1,8 @@
 import { useNavigate } from "@tanstack/react-router";
-import { GitBranch, Container, Cpu, MemoryStick, Layers, TriangleAlert, Terminal, ScrollText, ChevronUp, X } from "lucide-react";
+import { GitBranch, Container, Cpu, MemoryStick, Layers, TriangleAlert, ScrollText } from "lucide-react";
 import { useTaskStats } from "@/hooks/use-task-stats";
 import { useClusterMetrics } from "@/hooks/use-cluster-metrics";
-import { useTerminal } from "@/hooks/use-terminal";
+import { TerminalPopover } from "@/components/terminal-popover";
 
 function Separator() {
     return <span className='h-full w-px bg-border' />;
@@ -44,8 +44,6 @@ export function StatusBar() {
     const navigate = useNavigate();
     const { data: taskStats, isLoading: taskStatsLoading } = useTaskStats();
     const { data: metrics, isLoading: metricsLoading } = useClusterMetrics();
-
-    const { sessions, activeSessionId, isMinimized, setMinimized, switchSession, closeSession } = useTerminal();
 
     // Metrics
     const agents = metrics?.agents ?? [];
@@ -116,51 +114,8 @@ export function StatusBar() {
             {/* Right segments */}
             <div className='flex h-full items-center'>
                 {/* Terminal sessions */}
-                {sessions.length > 0 ? (
-                    <>
-                        <Separator />
-                        <div className='flex h-full items-center gap-1 px-2.5'>
-                            {sessions.map((session) => {
-                                const name = session.target.containerName || session.target.containerId.slice(0, 12);
-                                const isActive = session.id === activeSessionId;
-                                return (
-                                    <button
-                                        key={session.id}
-                                        className={`group flex items-center gap-1 rounded px-1.5 py-0.5 font-mono text-[10px] transition-colors ${isActive ? 'bg-bg-elevated text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
-                                        onClick={() => {
-                                            switchSession(session.id);
-                                            setMinimized(false);
-                                        }}
-                                    >
-                                        <Terminal className='size-[11px] text-accent-green' />
-                                        <span className='max-w-[80px] truncate'>{name}</span>
-                                        <span
-                                            className='shrink-0 rounded p-0.5 opacity-0 group-hover:opacity-100 hover:bg-muted'
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                closeSession(session.id);
-                                            }}
-                                            role='button'
-                                            tabIndex={0}
-                                        >
-                                            <X className='size-2.5' />
-                                        </span>
-                                    </button>
-                                );
-                            })}
-                            {isMinimized && (
-                                <button className='rounded p-0.5 text-muted-foreground hover:text-foreground' onClick={() => setMinimized(false)}>
-                                    <ChevronUp className='size-3.5' />
-                                </button>
-                            )}
-                        </div>
-                    </>
-                ) : (
-                    <>
-                        <Separator />
-                        <Segment icon={Terminal} iconColor='text-accent-green' label='0 TERMINALS' />
-                    </>
-                )}
+                <Separator />
+                <TerminalPopover />
                 <Separator />
                 <Segment icon={ScrollText} iconColor='text-muted-foreground' label='-- STREAMS' textColor='text-muted-foreground' />{" "}
                 {/* TODO: wire to log stream count */}

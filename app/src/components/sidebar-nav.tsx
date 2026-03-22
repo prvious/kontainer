@@ -1,5 +1,5 @@
 import { Link, useMatches } from "@tanstack/react-router";
-import { Activity, Box, HardDrive, FileStack, LayoutDashboard, Layers, Network, Server, Settings, ScrollText } from "lucide-react";
+import { Activity, Box, HardDrive, FileStack, LayoutDashboard, Layers, Network, Server, Settings, ScrollText, Terminal } from "lucide-react";
 import { useNodes } from "@/hooks/use-nodes";
 import { useTaskStats } from "@/hooks/use-task-stats";
 
@@ -36,6 +36,7 @@ const topSections: NavSection[] = [
 const bottomSection: NavSection = {
     heading: "SYSTEM",
     items: [
+        { label: "EXEC", to: "/exec", icon: Terminal },
         { label: "LOGS", to: "/logs", icon: ScrollText },
         { label: "SETTINGS", to: "/settings", icon: Settings },
     ],

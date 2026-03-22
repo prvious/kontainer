@@ -179,7 +179,6 @@ export function useLogStream(path: string, options: LogOptions) {
                 wsRef.current = null;
             }
         };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [path]);
 
     return { logs, status, isPaused, clearLogs, pause, resume, reconnect };
