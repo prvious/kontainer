@@ -2,8 +2,10 @@ package metrics
 
 import (
 	"context"
+	"fmt"
 	"time"
 
+	"github.com/goravel/framework/contracts/database/orm"
 	"github.com/goravel/framework/facades"
 	"github.com/prvious/kontainer/server/app/models"
 	"github.com/prvious/kontainer/server/app/services/cluster"
@@ -38,7 +40,7 @@ func (a *CollectAndStoreAction) Execute(ctx context.Context) {
 	if err != nil {
 		facades.Log().Errorf("metrics collector: local collect error: %v", err)
 	} else {
-		if err := a.persistNodeMetrics(localSnapshot); err != nil {
+		if err := a.persistMetrics(localSnapshot); err != nil {
 			facades.Log().Errorf("metrics collector: local insert error: %v", err)
 		}
 	}
@@ -52,20 +54,10 @@ func (a *CollectAndStoreAction) Execute(ctx context.Context) {
 			facades.Log().Errorf("metrics collector: follower %s (%s) error: %v", follower.NodeID, follower.Address, err)
 			continue
 		}
-		if err := a.persistNodeMetrics(snapshot); err != nil {
-			facades.Log().Errorf("metrics collector: follower insert error: %v", err)
+		if err := a.persistMetrics(snapshot); err != nil {
+			facades.Log().Errorf("metrics collector: follower %s (%s) insert error: %v", follower.NodeID, follower.Address, err)
 		}
 	}
-}
-
-// NodeID returns the leader's node ID so callers can skip self in fan-out loops.
-func (a *CollectAndStoreAction) NodeID() string {
-	return a.nodeID
-}
-
-// CollectLocal gathers local metrics. Exported for reuse.
-func (a *CollectAndStoreAction) CollectLocal(ctx context.Context) (AgentMetricsSnapshot, error) {
-	return a.collectLocal(ctx)
 }
 
 func (a *CollectAndStoreAction) collectLocal(ctx context.Context) (AgentMetricsSnapshot, error) {
@@ -78,7 +70,7 @@ func (a *CollectAndStoreAction) collectLocal(ctx context.Context) (AgentMetricsS
 		return AgentMetricsSnapshot{}, err
 	}
 	return AgentMetricsSnapshot{
-		Timestamp: time.Now().UTC(), NodeID: a.nodeID, Hostname: a.hostname,
+		Timestamp: time.Now().Truncate(time.Second).UTC(), NodeID: a.nodeID, Hostname: a.hostname,
 		Node: nodeMetrics, Containers: containerMetrics,
 	}, nil
 }
@@ -103,19 +95,23 @@ func (a *CollectAndStoreAction) FetchFollowerMetrics(ctx context.Context, addres
 		facades.Log().Warningf("metrics: follower %s sent unparseable timestamp %q, using current time: %v", address, resp.Timestamp, err)
 		ts = time.Now().UTC()
 	}
+	ts = ts.Truncate(time.Second)
 
 	snapshot := AgentMetricsSnapshot{
 		Timestamp: ts, NodeID: resp.NodeId, Hostname: resp.Hostname,
 	}
 
-	if resp.Node != nil {
-		snapshot.Node = NodeMetrics{
-			CPUs: int(resp.Node.Cpus), CPUPercent: resp.Node.CpuPercent,
-			MemoryTotal: uint64(resp.Node.MemoryTotal), MemoryUsed: uint64(resp.Node.MemoryUsed),
-			MemoryPercent: resp.Node.MemoryPercent,
-			DiskTotal: uint64(resp.Node.DiskTotal), DiskUsed: uint64(resp.Node.DiskUsed),
-			DiskPercent: resp.Node.DiskPercent,
-		}
+	if resp.Node == nil {
+		facades.Log().Warningf("metrics: follower %s (%s) returned nil node metrics, skipping snapshot", resp.NodeId, address)
+		return AgentMetricsSnapshot{}, fmt.Errorf("follower %s returned nil node metrics", address)
+	}
+
+	snapshot.Node = NodeMetrics{
+		CPUs: int(resp.Node.Cpus), CPUPercent: resp.Node.CpuPercent,
+		MemoryTotal: uint64(resp.Node.MemoryTotal), MemoryUsed: uint64(resp.Node.MemoryUsed),
+		MemoryPercent: resp.Node.MemoryPercent,
+		DiskTotal:     uint64(resp.Node.DiskTotal), DiskUsed: uint64(resp.Node.DiskUsed),
+		DiskPercent: resp.Node.DiskPercent,
 	}
 
 	for _, c := range resp.Containers {
@@ -130,12 +126,35 @@ func (a *CollectAndStoreAction) FetchFollowerMetrics(ctx context.Context, addres
 	return snapshot, nil
 }
 
-func (a *CollectAndStoreAction) persistNodeMetrics(s AgentMetricsSnapshot) error {
-	metric := &models.NodeMetric{
-		Timestamp: s.Timestamp, NodeID: s.NodeID, Hostname: s.Hostname,
-		CPUs: s.Node.CPUs, CPUPercent: s.Node.CPUPercent,
-		MemUsed: s.Node.MemoryUsed, MemTotal: s.Node.MemoryTotal, MemPercent: s.Node.MemoryPercent,
-		DiskUsed: s.Node.DiskUsed, DiskTotal: s.Node.DiskTotal, DiskPercent: s.Node.DiskPercent,
-	}
-	return facades.Orm().Query().Create(metric)
+// persistMetrics writes node + container rows atomically. All rows in a
+// snapshot share the same timestamp so readers can join them by equality.
+func (a *CollectAndStoreAction) persistMetrics(s AgentMetricsSnapshot) error {
+	return facades.Orm().Transaction(func(tx orm.Query) error {
+		nodeRow := &models.Metric{
+			Timestamp: s.Timestamp, Kind: models.MetricKindNode,
+			NodeID: s.NodeID, SubjectID: s.NodeID, SubjectName: s.Hostname,
+			CPUPercent: s.Node.CPUPercent,
+			MemUsed:    int64(s.Node.MemoryUsed), MemTotal: int64(s.Node.MemoryTotal), MemPercent: s.Node.MemoryPercent,
+			CPUs:     s.Node.CPUs,
+			DiskUsed: int64(s.Node.DiskUsed), DiskTotal: int64(s.Node.DiskTotal), DiskPercent: s.Node.DiskPercent,
+		}
+		if err := tx.Create(nodeRow); err != nil {
+			return fmt.Errorf("insert node metric for %s: %w", s.NodeID, err)
+		}
+
+		for _, c := range s.Containers {
+			row := &models.Metric{
+				Timestamp: s.Timestamp, Kind: models.MetricKindContainer,
+				NodeID: s.NodeID, SubjectID: c.ContainerID, SubjectName: c.Name,
+				CPUPercent: c.CPUPercent,
+				MemUsed:    c.MemoryUsed, MemTotal: c.MemoryLimit, MemPercent: c.MemoryPercent,
+				ServiceID: c.ServiceID,
+			}
+			if err := tx.Create(row); err != nil {
+				return fmt.Errorf("insert container metric %s on node %s: %w", c.ContainerID, s.NodeID, err)
+			}
+		}
+
+		return nil
+	})
 }

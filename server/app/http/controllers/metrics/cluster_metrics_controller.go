@@ -4,8 +4,8 @@ import (
 	"time"
 
 	"github.com/goravel/framework/contracts/http"
-	"github.com/prvious/kontainer/server/app/facades"
 	metricsActions "github.com/prvious/kontainer/server/app/actions/metrics"
+	"github.com/prvious/kontainer/server/app/facades"
 )
 
 type ClusterMetricsController struct {

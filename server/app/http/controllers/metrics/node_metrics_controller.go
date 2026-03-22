@@ -1,9 +1,12 @@
 package metrics
 
 import (
+	"errors"
+
 	"github.com/goravel/framework/contracts/http"
-	"github.com/prvious/kontainer/server/app/facades"
+
 	metricsActions "github.com/prvious/kontainer/server/app/actions/metrics"
+	"github.com/prvious/kontainer/server/app/facades"
 )
 
 type NodeMetricsController struct {
@@ -22,6 +25,9 @@ func (c *NodeMetricsController) Handle(ctx http.Context) http.Response {
 
 	snapshot, err := c.action.Execute(ctx.Context(), nodeID)
 	if err != nil {
+		if errors.Is(err, metricsActions.ErrNoRecentMetrics) {
+			return ctx.Response().Json(404, map[string]string{"error": "no recent metrics for this node"})
+		}
 		facades.Log().Errorf("node metrics controller: %v", err)
 		return ctx.Response().Json(500, map[string]string{"error": "failed to get node metrics"})
 	}

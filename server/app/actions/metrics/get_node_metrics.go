@@ -3,33 +3,45 @@ package metrics
 import (
 	"context"
 	"fmt"
+	"time"
 
-	"github.com/prvious/kontainer/server/app/services/cluster"
+	"github.com/goravel/framework/facades"
+
+	"github.com/prvious/kontainer/server/app/models"
 )
 
-type GetNodeMetricsAction struct {
-	collector    *CollectAndStoreAction
-	registry     *cluster.Registry
-	leaderNodeID string
+type GetNodeMetricsAction struct{}
+
+func NewGetNodeMetricsAction() *GetNodeMetricsAction {
+	return &GetNodeMetricsAction{}
 }
 
-func NewGetNodeMetricsAction(
-	collector *CollectAndStoreAction,
-	registry *cluster.Registry,
-	leaderNodeID string,
-) *GetNodeMetricsAction {
-	return &GetNodeMetricsAction{collector: collector, registry: registry, leaderNodeID: leaderNodeID}
-}
+func (a *GetNodeMetricsAction) Execute(_ context.Context, nodeID string) (AgentMetricsSnapshot, error) {
+	cutoff := time.Now().Add(-2 * time.Minute).UTC()
 
-func (a *GetNodeMetricsAction) Execute(ctx context.Context, nodeID string) (AgentMetricsSnapshot, error) {
-	if nodeID == "" || nodeID == a.leaderNodeID {
-		return a.collector.CollectLocal(ctx)
+	var nodeRow models.Metric
+	if err := facades.Orm().Query().
+		Where("kind = ? AND node_id = ? AND timestamp >= ?", models.MetricKindNode, nodeID, cutoff).
+		OrderBy("timestamp", "desc").
+		First(&nodeRow); err != nil {
+		return AgentMetricsSnapshot{}, fmt.Errorf("query node metrics for %s: %w", nodeID, err)
+	}
+	if nodeRow.ID == 0 {
+		return AgentMetricsSnapshot{}, ErrNoRecentMetrics
 	}
 
-	addr, ok := a.registry.ByNodeID(nodeID)
-	if !ok {
-		return AgentMetricsSnapshot{}, fmt.Errorf("node %s not found in registry", nodeID)
+	snapshot := nodeSnapshotFromRow(nodeRow)
+
+	var containerRows []models.Metric
+	if err := facades.Orm().Query().
+		Where("kind = ? AND node_id = ? AND timestamp = ?", models.MetricKindContainer, nodeID, nodeRow.Timestamp).
+		Get(&containerRows); err != nil {
+		return AgentMetricsSnapshot{}, fmt.Errorf("query container metrics for node %s: %w", nodeID, err)
 	}
 
-	return a.collector.FetchFollowerMetrics(ctx, addr)
+	for _, c := range containerRows {
+		snapshot.Containers = append(snapshot.Containers, containerMetricsFromRow(c))
+	}
+
+	return snapshot, nil
 }
