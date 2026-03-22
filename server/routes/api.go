@@ -56,7 +56,7 @@ func Api() {
 	if !hostnameOk {
 		facades.Log().Warningf("docker.hostname not resolved — image listings will use empty hostname")
 	}
-	leaderNodeID := facades.Config().GetString("cluster.node_id", "")
+	leaderNodeID, _ := resolve[string]("docker.node_id")
 
 	// WebSocket routes — inside /api prefix but WITHOUT JWT middleware.
 	// WS controllers handle JWT auth from the ?token= query param themselves.
