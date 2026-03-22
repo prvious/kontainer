@@ -50,6 +50,8 @@ Items displayed in the UI with fake/placeholder data or NOOP buttons. Each needs
 
 - **Structured log level parsing** — The LEVEL column shows "OUT"/"ERR" (stdout/stderr). Parsing log levels (INFO, WARN, ERROR, DEBUG) from log lines requires structured logging or pattern matching. Needs either structured log output from services or a configurable log format parser.
 
+- **Log text filter** — The "Filter logs..." search input was designed but deferred. Needs a per-tab or global text filter that filters log lines by keyword match. The `LogPanel` component already accepts a `logFilter` prop — just needs UI wiring.
+
 ## Sidebar
 
 - **Agent version/uptime card** — Shows static "AGENT -- / uptime: --". No agent health endpoint returns version or uptime. Needs a `/api/health` or `/ping` extension with version and uptime fields.
