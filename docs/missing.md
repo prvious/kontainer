@@ -52,6 +52,10 @@ Items displayed in the UI with fake/placeholder data or NOOP buttons. Each needs
 
 - **Log text filter** — The "Filter logs..." search input was designed but deferred. Needs a per-tab or global text filter that filters log lines by keyword match. The `LogPanel` component already accepts a `logFilter` prop — just needs UI wiring.
 
+## Exec Page
+
+- **PID and TTY in connection bar** — Shows placeholder "PID: -- | TTY: pts/0". The exec WebSocket doesn't return process metadata. Needs the agent to send PID/TTY info after exec attach.
+
 ## Sidebar
 
 - **Agent version/uptime card** — Shows static "AGENT -- / uptime: --". No agent health endpoint returns version or uptime. Needs a `/api/health` or `/ping` extension with version and uptime fields.
