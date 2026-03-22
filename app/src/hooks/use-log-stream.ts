@@ -35,6 +35,12 @@ export function useLogStream(path: string, options: LogOptions) {
     const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const unmountedRef = useRef(false);
 
+    // Store latest values in refs so the WebSocket callbacks always use current values
+    const agentUrlRef = useRef(agentUrl);
+    const tokenRef = useRef(token);
+    agentUrlRef.current = agentUrl;
+    tokenRef.current = token;
+
     const appendLogs = useCallback((entries: LogEntry[]) => {
         setLogs((prev) => {
             const merged = [...prev, ...entries];
@@ -64,8 +70,14 @@ export function useLogStream(path: string, options: LogOptions) {
         }
     }, [appendLogs]);
 
+    // Store options in a ref so reconnect always uses latest values
+    const optionsRef = useRef(options);
+    optionsRef.current = options;
+
     const connect = useCallback(() => {
-        if (!agentUrl || !token) return;
+        const url = agentUrlRef.current;
+        const tok = tokenRef.current;
+        if (!url || !tok) return;
 
         // Clean up previous connection
         if (wsRef.current) {
@@ -75,14 +87,15 @@ export function useLogStream(path: string, options: LogOptions) {
 
         setStatus("connecting");
 
+        const opts = optionsRef.current;
         const wsUrl =
-            agentUrl.replace(/^http/, "ws") +
+            url.replace(/^http/, "ws") +
             path +
-            `?token=${encodeURIComponent(token)}` +
-            `&tail=${options.tail}` +
-            `&timestamps=${options.timestamps}` +
-            `&stdout=${options.stdout}` +
-            `&stderr=${options.stderr}`;
+            `?token=${encodeURIComponent(tok)}` +
+            `&tail=${opts.tail}` +
+            `&timestamps=${opts.timestamps}` +
+            `&stdout=${opts.stdout}` +
+            `&stderr=${opts.stderr}`;
 
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
@@ -98,34 +111,34 @@ export function useLogStream(path: string, options: LogOptions) {
             try {
                 const data = JSON.parse(ev.data);
                 if (data.error) {
+                    console.warn("[useLogStream] server error:", data.error);
                     setStatus("error");
                     return;
                 }
                 const entry: LogEntry = {
                     id: nextLogId++,
-                    stream: data.stream,
-                    timestamp: data.timestamp || "",
-                    line: data.line,
+                    stream: data.stream === "stderr" ? "stderr" : "stdout",
+                    timestamp: data.timestamp ?? "",
+                    line: typeof data.line === "string" ? data.line : String(data.line ?? ""),
                 };
                 if (isPausedRef.current) {
                     pauseBufferRef.current.push(entry);
                 } else {
                     appendLogs([entry]);
                 }
-            } catch {
-                // ignore malformed messages
+            } catch (err) {
+                console.warn("[useLogStream] failed to parse WebSocket message:", err);
             }
         };
 
         ws.onclose = () => {
             if (unmountedRef.current) return;
             setStatus("disconnected");
-            // Auto-reconnect with backoff
             const delay = backoffRef.current;
             backoffRef.current = Math.min(backoffRef.current * 2, MAX_BACKOFF);
             reconnectTimerRef.current = setTimeout(() => {
                 if (!unmountedRef.current) {
-                    connect();
+                    connectRef.current();
                 }
             }, delay);
         };
@@ -134,7 +147,10 @@ export function useLogStream(path: string, options: LogOptions) {
             if (unmountedRef.current) return;
             setStatus("error");
         };
-    }, [agentUrl, token, path, options.tail, options.timestamps, options.stdout, options.stderr, appendLogs]);
+    }, [path, appendLogs]);
+
+    const connectRef = useRef(connect);
+    connectRef.current = connect;
 
     const reconnect = useCallback(() => {
         if (reconnectTimerRef.current) {
@@ -143,12 +159,14 @@ export function useLogStream(path: string, options: LogOptions) {
         }
         backoffRef.current = 1000;
         clearLogs();
-        connect();
-    }, [clearLogs, connect]);
+        connectRef.current();
+    }, [clearLogs]);
 
+    // Connect when path changes. agentUrl/token/options are read from refs
+    // so the effect doesn't need to re-run when they change.
     useEffect(() => {
         unmountedRef.current = false;
-        connect();
+        connectRef.current();
 
         return () => {
             unmountedRef.current = true;
@@ -161,7 +179,8 @@ export function useLogStream(path: string, options: LogOptions) {
                 wsRef.current = null;
             }
         };
-    }, [connect]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [path]);
 
     return { logs, status, isPaused, clearLogs, pause, resume, reconnect };
 }
