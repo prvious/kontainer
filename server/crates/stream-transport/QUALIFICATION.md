@@ -17,6 +17,11 @@ used by the tests exist only in the loopback fixture.
 - Maximum concurrent sessions per configured server seam: 4
 - Shutdown grace: 2 seconds
 
+Fallible configuration may lower those values but cannot exceed compiled safety
+ceilings of 64 KiB per frame, 1,024 queued frames, 16 MiB queued bytes, or
+1,024 concurrent sessions. This prevents pathological configuration from
+reaching Tokio channel or semaphore constructors.
+
 | Rejection | WebSocket close |
 |---|---|
 | Text message | `1003 binary protobuf required` |
@@ -32,6 +37,13 @@ supervisor awaits both join handles; normal completion increments a separate
 completed counter, while aborts or join failures remain visible. Qualification
 fails unless started and completed task counts match, active tasks reach zero,
 and failed joins remain zero.
+
+The loopback suite also stops reading from a real socket while sending 60 KiB
+frames until the server writer backs up and the bounded application queue
+rejects further output. Client-originated cancellation must complete its close
+handshake and drain the server session before server shutdown is requested.
+Malformed, unknown, text, and oversized server fixtures likewise assert the
+native client's exact rejection close code and reason.
 
 ## Reproducible evidence
 

@@ -84,8 +84,8 @@ mod tests {
     use crate::StreamLimits;
 
     #[test]
-    fn item_and_byte_limits_reject_overload_without_waiting() {
-        let limits = StreamLimits::new(256, 1, 128, 1, Duration::from_secs(1)).unwrap();
+    fn item_limit_rejects_overload_while_byte_capacity_remains() {
+        let limits = StreamLimits::new(256, 1, 1024, 1, Duration::from_secs(1)).unwrap();
         let (outbound, _receiver) = outbound_queue(limits);
 
         outbound
@@ -93,6 +93,20 @@ mod tests {
             .unwrap();
         assert_eq!(
             outbound.try_send(StreamFrame::acknowledgement(2, vec![0; 8])),
+            Err(OutboundFrameError::QueueOverloaded)
+        );
+    }
+
+    #[test]
+    fn byte_limit_rejects_overload_while_item_capacity_remains() {
+        let limits = StreamLimits::new(256, 4, 128, 1, Duration::from_secs(1)).unwrap();
+        let (outbound, _receiver) = outbound_queue(limits);
+
+        outbound
+            .try_send(StreamFrame::acknowledgement(1, vec![0; 80]))
+            .unwrap();
+        assert_eq!(
+            outbound.try_send(StreamFrame::acknowledgement(2, vec![0; 80])),
             Err(OutboundFrameError::QueueOverloaded)
         );
     }

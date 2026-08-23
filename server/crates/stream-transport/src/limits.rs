@@ -5,6 +5,10 @@ pub const DEFAULT_MAXIMUM_QUEUED_FRAMES: usize = 32;
 pub const DEFAULT_MAXIMUM_QUEUED_BYTES: usize = 1024 * 1024;
 pub const DEFAULT_MAXIMUM_CONCURRENT_SESSIONS: usize = 4;
 pub const DEFAULT_SHUTDOWN_GRACE: Duration = Duration::from_secs(2);
+const COMPILED_MAXIMUM_FRAME_BYTES: usize = 64 * 1024;
+const COMPILED_MAXIMUM_QUEUED_FRAMES: usize = 1024;
+const COMPILED_MAXIMUM_QUEUED_BYTES: usize = 16 * 1024 * 1024;
+const COMPILED_MAXIMUM_CONCURRENT_SESSIONS: usize = 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StreamLimits {
@@ -33,8 +37,31 @@ impl StreamLimits {
                 return Err(StreamLimitError::Zero { field });
             }
         }
-        if maximum_queued_bytes > u32::MAX as usize {
-            return Err(StreamLimitError::QueueByteLimitTooLarge);
+        for (field, value, maximum) in [
+            (
+                "maximum_frame_bytes",
+                maximum_frame_bytes,
+                COMPILED_MAXIMUM_FRAME_BYTES,
+            ),
+            (
+                "maximum_queued_frames",
+                maximum_queued_frames,
+                COMPILED_MAXIMUM_QUEUED_FRAMES,
+            ),
+            (
+                "maximum_queued_bytes",
+                maximum_queued_bytes,
+                COMPILED_MAXIMUM_QUEUED_BYTES,
+            ),
+            (
+                "maximum_concurrent_sessions",
+                maximum_concurrent_sessions,
+                COMPILED_MAXIMUM_CONCURRENT_SESSIONS,
+            ),
+        ] {
+            if value > maximum {
+                return Err(StreamLimitError::ExceedsCompiledMaximum { field, maximum });
+            }
         }
         if shutdown_grace.is_zero() {
             return Err(StreamLimitError::Zero {
@@ -92,7 +119,7 @@ impl Default for StreamLimits {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StreamLimitError {
     Zero { field: &'static str },
-    QueueByteLimitTooLarge,
+    ExceedsCompiledMaximum { field: &'static str, maximum: usize },
 }
 
 #[cfg(test)]
@@ -123,7 +150,7 @@ mod tests {
     }
 
     #[test]
-    fn zero_and_unrepresentable_limits_are_rejected() {
+    fn zero_and_pathological_limits_are_rejected() {
         assert_eq!(
             StreamLimits::new(0, 1, 1, 1, Duration::from_secs(1)),
             Err(StreamLimitError::Zero {
@@ -131,8 +158,56 @@ mod tests {
             })
         );
         assert_eq!(
-            StreamLimits::new(1, 1, u32::MAX as usize + 1, 1, Duration::from_secs(1)),
-            Err(StreamLimitError::QueueByteLimitTooLarge)
+            StreamLimits::new(
+                1,
+                1,
+                super::COMPILED_MAXIMUM_QUEUED_BYTES + 1,
+                1,
+                Duration::from_secs(1)
+            ),
+            Err(StreamLimitError::ExceedsCompiledMaximum {
+                field: "maximum_queued_bytes",
+                maximum: super::COMPILED_MAXIMUM_QUEUED_BYTES,
+            })
+        );
+        assert_eq!(
+            StreamLimits::new(
+                super::COMPILED_MAXIMUM_FRAME_BYTES + 1,
+                1,
+                1,
+                1,
+                Duration::from_secs(1)
+            ),
+            Err(StreamLimitError::ExceedsCompiledMaximum {
+                field: "maximum_frame_bytes",
+                maximum: super::COMPILED_MAXIMUM_FRAME_BYTES,
+            })
+        );
+        assert_eq!(
+            StreamLimits::new(
+                1,
+                super::COMPILED_MAXIMUM_QUEUED_FRAMES + 1,
+                1,
+                1,
+                Duration::from_secs(1)
+            ),
+            Err(StreamLimitError::ExceedsCompiledMaximum {
+                field: "maximum_queued_frames",
+                maximum: super::COMPILED_MAXIMUM_QUEUED_FRAMES,
+            })
+        );
+        assert_eq!(
+            StreamLimits::new(
+                1,
+                1,
+                1,
+                super::COMPILED_MAXIMUM_CONCURRENT_SESSIONS + 1,
+                Duration::from_secs(1)
+            ),
+            Err(StreamLimitError::ExceedsCompiledMaximum {
+                field: "maximum_concurrent_sessions",
+                maximum: super::COMPILED_MAXIMUM_CONCURRENT_SESSIONS,
+            })
         );
     }
 }

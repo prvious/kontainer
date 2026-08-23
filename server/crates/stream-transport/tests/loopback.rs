@@ -3,7 +3,10 @@ use std::{sync::Arc, time::Duration};
 use async_trait::async_trait;
 use axum::{
     Router,
-    extract::{State, ws::WebSocketUpgrade},
+    extract::{
+        State,
+        ws::{Message as AxumMessage, WebSocketUpgrade},
+    },
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::get,
@@ -14,7 +17,12 @@ use kontainer_stream_transport::{
     NativeStreamClient, OutboundFrameError, OutboundSender, StreamAdmissionError,
     StreamApplication, StreamClientError, StreamClose, StreamLimits, StreamServer,
 };
-use tokio::{net::TcpListener, task::JoinHandle, time};
+use tokio::{
+    net::TcpListener,
+    sync::{Mutex, oneshot},
+    task::JoinHandle,
+    time,
+};
 use tokio_tungstenite::{
     MaybeTlsStream, WebSocketStream, connect_async, connect_async_with_config,
     tungstenite::{
@@ -217,7 +225,7 @@ async fn missing_subprotocol_and_excess_concurrency_fail_before_upgrade() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn slow_consumer_overload_closes_instead_of_growing_the_queue() {
+async fn synchronous_burst_cannot_exceed_the_bounded_queue() {
     let limits = StreamLimits::new(256, 1, 256, 1, Duration::from_secs(1)).unwrap();
     let running = LoopbackServer::start(limits, Arc::new(BurstApplication)).await;
     let mut socket = connect_raw(&running.endpoint, 1024).await;
@@ -229,6 +237,33 @@ async fn slow_consumer_overload_closes_instead_of_growing_the_queue() {
         .await
         .unwrap();
 
+    assert_eq!(next_close(&mut socket).await, StreamClose::SLOW_CONSUMER);
+    running.finish().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn non_reading_peer_eventually_hits_slow_consumer_backpressure() {
+    let limits = StreamLimits::new(64 * 1024, 2, 128 * 1024, 1, Duration::from_secs(2)).unwrap();
+    let running = LoopbackServer::start(limits, Arc::new(AcknowledgingApplication)).await;
+    let mut socket = connect_raw(&running.endpoint, 64 * 1024).await;
+    let payload = vec![b's'; 60 * 1024];
+    let mut sent_frames = 0;
+
+    for sequence in 0..512 {
+        let frame = Message::Binary(StreamFrame::data(sequence, payload.clone()).encode().into());
+        match time::timeout(Duration::from_millis(100), socket.send(frame)).await {
+            Ok(Ok(())) => sent_frames += 1,
+            Ok(Err(_)) | Err(_) => break,
+        }
+    }
+
+    assert!(sent_frames > limits.maximum_queued_frames());
+    println!(
+        "KONTAINER_STREAM_SLOW_CONSUMER_EVIDENCE sent_without_reading={sent_frames} \
+         queue_frames={} queue_bytes={}",
+        limits.maximum_queued_frames(),
+        limits.maximum_queued_bytes()
+    );
     assert_eq!(next_close(&mut socket).await, StreamClose::SLOW_CONSUMER);
     running.finish().await;
 }
@@ -252,7 +287,72 @@ async fn client_cancellation_closes_the_peer_and_all_owned_tasks_join() {
         Err(StreamClientError::Cancelled)
     );
 
+    wait_for_drained_session(&running.server).await;
+    assert_eq!(running.server.observed_peer_close_count(), 1);
+    let counts = running.server.task_counts();
+    assert_eq!(counts.started, counts.completed);
+    assert_eq!(counts.active, 0);
+    assert_eq!(counts.failed_joins, 0);
+
     running.finish().await;
+}
+
+#[tokio::test]
+async fn native_client_rejects_invalid_server_frames_with_owned_closes() {
+    assert_native_rejection(
+        AxumMessage::Text("not protobuf".into()),
+        StreamLimits::default(),
+        StreamClientError::UnexpectedTextFrame,
+        StreamClose::BINARY_REQUIRED,
+    )
+    .await;
+
+    let mut unknown_version = StreamFrame::data(1, Vec::new()).encode();
+    unknown_version[1] = 2;
+    assert_native_rejection(
+        AxumMessage::Binary(unknown_version.into()),
+        StreamLimits::default(),
+        StreamClientError::Protocol(
+            kontainer_stream_protocol::StreamProtocolError::UnsupportedProtocolVersion(2),
+        ),
+        StreamClose::UNSUPPORTED_VERSION,
+    )
+    .await;
+
+    let mut unknown_kind = StreamFrame::data(1, Vec::new()).encode();
+    let kind_value = unknown_kind
+        .iter()
+        .position(|byte| *byte == 24)
+        .expect("fixture contains kind field")
+        + 1;
+    unknown_kind[kind_value] = 99;
+    assert_native_rejection(
+        AxumMessage::Binary(unknown_kind.into()),
+        StreamLimits::default(),
+        StreamClientError::Protocol(
+            kontainer_stream_protocol::StreamProtocolError::UnknownFrameKind(99),
+        ),
+        StreamClose::UNKNOWN_FRAME_KIND,
+    )
+    .await;
+
+    assert_native_rejection(
+        AxumMessage::Binary(vec![0xff].into()),
+        StreamLimits::default(),
+        StreamClientError::Protocol(
+            kontainer_stream_protocol::StreamProtocolError::MalformedEnvelope,
+        ),
+        StreamClose::MALFORMED_ENVELOPE,
+    )
+    .await;
+
+    assert_native_rejection(
+        AxumMessage::Binary(vec![0; 129].into()),
+        StreamLimits::new(128, 4, 1024, 1, Duration::from_secs(1)).unwrap(),
+        StreamClientError::FrameTooLarge,
+        StreamClose::MESSAGE_TOO_LARGE,
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -288,6 +388,25 @@ async fn assert_invalid_frame(message: Message, expected: StreamClose) {
 
     assert_eq!(next_close(&mut socket).await, expected);
     running.finish().await;
+}
+
+async fn assert_native_rejection(
+    message: AxumMessage,
+    limits: StreamLimits,
+    expected_error: StreamClientError,
+    expected_close: StreamClose,
+) {
+    let invalid_server = InvalidLoopbackServer::start(message).await;
+    let cancellation = CancellationToken::new();
+    let mut client = NativeStreamClient::connect(&invalid_server.endpoint, limits, &cancellation)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        client.receive_frame(&cancellation).await,
+        Err(expected_error)
+    );
+    invalid_server.finish(expected_close).await;
 }
 
 async fn connect_raw(endpoint: &str, maximum_frame_bytes: usize) -> RawSocket {
@@ -364,11 +483,77 @@ async fn wait_for_active_sessions(server: &StreamServer, expected: usize) {
     .expect("session reaches expected lifecycle state");
 }
 
+async fn wait_for_drained_session(server: &StreamServer) {
+    time::timeout(Duration::from_secs(2), async {
+        loop {
+            if server.active_session_count() == 0 && server.task_counts().active == 0 {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("peer close drains the admitted session without server shutdown");
+}
+
 struct LoopbackServer {
     endpoint: String,
     server: StreamServer,
     http_shutdown: CancellationToken,
     http_task: JoinHandle<()>,
+}
+
+struct InvalidFixture {
+    message: Mutex<Option<AxumMessage>>,
+    observed_close: Mutex<Option<oneshot::Sender<(u16, String)>>>,
+}
+
+struct InvalidLoopbackServer {
+    endpoint: String,
+    observed_close: oneshot::Receiver<(u16, String)>,
+    http_shutdown: CancellationToken,
+    http_task: JoinHandle<()>,
+}
+
+impl InvalidLoopbackServer {
+    async fn start(message: AxumMessage) -> Self {
+        let (close_sender, observed_close) = oneshot::channel();
+        let fixture = Arc::new(InvalidFixture {
+            message: Mutex::new(Some(message)),
+            observed_close: Mutex::new(Some(close_sender)),
+        });
+        let router = Router::new()
+            .route("/invalid", get(invalid_upgrade))
+            .with_state(fixture);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let http_shutdown = CancellationToken::new();
+        let shutdown = http_shutdown.clone();
+        let http_task = tokio::spawn(async move {
+            axum::serve(listener, router)
+                .with_graceful_shutdown(shutdown.cancelled_owned())
+                .await
+                .unwrap();
+        });
+
+        Self {
+            endpoint: format!("ws://{address}/invalid"),
+            observed_close,
+            http_shutdown,
+            http_task,
+        }
+    }
+
+    async fn finish(self, expected: StreamClose) {
+        let (code, reason) = time::timeout(Duration::from_secs(2), self.observed_close)
+            .await
+            .expect("native client sends its rejection close")
+            .expect("invalid fixture observes the close");
+        assert_eq!(code, expected.code);
+        assert_eq!(reason, expected.reason);
+        self.http_shutdown.cancel();
+        self.http_task.await.unwrap();
+    }
 }
 
 impl LoopbackServer {
@@ -430,4 +615,32 @@ async fn upgrade(State(server): State<StreamServer>, websocket: WebSocketUpgrade
             (StatusCode::SERVICE_UNAVAILABLE, "stream server draining").into_response()
         }
     }
+}
+
+async fn invalid_upgrade(
+    State(fixture): State<Arc<InvalidFixture>>,
+    websocket: WebSocketUpgrade,
+) -> Response {
+    websocket
+        .protocols([WEBSOCKET_SUBPROTOCOL])
+        .on_upgrade(move |mut socket| async move {
+            let message = fixture
+                .message
+                .lock()
+                .await
+                .take()
+                .expect("fixture serves one connection");
+            socket.send(message).await.unwrap();
+
+            while let Some(message) = socket.next().await {
+                if let Ok(AxumMessage::Close(Some(frame))) = message {
+                    let observed = (frame.code, frame.reason.to_string());
+                    let _ = socket.flush().await;
+                    if let Some(sender) = fixture.observed_close.lock().await.take() {
+                        let _ = sender.send(observed);
+                    }
+                    return;
+                }
+            }
+        })
 }

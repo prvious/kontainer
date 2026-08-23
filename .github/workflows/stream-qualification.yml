@@ -75,6 +75,7 @@ jobs:
           } 2>&1 | tee "$EVIDENCE_FILE"
 
           grep -q "KONTAINER_STREAM_EVIDENCE" "$EVIDENCE_FILE"
+          grep -q "KONTAINER_STREAM_SLOW_CONSUMER_EVIDENCE" "$EVIDENCE_FILE"
           grep -q "active=0 failed_joins=0" "$EVIDENCE_FILE"
           cargo tree --manifest-path server/Cargo.toml \
             --package kontainer-stream-transport --edges features --invert rustls |

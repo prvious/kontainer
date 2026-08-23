@@ -37,6 +37,7 @@ struct ServerInner {
     completed_tasks: AtomicUsize,
     active_tasks: AtomicUsize,
     failed_task_joins: AtomicUsize,
+    observed_peer_closes: AtomicUsize,
 }
 
 impl StreamServer {
@@ -54,6 +55,7 @@ impl StreamServer {
                 completed_tasks: AtomicUsize::new(0),
                 active_tasks: AtomicUsize::new(0),
                 failed_task_joins: AtomicUsize::new(0),
+                observed_peer_closes: AtomicUsize::new(0),
             }),
         }
     }
@@ -99,6 +101,11 @@ impl StreamServer {
             active: self.inner.active_tasks.load(Ordering::Acquire),
             failed_joins: self.inner.failed_task_joins.load(Ordering::Acquire),
         }
+    }
+
+    #[must_use]
+    pub fn observed_peer_close_count(&self) -> usize {
+        self.inner.observed_peer_closes.load(Ordering::Acquire)
     }
 
     pub async fn shutdown(&self) -> Result<(), StreamShutdownError> {
@@ -313,7 +320,15 @@ async fn read_loop(
                 signal_close(&signal, StreamClose::BINARY_REQUIRED);
                 return;
             }
-            Some(Ok(Message::Close(_))) | None => {
+            Some(Ok(Message::Close(_))) => {
+                server
+                    .inner
+                    .observed_peer_closes
+                    .fetch_add(1, Ordering::AcqRel);
+                let _ = signal.send(SessionSignal::PeerClosed);
+                return;
+            }
+            None => {
                 let _ = signal.send(SessionSignal::PeerClosed);
                 return;
             }
@@ -350,7 +365,14 @@ async fn write_loop(
                         send_close(&mut sink, close, server.inner.limits).await;
                         return;
                     }
-                    SessionSignal::PeerClosed => return,
+                    SessionSignal::PeerClosed => {
+                        let _ = time::timeout(
+                            server.inner.limits.shutdown_grace(),
+                            sink.flush(),
+                        )
+                        .await;
+                        return;
+                    }
                 }
             }
             queued = receiver.recv() => match queued {
