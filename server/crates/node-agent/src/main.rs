@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use std::{env, error::Error, fs, net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{env, error::Error, ffi::OsString, fs, net::SocketAddr, path::PathBuf, sync::Arc};
 
 use kontainer_agent_proto::v1::{
     DescribeRequest, DescribeResponse,
@@ -59,6 +59,10 @@ fn environment_variable(name: &str, default: &str) -> String {
     env::var(name).unwrap_or_else(|_| default.to_owned())
 }
 
+fn is_version_request(arguments: &[OsString]) -> bool {
+    arguments.len() == 1 && matches!(arguments[0].to_str(), Some("--version" | "-V" | "version"))
+}
+
 #[derive(Clone)]
 struct NodeAgentService {
     node_id: String,
@@ -103,6 +107,12 @@ fn tls_config(files: &TlsFiles) -> Result<tonic::transport::ServerTlsConfig, Box
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    let arguments = env::args_os().skip(1).collect::<Vec<_>>();
+    if is_version_request(&arguments) {
+        println!("kontainer-node-agent {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
@@ -148,11 +158,11 @@ async fn shutdown_signal() {
 
 #[cfg(test)]
 mod tests {
-    use super::{ContainerEngine, NodeAgent, NodeAgentService};
+    use super::{ContainerEngine, NodeAgent, NodeAgentService, is_version_request};
     use async_trait::async_trait;
     use kontainer_agent_proto::v1::DescribeRequest;
     use kontainer_engine::EngineError;
-    use std::sync::Arc;
+    use std::{ffi::OsString, sync::Arc};
     use tonic::Request;
 
     struct AvailableEngine;
@@ -181,5 +191,18 @@ mod tests {
         assert_eq!(response.agent_version, env!("CARGO_PKG_VERSION"));
         assert!(response.docker_connected);
         assert!(!response.architecture.is_empty());
+    }
+
+    #[test]
+    fn version_command_does_not_require_runtime_configuration() {
+        for argument in ["--version", "-V", "version"] {
+            assert!(is_version_request(&[OsString::from(argument)]));
+        }
+
+        assert!(!is_version_request(&[]));
+        assert!(!is_version_request(&[
+            OsString::from("--version"),
+            OsString::from("unexpected"),
+        ]));
     }
 }
