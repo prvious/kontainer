@@ -1,0 +1,38 @@
+logger:
+  enable: true
+  pretty_backtrace: true
+  level: <%= get_env(name="LOG_LEVEL", default="debug") %>
+  format: compact
+
+server:
+  binding: <%= get_env(name="BINDING", default="127.0.0.1") %>
+  port: <%= get_env(name="PORT", default="5150") %>
+  host: <%= get_env(name="HOST", default="http://127.0.0.1:5150") %>
+  middlewares:
+    catch_panic:
+      enable: true
+    logger:
+      enable: true
+    request_id:
+      enable: true
+
+database:
+  uri: <%= get_env(name="DATABASE_URL", default="postgres://kontainer:kontainer@127.0.0.1:5432/kontainer_development") %>
+  enable_logging: <%= get_env(name="DB_LOGGING", default="false") %>
+  connect_timeout: 500
+  idle_timeout: 500
+  min_connections: 1
+  max_connections: 5
+  auto_migrate: true
+  dangerously_truncate: false
+  dangerously_recreate: false
+
+settings:
+  agent_rpc:
+    enabled: <%= get_env(name="AGENT_RPC_ENABLED", default="false") %>
+    binding: <%= get_env(name="AGENT_RPC_BINDING", default="127.0.0.1:50051") %>
+    tls:
+      certificate_path: <%= get_env(name="AGENT_RPC_TLS_CERTIFICATE_PATH", default="config/dev-controller.pem") %>
+      private_key_path: <%= get_env(name="AGENT_RPC_TLS_PRIVATE_KEY_PATH", default="config/dev-controller-key.pem") %>
+      client_ca_path: <%= get_env(name="AGENT_RPC_TLS_CLIENT_CA_PATH", default="config/dev-agent-ca.pem") %>
+

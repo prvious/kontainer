@@ -1,8 +1,3 @@
-.idea
-.vscode
-.DS_Store
-.env
-.env.*
-!.env.example
-storage
-tmp
+/target/
+/config/*.local.yaml
+/.env

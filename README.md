@@ -1,8 +1,8 @@
 # Kontainer
 
-Kontainer is a desktop app for managing Docker Swarm infrastructure through a dedicated agent API.
+Kontainer is a desktop app for managing Docker Swarm infrastructure through a dedicated controller and node agents.
 
-It pairs a Tauri desktop client with a Go agent built on Goravel so you can inspect clusters, operate services, stream logs, and open exec sessions without exposing the Docker socket directly to the UI.
+The greenfield Rust rewrite is now the active implementation. The old Go/Goravel server has been removed; there are no compatibility or data-migration requirements.
 
 **Website:** [kontainer.dev](https://kontainer.dev)
 
@@ -23,80 +23,75 @@ It pairs a Tauri desktop client with a Go agent built on Goravel so you can insp
 
 ## Architecture
 
-Kontainer has two main parts:
+Kontainer has two main areas:
 
 - `app/` - Tauri desktop app built with Rust, React, Shadcn UI, Tailwind CSS, TanStack Router, and TanStack Query.
-- `server/` - Go agent built with Goravel, gRPC, WebSocket support, Docker SDK integrations, and SQLite-backed persistence where needed.
+- `server/` - Rust workspace with a Loco/SeaORM controller, a Tokio/Tonic node agent, shared protobuf contracts, and a typed Docker Engine adapter.
 
-The agent runs in one of two modes:
+The server workspace ships two processes:
 
-- `leader` - serves the public API, handles auth, runs scheduled work, and coordinates cluster-wide operations.
-- `follower` - exposes internal gRPC and health endpoints for node-local work in multi-node setups.
+- `kontainer-controller` - owns `/api/v1`, PostgreSQL, auth, operations, and cluster coordination.
+- `kontainer-node-agent` - runs on each Swarm node, owns local Docker access, and never connects to PostgreSQL.
 
 Frontend requests flow through the desktop boundary like this:
 
-`React -> Tauri invoke -> Rust command -> Go agent API`
+`React -> Tauri invoke -> Rust client -> controller -> node agent -> local Docker Engine`
 
 ## Repository Layout
 
 - `app/` - desktop UI and Tauri commands
-- `server/` - Goravel agent, routes, actions, services, and tests
+- `server/` - controller, node agent, protobuf, migrations, Docker adapter, and tests
 - `dev/` - local multi-node Docker-in-Docker development environment
 - `docs/` - planning, reference, and design artifacts
 
-## Deployment Docs
+## Architecture Decisions
 
-- `docs/deployment.md` - deployment modes, environment variables, Docker examples, and setup notes
-- `docs/agent.md` - current agent architecture, responsibilities, and discovery model
+- `docs/v2/approved-greenfield-reset.md` - authoritative rewrite decisions
+- `docs/v2/decision-register.md` - decision history and superseded research
 
 ## Local Development
 
 ### Prerequisites
 
 - `pnpm`
-- Go
-- Rust
+- Rust 1.98
 - Docker
+- PostgreSQL
 
 ### Common Commands
 
 Run from the repository root:
 
 ```bash
-pnpm dev           # Start the dev cluster, leader, followers, and desktop app
-pnpm dev:cluster   # Start only the local Docker-in-Docker Swarm cluster
-pnpm dev:app       # Start only the Tauri desktop app
-pnpm dev:agent     # Start only the Goravel leader agent (defaults to http://localhost:3000)
-pnpm artisan list  # Run Goravel artisan commands from the server workspace
-pnpm build         # Build app and agent
-pnpm test:agent    # Run Go agent tests
-pnpm vet:agent     # Run Go agent vet checks
+pnpm dev:app          # Start the Tauri desktop app
+pnpm dev:cluster      # Start the local Docker-in-Docker Swarm cluster
+pnpm dev:controller   # Start the controller (requires PostgreSQL)
+pnpm build:server     # Build both server binaries
+pnpm test:server      # Test the Rust server workspace
+pnpm lint:server      # Run Clippy with warnings denied
 pnpm lint          # Lint the frontend
 pnpm fmt           # Format the frontend
 pnpm types         # Run frontend type checking
 pnpm down          # Tear down the local dev cluster
-pnpm reset         # Tear down the cluster and clear local agent databases
+pnpm reset         # Tear down the local dev cluster and volumes
 ```
 
-`pnpm dev` bootstraps a local 3-node Docker-in-Docker Swarm cluster for development.
-
-The checked-in local server defaults in `server/.env.example` use:
-
-- leader HTTP on `http://localhost:3000`
-- follower HTTP on `http://localhost:3001` and `http://localhost:3002` via `dev/Procfile`
-- follower discovery through `CLUSTER_DEV_FOLLOWERS`
+The controller development configuration expects PostgreSQL at
+`postgres://kontainer:kontainer@127.0.0.1:5432/kontainer_development` unless
+`DATABASE_URL` overrides it. Private controller-agent RPC is disabled in the
+development config until an mTLS certificate bundle is supplied.
 
 ## Testing
 
 ```bash
 pnpm --filter app test
-pnpm test:agent
-pnpm vet:agent
+pnpm test:server
+pnpm lint:server
 cargo test --manifest-path app/src-tauri/Cargo.toml
 ```
 
 ## Notes
 
-- The desktop app talks to the agent API; the agent is not a raw Docker socket proxy.
-- In multi-node setups, the leader discovers and coordinates follower agents.
+- The desktop app talks to the controller API; neither public APIs nor protobuf messages proxy the Docker socket.
+- Both Linux AMD64 and ARM64 are first-class release targets and require native smoke evidence.
 - Keep long-form planning and framework-specific guidance in `docs/` and skills rather than expanding this README.

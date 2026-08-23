@@ -6,7 +6,7 @@ This file contains repo-specific rules that should change implementation behavio
 
 Kontainer has two parts:
 
-- `server/` - a Go agent built with Goravel
+- `server/` - a Rust workspace containing a Loco controller and a Tokio/Tonic node agent
 - `app/` - a Tauri desktop app using Rust, React, Shadcn UI, and Tailwind CSS
 
 The primary target today is Docker Swarm. Compose and Kubernetes are planned.
@@ -16,13 +16,6 @@ The primary target today is Docker Swarm. Compose and Kubernetes are planned.
 This project has domain-specific skills available. You MUST activate the relevant skill whenever you work in that domain; don't wait until you're stuck.
 
 - `frontend-ui` - Activates for React UI work in `app/`. Use when building or restyling screens, composing Shadcn UI components, choosing Tailwind classes, adjusting layout, spacing, dark mode, or responsive behavior.
-- `goravel-tooling` - Activates when writing or updating artisan commands, Goravel tests, or framework-integrated logging.
-- `goravel-data` - Activates when working with ORM models, relationships, queries, migrations, factories, or seeders.
-- `goravel-foundations` - Activates when working with service providers, the service container, facades, configuration, or application bootstrap and lifecycle wiring.
-- `goravel-async` - Activates when working with queues, jobs, events, listeners, task scheduling, or caching.
-- `goravel-security` - Activates when implementing authentication, authorization, JWT guards, policies, hashing, or encryption.
-- `goravel-http` - Activates when building routes, controllers, middleware, request validation, request parsing, or HTTP responses.
-- `goravel-integrations` - Activates when working with gRPC, outbound HTTP clients, filesystem/storage, mail, or localization.
 - `vitest-tauri-testing` - Activates for frontend tests that mock Tauri IPC, events, windows, or other native-layer integrations.
 - `tanstack-query-best-practices` - Activates when building data-driven React components that fetch, cache, or mutate server state with TanStack Query.
 - `tanstack-router-best-practices` - Activates when adding or modifying routes, loaders, search params, or navigation logic with TanStack Router.
@@ -50,27 +43,25 @@ This project has domain-specific skills available. You MUST activate the relevan
 
 Use the action-per-file pattern for discrete operations.
 
-- Go example: `services/scale_service.go` defines `ScaleServiceAction` with `Execute`
-- Rust/Tauri commands should follow the same single-responsibility pattern and use state injection
+- Rust actions and Tauri commands should follow the same single-responsibility pattern and use explicit dependency/state injection.
 
-## Agent Rules
+## Server Rules
 
-- The agent exposes its own API; it is not a proxy to the Docker socket.
+- The controller exposes `/api/v1`; it is not a proxy to the Docker socket.
+- `kontainer-controller` owns the public API, PostgreSQL, authorization, durable operations, and controller-to-agent coordination.
+- `kontainer-node-agent` owns node-local Docker access and never connects to PostgreSQL.
+- Agents send metrics and check-ins to the controller; only the controller persists central state.
 - Keep API responses flat and limited to what the frontend needs.
-- Auth routes are public; `/api/*` routes require JWT.
-- Real-time flows such as logs and auth bridging use WebSocket.
-
-### Goravel
-
-- Prefer Goravel facades and framework primitives over ad hoc native Go implementations.
-- Prefer ORM models and relationships over raw queries; use eager loading to avoid N+1 issues.
-- Use dedicated request structs for validation instead of inline controller validation.
-- Use environment variables only in config files; read config through Goravel config APIs in application code.
-- When relevant, load the matching `goravel-*` skill instead of duplicating framework reference here.
+- Use Loco/Axum middleware and request extractors at the HTTP edge, then pass explicit dependencies into domain actions.
+- Use SeaORM entities, typed query builders, relationships, and builder migrations for PostgreSQL. Avoid raw SQL for ordinary persistence.
+- PostgreSQL is the only supported runtime database. Loco currently compiles an unused SQLite driver transitively; do not configure or document SQLite as supported.
+- Private RPC uses the `kontainer.agent.v1` Tonic contract and mandatory mTLS.
+- Ordinary progress uses polling of durable operations. Logs and exec use binary WebSocket. Do not add SSE without a measured need.
+- Keep public DTOs, domain types, protobuf messages, persistence models, and desktop IPC types distinct at trust/compatibility boundaries.
 
 ## Desktop App Rules
 
-- React talks to Rust via Tauri `invoke`; Rust talks to the Go agent.
+- React talks to Rust via Tauri `invoke`; a UI-neutral Rust client talks to the controller.
 - Register every new Tauri command in `app/src-tauri/src/lib.rs`.
 - Keep Rust and TypeScript types in sync for any data crossing the Tauri boundary.
 - For serialized Rust structs sent to TypeScript, use `#[serde(rename_all = "camelCase")]` unless a sibling pattern clearly differs.
@@ -79,10 +70,10 @@ Use the action-per-file pattern for discrete operations.
 
 ## Architecture Notes
 
-- The agent runs in `leader` or `follower` mode based on `AGENT_ROLE`.
-- Leaders serve the API and scheduled work; followers expose internal gRPC and health endpoints.
-- Leader discovery and follower registration live under `server/app/services/cluster/`.
-- Read the nearby cluster files before changing discovery, registration, or role-specific bootstrap behavior.
+- The controller and node agent are separate binaries; do not recreate leader/follower modes in one executable.
+- Keep Docker operations behind Kontainer-owned traits such as `ContainerEngine`; do not leak Bollard wire types into domain actions or public responses.
+- Supervise long-running reconcilers and RPC/HTTP servers under explicit cancellation and graceful shutdown.
+- See `docs/v2/approved-greenfield-reset.md` for authoritative decisions. Older v1/Goravel documents are historical research.
 
 ## Testing And Verification
 
@@ -94,7 +85,7 @@ Use the action-per-file pattern for discrete operations.
 Run the relevant checks for the code you changed:
 
 - Frontend: `pnpm --filter app test`, `pnpm types`, `pnpm lint`, `pnpm fmt`
-- Go agent: `gofmt`, `go vet -C server ./...`, `go test -C server ./...`
+- Server workspace: `cargo fmt --manifest-path server/Cargo.toml --all -- --check`, `cargo check --manifest-path server/Cargo.toml --workspace --all-targets`, `cargo clippy --manifest-path server/Cargo.toml --workspace --all-targets -- -D warnings`, `cargo test --manifest-path server/Cargo.toml --workspace`
 - Tauri/Rust: `cargo fmt`, `cargo test`
 
 Keep this file short. If guidance becomes tutorial-like, move it into a skill.
