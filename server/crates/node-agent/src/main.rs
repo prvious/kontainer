@@ -6,7 +6,7 @@ use kontainer_agent_proto::v1::{
     DescribeRequest, DescribeResponse,
     node_agent_server::{NodeAgent, NodeAgentServer},
 };
-use kontainer_engine::{ContainerEngine, LocalDockerEngine};
+use kontainer_engine::{ContainerEngine, LocalDockerEngine, LocalEngineOptions};
 use tonic::{Request, Response, Status, transport::Server};
 use tracing::warn;
 use tracing_subscriber::EnvFilter;
@@ -113,7 +113,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let config = AgentConfig::from_environment()?;
     let service = NodeAgentService {
         node_id: config.node_id,
-        engine: Arc::new(LocalDockerEngine::connect()?),
+        engine: Arc::new(LocalDockerEngine::connect_for_node(
+            LocalEngineOptions::default(),
+        )?),
     };
 
     Server::builder()
