@@ -5,8 +5,8 @@ use chrono::{Duration, Utc};
 use loco_rs::{app::AppContext, config::Config, environment::Environment};
 use migration::{Migrator, MigratorTrait, SchemaManager};
 use sea_orm::{
-    ConnectionTrait, Database, DatabaseConnection, DbBackend, EntityTrait, PaginatorTrait,
-    QueryResult, Statement, TransactionTrait,
+    ActiveModelTrait, ActiveValue::Set, ConnectionTrait, Database, DatabaseConnection, DbBackend,
+    EntityTrait, PaginatorTrait, QueryResult, Statement, TransactionTrait,
 };
 use tower::ServiceExt;
 use url::Url;
@@ -274,6 +274,59 @@ async fn postgres_operation_is_polled_through_the_versioned_http_route()
     assert_eq!(document["id"], operation_id.to_string());
     assert_eq!(document["state"], OperationState::Recoverable.as_str());
     assert_eq!(document["lastEventSequence"], 1);
+    assert!(removed);
+    Ok(())
+}
+
+#[tokio::test]
+async fn postgres_broken_operation_history_is_an_internal_error() -> Result<(), Box<dyn Error>> {
+    let Some(test_database) = PostgresTestDatabase::create(true).await? else {
+        return Ok(());
+    };
+
+    let evidence = async {
+        let operation_id = Uuid::now_v7();
+        let now = Utc::now();
+        operation::ActiveModel {
+            id: Set(operation_id),
+            kind: Set("test.broken-history".to_owned()),
+            state: Set(OperationState::Recoverable.as_str().to_owned()),
+            claimed_by: Set(None),
+            claimed_at: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(&test_database.connection)
+        .await?;
+        let action_error = get::execute(&test_database.connection, operation_id).await;
+
+        let config_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("config");
+        let config = Config::from_folder(&Environment::Test, &config_path)?;
+        let context =
+            AppContext::builder(Environment::Test, test_database.connection.clone(), config)
+                .build();
+        let response = Router::new()
+            .route(
+                "/api/v1/operations/{operation_id}",
+                get(crate::controllers::operations::show),
+            )
+            .with_state(context)
+            .oneshot(
+                Request::get(format!("/api/v1/operations/{operation_id}")).body(Body::empty())?,
+            )
+            .await?;
+
+        Ok::<_, Box<dyn Error>>((action_error, response.status()))
+    }
+    .await;
+    let removed = test_database.cleanup().await?;
+    let (action_error, status) = evidence?;
+
+    assert!(matches!(
+        action_error,
+        Err(get::GetOperationError::MissingEvent)
+    ));
+    assert_eq!(status, axum::http::StatusCode::INTERNAL_SERVER_ERROR);
     assert!(removed);
     Ok(())
 }

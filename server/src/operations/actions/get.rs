@@ -13,6 +13,8 @@ use crate::operations::{
 pub enum GetOperationError {
     #[error("operation not found")]
     NotFound,
+    #[error("operation history is missing its initial event")]
+    MissingEvent,
     #[error(transparent)]
     CorruptState(#[from] CorruptOperationState),
     #[error("operation polling persistence failed")]
@@ -39,7 +41,7 @@ pub async fn execute(
                         .one(transaction)
                         .await
                         .map_err(GetOperationError::Persistence)?
-                        .ok_or(GetOperationError::NotFound)?;
+                        .ok_or(GetOperationError::MissingEvent)?;
 
                     Ok(OperationSnapshot {
                         operation,

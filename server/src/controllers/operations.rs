@@ -95,9 +95,9 @@ pub(crate) async fn show(
 fn map_get_error(error: GetOperationError) -> Error {
     match error {
         GetOperationError::NotFound => Error::NotFound,
-        GetOperationError::CorruptState(_) | GetOperationError::Persistence(_) => {
-            Error::InternalServerError
-        }
+        GetOperationError::MissingEvent
+        | GetOperationError::CorruptState(_)
+        | GetOperationError::Persistence(_) => Error::InternalServerError,
     }
 }
 
