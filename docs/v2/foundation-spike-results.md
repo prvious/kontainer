@@ -28,6 +28,9 @@ of a real PostgreSQL, Docker Engine, mTLS, or architecture claim.
   `/api/v1/status`.
 - Formatting, warnings-as-errors Clippy, workspace tests, and both independent
   host builds pass.
+- Pull requests that touch the Rust server run formatting, workspace checks,
+  warnings-as-errors Clippy, non-zero workspace tests, and independent
+  controller/node-agent builds on the pinned toolchain.
 
 ## Important dependency caveat
 

@@ -1,0 +1,63 @@
+name: Server Rust
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "server/**"
+      - ".github/workflows/server-rust.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "server/**"
+      - ".github/workflows/server-rust.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: server-rust-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  verify:
+    name: Workspace verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.0
+          components: rustfmt, clippy
+
+      - name: Cache Cargo build data
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+
+      - name: Check formatting
+        run: cargo fmt --manifest-path server/Cargo.toml --all -- --check
+
+      - name: Check workspace
+        run: cargo check --manifest-path server/Cargo.toml --workspace --all-targets
+
+      - name: Run Clippy
+        run: cargo clippy --manifest-path server/Cargo.toml --workspace --all-targets -- -D warnings
+
+      - name: Run workspace tests
+        run: cargo test --manifest-path server/Cargo.toml --workspace
+
+      - name: Build controller independently
+        run: cargo build --manifest-path server/Cargo.toml --package kontainer-controller --bin kontainer-controller
+
+      - name: Build node agent independently
+        run: cargo build --manifest-path server/Cargo.toml --package kontainer-node-agent --bin kontainer-node-agent
