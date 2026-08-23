@@ -31,6 +31,12 @@ of a real PostgreSQL, Docker Engine, mTLS, or architecture claim.
 - Pull requests that touch the Rust server run formatting, workspace checks,
   warnings-as-errors Clippy, non-zero workspace tests, and independent
   controller/node-agent builds on the pinned toolchain.
+- SeaORM builder migrations create and roll back the durable operation,
+  idempotency, ordered event, and audit-intent schema against PostgreSQL. The
+  admission transaction, rollback boundary, and `FOR UPDATE SKIP LOCKED`
+  operation claim were exercised against PostgreSQL 17.11 on the current ARM64
+  macOS host; CI repeats the integration cases against PostgreSQL 17.6 on
+  Linux AMD64.
 
 ## Important dependency caveat
 
@@ -42,16 +48,13 @@ convention-oriented model/migration workflow chosen for the controller.
 
 ## Still required before the foundation gate closes
 
-1. Run builder-based migrations against a real PostgreSQL container and prove
-   transactions plus the row/advisory locking primitive chosen for durable
-   operations.
-2. Exercise the Bollard adapter against real Docker Engines and record an API
+1. Exercise the Bollard adapter against real Docker Engines and record an API
    compatibility floor.
-3. Run a real mutually authenticated controller-agent handshake, including
+2. Run a real mutually authenticated controller-agent handshake, including
    certificate rejection and coordinated shutdown tests.
-4. Add the binary WebSocket transport dependency to the real log/exec walking
+3. Add the binary WebSocket transport dependency to the real log/exec walking
    skeleton and run a framed echo/close test.
-5. Produce Linux `amd64` and `arm64` artifacts, then collect native smoke
+4. Produce Linux `amd64` and `arm64` artifacts, then collect native smoke
    evidence on both architectures. A macOS ARM64 build does not satisfy either
    Linux target.
 

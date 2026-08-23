@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+mod m20260823_000001_create_durable_operations;
+
 pub use sea_orm_migration::prelude::*;
 
 pub struct Migrator;
@@ -7,7 +9,9 @@ pub struct Migrator;
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        Vec::new()
+        vec![Box::new(
+            m20260823_000001_create_durable_operations::Migration,
+        )]
     }
 }
 
@@ -16,7 +20,7 @@ mod tests {
     use super::{Migrator, MigratorTrait};
 
     #[test]
-    fn greenfield_migrator_starts_empty() {
-        assert!(Migrator::migrations().is_empty());
+    fn durable_operation_migration_is_registered() {
+        assert_eq!(Migrator::migrations().len(), 1);
     }
 }
