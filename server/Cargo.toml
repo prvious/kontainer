@@ -1,0 +1,74 @@
+[workspace]
+members = [
+  ".",
+  "crates/agent-proto",
+  "crates/engine",
+  "crates/node-agent",
+  "migration",
+]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+publish = false
+
+[workspace.dependencies]
+async-trait = "0.1.89"
+axum = "0.8.4"
+bollard = { version = "0.21.1", default-features = false, features = ["http", "pipe"] }
+loco-rs = { version = "1.1.0", default-features = false, features = [
+  "auth",
+  "cache_inmem",
+  "cli",
+  "with-db",
+] }
+prost = "0.14.1"
+sea-orm = { version = "2.0.2", default-features = false, features = [
+  "macros",
+  "runtime-tokio-rustls",
+  "sqlx-postgres",
+] }
+sea-orm-migration = { version = "2.0.2", default-features = false, features = [
+  "runtime-tokio-rustls",
+  "sqlx-postgres",
+] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+tokio = { version = "1.47.1", features = ["macros", "net", "rt-multi-thread", "signal", "time"] }
+tokio-util = "0.7.19"
+tonic = { version = "0.14.6", features = ["tls-ring"] }
+tonic-prost = "0.14.6"
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.20", features = ["env-filter", "json"] }
+utoipa = { version = "5.5.0", features = ["axum_extras"] }
+
+[package]
+name = "kontainer-controller"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+default-run = "kontainer-controller"
+
+[dependencies]
+async-trait.workspace = true
+axum.workspace = true
+kontainer-agent-proto = { path = "crates/agent-proto" }
+loco-rs.workspace = true
+migration = { path = "migration" }
+sea-orm.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tonic.workspace = true
+tonic-prost.workspace = true
+tracing.workspace = true
+utoipa.workspace = true
+
+[[bin]]
+name = "kontainer-controller"
+path = "src/bin/main.rs"
+

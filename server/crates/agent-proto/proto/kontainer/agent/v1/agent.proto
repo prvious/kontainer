@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package kontainer.agent.v1;
+
+// ControllerIntake is hosted by the controller for node check-in and future
+// metrics ingestion. Every production connection is mutually authenticated.
+service ControllerIntake {
+  rpc CheckIn(CheckInRequest) returns (CheckInResponse);
+}
+
+// NodeAgent is hosted on each Swarm node for controller-assigned, node-local
+// work. It never exposes the Docker socket itself.
+service NodeAgent {
+  rpc Describe(DescribeRequest) returns (DescribeResponse);
+}
+
+message CheckInRequest {
+  string agent_id = 1;
+  string agent_version = 2;
+  string architecture = 3;
+}
+
+message CheckInResponse {
+  string controller_version = 1;
+  string protocol_package = 2;
+}
+
+message DescribeRequest {}
+
+message DescribeResponse {
+  string node_id = 1;
+  string agent_version = 2;
+  string architecture = 3;
+  bool docker_connected = 4;
+}
+

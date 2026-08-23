@@ -1,0 +1,38 @@
+logger:
+  enable: true
+  pretty_backtrace: false
+  level: <%= get_env(name="LOG_LEVEL", default="info") %>
+  format: json
+
+server:
+  binding: <%= get_env(name="BINDING", default="0.0.0.0") %>
+  port: <%= get_env(name="PORT", default="5150") %>
+  host: <%= get_env(name="HOST") %>
+  middlewares:
+    catch_panic:
+      enable: true
+    logger:
+      enable: true
+    request_id:
+      enable: true
+
+database:
+  uri: <%= get_env(name="DATABASE_URL") %>
+  enable_logging: <%= get_env(name="DB_LOGGING", default="false") %>
+  connect_timeout: <%= get_env(name="DB_CONNECT_TIMEOUT", default="500") %>
+  idle_timeout: <%= get_env(name="DB_IDLE_TIMEOUT", default="500") %>
+  min_connections: <%= get_env(name="DB_MIN_CONNECTIONS", default="2") %>
+  max_connections: <%= get_env(name="DB_MAX_CONNECTIONS", default="20") %>
+  auto_migrate: <%= get_env(name="DB_AUTO_MIGRATE", default="false") %>
+  dangerously_truncate: false
+  dangerously_recreate: false
+
+settings:
+  agent_rpc:
+    enabled: true
+    binding: <%= get_env(name="AGENT_RPC_BINDING", default="0.0.0.0:50051") %>
+    tls:
+      certificate_path: <%= get_env(name="AGENT_RPC_TLS_CERTIFICATE_PATH") %>
+      private_key_path: <%= get_env(name="AGENT_RPC_TLS_PRIVATE_KEY_PATH") %>
+      client_ca_path: <%= get_env(name="AGENT_RPC_TLS_CLIENT_CA_PATH") %>
+

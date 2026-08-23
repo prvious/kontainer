@@ -1,0 +1,20 @@
+[package]
+name = "kontainer-node-agent"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+kontainer-agent-proto = { path = "../agent-proto" }
+kontainer-engine = { path = "../engine" }
+tokio.workspace = true
+tonic.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[[bin]]
+name = "kontainer-node-agent"
+path = "src/main.rs"
+
