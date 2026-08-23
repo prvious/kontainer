@@ -4,19 +4,24 @@
 use std::{env, path::PathBuf, time::Duration};
 
 use kontainer_engine::{
-    ContainerEngine, EngineAccessScope, EngineErrorKind, LocalDockerEngine, LocalEngineOptions,
+    ContainerEngine, EngineAccessScope, EngineApiVersion, EngineErrorKind, LocalDockerEngine,
+    LocalEngineOptions,
 };
 use tokio_util::sync::CancellationToken;
 
 const TEST_SOCKET_ENV: &str = "KONTAINER_TEST_DOCKER_SOCKET";
 const TEST_ENGINE_ENV: &str = "KONTAINER_TEST_ENGINE_IMAGE";
 const TEST_VERSION_ENV: &str = "KONTAINER_TEST_ENGINE_VERSION";
+const TEST_API_VERSION_ENV: &str = "KONTAINER_TEST_ENGINE_API_VERSION";
 
 #[tokio::test]
 async fn qualifies_configured_real_engine() {
     let socket_path = required_environment_path(TEST_SOCKET_ENV);
     let fixture_image = required_environment(TEST_ENGINE_ENV);
     let expected_version = required_environment(TEST_VERSION_ENV);
+    let expected_api_version = required_environment(TEST_API_VERSION_ENV)
+        .parse::<EngineApiVersion>()
+        .expect("configured expected Engine API version must be valid");
     let options = LocalEngineOptions {
         socket_path,
         operation_timeout: Duration::from_secs(10),
@@ -32,6 +37,10 @@ async fn qualifies_configured_real_engine() {
     assert_eq!(node_description.access_scope, EngineAccessScope::NodeLocal);
     assert_eq!(manager_description.daemon_version, expected_version);
     assert_eq!(node_description.daemon_version, expected_version);
+    assert_eq!(
+        manager_description.negotiated_api_version,
+        expected_api_version
+    );
     assert_eq!(
         manager_description.negotiated_api_version,
         node_description.negotiated_api_version

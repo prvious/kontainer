@@ -42,8 +42,10 @@ jobs:
         engine:
           - version: 27.5.1
             image: docker:27.5.1-dind
+            negotiated_api: "1.47"
           - version: 29.7.2
             image: docker:29.7.2-dind
+            negotiated_api: "1.53"
 
     steps:
       - name: Check out repository
@@ -101,6 +103,7 @@ jobs:
         env:
           KONTAINER_TEST_ENGINE_IMAGE: ${{ matrix.engine.image }}
           KONTAINER_TEST_ENGINE_VERSION: ${{ matrix.engine.version }}
+          KONTAINER_TEST_ENGINE_API_VERSION: ${{ matrix.engine.negotiated_api }}
           EVIDENCE_FILE: engine-qualification-${{ matrix.engine.version }}-${{ matrix.runner_architecture }}.log
         run: |
           set -euo pipefail
