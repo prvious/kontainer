@@ -19,7 +19,7 @@ use kontainer_stream_transport::{
 };
 use tokio::{
     net::TcpListener,
-    sync::{Mutex, oneshot},
+    sync::{Mutex, mpsc, oneshot},
     task::JoinHandle,
     time,
 };
@@ -108,6 +108,37 @@ impl StreamApplication for BurstApplication {
             ))?;
         }
         Ok(())
+    }
+}
+
+struct FloodingApplication {
+    overload: mpsc::UnboundedSender<usize>,
+}
+
+#[async_trait]
+impl StreamApplication for FloodingApplication {
+    async fn handle(
+        &self,
+        frame: StreamFrame,
+        outbound: &OutboundSender,
+    ) -> Result<(), OutboundFrameError> {
+        let payload = vec![b's'; 60 * 1024];
+
+        for offset in 0..4_096 {
+            match outbound.try_send(StreamFrame::acknowledgement(
+                frame.sequence + offset,
+                payload.clone(),
+            )) {
+                Ok(()) => time::sleep(Duration::from_millis(1)).await,
+                Err(error @ OutboundFrameError::QueueOverloaded) => {
+                    let _ = self.overload.send(offset as usize);
+                    return Err(error);
+                }
+                Err(error) => return Err(error),
+            }
+        }
+
+        panic!("non-reading peer accepted the entire bounded flood")
     }
 }
 
@@ -243,20 +274,25 @@ async fn synchronous_burst_cannot_exceed_the_bounded_queue() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn non_reading_peer_eventually_hits_slow_consumer_backpressure() {
-    let limits = StreamLimits::new(64 * 1024, 2, 128 * 1024, 1, Duration::from_secs(2)).unwrap();
-    let running = LoopbackServer::start(limits, Arc::new(AcknowledgingApplication)).await;
+    let limits =
+        StreamLimits::new(64 * 1024, 32, 2 * 1024 * 1024, 1, Duration::from_secs(2)).unwrap();
+    let (overload, mut overload_observed) = mpsc::unbounded_channel();
+    let running = LoopbackServer::start(limits, Arc::new(FloodingApplication { overload })).await;
     let mut socket = connect_raw(&running.endpoint, 64 * 1024).await;
-    let payload = vec![b's'; 60 * 1024];
-    let mut sent_frames = 0;
 
-    for sequence in 0..512 {
-        let frame = Message::Binary(StreamFrame::data(sequence, payload.clone()).encode().into());
-        match time::timeout(Duration::from_millis(100), socket.send(frame)).await {
-            Ok(Ok(())) => sent_frames += 1,
-            Ok(Err(_)) | Err(_) => break,
-        }
-    }
+    socket
+        .send(Message::Binary(
+            StreamFrame::data(1, b"start outbound flood".to_vec())
+                .encode()
+                .into(),
+        ))
+        .await
+        .unwrap();
 
+    let sent_frames = time::timeout(Duration::from_secs(5), overload_observed.recv())
+        .await
+        .expect("non-reading peer eventually backs up the server writer")
+        .expect("flood application reports its bounded-queue overload");
     assert!(sent_frames > limits.maximum_queued_frames());
     println!(
         "KONTAINER_STREAM_SLOW_CONSUMER_EVIDENCE sent_without_reading={sent_frames} \

@@ -38,9 +38,11 @@ completed counter, while aborts or join failures remain visible. Qualification
 fails unless started and completed task counts match, active tasks reach zero,
 and failed joins remain zero.
 
-The loopback suite also stops reading from a real socket while sending 60 KiB
-frames until the server writer backs up and the bounded application queue
-rejects further output. Client-originated cancellation must complete its close
+The loopback suite sends one small trigger, then stops reading from the real
+socket while a test application yields between 60 KiB outbound frames. The
+server writer eventually backs up and the bounded application queue rejects
+further output without any unread inbound flood that could turn the intended
+close into a TCP reset. Client-originated cancellation must complete its close
 handshake and drain the server session before server shutdown is requested.
 Malformed, unknown, text, and oversized server fixtures likewise assert the
 native client's exact rejection close code and reason.
