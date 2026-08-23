@@ -25,6 +25,7 @@ settings:
   agent_rpc:
     enabled: false
     binding: 127.0.0.1:50052
+    cluster_id: test
     tls:
       certificate_path: config/test-controller.pem
       private_key_path: config/test-controller-key.pem

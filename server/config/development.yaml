@@ -31,8 +31,8 @@ settings:
   agent_rpc:
     enabled: <%= get_env(name="AGENT_RPC_ENABLED", default="false") %>
     binding: <%= get_env(name="AGENT_RPC_BINDING", default="127.0.0.1:50051") %>
+    cluster_id: <%= get_env(name="CLUSTER_ID", default="development") %>
     tls:
       certificate_path: <%= get_env(name="AGENT_RPC_TLS_CERTIFICATE_PATH", default="config/dev-controller.pem") %>
       private_key_path: <%= get_env(name="AGENT_RPC_TLS_PRIVATE_KEY_PATH", default="config/dev-controller-key.pem") %>
       client_ca_path: <%= get_env(name="AGENT_RPC_TLS_CLIENT_CA_PATH", default="config/dev-agent-ca.pem") %>
-

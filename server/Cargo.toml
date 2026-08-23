@@ -4,6 +4,7 @@ members = [
   "crates/agent-proto",
   "crates/engine",
   "crates/node-agent",
+  "crates/rpc-auth",
   "migration",
 ]
 resolver = "3"
@@ -37,12 +38,14 @@ sea-orm-migration = { version = "2.0.2", default-features = false, features = [
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 tokio = { version = "1.47.1", features = ["macros", "net", "rt-multi-thread", "signal", "time"] }
+tokio-stream = { version = "0.1.19", features = ["net"] }
 tokio-util = "0.7.19"
 tonic = { version = "0.14.6", features = ["tls-ring"] }
 tonic-prost = "0.14.6"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter", "json"] }
 utoipa = { version = "5.5.0", features = ["axum_extras"] }
+x509-parser = "0.18.1"
 
 [package]
 name = "kontainer-controller"
@@ -56,12 +59,14 @@ default-run = "kontainer-controller"
 async-trait.workspace = true
 axum.workspace = true
 kontainer-agent-proto = { path = "crates/agent-proto" }
+kontainer-rpc-auth = { path = "crates/rpc-auth" }
 loco-rs.workspace = true
 migration = { path = "migration" }
 sea-orm.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+tokio-stream.workspace = true
 tokio-util.workspace = true
 tonic.workspace = true
 tonic-prost.workspace = true
@@ -72,3 +77,8 @@ utoipa.workspace = true
 name = "kontainer-controller"
 path = "src/bin/main.rs"
 
+[dev-dependencies]
+kontainer-engine = { path = "crates/engine" }
+kontainer-node-agent = { path = "crates/node-agent" }
+rcgen = "0.14.9"
+tempfile = "3.27.0"
