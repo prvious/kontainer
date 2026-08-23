@@ -1,0 +1,94 @@
+name: Stream qualification
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "server/crates/stream-protocol/**"
+      - "server/crates/stream-transport/**"
+      - "server/Cargo.toml"
+      - "server/Cargo.lock"
+      - ".github/workflows/stream-qualification.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "server/crates/stream-protocol/**"
+      - "server/crates/stream-transport/**"
+      - "server/Cargo.toml"
+      - "server/Cargo.lock"
+      - ".github/workflows/stream-qualification.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stream-qualification-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  loopback:
+    name: Binary frame and lifecycle evidence
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.0
+
+      - name: Cache Cargo build data
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+
+      - name: Record graph and raw loopback evidence
+        env:
+          EVIDENCE_FILE: stream-qualification.log
+        run: |
+          set -euo pipefail
+          {
+            echo "commit=$GITHUB_SHA"
+            echo "runner_architecture=$(uname -m)"
+            echo "rust_version=$(rustc --version)"
+            cargo tree --manifest-path server/Cargo.toml \
+              --package kontainer-stream-transport --invert rustls
+            cargo tree --manifest-path server/Cargo.toml \
+              --package kontainer-stream-transport --edges features --invert rustls
+            cargo tree --manifest-path server/Cargo.toml \
+              --package kontainer-stream-transport --invert tokio-tungstenite
+            cargo tree --manifest-path server/Cargo.toml \
+              --package kontainer-stream-transport --invert axum
+            echo "command=cargo test --manifest-path server/Cargo.toml --package kontainer-stream-transport --test loopback -- --nocapture"
+            cargo test --manifest-path server/Cargo.toml \
+              --package kontainer-stream-transport \
+              --test loopback -- --nocapture
+          } 2>&1 | tee "$EVIDENCE_FILE"
+
+          grep -q "KONTAINER_STREAM_EVIDENCE" "$EVIDENCE_FILE"
+          grep -q "active=0 failed_joins=0" "$EVIDENCE_FILE"
+          cargo tree --manifest-path server/Cargo.toml \
+            --package kontainer-stream-transport --edges features --invert rustls |
+            grep -q 'rustls feature "ring"'
+          if cargo tree --manifest-path server/Cargo.toml --duplicates |
+            grep -Eq "^(axum|hyper|http|http-body|rustls|tokio|tokio-tungstenite|tungstenite) v"; then
+            echo "duplicate core HTTP/runtime/TLS dependency detected"
+            exit 1
+          fi
+
+      - name: Upload raw qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stream-qualification
+          path: stream-qualification.log
+          if-no-files-found: error
