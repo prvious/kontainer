@@ -1,10 +1,23 @@
-# Kontainer v2 GitHub tracking blueprint
+# Kontainer GitHub execution tracking
 
-Status: proposed tracking structure; no GitHub state has been created
+Status: greenfield hierarchy created in GitHub
 
 Prepared: 2026-08-19
 
-Scope: the Rust controller and node-agent rewrite, v1 parity and retirement, production qualification, and the optional stack-deployment feature
+Implemented: 2026-08-23
+
+Scope: Kontainer `1.0`, its Rust controller and node agent, desktop integration, and release qualification
+
+## Live GitHub state
+
+- [Product parent #40](https://github.com/prvious/kontainer/issues/40) owns 15 native domain sub-epics [#41 through #55](https://github.com/prvious/kontainer/issues?q=is%3Aissue%20state%3Aopen%20label%3Aepic).
+- The first Foundation implementation/evidence set is [#56 through #60](https://github.com/prvious/kontainer/milestone/1), owned by its relevant domain epics.
+- Five release-gate milestones exist: Foundation, `0.1 — Secure skeleton`, `0.5 — Product beta`, `1.0 — Stable`, and HA qualification.
+- Labels distinguish epics, decisions, spikes, foundation work, evidence requirements, and major product areas.
+- Native parent/sub-issue and blocked-by relationships are in use.
+- No GitHub Project was created. Issues provide the initial source of truth, and the available token does not currently have Project scope.
+
+The [approved greenfield reset](./approved-greenfield-reset.md) and the live GitHub issues supersede the proposed bodies below wherever they mention `/api/v2`, SQLite profiles, SSE, Go coexistence, v1 migration/parity, a `v2.0` release, or deferred capabilities as active epics. The remainder of this file is retained as historical template and research material; do not paste it into new issues without reconciling it to the reset.
 
 ## Purpose
 

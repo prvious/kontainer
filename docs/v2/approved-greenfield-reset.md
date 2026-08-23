@@ -10,6 +10,15 @@ Kontainer currently has no users or production installations. The Rust rewrite i
 
 This decision supersedes every conflicting recommendation in the remaining `docs/v2` research, including SQLite profiles, `/api/v2`, SSE, Go/Rust coexistence, v1 adapters, user-data migration, and mandatory v1 parity. The older reports remain useful technical research, risk analysis, and feature archaeology; they are not authoritative where they conflict with this file.
 
+## Delivery tracking
+
+- GitHub Issues in `prvious/kontainer` are the execution source of truth.
+- Use one Kontainer `1.0` product parent, domain epics as native sub-issues, and review-ready vertical implementation issues beneath the owning domain epic.
+- Use native issue dependencies for real execution blockers rather than duplicating dependency checklists in prose.
+- Assign release-gate milestones to leaf issues, not long-lived epics that span several gates.
+- Keep deferred capabilities out of the active epic hierarchy until a later product decision promotes them.
+- A GitHub Project is optional and should be added only when Issues, sub-issues, dependencies, labels, and milestones no longer provide sufficient scheduling visibility.
+
 ## Product and compatibility
 
 - Develop the new product as `0.x`; the first stable product release is Kontainer `1.0`.

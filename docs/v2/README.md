@@ -161,35 +161,34 @@ Within parity, implement shared manager read models first, node-local unary oper
 
 ## GitHub tracking recommendation
 
-Yes—GitHub Issues are the right execution tracker, with one important constraint: do not use one giant checkbox issue as the source of truth.
+GitHub Issues are now the execution source of truth. Do not use one giant checkbox issue as the source of truth.
 
-Create:
+The live hierarchy contains:
 
-1. one parent issue, `Kontainer v2: Rust controller and node-agent rewrite`;
-2. the 17 domain epics above as native sub-issues;
-3. separate decision issues for open/provisional `ADR-CAND-*` rows;
-4. review-sized implementation issues only when their decisions and acceptance contract are ready;
-5. native `Blocked by` relationships for real ordering, plus milestones for `v2-foundation`, `v2-parity-preview`, `v2-beta`, and `v2.0-ga`.
+1. [one Kontainer `1.0` parent issue](https://github.com/prvious/kontainer/issues/40);
+2. 15 greenfield domain epics as native sub-issues, with the obsolete v1 migration/retirement and deferred Compose epics removed;
+3. five review-ready [Foundation issues](https://github.com/prvious/kontainer/milestone/1) for PostgreSQL operations, real Docker negotiation, real mTLS, binary WebSocket framing, and native Linux AMD64/ARM64 evidence;
+4. native blocked-by relationships for real ordering;
+5. Foundation, `0.1 — Secure skeleton`, `0.5 — Product beta`, `1.0 — Stable`, and HA qualification milestones.
 
-Every implementation issue should include:
+Every new implementation issue should include:
 
-- epic, milestone/profile, affected `V1-*` ledger IDs, and dependent `ADR-CAND-*` decisions;
+- owning epic, milestone/profile, and unresolved decisions that genuinely block it;
 - outcome, accepted route, scope, explicit non-goals, and failure/partial-result behavior;
 - security/privacy and performance/resource-budget implications;
 - unit, contract, integration, real-Swarm, migration, chaos, or release evidence appropriate to the change;
-- observability, documentation, rollout, rollback, and removal of replaced Go behavior;
+- observability, documentation, rollout, and rollback behavior where applicable;
 - a completion rule that requires merged code and evidence, not merely an opened PR.
 
-GitHub natively supports hierarchical sub-issues and issue dependencies, which is enough for this three-level structure. A Project is optional; if used, keep fields small: Status, Gate, Domain, Profile, Decision state, and Risk. [The GitHub blueprint](./github-tracking.md) contains a ready-to-paste parent body, all 17 sub-epic bodies, labels, milestones, an issue template, sizing rules, and suggested creation order. No GitHub issue or repository setting was changed during this research.
+GitHub's hierarchical sub-issues and issue dependencies are sufficient for the initial three-level structure. A Project remains optional; the current token lacks Project scope and no Project was created. [The tracking document](./github-tracking.md) records the live hierarchy and retains the earlier blueprint as historical template material.
 
-## Recommended review path
+## Delivery workflow
 
-1. Review this map and decide whether the product boundaries are right.
-2. Review [the decision register](./decision-register.md), starting with its first-code blockers.
-3. Review [the phasing plan](./phasing-review.md), especially the walking skeleton and service-scale vertical slice.
-4. Audit item-level treatment in [the feature ledger](./feature-ledger.md); resolve the 12 question rows and any `decision-blocked` disposition.
-5. Use the domain reports for the implementation details and rejected alternatives you want to challenge.
-6. Only then create the parent epic and decision issues from [the GitHub blueprint](./github-tracking.md).
+1. Start from the next unblocked, review-ready leaf issue; initially this is [the PostgreSQL durable-operation walking skeleton](https://github.com/prvious/kontainer/issues/56).
+2. Link implementation PRs to their leaf issue and use `Closes #...` only when the full acceptance criteria and evidence are complete.
+3. Add leaf issues only when their contract and blockers are understood; do not expand every research bullet into speculative tickets.
+4. Close epics only when their observable outcomes and gate evidence are complete, not when their initially imagined children happen to be closed.
+5. Promote deferred capabilities through an explicit product decision before adding them to the active hierarchy.
 
 ## Research report index
 
@@ -217,6 +216,4 @@ GitHub natively supports hierarchical sub-issues and issue dependencies, which i
 
 ## Current truth
 
-The v2 architecture has been researched in depth, including alternatives and rejection rationale. The v1 surface has been inventoried. The GitHub hierarchy is ready to create. No Rust agent rewrite, GPUI product app, GitHub epic, issue, label, milestone, or Project change has been implemented by this work.
-
-The next useful action is review and decision closure—not a broad “rewrite the agent in Rust” coding issue.
+The greenfield Rust foundation and GitHub execution hierarchy both exist. The first active implementation issue is [#56](https://github.com/prvious/kontainer/issues/56). Older v1 research remains useful archaeology, not a compatibility or migration backlog. No GitHub Project has been created.
