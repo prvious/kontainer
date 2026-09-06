@@ -28,6 +28,7 @@ env:
 jobs:
   native-smoke:
     name: Native smoke (${{ matrix.architecture }})
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -64,6 +65,7 @@ jobs:
           "native-evidence/${{ matrix.architecture }}"
 
       - name: Upload native artifacts and evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: kontainer-native-${{ matrix.architecture }}-${{ github.sha }}

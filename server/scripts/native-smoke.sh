@@ -10,13 +10,27 @@ target_triple="$1"
 expected_machine="$2"
 evidence_directory="$3"
 
+case "$target_triple:$expected_machine" in
+  x86_64-unknown-linux-gnu:x86_64) binary_machine="x86-64" ;;
+  aarch64-unknown-linux-gnu:aarch64) binary_machine="ARM aarch64" ;;
+  *)
+    echo "unsupported native smoke target/machine: $target_triple/$expected_machine" >&2
+    exit 64
+    ;;
+esac
+
 actual_machine="$(uname -m)"
-if [[ "$actual_machine" != "$expected_machine" ]]; then
+if [[ "$(uname -s)" != Linux || "$actual_machine" != "$expected_machine" ]]; then
   echo "native runner mismatch: expected $expected_machine, got $actual_machine" >&2
   exit 1
 fi
 
 mkdir -p "$evidence_directory/artifacts"
+uname -a > "$evidence_directory/uname.txt"
+rustc -Vv > "$evidence_directory/rustc.txt"
+cargo -V > "$evidence_directory/cargo.txt"
+git rev-parse HEAD > "$evidence_directory/commit.txt"
+sha256sum server/Cargo.lock > "$evidence_directory/lockfile-sha256.txt"
 
 cargo build \
   --manifest-path server/Cargo.toml \
@@ -39,33 +53,29 @@ cargo test \
   --locked \
   --target "$target_triple" \
   --package kontainer-agent-proto \
-  -- --nocapture | tee "$evidence_directory/protobuf-runtime-test.txt"
+  -- --nocapture 2>&1 | tee "$evidence_directory/protobuf-runtime-test.txt"
 
 target_directory="server/target/$target_triple/release"
 controller_binary="$target_directory/kontainer-controller"
 node_agent_binary="$target_directory/kontainer-node-agent"
 
-file "$controller_binary" "$node_agent_binary" | tee "$evidence_directory/binary-format.txt"
+for binary in "$controller_binary" "$node_agent_binary"; do
+  binary_format="$(file "$binary")"
+  echo "$binary_format"
+  if [[ "$binary_format" != *"ELF 64-bit"* || "$binary_format" != *"$binary_machine"* ]]; then
+    echo "unexpected binary format: $binary_format" >&2
+    exit 1
+  fi
+done | tee "$evidence_directory/binary-format.txt"
 
-case "$target_triple" in
-  x86_64-unknown-linux-gnu)
-    grep -q "x86-64" "$evidence_directory/binary-format.txt"
-    ;;
-  aarch64-unknown-linux-gnu)
-    grep -q "ARM aarch64" "$evidence_directory/binary-format.txt"
-    ;;
-  *)
-    echo "unsupported native smoke target: $target_triple" >&2
-    exit 64
-    ;;
-esac
+timeout --kill-after=2s 10s "$controller_binary" --help > "$evidence_directory/controller-help.txt"
+timeout --kill-after=2s 10s "$node_agent_binary" --version > "$evidence_directory/node-agent-version.txt"
 
-"$controller_binary" --help > "$evidence_directory/controller-help.txt"
-"$node_agent_binary" --version > "$evidence_directory/node-agent-version.txt"
-
-if env -u KONTAINER_NODE_ID "$node_agent_binary" \
-  > "$evidence_directory/node-agent-missing-config.txt" 2>&1; then
-  echo "node agent unexpectedly started without required configuration" >&2
+missing_config_exit=0
+timeout --kill-after=2s 10s env -u KONTAINER_NODE_ID "$node_agent_binary" \
+  > "$evidence_directory/node-agent-missing-config.txt" 2>&1 || missing_config_exit=$?
+if [[ "$missing_config_exit" -ne 1 ]]; then
+  echo "expected node-agent configuration exit 1, got $missing_config_exit" >&2
   exit 1
 fi
 grep -q "required environment variable KONTAINER_NODE_ID is not set" \
@@ -74,11 +84,6 @@ grep -q "required environment variable KONTAINER_NODE_ID is not set" \
 install -m 0755 "$controller_binary" "$evidence_directory/artifacts/kontainer-controller"
 install -m 0755 "$node_agent_binary" "$evidence_directory/artifacts/kontainer-node-agent"
 
-uname -a > "$evidence_directory/uname.txt"
-rustc -Vv > "$evidence_directory/rustc.txt"
-cargo -V > "$evidence_directory/cargo.txt"
-git rev-parse HEAD > "$evidence_directory/commit.txt"
-sha256sum server/Cargo.lock > "$evidence_directory/lockfile-sha256.txt"
 sha256sum \
   "$evidence_directory/artifacts/kontainer-controller" \
   "$evidence_directory/artifacts/kontainer-node-agent" \
