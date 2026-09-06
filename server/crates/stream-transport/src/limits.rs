@@ -68,6 +68,12 @@ impl StreamLimits {
                 field: "shutdown_grace",
             });
         }
+        if std::time::Instant::now()
+            .checked_add(shutdown_grace)
+            .is_none()
+        {
+            return Err(StreamLimitError::ShutdownGraceOverflow);
+        }
 
         Ok(Self {
             maximum_frame_bytes,
@@ -120,6 +126,7 @@ impl Default for StreamLimits {
 pub enum StreamLimitError {
     Zero { field: &'static str },
     ExceedsCompiledMaximum { field: &'static str, maximum: usize },
+    ShutdownGraceOverflow,
 }
 
 #[cfg(test)]
@@ -151,6 +158,10 @@ mod tests {
 
     #[test]
     fn zero_and_pathological_limits_are_rejected() {
+        assert_eq!(
+            StreamLimits::new(1, 1, 1, 1, Duration::MAX),
+            Err(StreamLimitError::ShutdownGraceOverflow)
+        );
         assert_eq!(
             StreamLimits::new(0, 1, 1, 1, Duration::from_secs(1)),
             Err(StreamLimitError::Zero {

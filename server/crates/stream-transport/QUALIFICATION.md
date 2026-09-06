@@ -27,6 +27,8 @@ reaching Tokio channel or semaphore constructors.
 | Text message | `1003 binary protobuf required` |
 | Unknown protocol version | `1002 unsupported protocol version` |
 | Unknown frame kind | `1002 unknown frame kind` |
+| Malformed WebSocket framing | `1002 websocket protocol violation` |
+| Invalid WebSocket UTF-8 | `1007 invalid websocket utf-8` |
 | Malformed protobuf | `1007 malformed protobuf envelope` |
 | Oversized message/frame | `1009 frame exceeds configured limit` |
 | Queue item/byte overload | `1013 slow consumer exceeded queue limits` |
@@ -46,6 +48,8 @@ close into a TCP reset. Client-originated cancellation must complete its close
 handshake and drain the server session before server shutdown is requested.
 Malformed, unknown, text, and oversized server fixtures likewise assert the
 native client's exact rejection close code and reason.
+Peer-initiated closes are acknowledged before the native client returns, and
+client-initiated close sending and acknowledgement share one shutdown deadline.
 
 ## Reproducible evidence
 

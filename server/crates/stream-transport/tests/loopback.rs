@@ -18,6 +18,7 @@ use kontainer_stream_transport::{
     StreamApplication, StreamClientError, StreamClose, StreamLimits, StreamServer,
 };
 use tokio::{
+    io::AsyncWriteExt,
     net::TcpListener,
     sync::{Mutex, mpsc, oneshot},
     task::JoinHandle,
@@ -222,6 +223,38 @@ async fn oversized_frames_close_with_the_configured_code_and_reason() {
 }
 
 #[tokio::test]
+async fn websocket_protocol_and_utf8_errors_have_specific_close_reasons() {
+    let running = LoopbackServer::start(StreamLimits::default(), Arc::new(SilentApplication)).await;
+    for (wire_frame, expected) in [
+        // Client frames must be masked, including binary frames.
+        (&[0x82, 0x01, 0xff][..], StreamClose::PROTOCOL_VIOLATION),
+        // A masked text frame with invalid UTF-8 fails before application decoding.
+        (
+            &[0x81, 0x81, 0, 0, 0, 0, 0xff][..],
+            StreamClose::INVALID_UTF8,
+        ),
+    ] {
+        let mut socket = connect_raw(&running.endpoint, 1024).await;
+        let MaybeTlsStream::Plain(stream) = socket.get_mut() else {
+            panic!("loopback fixture uses plaintext TCP")
+        };
+        stream.write_all(wire_frame).await.unwrap();
+
+        let close = time::timeout(Duration::from_secs(2), socket.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let Message::Close(Some(close)) = close else {
+            panic!("server must close a malformed WebSocket frame")
+        };
+        assert_eq!(u16::from(close.code), expected.code);
+        assert_eq!(close.reason, expected.reason);
+    }
+    running.finish().await;
+}
+
+#[tokio::test]
 async fn missing_subprotocol_and_excess_concurrency_fail_before_upgrade() {
     let running = LoopbackServer::start(
         StreamLimits::new(1024, 4, 4096, 1, Duration::from_secs(1)).unwrap(),
@@ -392,6 +425,33 @@ async fn native_client_rejects_invalid_server_frames_with_owned_closes() {
 }
 
 #[tokio::test]
+async fn native_client_acknowledges_a_server_close_before_returning() {
+    let closing_server =
+        InvalidLoopbackServer::start(AxumMessage::Close(Some(axum::extract::ws::CloseFrame {
+            code: StreamClose::NORMAL.code,
+            reason: StreamClose::NORMAL.reason.into(),
+        })))
+        .await;
+    let cancellation = CancellationToken::new();
+    let mut client = NativeStreamClient::connect(
+        &closing_server.endpoint,
+        StreamLimits::default(),
+        &cancellation,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        client.receive_frame(&cancellation).await,
+        Err(StreamClientError::Closed {
+            code: StreamClose::NORMAL.code,
+            reason: StreamClose::NORMAL.reason.to_owned(),
+        })
+    );
+    closing_server.finish(StreamClose::NORMAL).await;
+}
+
+#[tokio::test]
 async fn server_cancellation_closes_the_client_within_grace_and_joins_every_task() {
     let limits = StreamLimits::new(1024, 4, 4096, 1, Duration::from_secs(1)).unwrap();
     let running = LoopbackServer::start(limits, Arc::new(SilentApplication)).await;
@@ -412,6 +472,15 @@ async fn server_cancellation_closes_the_client_within_grace_and_joins_every_task
             code: StreamClose::SERVER_SHUTDOWN.code,
             reason: StreamClose::SERVER_SHUTDOWN.reason.to_owned(),
         })
+    );
+    assert_eq!(
+        NativeStreamClient::connect(&running.endpoint, limits, &cancellation)
+            .await
+            .err()
+            .unwrap(),
+        StreamClientError::HandshakeRejected {
+            status: StatusCode::SERVICE_UNAVAILABLE.as_u16(),
+        }
     );
 
     running.finish_after_stream_shutdown().await;

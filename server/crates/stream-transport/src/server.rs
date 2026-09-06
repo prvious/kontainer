@@ -8,7 +8,7 @@ use axum::{
     response::Response,
 };
 use futures_util::{SinkExt, StreamExt, stream::SplitSink};
-use kontainer_stream_protocol::{StreamFrame, StreamProtocolError, WEBSOCKET_SUBPROTOCOL};
+use kontainer_stream_protocol::{StreamFrame, WEBSOCKET_SUBPROTOCOL};
 use tokio::{
     sync::{Notify, OwnedSemaphorePermit, Semaphore, mpsc, watch},
     task::JoinHandle,
@@ -80,6 +80,11 @@ impl StreamServer {
             .try_acquire_owned()
             .map_err(|_| StreamAdmissionError::AtCapacity)?;
         let session_registration = self.inner.register_session();
+        // Shutdown may finish between the first check and this registration.
+        // Recheck before handing the caller an admission that can start tasks.
+        if self.inner.shutdown.is_cancelled() {
+            return Err(StreamAdmissionError::ShuttingDown);
+        }
 
         Ok(StreamAdmission {
             server: self.clone(),
@@ -110,7 +115,9 @@ impl StreamServer {
 
     pub async fn shutdown(&self) -> Result<(), StreamShutdownError> {
         self.inner.shutdown.cancel();
-        let deadline = time::Instant::now() + self.inner.limits.shutdown_grace();
+        let deadline = time::Instant::now()
+            .checked_add(self.inner.limits.shutdown_grace())
+            .ok_or(StreamShutdownError::GraceExpired)?;
 
         loop {
             let notified = self.inner.idle.notified();
@@ -280,16 +287,8 @@ async fn read_loop(
                 }
                 let frame = match StreamFrame::decode(&bytes) {
                     Ok(frame) => frame,
-                    Err(StreamProtocolError::MalformedEnvelope) => {
-                        signal_close(&signal, StreamClose::MALFORMED_ENVELOPE);
-                        return;
-                    }
-                    Err(StreamProtocolError::UnsupportedProtocolVersion(_)) => {
-                        signal_close(&signal, StreamClose::UNSUPPORTED_VERSION);
-                        return;
-                    }
-                    Err(StreamProtocolError::UnknownFrameKind(_)) => {
-                        signal_close(&signal, StreamClose::UNKNOWN_FRAME_KIND);
+                    Err(error) => {
+                        signal_close(&signal, StreamClose::for_envelope_error(error));
                         return;
                     }
                 };
@@ -333,8 +332,16 @@ async fn read_loop(
                 return;
             }
             Some(Ok(Message::Ping(_) | Message::Pong(_))) => {}
-            Some(Err(_)) => {
-                signal_close(&signal, StreamClose::MESSAGE_TOO_LARGE);
+            Some(Err(error)) => {
+                let error = error.into_inner();
+                let close = error
+                    .downcast_ref::<tokio_tungstenite::tungstenite::Error>()
+                    .and_then(StreamClose::for_transport_error);
+                if let Some(close) = close {
+                    signal_close(&signal, close);
+                } else {
+                    let _ = signal.send(SessionSignal::PeerClosed);
+                }
                 return;
             }
         }

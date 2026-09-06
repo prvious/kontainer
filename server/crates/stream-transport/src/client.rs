@@ -97,44 +97,44 @@ impl NativeStreamClient {
             match message {
                 Some(Ok(Message::Binary(bytes))) => {
                     if bytes.len() > self.limits.maximum_frame_bytes() {
-                        self.reject(StreamClose::MESSAGE_TOO_LARGE).await;
+                        self.close_with_handshake(StreamClose::MESSAGE_TOO_LARGE)
+                            .await;
                         return Err(StreamClientError::FrameTooLarge);
                     }
                     return match StreamFrame::decode(&bytes) {
                         Ok(frame) => Ok(frame),
                         Err(error) => {
-                            let close = match error {
-                                StreamProtocolError::MalformedEnvelope => {
-                                    StreamClose::MALFORMED_ENVELOPE
-                                }
-                                StreamProtocolError::UnsupportedProtocolVersion(_) => {
-                                    StreamClose::UNSUPPORTED_VERSION
-                                }
-                                StreamProtocolError::UnknownFrameKind(_) => {
-                                    StreamClose::UNKNOWN_FRAME_KIND
-                                }
-                            };
-                            self.reject(close).await;
+                            self.close_with_handshake(StreamClose::for_envelope_error(error))
+                                .await;
                             Err(StreamClientError::Protocol(error))
                         }
                     };
                 }
                 Some(Ok(Message::Close(frame))) => {
+                    // Tungstenite queues the peer's acknowledgement when reading Close.
+                    let _ = time::timeout(self.limits.shutdown_grace(), self.socket.flush()).await;
                     let (code, reason) = frame
                         .map(|frame| (u16::from(frame.code), frame.reason.to_string()))
                         .unwrap_or((1005, String::new()));
                     return Err(StreamClientError::Closed { code, reason });
                 }
                 Some(Ok(Message::Text(_))) => {
-                    self.reject(StreamClose::BINARY_REQUIRED).await;
+                    self.close_with_handshake(StreamClose::BINARY_REQUIRED)
+                        .await;
                     return Err(StreamClientError::UnexpectedTextFrame);
                 }
                 Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_))) => {}
-                Some(Err(tokio_tungstenite::tungstenite::Error::Capacity(_))) => {
-                    self.reject(StreamClose::MESSAGE_TOO_LARGE).await;
-                    return Err(StreamClientError::FrameTooLarge);
+                Some(Err(error)) => {
+                    let close = StreamClose::for_transport_error(&error);
+                    if let Some(close) = close {
+                        self.close_with_handshake(close).await;
+                    }
+                    return Err(if close == Some(StreamClose::MESSAGE_TOO_LARGE) {
+                        StreamClientError::FrameTooLarge
+                    } else {
+                        StreamClientError::TransportFailure
+                    });
                 }
-                Some(Err(_)) => return Err(StreamClientError::TransportFailure),
                 None => return Err(StreamClientError::ConnectionEnded),
             }
         }
@@ -153,21 +153,15 @@ impl NativeStreamClient {
         self.close_with_handshake(StreamClose::NORMAL).await;
     }
 
-    async fn send_close(&mut self, close: StreamClose) {
+    async fn close_with_handshake(&mut self, close: StreamClose) {
         let message = Message::Close(Some(CloseFrame {
             code: CloseCode::from(close.code),
             reason: close.reason.into(),
         }));
-        let _ = time::timeout(self.limits.shutdown_grace(), self.socket.send(message)).await;
-    }
-
-    async fn reject(&mut self, close: StreamClose) {
-        self.close_with_handshake(close).await;
-    }
-
-    async fn close_with_handshake(&mut self, close: StreamClose) {
-        self.send_close(close).await;
         let _ = time::timeout(self.limits.shutdown_grace(), async {
+            if self.socket.send(message).await.is_err() {
+                return;
+            }
             loop {
                 match self.socket.next().await {
                     Some(Ok(Message::Close(_))) | Some(Err(_)) | None => return,
