@@ -43,12 +43,7 @@ pub async fn execute(
                 };
 
                 let operation_id = model.id;
-                let next_sequence = operation_event::Entity::find()
-                    .filter(operation_event::Column::OperationId.eq(operation_id))
-                    .order_by_desc(operation_event::Column::Sequence)
-                    .one(transaction)
-                    .await?
-                    .map_or(1, |event| event.sequence + 1);
+                let next_sequence = super::next_event_sequence(transaction, operation_id).await?;
                 let now = Utc::now();
                 let mut active_model: operation::ActiveModel = model.into();
                 active_model.state = Set(OperationState::Running.as_str().to_owned());

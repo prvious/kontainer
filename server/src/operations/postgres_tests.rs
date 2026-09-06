@@ -5,8 +5,8 @@ use chrono::{Duration, Utc};
 use loco_rs::{app::AppContext, config::Config, environment::Environment};
 use migration::{Migrator, MigratorTrait, SchemaManager};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ConnectionTrait, Database, DatabaseConnection, DbBackend,
-    EntityTrait, PaginatorTrait, QueryResult, Statement, TransactionTrait,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, Database, DatabaseConnection,
+    DbBackend, EntityTrait, PaginatorTrait, QueryFilter, QueryResult, Statement, TransactionTrait,
 };
 use tower::ServiceExt;
 use url::Url;
@@ -175,16 +175,18 @@ async fn postgres_admission_is_atomic_and_idempotent() -> Result<(), Box<dyn Err
     };
 
     let evidence = async {
-        let first = admit::execute(
-            &test_database.connection,
-            admission_request("admit-once", br#"{"replicas":2}"#)?,
-        )
-        .await?;
-        let replay = admit::execute(
-            &test_database.connection,
-            admission_request("admit-once", br#"{"replicas":2}"#)?,
-        )
-        .await?;
+        let first_request = admission_request("admit-once", br#"{"replicas":2}"#)?;
+        let second_request = admission_request("admit-once", br#"{"replicas":2}"#)?;
+        let (first, second) = tokio::join!(
+            admit::execute(&test_database.connection, first_request),
+            admit::execute(&test_database.connection, second_request),
+        );
+        let (first, second) = (first?, second?);
+        let (first, replay) = if first.replayed {
+            (second, first)
+        } else {
+            (first, second)
+        };
         let conflict = admit::execute(
             &test_database.connection,
             admission_request("admit-once", br#"{"replicas":3}"#)?,
@@ -440,6 +442,89 @@ async fn postgres_rollback_and_uncertain_recovery_are_explicit() -> Result<(), B
     assert_eq!(uncertain.operation.state, OperationState::Uncertain);
     assert_eq!(uncertain.last_event_sequence, 3);
     assert_eq!(uncertain.last_error_code.as_deref(), Some("engine_timeout"));
+    assert!(removed);
+    Ok(())
+}
+
+#[tokio::test]
+async fn postgres_transitions_reject_missing_or_exhausted_history() -> Result<(), Box<dyn Error>> {
+    let Some(test_database) = PostgresTestDatabase::create(true).await? else {
+        return Ok(());
+    };
+
+    let evidence = async {
+        let mut outcomes = Vec::new();
+        for state in [OperationState::Recoverable, OperationState::Running] {
+            for exhausted in [false, true] {
+                let admitted = admit::execute(
+                    &test_database.connection,
+                    admission_request(&format!("history-{state:?}-{exhausted}"), b"history")?,
+                )
+                .await?;
+                let operation_id = admitted.operation.id;
+                if state == OperationState::Running {
+                    claim_next::execute(&test_database.connection, "controller:worker")
+                        .await?
+                        .ok_or_else(|| io::Error::other("expected operation to be claimed"))?;
+                }
+                operation_event::Entity::delete_many()
+                    .filter(operation_event::Column::OperationId.eq(operation_id))
+                    .exec(&test_database.connection)
+                    .await?;
+                if exhausted {
+                    operation_event::ActiveModel {
+                        operation_id: Set(operation_id),
+                        sequence: Set(i32::MAX),
+                        state: Set(state.as_str().to_owned()),
+                        error_code: Set(None),
+                        created_at: Set(Utc::now()),
+                        ..Default::default()
+                    }
+                    .insert(&test_database.connection)
+                    .await?;
+                }
+                let rejected = if state == OperationState::Recoverable {
+                    matches!(
+                        claim_next::execute(&test_database.connection, "controller:worker").await,
+                        Err(claim_next::ClaimOperationError::Persistence(_))
+                    )
+                } else {
+                    matches!(
+                        mark_uncertain::execute(&test_database.connection, operation_id, "timeout")
+                            .await,
+                        Err(mark_uncertain::MarkUncertainError::Persistence(_))
+                    )
+                };
+                let model = operation::Entity::find_by_id(operation_id)
+                    .one(&test_database.connection)
+                    .await?
+                    .ok_or_else(|| io::Error::other("operation disappeared"))?;
+                let events = operation_event::Entity::find()
+                    .filter(operation_event::Column::OperationId.eq(operation_id))
+                    .count(&test_database.connection)
+                    .await?;
+                outcomes.push((
+                    rejected,
+                    model.state == state.as_str(),
+                    events == u64::from(exhausted),
+                ));
+
+                // Exclude this intentionally corrupt row from the next claim.
+                let mut model: operation::ActiveModel = model.into();
+                model.state = Set(OperationState::Failed.as_str().to_owned());
+                model.update(&test_database.connection).await?;
+            }
+        }
+        Ok::<_, Box<dyn Error>>(outcomes)
+    }
+    .await;
+    let removed = test_database.cleanup().await?;
+
+    assert!(
+        evidence?
+            .into_iter()
+            .all(|outcome| outcome == (true, true, true))
+    );
     assert!(removed);
     Ok(())
 }

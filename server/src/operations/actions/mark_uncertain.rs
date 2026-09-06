@@ -1,8 +1,8 @@
 use chrono::Utc;
 use sea_orm::sea_query::LockType;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, DatabaseConnection, DbErr, EntityTrait,
-    QueryFilter, QueryOrder, QuerySelect, TransactionError, TransactionTrait,
+    ActiveModelTrait, ActiveValue::Set, DatabaseConnection, DbErr, EntityTrait, QuerySelect,
+    TransactionError, TransactionTrait,
 };
 use uuid::Uuid;
 
@@ -24,17 +24,7 @@ pub enum MarkUncertainError {
     #[error(transparent)]
     CorruptState(#[from] CorruptOperationState),
     #[error("operation transition persistence failed")]
-    Persistence(#[source] DbErr),
-}
-
-#[derive(Debug, thiserror::Error)]
-enum TransitionError {
-    #[error("operation not found")]
-    NotFound,
-    #[error("invalid operation state")]
-    InvalidState,
-    #[error(transparent)]
-    Database(#[from] DbErr),
+    Persistence(#[from] DbErr),
 }
 
 pub async fn execute(
@@ -58,17 +48,12 @@ pub async fn execute(
                     .lock(LockType::Update)
                     .one(transaction)
                     .await?
-                    .ok_or(TransitionError::NotFound)?;
+                    .ok_or(MarkUncertainError::NotFound)?;
                 if model.state != OperationState::Running.as_str() {
-                    return Err(TransitionError::InvalidState);
+                    return Err(MarkUncertainError::InvalidState);
                 }
 
-                let next_sequence = operation_event::Entity::find()
-                    .filter(operation_event::Column::OperationId.eq(operation_id))
-                    .order_by_desc(operation_event::Column::Sequence)
-                    .one(transaction)
-                    .await?
-                    .map_or(1, |event| event.sequence + 1);
+                let next_sequence = super::next_event_sequence(transaction, operation_id).await?;
                 let now = Utc::now();
                 let mut active_model: operation::ActiveModel = model.into();
                 active_model.state = Set(OperationState::Uncertain.as_str().to_owned());
@@ -90,20 +75,10 @@ pub async fn execute(
             })
         })
         .await
-        .map_err(map_transaction_error)?;
+        .map_err(|error| match error {
+            TransactionError::Connection(error) => MarkUncertainError::Persistence(error),
+            TransactionError::Transaction(error) => error,
+        })?;
 
     updated.try_into().map_err(MarkUncertainError::CorruptState)
-}
-
-fn map_transaction_error(error: TransactionError<TransitionError>) -> MarkUncertainError {
-    match error {
-        TransactionError::Connection(error) => MarkUncertainError::Persistence(error),
-        TransactionError::Transaction(TransitionError::NotFound) => MarkUncertainError::NotFound,
-        TransactionError::Transaction(TransitionError::InvalidState) => {
-            MarkUncertainError::InvalidState
-        }
-        TransactionError::Transaction(TransitionError::Database(error)) => {
-            MarkUncertainError::Persistence(error)
-        }
-    }
 }
