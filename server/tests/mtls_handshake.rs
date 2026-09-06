@@ -179,6 +179,23 @@ async fn node_agent_rejects_an_agent_certificate_used_as_a_controller_identity()
 }
 
 #[tokio::test]
+async fn controller_rejects_trusted_certificates_without_one_unambiguous_workload_identity() {
+    let pki = TestPki::generate();
+    let controller = start_controller(&pki).await;
+
+    for fixture in [&pki.missing_identity, &pki.ambiguous_identity] {
+        let error = controller_client(controller.address, pki.trusted_files(fixture))
+            .await
+            .check_in(check_in_request(NODE_ID))
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), Code::Unauthenticated);
+    }
+
+    controller.stop().await;
+}
+
+#[tokio::test]
 async fn shutdown_cancels_an_in_flight_rpc_and_joins_the_server_task() {
     let pki = TestPki::generate();
     let entered = Arc::new(Semaphore::new(0));
@@ -218,9 +235,20 @@ async fn shared_shutdown_joins_controller_http_and_rpc_tasks() {
     let rpc_address = rpc_listener.local_addr().unwrap();
     let cancellation = CancellationToken::new();
     let task_cancellation = cancellation.clone();
-    let router = Router::new().route("/health", get(|| async { "ok" }));
+    let entered = Arc::new(Semaphore::new(0));
+    let released = Arc::new(Semaphore::new(0));
+    let handler_entered = entered.clone();
+    let handler_released = released.clone();
+    let router = Router::new().route(
+        "/health",
+        get(move || async move {
+            handler_entered.add_permits(1);
+            handler_released.acquire().await.unwrap().forget();
+            "ok"
+        }),
+    );
     let tls_files = pki.trusted_files(&pki.controller);
-    let task = tokio::spawn(async move {
+    let mut task = tokio::spawn(async move {
         supervise_controller_servers(
             router,
             http_listener,
@@ -238,14 +266,27 @@ async fn shared_shutdown_joins_controller_http_and_rpc_tasks() {
     http.write_all(b"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
         .await
         .unwrap();
-    let mut response = Vec::new();
-    http.read_to_end(&mut response).await.unwrap();
-    assert!(response.starts_with(b"HTTP/1.1 200 OK"));
+    let http_call = tokio::spawn(async move {
+        let mut response = Vec::new();
+        http.read_to_end(&mut response).await.unwrap();
+        response
+    });
+    entered.acquire().await.unwrap().forget();
 
     let mut intake = controller_client(rpc_address, pki.trusted_files(&pki.agent)).await;
     intake.check_in(check_in_request(NODE_ID)).await.unwrap();
 
     cancellation.cancel();
+    assert!(
+        timeout(Duration::from_millis(20), &mut task).await.is_err(),
+        "controller supervisor dropped the in-flight HTTP handler instead of draining it"
+    );
+    released.add_permits(1);
+    let response = timeout(Duration::from_secs(2), http_call)
+        .await
+        .expect("HTTP request did not drain")
+        .unwrap();
+    assert!(response.starts_with(b"HTTP/1.1 200 OK"));
     timeout(Duration::from_secs(2), task)
         .await
         .expect("controller HTTP/RPC supervisor did not stop")
@@ -259,6 +300,60 @@ async fn shared_shutdown_joins_controller_http_and_rpc_tasks() {
         TcpStream::connect(rpc_address).await.is_err(),
         "RPC listener still admitted connections after shutdown"
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn already_cancelled_controller_shutdown_is_successful() {
+    for _ in 0..64 {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let cancellation = CancellationToken::new();
+        cancellation.cancel();
+
+        timeout(
+            Duration::from_secs(2),
+            supervise_controller_servers(Router::new(), listener, None, cancellation),
+        )
+        .await
+        .expect("already cancelled supervisor did not join")
+        .expect("intentional cancellation was treated as an unexpected server exit");
+    }
+}
+
+#[tokio::test]
+async fn rpc_startup_failure_cancels_and_joins_the_http_server() {
+    let http_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let http_address = http_listener.local_addr().unwrap();
+    let rpc_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let rpc_address = rpc_listener.local_addr().unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let missing_file = directory.path().join("missing.pem");
+    let cancellation = CancellationToken::new();
+
+    let result = timeout(
+        Duration::from_secs(2),
+        supervise_controller_servers(
+            Router::new(),
+            http_listener,
+            Some(BoundAgentRpcServer {
+                listener: rpc_listener,
+                cluster_id: CLUSTER_ID.to_owned(),
+                tls_files: MutualTlsIdentityFiles::new(&missing_file, &missing_file, &missing_file),
+            }),
+            cancellation.clone(),
+        ),
+    )
+    .await
+    .expect("RPC startup failure did not join the HTTP server");
+
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("agent RPC server failed")
+    );
+    assert!(cancellation.is_cancelled());
+    assert!(TcpStream::connect(http_address).await.is_err());
+    assert!(TcpStream::connect(rpc_address).await.is_err());
 }
 
 async fn start_controller(pki: &TestPki) -> RunningServer {

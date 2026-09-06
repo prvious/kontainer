@@ -118,6 +118,7 @@ pub async fn supervise_controller_servers(
     }
 
     let first_completion = tokio::select! {
+        biased;
         _ = cancellation.cancelled() => None,
         completion = servers.join_next() => completion,
     };

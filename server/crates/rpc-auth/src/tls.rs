@@ -2,7 +2,7 @@ use std::{fs, io, path::PathBuf};
 
 use tonic::transport::{Certificate, ClientTlsConfig, Identity, ServerTlsConfig};
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct MutualTlsIdentityFiles {
     certificate_path: PathBuf,
     private_key_path: PathBuf,
@@ -51,17 +51,6 @@ impl MutualTlsIdentityFiles {
 
     fn load_peer_ca(&self) -> io::Result<Certificate> {
         fs::read(&self.peer_ca_path).map(Certificate::from_pem)
-    }
-}
-
-impl std::fmt::Debug for MutualTlsIdentityFiles {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter
-            .debug_struct("MutualTlsIdentityFiles")
-            .field("certificate_path", &self.certificate_path)
-            .field("private_key_path", &self.private_key_path)
-            .field("peer_ca_path", &self.peer_ca_path)
-            .finish()
     }
 }
 

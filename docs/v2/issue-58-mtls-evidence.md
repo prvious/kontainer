@@ -1,6 +1,6 @@
 # Issue 58 mTLS evidence
 
-Captured on 2026-08-23 from an ARM64 macOS host (`Darwin arm64`, Rust host
+Captured on 2026-09-06 from an ARM64 macOS host (`Darwin arm64`, Rust host
 `aarch64-apple-darwin`). This evidence exercises local ephemeral listeners; it
 does not claim Linux AMD64 or Linux ARM64 release verification.
 
@@ -18,6 +18,8 @@ explicit file paths.
 - Wrong cluster: `spiffe://kontainer.internal/swarm/cluster-other/node/node-1/agent`
 - Unknown CA: the valid node-agent URI signed by an untrusted test CA
 - Missing certificate: trusted server CA with no client identity
+- Missing URI identity: a trusted leaf with only a DNS SAN
+- Ambiguous identity: a trusted leaf with both agent and controller URI SANs
 
 The services extract the URI SAN from the certificate verified by rustls at the
 Tonic boundary. They reject absent identities, an unexpected trust domain or
@@ -34,19 +36,21 @@ cargo test --manifest-path server/Cargo.toml --test mtls_handshake -- --nocaptur
 ```
 
 The accepted exchange used protocol package `kontainer.agent.v1`, controller
-port `49886`, and agent port `49887`. The rejection listener used port `49883`.
+port `49415`, and agent port `49416`. The rejection listener used port `49408`.
 All ports were kernel-assigned loopback ports and will vary between runs.
 
 ```text
-mTLS evidence: protocol=kontainer.agent.v1 controller=spiffe://kontainer.internal/swarm/cluster-test/controller/controller-a agent=spiffe://kontainer.internal/swarm/cluster-test/node/node-1/agent controller_port=49886 agent_port=49887 result=accepted
-mTLS rejection evidence: port=49883 missing_cert=rejected unknown_ca=rejected plaintext=rejected wrong_cluster=cluster-other:rejected wrong_workload=controller-as-agent:rejected mismatched_claim=rejected
-test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+mTLS evidence: protocol=kontainer.agent.v1 controller=spiffe://kontainer.internal/swarm/cluster-test/controller/controller-a agent=spiffe://kontainer.internal/swarm/cluster-test/node/node-1/agent controller_port=49415 agent_port=49416 result=accepted
+mTLS rejection evidence: port=49408 missing_cert=rejected unknown_ca=rejected plaintext=rejected wrong_cluster=cluster-other:rejected wrong_workload=controller-as-agent:rejected mismatched_claim=rejected
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
 ```
 
 The suite also proves that cancellation interrupts an in-flight agent RPC,
 joins its server task within two seconds, joins the controller HTTP and RPC
-tasks under one cancellation token, and stops both listeners from accepting new
-connections after shutdown.
+tasks under one cancellation token while draining an in-flight HTTP handler,
+and stops both listeners from accepting new connections after shutdown. An
+already-cancelled start exits cleanly, and RPC startup failure cancels and joins
+its HTTP sibling. URI parser tests also reject `.` and `..` identity segments.
 
 ## Dependency graph check
 
@@ -58,3 +62,6 @@ connections after shutdown.
 The PKI is test-only and intentionally generated at runtime. Production CA
 selection, enrollment, rotation, revocation, Swarm membership, delegation
 grants, and multi-controller routing remain follow-up work.
+HTTP handlers currently drain to completion; bounded per-operation shutdown
+policies and durable-mutation uncertainty handling belong to the lifecycle and
+operation implementations.

@@ -2,7 +2,7 @@ use std::{error::Error, fmt};
 
 use x509_parser::{extensions::GeneralName, parse_x509_certificate};
 
-const TRUST_DOMAIN: &str = "kontainer.internal";
+const IDENTITY_PREFIX: &str = "spiffe://kontainer.internal/swarm/";
 const MAX_ID_LENGTH: usize = 128;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,11 +84,11 @@ impl WorkloadIdentity {
             Self::Controller {
                 cluster_id,
                 instance_id,
-            } => format!("spiffe://{TRUST_DOMAIN}/swarm/{cluster_id}/controller/{instance_id}"),
+            } => format!("{IDENTITY_PREFIX}{cluster_id}/controller/{instance_id}"),
             Self::NodeAgent {
                 cluster_id,
                 node_id,
-            } => format!("spiffe://{TRUST_DOMAIN}/swarm/{cluster_id}/node/{node_id}/agent"),
+            } => format!("{IDENTITY_PREFIX}{cluster_id}/node/{node_id}/agent"),
         }
     }
 }
@@ -131,13 +131,9 @@ impl fmt::Display for IdentityError {
 impl Error for IdentityError {}
 
 fn parse_identity_uri(uri: &str) -> Result<WorkloadIdentity, IdentityError> {
-    let prefix = format!("spiffe://{TRUST_DOMAIN}/swarm/");
     let path = uri
-        .strip_prefix(&prefix)
+        .strip_prefix(IDENTITY_PREFIX)
         .ok_or(IdentityError::InvalidWorkloadIdentity)?;
-    if path.contains(['%', '?', '#', '\\']) {
-        return Err(IdentityError::InvalidWorkloadIdentity);
-    }
 
     let segments = path.split('/').collect::<Vec<_>>();
     match segments.as_slice() {
@@ -163,6 +159,7 @@ fn parse_identity_uri(uri: &str) -> Result<WorkloadIdentity, IdentityError> {
 
 fn valid_identity_segment(value: &str) -> bool {
     !value.is_empty()
+        && !matches!(value, "." | "..")
         && value.len() <= MAX_ID_LENGTH
         && value
             .bytes()
@@ -201,6 +198,11 @@ mod tests {
             "spiffe://kontainer.internal/swarm/cluster-1/node/node%2f1/agent",
             "spiffe://kontainer.internal/swarm/cluster-1/node/node-1/agent?admin=true",
             "spiffe://kontainer.internal/swarm//node/node-1/agent",
+            "spiffe://kontainer.internal/swarm/../node/node-1/agent",
+            "spiffe://kontainer.internal/swarm/cluster-1/node/./agent",
+            "spiffe://kontainer.internal/swarm/cluster-1/controller/..",
+            "spiffe://kontainer.internal/swarm/cluster-1/node/node#1/agent",
+            "spiffe://kontainer.internal/swarm/cluster-1/node/node\\1/agent",
         ] {
             assert_eq!(
                 parse_identity_uri(uri),

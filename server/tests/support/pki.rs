@@ -31,6 +31,8 @@ pub struct TestPki {
     pub wrong_workload: IdentityFixture,
     pub wrong_cluster: IdentityFixture,
     pub untrusted_agent: IdentityFixture,
+    pub missing_identity: IdentityFixture,
+    pub ambiguous_identity: IdentityFixture,
 }
 
 impl TestPki {
@@ -47,36 +49,50 @@ impl TestPki {
             directory.path(),
             "controller",
             CONTROLLER_NAME,
-            CONTROLLER_URI,
+            &[CONTROLLER_URI],
             &trusted_issuer,
         );
         let agent = issue_identity(
             directory.path(),
             "agent",
             NODE_AGENT_NAME,
-            AGENT_URI,
+            &[AGENT_URI],
             &trusted_issuer,
         );
         let wrong_workload = issue_identity(
             directory.path(),
             "wrong-workload",
             "wrong-workload.kontainer.test",
-            CONTROLLER_URI,
+            &[CONTROLLER_URI],
             &trusted_issuer,
         );
         let wrong_cluster = issue_identity(
             directory.path(),
             "wrong-cluster",
             "wrong-cluster.kontainer.test",
-            "spiffe://kontainer.internal/swarm/cluster-other/node/node-1/agent",
+            &["spiffe://kontainer.internal/swarm/cluster-other/node/node-1/agent"],
             &trusted_issuer,
         );
         let untrusted_agent = issue_identity(
             directory.path(),
             "untrusted-agent",
             "untrusted-agent.kontainer.test",
-            AGENT_URI,
+            &[AGENT_URI],
             &untrusted_issuer,
+        );
+        let missing_identity = issue_identity(
+            directory.path(),
+            "missing-identity",
+            NODE_AGENT_NAME,
+            &[],
+            &trusted_issuer,
+        );
+        let ambiguous_identity = issue_identity(
+            directory.path(),
+            "ambiguous-identity",
+            NODE_AGENT_NAME,
+            &[AGENT_URI, CONTROLLER_URI],
+            &trusted_issuer,
         );
 
         Self {
@@ -87,6 +103,8 @@ impl TestPki {
             wrong_workload,
             wrong_cluster,
             untrusted_agent,
+            missing_identity,
+            ambiguous_identity,
         }
     }
 
@@ -135,16 +153,18 @@ fn issue_identity(
     directory: &std::path::Path,
     fixture_name: &str,
     dns_name: &str,
-    workload_uri: &str,
+    workload_uris: &[&str],
     issuer: &Issuer<'_, KeyPair>,
 ) -> IdentityFixture {
     let mut parameters = CertificateParams::new(vec![dns_name.to_owned()]).unwrap();
     parameters
         .distinguished_name
         .push(DnType::CommonName, fixture_name);
-    parameters
-        .subject_alt_names
-        .push(SanType::URI(workload_uri.try_into().unwrap()));
+    parameters.subject_alt_names.extend(
+        workload_uris
+            .iter()
+            .map(|uri| SanType::URI((*uri).try_into().unwrap())),
+    );
     parameters.key_usages = vec![KeyUsagePurpose::DigitalSignature];
     parameters.extended_key_usages = vec![
         ExtendedKeyUsagePurpose::ClientAuth,
