@@ -17,7 +17,7 @@ server:
       enable: true
 
 database:
-  uri: <%= get_env(name="DATABASE_URL", default="postgres://kontainer:kontainer@127.0.0.1:5432/kontainer_development") %>
+  uri: <%= get_env(name="DATABASE_URL", default="postgres://kontainer:kontainer@127.0.0.1:55466/kontainer_development") %>
   enable_logging: <%= get_env(name="DB_LOGGING", default="false") %>
   connect_timeout: 500
   idle_timeout: 500

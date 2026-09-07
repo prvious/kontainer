@@ -80,6 +80,7 @@ Use the action-per-file pattern for discrete operations.
 - Every code change must be covered by tests or by updating existing tests.
 - Run the smallest relevant test set first, then broader verification when the change touches shared infrastructure.
 - Frontend tests use Vitest.
+- Run local PostgreSQL exclusively through `server/compose.postgres.yaml` (official Alpine image, persistent project volume). Never install/start host PostgreSQL or alter the user's environment manager. Reuse the service between tests; do not delete its volume without approval.
 - Do not delete tests without approval.
 
 Run the relevant checks for the code you changed:

@@ -77,11 +77,20 @@ pnpm reset         # Tear down the local dev cluster and volumes
 ```
 
 The controller development configuration expects PostgreSQL at
-`postgres://kontainer:kontainer@127.0.0.1:5432/kontainer_development` unless
+`postgres://kontainer:kontainer@127.0.0.1:55466/kontainer_development` unless
 `DATABASE_URL` overrides it. Start the matching development service with
-`docker compose -f server/compose.postgres.yaml up -d postgres`. Private
+`docker compose -f server/compose.postgres.yaml up -d --wait postgres`. Private
 controller-agent RPC is disabled in the development config until an mTLS
 certificate bundle is supplied.
+
+Use Docker exclusively for local PostgreSQL; do not install or start a host
+PostgreSQL service. The development Compose service uses `postgres:17-alpine`,
+publishes only on loopback port `55466`, and supports `KONTAINER_POSTGRES_PORT`
+to avoid conflicts with other local development tools (also override the client
+database URLs when changing ports). Its project-scoped named volume preserves
+data across container restarts. The checked-in credentials are local-development
+credentials, not deployment secrets. Do not delete or reuse another application's
+data.
 
 Controller-owned `settings`, `agent_rpc`, and nested TLS settings reject unknown
 keys. Configured cluster/node IDs use the same canonical segment rules as
@@ -110,6 +119,22 @@ availability SLO. `/api/v1/status` reports build/liveness information only. The
 framework defaults `/_ping`, `/_health`, and `/_readiness` are not exposed.
 
 ## Testing
+
+For real PostgreSQL integration tests, reuse the project's persistent Compose
+service. The start command is safe to repeat:
+
+```bash
+docker compose -f server/compose.postgres.yaml up -d --wait postgres
+KONTAINER_REQUIRE_POSTGRES_TESTS=1 \
+KONTAINER_TEST_DATABASE_URL=postgres://kontainer:kontainer@127.0.0.1:55466/postgres \
+  cargo test --manifest-path server/Cargo.toml --workspace
+```
+
+Tests create and clean up their own scratch databases; the service and development
+database remain intact. Leave PostgreSQL running between test runs. To pause it
+without deleting data, use `docker compose -f server/compose.postgres.yaml stop postgres`.
+Do not run `down --volumes` or delete the named volume unless intentionally
+resetting project data with explicit approval. Host PostgreSQL is never needed.
 
 ```bash
 pnpm --filter app test
