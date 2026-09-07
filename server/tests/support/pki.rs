@@ -124,6 +124,14 @@ impl TestPki {
         )
     }
 
+    pub fn mismatched_key_files(&self) -> MutualTlsIdentityFiles {
+        MutualTlsIdentityFiles::new(
+            &self.controller.certificate_path,
+            &self.agent.private_key_path,
+            &self.trusted_ca_path,
+        )
+    }
+
     pub fn anonymous_client_config(&self, server_name: &str) -> ClientTlsConfig {
         let trusted_ca = fs::read(&self.trusted_ca_path).unwrap();
         ClientTlsConfig::new()

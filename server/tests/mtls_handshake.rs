@@ -1,6 +1,13 @@
 mod support;
 
-use std::{future::pending, sync::Arc, time::Duration};
+use std::{
+    future::pending,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+    time::Duration,
+};
 
 use async_trait::async_trait;
 use axum::{Router, routing::get};
@@ -376,6 +383,91 @@ async fn rpc_startup_failure_cancels_and_joins_the_http_server() {
     assert!(TcpStream::connect(rpc_address).await.is_err());
 }
 
+#[tokio::test]
+async fn invalid_tls_fails_before_rpc_polling_or_http_admission() {
+    let pki = TestPki::generate();
+    let directory = tempfile::tempdir().unwrap();
+    let missing = directory.path().join("missing.pem");
+    let malformed = directory.path().join("malformed.pem");
+    std::fs::write(&malformed, "secret-canary-invalid-pem").unwrap();
+
+    for files in [
+        MutualTlsIdentityFiles::new(&missing, &missing, &missing),
+        MutualTlsIdentityFiles::new(&malformed, &malformed, &malformed),
+        pki.mismatched_key_files(),
+    ] {
+        let rpc_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let error = serve_controller_rpc(
+            rpc_listener,
+            CLUSTER_ID.to_owned(),
+            files.clone(),
+            CancellationToken::new(),
+        )
+        .err()
+        .expect("controller TLS failure was deferred until polling");
+        assert!(!error.to_string().contains("secret-canary"));
+
+        let node_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let cancellation = CancellationToken::new();
+        let service =
+            NodeAgentService::new(NODE_ID, Arc::new(AvailableEngine), cancellation.clone());
+        let error = serve_node_agent_rpc(
+            node_listener,
+            CLUSTER_ID.to_owned(),
+            files.clone(),
+            service,
+            cancellation,
+        )
+        .err()
+        .expect("node-agent TLS failure was deferred until polling");
+        assert!(!error.to_string().contains("secret-canary"));
+
+        let http_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let http_address = http_listener.local_addr().unwrap();
+        let mut queued_request = TcpStream::connect(http_address).await.unwrap();
+        queued_request
+            .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+            .await
+            .unwrap();
+        let admitted = Arc::new(AtomicUsize::new(0));
+        let handler_admitted = admitted.clone();
+        let router = Router::new().route(
+            "/",
+            get(move || {
+                let admitted = handler_admitted.clone();
+                async move {
+                    admitted.fetch_add(1, Ordering::SeqCst);
+                    "should not run"
+                }
+            }),
+        );
+        let rpc_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let rpc_address = rpc_listener.local_addr().unwrap();
+        let cancellation = CancellationToken::new();
+        let result = timeout(
+            Duration::from_secs(2),
+            supervise_controller_servers(
+                router,
+                http_listener,
+                Some(BoundAgentRpcServer {
+                    listener: rpc_listener,
+                    cluster_id: CLUSTER_ID.to_owned(),
+                    tls_files: files,
+                }),
+                cancellation.clone(),
+            ),
+        )
+        .await
+        .unwrap();
+
+        assert!(result.is_err());
+        assert!(cancellation.is_cancelled());
+        assert_eq!(admitted.load(Ordering::SeqCst), 0);
+        assert!(TcpStream::connect(http_address).await.is_err());
+        assert!(TcpStream::connect(rpc_address).await.is_err());
+    }
+}
+
 async fn start_controller(pki: &TestPki) -> RunningServer {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -388,8 +480,9 @@ async fn start_controller(pki: &TestPki) -> RunningServer {
             CLUSTER_ID.to_owned(),
             tls_files,
             task_cancellation,
-        )
+        )?
         .await
+        .map_err(Into::into)
     });
 
     RunningServer {
@@ -413,8 +506,9 @@ async fn start_node_agent(pki: &TestPki, engine: Arc<dyn ContainerEngine>) -> Ru
             tls_files,
             service,
             task_cancellation,
-        )
+        )?
         .await
+        .map_err(Into::into)
     });
 
     RunningServer {

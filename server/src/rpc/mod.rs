@@ -8,7 +8,7 @@ use kontainer_agent_proto::{
 use kontainer_rpc_auth::{
     AuthenticatedPeerIdentity, MutualTlsIdentityFiles, PeerIdentityInterceptor, WorkloadKind,
 };
-use std::error::Error;
+use std::{error::Error, future::Future};
 use tokio::net::TcpListener;
 use tokio_stream::wrappers::TcpListenerStream;
 use tokio_util::sync::CancellationToken;
@@ -47,16 +47,20 @@ impl ControllerIntake for ControllerIntakeService {
     }
 }
 
-pub async fn serve_controller_rpc(
+/// Validate TLS eagerly; polling the returned future begins RPC admission.
+pub fn serve_controller_rpc(
     listener: TcpListener,
     cluster_id: String,
     tls_files: MutualTlsIdentityFiles,
     cancellation: CancellationToken,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
+) -> Result<
+    impl Future<Output = Result<(), tonic::transport::Error>> + Send,
+    Box<dyn Error + Send + Sync>,
+> {
+    let peer_identity = PeerIdentityInterceptor::new(cluster_id, WorkloadKind::NodeAgent)?;
     let tls_config = tls_files.server_config()?;
-    let peer_identity = PeerIdentityInterceptor::new(cluster_id, WorkloadKind::NodeAgent);
 
-    Server::builder()
+    Ok(Server::builder()
         .tls_config(tls_config)?
         .add_service(ControllerIntakeServer::with_interceptor(
             ControllerIntakeService,
@@ -65,10 +69,7 @@ pub async fn serve_controller_rpc(
         .serve_with_incoming_shutdown(
             TcpListenerStream::new(listener),
             cancellation.cancelled_owned(),
-        )
-        .await?;
-
-    Ok(())
+        ))
 }
 
 #[cfg(test)]

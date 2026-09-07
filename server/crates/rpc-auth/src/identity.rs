@@ -157,7 +157,8 @@ fn parse_identity_uri(uri: &str) -> Result<WorkloadIdentity, IdentityError> {
     }
 }
 
-fn valid_identity_segment(value: &str) -> bool {
+#[must_use]
+pub fn valid_identity_segment(value: &str) -> bool {
     !value.is_empty()
         && !matches!(value, "." | "..")
         && value.len() <= MAX_ID_LENGTH

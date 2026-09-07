@@ -43,7 +43,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         config.tls_files,
         service,
         cancellation.clone(),
-    );
+    )?;
     tokio::pin!(server);
 
     let result = tokio::select! {
@@ -54,7 +54,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         }
     };
     cancellation.cancel();
-    result
+    result.map_err(Into::into)
 }
 
 async fn shutdown_signal() {

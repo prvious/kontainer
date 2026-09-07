@@ -1,6 +1,9 @@
 use tonic::{Request, Status, service::Interceptor};
 
-use crate::{AuthenticatedPeerIdentity, WorkloadIdentity, WorkloadKind};
+use crate::{
+    AuthenticatedPeerIdentity, IdentityError, WorkloadIdentity, WorkloadKind,
+    valid_identity_segment,
+};
 
 #[derive(Debug, Clone)]
 pub struct PeerIdentityInterceptor {
@@ -9,12 +12,18 @@ pub struct PeerIdentityInterceptor {
 }
 
 impl PeerIdentityInterceptor {
-    #[must_use]
-    pub fn new(cluster_id: impl Into<String>, required_kind: WorkloadKind) -> Self {
-        Self {
-            cluster_id: cluster_id.into(),
-            required_kind,
+    pub fn new(
+        cluster_id: impl Into<String>,
+        required_kind: WorkloadKind,
+    ) -> Result<Self, IdentityError> {
+        let cluster_id = cluster_id.into();
+        if !valid_identity_segment(&cluster_id) {
+            return Err(IdentityError::InvalidWorkloadIdentity);
         }
+        Ok(Self {
+            cluster_id,
+            required_kind,
+        })
     }
 }
 
@@ -39,5 +48,21 @@ impl Interceptor for PeerIdentityInterceptor {
             .extensions_mut()
             .insert(AuthenticatedPeerIdentity::new(identity));
         Ok(request)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{IdentityError, PeerIdentityInterceptor, WorkloadKind};
+
+    #[test]
+    fn invalid_configured_clusters_fail_before_peer_admission() {
+        for invalid in ["", ".", "..", "cluster/other", " secret-value "] {
+            assert_eq!(
+                PeerIdentityInterceptor::new(invalid, WorkloadKind::NodeAgent).unwrap_err(),
+                IdentityError::InvalidWorkloadIdentity,
+            );
+        }
+        assert!(PeerIdentityInterceptor::new("cluster-1", WorkloadKind::Controller).is_ok());
     }
 }
