@@ -101,7 +101,8 @@ requests; setup failure closes both bound listeners. This is not certificate
 enrollment or a bounded-shutdown guarantee. The node agent's `--version` still
 requires no runtime configuration.
 
-Controller probes are unauthenticated and return only `{"ok": true}` or
+The [canonical controller probes](docs/v2/approved-greenfield-reset.md#controller-probe-paths)
+are unauthenticated and return only `{"ok": true}` or
 `{"ok": false}`, with `Cache-Control: no-store`:
 
 | Probe | Meaning |
