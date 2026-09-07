@@ -2,6 +2,8 @@ use loco_rs::prelude::*;
 use serde::Serialize;
 use utoipa::{OpenApi, ToSchema};
 
+use super::operations::{OperationResponse, OperationStateResponse};
+
 #[derive(Debug, Serialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct StatusResponse {
@@ -30,7 +32,10 @@ async fn show() -> Result<Response> {
 }
 
 #[derive(OpenApi)]
-#[openapi(paths(show), components(schemas(StatusResponse)))]
+#[openapi(
+    paths(show, super::operations::show),
+    components(schemas(StatusResponse, OperationResponse, OperationStateResponse))
+)]
 struct ApiDoc;
 
 async fn openapi() -> Result<Response> {
@@ -61,5 +66,11 @@ mod tests {
         let document = ApiDoc::openapi();
 
         assert!(document.paths.paths.contains_key("/api/v1/status"));
+        assert!(
+            document
+                .paths
+                .paths
+                .contains_key("/api/v1/operations/{operation_id}")
+        );
     }
 }
