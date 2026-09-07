@@ -2604,6 +2604,7 @@ dependencies = [
  "async-trait",
  "bollard",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]
