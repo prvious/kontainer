@@ -32,34 +32,45 @@ async fn readiness_tracks_postgres_and_shutdown_without_reporting_dependency_det
     let Some(database) = PostgresTestDatabase::create(true).await? else {
         return Ok(());
     };
-    let context = App::after_context(
-        AppContext::builder(
-            Environment::Test,
-            database.connection.clone(),
-            Config::from_folder(&Environment::Test, Path::new("config"))?,
+    let evidence = async {
+        let context = App::after_context(
+            AppContext::builder(
+                Environment::Test,
+                database.connection.clone(),
+                Config::from_folder(&Environment::Test, Path::new("config"))?,
+            )
+            .build(),
         )
-        .build(),
-    )
-    .await?;
-    assert_eq!(
-        health::ready(State(context.clone())).await.status(),
-        StatusCode::OK
-    );
-    database.connection.clone().close().await?;
-    assert_eq!(
-        health::ready(State(context.clone())).await.status(),
-        StatusCode::SERVICE_UNAVAILABLE
-    );
-    context
-        .shared_store
-        .get::<CancellationToken>()
-        .unwrap()
-        .cancel();
-    assert_eq!(
-        health::ready(State(context)).await.status(),
-        StatusCode::SERVICE_UNAVAILABLE
-    );
-    assert!(database.cleanup().await?);
+        .await?;
+        let healthy = health::ready(State(context.clone())).await.status();
+        context
+            .shared_store
+            .get::<CancellationToken>()
+            .ok_or_else(|| io::Error::other("controller lifecycle is not initialized"))?
+            .cancel();
+        let draining = health::ready(State(context.clone())).await.status();
+
+        let context = App::after_context(context).await?;
+        let healthy_after_reinitialization = health::ready(State(context.clone())).await.status();
+        database.connection.clone().close().await?;
+        let unavailable = health::ready(State(context)).await.status();
+
+        Ok::<_, Box<dyn Error>>((
+            healthy,
+            draining,
+            healthy_after_reinitialization,
+            unavailable,
+        ))
+    }
+    .await;
+    let removed = database.cleanup().await?;
+    let (healthy, draining, healthy_after_reinitialization, unavailable) = evidence?;
+
+    assert_eq!(healthy, StatusCode::OK);
+    assert_eq!(draining, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(healthy_after_reinitialization, StatusCode::OK);
+    assert_eq!(unavailable, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(removed);
     Ok(())
 }
 

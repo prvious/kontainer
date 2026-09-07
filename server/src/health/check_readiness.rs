@@ -63,12 +63,16 @@ mod tests {
     #[tokio::test]
     async fn shutdown_interrupts_a_database_check_and_wins_a_completion_race() {
         let shutdown = CancellationToken::new();
-        let check = check_ping(pending(), &shutdown, PROBE_TIMEOUT);
+        let check = check_ping(pending(), &shutdown, Duration::from_secs(10));
         let cancel = async {
             tokio::task::yield_now().await;
             shutdown.cancel();
         };
-        let (ready, ()) = tokio::join!(check, cancel);
+        let (ready, ()) = timeout(Duration::from_secs(1), async {
+            tokio::join!(check, cancel)
+        })
+        .await
+        .expect("shutdown must interrupt the pending ping before its probe deadline");
         assert!(!ready);
 
         let shutdown = CancellationToken::new();
