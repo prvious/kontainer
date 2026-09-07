@@ -1,0 +1,74 @@
+name: Server native Linux smoke
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "server/**"
+      - ".github/workflows/server-native-linux.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "server/**"
+      - ".github/workflows/server-native-linux.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: server-native-linux-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  native-smoke:
+    name: Native smoke (${{ matrix.architecture }})
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: amd64
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            uname_machine: x86_64
+          - architecture: arm64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            uname_machine: aarch64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.0
+
+      - name: Cache Cargo build data
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+          key: ${{ matrix.target }}
+
+      - name: Build and run native smoke
+        run: >-
+          bash server/scripts/native-smoke.sh
+          "${{ matrix.target }}"
+          "${{ matrix.uname_machine }}"
+          "native-evidence/${{ matrix.architecture }}"
+
+      - name: Upload native artifacts and evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kontainer-native-${{ matrix.architecture }}-${{ github.sha }}
+          path: native-evidence/${{ matrix.architecture }}
+          if-no-files-found: error
+          retention-days: 14

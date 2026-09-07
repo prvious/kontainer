@@ -74,6 +74,26 @@ impl RunningServer {
 }
 
 #[tokio::test]
+async fn describe_reports_node_identity_and_engine_health() {
+    let pki = TestPki::generate();
+    let node_agent = start_node_agent(&pki, Arc::new(AvailableEngine)).await;
+    let mut agent = node_agent_client(node_agent.address, pki.trusted_files(&pki.controller)).await;
+
+    let response = agent
+        .describe(DescribeRequest {})
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(response.node_id, NODE_ID);
+    assert_eq!(response.agent_version, env!("CARGO_PKG_VERSION"));
+    assert!(response.docker_connected);
+    assert!(!response.architecture.is_empty());
+
+    node_agent.stop().await;
+}
+
+#[tokio::test]
 async fn valid_controller_and_agent_complete_both_versioned_rpc_exchanges() {
     let pki = TestPki::generate();
     let controller = start_controller(&pki).await;

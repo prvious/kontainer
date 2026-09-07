@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use std::{error::Error, sync::Arc};
+use std::{env, error::Error, ffi::OsString, sync::Arc};
 
 use kontainer_engine::{LocalDockerEngine, LocalEngineOptions};
 use kontainer_node_agent::{AgentConfig, NodeAgentService, serve_node_agent_rpc};
@@ -8,8 +8,18 @@ use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
 
+fn is_version_request(arguments: &[OsString]) -> bool {
+    arguments.len() == 1 && matches!(arguments[0].to_str(), Some("--version" | "-V" | "version"))
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
+    let arguments = env::args_os().skip(1).collect::<Vec<_>>();
+    if is_version_request(&arguments) {
+        println!("kontainer-node-agent {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
@@ -66,4 +76,23 @@ async fn shutdown_signal() {
     tokio::signal::ctrl_c()
         .await
         .expect("failed to install Ctrl+C handler");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_version_request;
+    use std::ffi::OsString;
+
+    #[test]
+    fn version_command_does_not_require_runtime_configuration() {
+        for argument in ["--version", "-V", "version"] {
+            assert!(is_version_request(&[OsString::from(argument)]));
+        }
+
+        assert!(!is_version_request(&[]));
+        assert!(!is_version_request(&[
+            OsString::from("--version"),
+            OsString::from("unexpected"),
+        ]));
+    }
 }
