@@ -78,8 +78,10 @@ pnpm reset         # Tear down the local dev cluster and volumes
 
 The controller development configuration expects PostgreSQL at
 `postgres://kontainer:kontainer@127.0.0.1:5432/kontainer_development` unless
-`DATABASE_URL` overrides it. Private controller-agent RPC is disabled in the
-development config until an mTLS certificate bundle is supplied.
+`DATABASE_URL` overrides it. Start the matching development service with
+`docker compose -f server/compose.postgres.yaml up -d postgres`. Private
+controller-agent RPC is disabled in the development config until an mTLS
+certificate bundle is supplied.
 
 ## Testing
 

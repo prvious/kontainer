@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package kontainer.stream.v1;
+
+// StreamEnvelope is the shared public framing boundary. Product-specific log
+// and exec payload messages will extend this contract additively after their
+// state machines are implemented.
+message StreamEnvelope {
+  uint32 protocol_version = 1;
+  uint64 sequence = 2;
+  FrameKind kind = 3;
+  bytes payload = 4;
+}
+
+enum FrameKind {
+  FRAME_KIND_UNSPECIFIED = 0;
+  FRAME_KIND_DATA = 1;
+  FRAME_KIND_ACKNOWLEDGEMENT = 2;
+}
