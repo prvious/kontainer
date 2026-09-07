@@ -2568,18 +2568,24 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "axum",
+ "chrono",
  "kontainer-agent-proto",
  "loco-rs",
  "migration",
  "sea-orm",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.20",
  "tokio",
  "tokio-util",
  "tonic",
  "tonic-prost",
+ "tower",
  "tracing",
+ "url",
  "utoipa",
+ "uuid",
 ]
 
 [[package]]
