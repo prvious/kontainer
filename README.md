@@ -92,6 +92,23 @@ requests; setup failure closes both bound listeners. This is not certificate
 enrollment or a bounded-shutdown guarantee. The node agent's `--version` still
 requires no runtime configuration.
 
+Controller probes are unauthenticated and return only `{"ok": true}` or
+`{"ok": false}`, with `Cache-Control: no-store`:
+
+| Probe | Meaning |
+| --- | --- |
+| `/health/live` | HTTP is serving; does not check PostgreSQL or Docker. |
+| `/health/startup` | Startup completed: HTTP admission begins only after static configuration and enabled RPC TLS preparation succeed. Startup failure leaves this endpoint unreachable. |
+| `/health/ready` | Not draining, and PostgreSQL answered a ping within one second; otherwise HTTP 503. This is not a cluster-wide Docker availability check. |
+
+Shutdown immediately makes readiness false and rejects newly admitted application
+requests with HTTP 503, while requests already admitted may finish. Probes remain
+meaningful on any connection still being served during drain; the listeners stop
+accepting connections as part of shutdown. This does not yet bound total drain
+time. The one-second database probe deadline is an operational default, not an
+availability SLO. `/api/v1/status` reports build/liveness information only. The
+framework defaults `/_ping`, `/_health`, and `/_readiness` are not exposed.
+
 ## Testing
 
 ```bash
