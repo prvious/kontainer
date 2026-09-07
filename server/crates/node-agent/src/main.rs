@@ -1,112 +1,19 @@
 #![forbid(unsafe_code)]
 
-use std::{env, error::Error, ffi::OsString, fs, net::SocketAddr, path::PathBuf, sync::Arc};
+use std::{env, error::Error, ffi::OsString, sync::Arc};
 
-use kontainer_agent_proto::v1::{
-    DescribeRequest, DescribeResponse,
-    node_agent_server::{NodeAgent, NodeAgentServer},
-};
-use kontainer_engine::{ContainerEngine, LocalDockerEngine};
-use tonic::{Request, Response, Status, transport::Server};
-use tracing::warn;
+use kontainer_engine::{LocalDockerEngine, LocalEngineOptions};
+use kontainer_node_agent::{AgentConfig, NodeAgentService, serve_node_agent_rpc};
+use tokio::net::TcpListener;
+use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
-
-#[derive(Debug, Clone)]
-struct AgentConfig {
-    node_id: String,
-    binding: SocketAddr,
-    tls: TlsFiles,
-}
-
-#[derive(Debug, Clone)]
-struct TlsFiles {
-    certificate_path: PathBuf,
-    private_key_path: PathBuf,
-    client_ca_path: PathBuf,
-}
-
-impl AgentConfig {
-    fn from_environment() -> Result<Self, Box<dyn Error>> {
-        Ok(Self {
-            node_id: required_environment_variable("KONTAINER_NODE_ID")?,
-            binding: environment_variable("KONTAINER_NODE_RPC_BINDING", "0.0.0.0:50052").parse()?,
-            tls: TlsFiles {
-                certificate_path: required_environment_variable(
-                    "KONTAINER_NODE_RPC_TLS_CERTIFICATE_PATH",
-                )?
-                .into(),
-                private_key_path: required_environment_variable(
-                    "KONTAINER_NODE_RPC_TLS_PRIVATE_KEY_PATH",
-                )?
-                .into(),
-                client_ca_path: required_environment_variable(
-                    "KONTAINER_NODE_RPC_TLS_CLIENT_CA_PATH",
-                )?
-                .into(),
-            },
-        })
-    }
-}
-
-fn required_environment_variable(name: &str) -> Result<String, Box<dyn Error>> {
-    env::var(name)
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| format!("required environment variable {name} is not set").into())
-}
-
-fn environment_variable(name: &str, default: &str) -> String {
-    env::var(name).unwrap_or_else(|_| default.to_owned())
-}
 
 fn is_version_request(arguments: &[OsString]) -> bool {
     arguments.len() == 1 && matches!(arguments[0].to_str(), Some("--version" | "-V" | "version"))
 }
 
-#[derive(Clone)]
-struct NodeAgentService {
-    node_id: String,
-    engine: Arc<dyn ContainerEngine>,
-}
-
-#[tonic::async_trait]
-impl NodeAgent for NodeAgentService {
-    async fn describe(
-        &self,
-        _request: Request<DescribeRequest>,
-    ) -> Result<Response<DescribeResponse>, Status> {
-        let docker_connected = match self.engine.is_available().await {
-            Ok(is_available) => is_available,
-            Err(error) => {
-                warn!(%error, "Docker health check failed");
-                false
-            }
-        };
-
-        Ok(Response::new(DescribeResponse {
-            node_id: self.node_id.clone(),
-            agent_version: env!("CARGO_PKG_VERSION").to_owned(),
-            architecture: std::env::consts::ARCH.to_owned(),
-            docker_connected,
-        }))
-    }
-}
-
-fn tls_config(files: &TlsFiles) -> Result<tonic::transport::ServerTlsConfig, Box<dyn Error>> {
-    let certificate = fs::read(&files.certificate_path)?;
-    let private_key = fs::read(&files.private_key_path)?;
-    let client_ca = fs::read(&files.client_ca_path)?;
-
-    Ok(tonic::transport::ServerTlsConfig::new()
-        .identity(tonic::transport::Identity::from_pem(
-            certificate,
-            private_key,
-        ))
-        .client_ca_root(tonic::transport::Certificate::from_pem(client_ca)))
-}
-
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let arguments = env::args_os().skip(1).collect::<Vec<_>>();
     if is_version_request(&arguments) {
         println!("kontainer-node-agent {}", env!("CARGO_PKG_VERSION"));
@@ -121,18 +28,33 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .init();
 
     let config = AgentConfig::from_environment()?;
-    let service = NodeAgentService {
-        node_id: config.node_id,
-        engine: Arc::new(LocalDockerEngine::connect()?),
+    let listener = TcpListener::bind(config.binding).await?;
+    let cancellation = CancellationToken::new();
+    let service = NodeAgentService::new(
+        config.node_id,
+        Arc::new(LocalDockerEngine::connect_for_node(
+            LocalEngineOptions::default(),
+        )?),
+        cancellation.clone(),
+    );
+    let server = serve_node_agent_rpc(
+        listener,
+        config.cluster_id,
+        config.tls_files,
+        service,
+        cancellation.clone(),
+    );
+    tokio::pin!(server);
+
+    let result = tokio::select! {
+        result = &mut server => result,
+        _ = shutdown_signal() => {
+            cancellation.cancel();
+            server.await
+        }
     };
-
-    Server::builder()
-        .tls_config(tls_config(&config.tls)?)?
-        .add_service(NodeAgentServer::new(service))
-        .serve_with_shutdown(config.binding, shutdown_signal())
-        .await?;
-
-    Ok(())
+    cancellation.cancel();
+    result
 }
 
 async fn shutdown_signal() {
@@ -158,40 +80,8 @@ async fn shutdown_signal() {
 
 #[cfg(test)]
 mod tests {
-    use super::{ContainerEngine, NodeAgent, NodeAgentService, is_version_request};
-    use async_trait::async_trait;
-    use kontainer_agent_proto::v1::DescribeRequest;
-    use kontainer_engine::EngineError;
-    use std::{ffi::OsString, sync::Arc};
-    use tonic::Request;
-
-    struct AvailableEngine;
-
-    #[async_trait]
-    impl ContainerEngine for AvailableEngine {
-        async fn is_available(&self) -> Result<bool, EngineError> {
-            Ok(true)
-        }
-    }
-
-    #[tokio::test]
-    async fn describe_reports_node_identity_and_engine_health() {
-        let service = NodeAgentService {
-            node_id: "node-1".to_owned(),
-            engine: Arc::new(AvailableEngine),
-        };
-
-        let response = service
-            .describe(Request::new(DescribeRequest {}))
-            .await
-            .unwrap()
-            .into_inner();
-
-        assert_eq!(response.node_id, "node-1");
-        assert_eq!(response.agent_version, env!("CARGO_PKG_VERSION"));
-        assert!(response.docker_connected);
-        assert!(!response.architecture.is_empty());
-    }
+    use super::is_version_request;
+    use std::ffi::OsString;
 
     #[test]
     fn version_command_does_not_require_runtime_configuration() {

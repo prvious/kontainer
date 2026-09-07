@@ -31,8 +31,8 @@ settings:
   agent_rpc:
     enabled: true
     binding: <%= get_env(name="AGENT_RPC_BINDING", default="0.0.0.0:50051") %>
+    cluster_id: <%= get_env(name="CLUSTER_ID") %>
     tls:
       certificate_path: <%= get_env(name="AGENT_RPC_TLS_CERTIFICATE_PATH") %>
       private_key_path: <%= get_env(name="AGENT_RPC_TLS_PRIVATE_KEY_PATH") %>
       client_ca_path: <%= get_env(name="AGENT_RPC_TLS_CLIENT_CA_PATH") %>
-
