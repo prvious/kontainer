@@ -8,8 +8,8 @@ mod error;
 mod local;
 
 pub use capability::{
-    CapabilityStatus, EngineAccessScope, EngineApiVersion, EngineCapabilities, EngineCapability,
-    EngineDescription, UnsupportedCapabilityReason,
+    CapabilityStatus, EngineAccessScope, EngineApiVersion, EngineApiVersionParseError,
+    EngineCapabilities, EngineDescription, UnsupportedCapabilityReason,
 };
 pub use error::{EngineError, EngineErrorKind, EngineOperation};
 pub use local::{LocalDockerEngine, LocalEngineOptions};

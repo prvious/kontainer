@@ -1,7 +1,11 @@
 use std::{future::Future, path::PathBuf, time::Duration};
 
 use async_trait::async_trait;
-use bollard::{API_DEFAULT_VERSION, Docker, errors::Error as BollardError, models::LocalNodeState};
+use bollard::{
+    API_DEFAULT_VERSION, Docker,
+    errors::Error as BollardError,
+    models::{LocalNodeState, SwarmInfo},
+};
 use tokio::time;
 use tokio_util::sync::CancellationToken;
 
@@ -142,9 +146,6 @@ impl ContainerEngine for LocalDockerEngine {
         let version = self
             .execute(EngineOperation::ReadVersion, cancellation, client.version())
             .await?;
-        let system_info = self
-            .execute(EngineOperation::ReadSystemInfo, cancellation, client.info())
-            .await?;
         let client_version = client.client_version();
         let negotiated_api_version = EngineApiVersion::new(
             u16::try_from(client_version.major_version).map_err(|_| {
@@ -172,6 +173,9 @@ impl ContainerEngine for LocalDockerEngine {
             ));
         }
 
+        let system_info = self
+            .execute(EngineOperation::ReadSystemInfo, cancellation, client.info())
+            .await?;
         let daemon_version = required_text(version.version, EngineOperation::ReadVersion)?;
         let operating_system = required_text(
             system_info.operating_system.or(version.os),
@@ -181,11 +185,7 @@ impl ContainerEngine for LocalDockerEngine {
             system_info.architecture.or(version.arch),
             EngineOperation::ReadSystemInfo,
         )?;
-        let capabilities = capabilities_from_swarm(
-            system_info
-                .swarm
-                .and_then(|swarm| swarm.local_node_state.zip(swarm.control_available)),
-        );
+        let capabilities = capabilities_from_swarm(system_info.swarm);
 
         Ok(EngineDescription {
             access_scope: self.access_scope,
@@ -216,12 +216,16 @@ fn required_text(value: Option<String>, operation: EngineOperation) -> Result<St
         .ok_or_else(|| EngineError::new(EngineErrorKind::InvalidResponse, operation))
 }
 
-fn capabilities_from_swarm(swarm: Option<(LocalNodeState, bool)>) -> EngineCapabilities {
-    let (node, manager) = match swarm {
-        Some((LocalNodeState::ACTIVE, true)) => {
+fn capabilities_from_swarm(swarm: Option<SwarmInfo>) -> EngineCapabilities {
+    let (node, manager) = match swarm.and_then(|swarm| {
+        swarm
+            .local_node_state
+            .map(|state| (state, swarm.control_available))
+    }) {
+        Some((LocalNodeState::ACTIVE, Some(true))) => {
             (CapabilityStatus::Supported, CapabilityStatus::Supported)
         }
-        Some((LocalNodeState::ACTIVE, false)) => (
+        Some((LocalNodeState::ACTIVE, _)) => (
             CapabilityStatus::Supported,
             CapabilityStatus::Unsupported(UnsupportedCapabilityReason::ManagerControlUnavailable),
         ),
@@ -257,12 +261,12 @@ fn capabilities_from_swarm(swarm: Option<(LocalNodeState, bool)>) -> EngineCapab
 mod tests {
     use std::{future, path::PathBuf, time::Duration};
 
-    use bollard::models::LocalNodeState;
+    use bollard::models::{LocalNodeState, SwarmInfo};
     use tokio_util::sync::CancellationToken;
 
     use super::{LocalDockerEngine, LocalEngineOptions, capabilities_from_swarm};
     use crate::{
-        CapabilityStatus, EngineAccessScope, EngineErrorKind, EngineOperation,
+        CapabilityStatus, ContainerEngine, EngineAccessScope, EngineErrorKind, EngineOperation,
         UnsupportedCapabilityReason,
     };
 
@@ -302,18 +306,114 @@ mod tests {
 
     #[test]
     fn inactive_and_worker_swarms_report_manager_support_explicitly() {
-        let inactive = capabilities_from_swarm(Some((LocalNodeState::INACTIVE, false)));
+        let inactive = capabilities_from_swarm(Some(SwarmInfo {
+            local_node_state: Some(LocalNodeState::INACTIVE),
+            control_available: Some(false),
+            ..Default::default()
+        }));
         assert_eq!(
             inactive.swarm_node_operations,
             CapabilityStatus::Unsupported(UnsupportedCapabilityReason::SwarmInactive)
         );
 
-        let worker = capabilities_from_swarm(Some((LocalNodeState::ACTIVE, false)));
+        let worker = capabilities_from_swarm(Some(SwarmInfo {
+            local_node_state: Some(LocalNodeState::ACTIVE),
+            control_available: Some(false),
+            ..Default::default()
+        }));
         assert_eq!(worker.swarm_node_operations, CapabilityStatus::Supported);
         assert_eq!(
             worker.swarm_manager_operations,
             CapabilityStatus::Unsupported(UnsupportedCapabilityReason::ManagerControlUnavailable)
         );
+    }
+
+    #[test]
+    fn missing_manager_control_does_not_discard_known_node_state() {
+        for (state, expected_node) in [
+            (LocalNodeState::ACTIVE, CapabilityStatus::Supported),
+            (
+                LocalNodeState::INACTIVE,
+                CapabilityStatus::Unsupported(UnsupportedCapabilityReason::SwarmInactive),
+            ),
+            (
+                LocalNodeState::PENDING,
+                CapabilityStatus::Unsupported(UnsupportedCapabilityReason::SwarmPending),
+            ),
+        ] {
+            let capabilities = capabilities_from_swarm(Some(SwarmInfo {
+                local_node_state: Some(state),
+                control_available: None,
+                ..Default::default()
+            }));
+
+            assert_eq!(capabilities.swarm_node_operations, expected_node);
+            assert_ne!(
+                capabilities.swarm_manager_operations,
+                CapabilityStatus::Supported
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn unsupported_api_is_reported_before_requesting_system_info() {
+        use tokio::{
+            io::{AsyncReadExt, AsyncWriteExt},
+            net::UnixListener,
+        };
+
+        let socket_path = std::env::temp_dir().join(format!(
+            "kontainer-engine-api-range-{}.sock",
+            std::process::id(),
+        ));
+        let listener = UnixListener::bind(&socket_path).unwrap();
+        let engine = LocalDockerEngine::connect_for_node(LocalEngineOptions {
+            socket_path: socket_path.clone(),
+            operation_timeout: Duration::from_secs(1),
+        })
+        .unwrap();
+        let fixture = tokio::spawn(async move {
+            for expected_endpoint in ["/version", "/_ping", "/version"] {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                loop {
+                    let byte = socket.read_u8().await.unwrap();
+                    request.push(byte);
+                    if request.ends_with(b"\r\n\r\n") {
+                        break;
+                    }
+                    assert!(request.len() < 4096);
+                }
+                let request = String::from_utf8(request).unwrap();
+                assert!(request.lines().next().unwrap().contains(expected_endpoint));
+                let body = if expected_endpoint == "/_ping" {
+                    "OK"
+                } else {
+                    r#"{"ApiVersion":"1.99","MinAPIVersion":"1.99","Version":"future"}"#
+                };
+                socket
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                            body.len(),
+                        )
+                        .as_bytes(),
+                    )
+                    .await
+                    .unwrap();
+            }
+        });
+
+        let result = engine.describe(&CancellationToken::new()).await;
+        tokio::time::timeout(Duration::from_secs(2), fixture)
+            .await
+            .unwrap()
+            .unwrap();
+        std::fs::remove_file(socket_path).unwrap();
+
+        let error = result.unwrap_err();
+        assert_eq!(error.kind(), EngineErrorKind::UnsupportedApiVersion);
+        assert_eq!(error.operation(), EngineOperation::NegotiateApiVersion);
     }
 
     #[tokio::test]

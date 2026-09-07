@@ -57,13 +57,6 @@ impl From<ParseIntError> for EngineApiVersionParseError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EngineCapability {
-    LocalContainerOperations,
-    SwarmNodeOperations,
-    SwarmManagerOperations,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CapabilityStatus {
     Supported,
     Unsupported(UnsupportedCapabilityReason),
@@ -86,17 +79,6 @@ pub struct EngineCapabilities {
     pub swarm_manager_operations: CapabilityStatus,
 }
 
-impl EngineCapabilities {
-    #[must_use]
-    pub const fn status(&self, capability: EngineCapability) -> CapabilityStatus {
-        match capability {
-            EngineCapability::LocalContainerOperations => self.local_container_operations,
-            EngineCapability::SwarmNodeOperations => self.swarm_node_operations,
-            EngineCapability::SwarmManagerOperations => self.swarm_manager_operations,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EngineDescription {
     pub access_scope: EngineAccessScope,
@@ -113,7 +95,7 @@ pub struct EngineDescription {
 mod tests {
     use super::{
         CapabilityStatus, EngineApiVersion, EngineApiVersionParseError, EngineCapabilities,
-        EngineCapability, UnsupportedCapabilityReason,
+        UnsupportedCapabilityReason,
     };
 
     #[test]
@@ -155,7 +137,7 @@ mod tests {
         };
 
         assert_eq!(
-            capabilities.status(EngineCapability::SwarmManagerOperations),
+            capabilities.swarm_manager_operations,
             CapabilityStatus::Unsupported(UnsupportedCapabilityReason::SwarmInactive)
         );
     }
