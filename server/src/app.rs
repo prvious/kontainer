@@ -42,7 +42,13 @@ impl Hooks for App {
     }
 
     fn routes(_ctx: &AppContext) -> AppRoutes {
-        AppRoutes::with_default_routes().nest_route("/api/v1", controllers::status::routes())
+        AppRoutes::with_default_routes().nest_routes(
+            "/api/v1",
+            vec![
+                controllers::status::routes(),
+                controllers::operations::routes(),
+            ],
+        )
     }
 
     async fn serve(

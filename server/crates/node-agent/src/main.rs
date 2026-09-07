@@ -2,7 +2,7 @@
 
 use std::{error::Error, sync::Arc};
 
-use kontainer_engine::LocalDockerEngine;
+use kontainer_engine::{LocalDockerEngine, LocalEngineOptions};
 use kontainer_node_agent::{AgentConfig, NodeAgentService, serve_node_agent_rpc};
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
@@ -22,7 +22,9 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let cancellation = CancellationToken::new();
     let service = NodeAgentService::new(
         config.node_id,
-        Arc::new(LocalDockerEngine::connect()?),
+        Arc::new(LocalDockerEngine::connect_for_node(
+            LocalEngineOptions::default(),
+        )?),
         cancellation.clone(),
     );
     let server = serve_node_agent_rpc(

@@ -1,0 +1,160 @@
+name: Engine qualification
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "server/crates/engine/**"
+      - "server/Cargo.toml"
+      - "server/Cargo.lock"
+      - ".github/workflows/engine-qualification.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "server/crates/engine/**"
+      - "server/Cargo.toml"
+      - "server/Cargo.lock"
+      - ".github/workflows/engine-qualification.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: engine-qualification-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  real-engine:
+    name: Docker ${{ matrix.engine.version }} on ${{ matrix.runner_architecture }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        runner_architecture:
+          - amd64
+        engine:
+          - version: 27.5.1
+            image: docker:27.5.1-dind
+            negotiated_api: "1.47"
+          - version: 29.7.2
+            image: docker:29.7.2-dind
+            negotiated_api: "1.53"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install pinned Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.0
+
+      - name: Cache Cargo build data
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+
+      - name: Start pinned Docker Engine fixture
+        env:
+          ENGINE_IMAGE: ${{ matrix.engine.image }}
+          ENGINE_VERSION: ${{ matrix.engine.version }}
+        run: |
+          set -euo pipefail
+          fixture_name="kontainer-engine-${ENGINE_VERSION//./-}"
+          socket_directory="$RUNNER_TEMP/$fixture_name"
+          mkdir -p "$socket_directory"
+          docker pull "$ENGINE_IMAGE"
+          docker run --detach --privileged \
+            --name "$fixture_name" \
+            --env DOCKER_TLS_CERTDIR= \
+            --volume "$socket_directory:/run/kontainer" \
+            "$ENGINE_IMAGE" \
+            --host=unix:///run/kontainer/docker.sock \
+            --storage-driver=vfs \
+            --iptables=false \
+            --bridge=none
+
+          ready=false
+          for _ in $(seq 1 60); do
+            if docker exec "$fixture_name" \
+              docker --host unix:///run/kontainer/docker.sock info >/dev/null 2>&1; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [ "$ready" != true ]; then
+            docker logs "$fixture_name"
+            exit 1
+          fi
+
+          sudo chmod 0666 "$socket_directory/docker.sock"
+          echo "KONTAINER_FIXTURE_NAME=$fixture_name" >> "$GITHUB_ENV"
+          echo "KONTAINER_TEST_DOCKER_SOCKET=$socket_directory/docker.sock" >> "$GITHUB_ENV"
+
+      - name: Qualify the typed adapter
+        env:
+          KONTAINER_TEST_ENGINE_IMAGE: ${{ matrix.engine.image }}
+          KONTAINER_TEST_ENGINE_VERSION: ${{ matrix.engine.version }}
+          KONTAINER_TEST_ENGINE_API_VERSION: ${{ matrix.engine.negotiated_api }}
+          EVIDENCE_FILE: engine-qualification-${{ matrix.engine.version }}-${{ matrix.runner_architecture }}.log
+        run: |
+          set -euo pipefail
+          {
+            echo "commit=$GITHUB_SHA"
+            echo "runner_architecture=$(uname -m)"
+            echo "rust_version=$(rustc --version)"
+            echo "fixture_image=$KONTAINER_TEST_ENGINE_IMAGE"
+            echo "fixture_digest=$(docker image inspect --format '{{index .RepoDigests 0}}' "$KONTAINER_TEST_ENGINE_IMAGE")"
+            docker exec "$KONTAINER_FIXTURE_NAME" \
+              docker --host unix:///run/kontainer/docker.sock version
+            echo "command=cargo test --manifest-path server/Cargo.toml --package kontainer-engine --features real-engine-tests --test real_docker qualifies_configured_real_engine -- --nocapture"
+            cargo test --manifest-path server/Cargo.toml \
+              --package kontainer-engine \
+              --features real-engine-tests \
+              --test real_docker \
+              qualifies_configured_real_engine \
+              -- --nocapture
+          } 2>&1 | tee "$EVIDENCE_FILE"
+
+      - name: Prove daemon-shutdown error mapping
+        env:
+          KONTAINER_TEST_ENGINE_IMAGE: ${{ matrix.engine.image }}
+          KONTAINER_TEST_ENGINE_VERSION: ${{ matrix.engine.version }}
+          EVIDENCE_FILE: engine-qualification-${{ matrix.engine.version }}-${{ matrix.runner_architecture }}.log
+        run: |
+          set -euo pipefail
+          docker stop "$KONTAINER_FIXTURE_NAME"
+          {
+            echo "daemon_shutdown_fixture=$KONTAINER_FIXTURE_NAME"
+            echo "command=cargo test --manifest-path server/Cargo.toml --package kontainer-engine --features real-engine-tests --test real_docker stopped_real_engine_maps_to_connection_unavailable -- --nocapture"
+            cargo test --manifest-path server/Cargo.toml \
+              --package kontainer-engine \
+              --features real-engine-tests \
+              --test real_docker \
+              stopped_real_engine_maps_to_connection_unavailable \
+              -- --nocapture
+          } 2>&1 | tee -a "$EVIDENCE_FILE"
+
+      - name: Upload raw qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine-qualification-${{ matrix.engine.version }}-${{ matrix.runner_architecture }}
+          path: engine-qualification-${{ matrix.engine.version }}-${{ matrix.runner_architecture }}.log
+          if-no-files-found: error
+
+      - name: Show daemon logs after failure
+        if: failure()
+        run: docker logs "$KONTAINER_FIXTURE_NAME" || true
+
+      - name: Remove Docker Engine fixture
+        if: always()
+        run: docker rm --force "$KONTAINER_FIXTURE_NAME" || true
