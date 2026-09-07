@@ -1,7 +1,7 @@
 use std::{net::SocketAddr, path::PathBuf};
 
 use axum::Router;
-use kontainer_rpc_auth::MutualTlsIdentityFiles;
+use kontainer_rpc_auth::{MutualTlsIdentityFiles, valid_identity_segment};
 use loco_rs::{
     Error, Result,
     app::AppContext,
@@ -14,19 +14,23 @@ use tokio_util::sync::CancellationToken;
 use crate::rpc::serve_controller_rpc;
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ControllerSettings {
     agent_rpc: AgentRpcSettings,
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct AgentRpcSettings {
     enabled: bool,
     binding: SocketAddr,
+    #[serde(deserialize_with = "deserialize_cluster_id")]
     cluster_id: String,
     tls: AgentRpcTlsSettings,
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct AgentRpcTlsSettings {
     certificate_path: PathBuf,
     private_key_path: PathBuf,
@@ -86,6 +90,20 @@ pub async fn supervise_controller_servers(
     agent_rpc: Option<BoundAgentRpcServer>,
     cancellation: CancellationToken,
 ) -> Result<()> {
+    let agent_rpc = agent_rpc
+        .map(|agent_rpc| {
+            serve_controller_rpc(
+                agent_rpc.listener,
+                agent_rpc.cluster_id,
+                agent_rpc.tls_files,
+                cancellation.clone(),
+            )
+        })
+        .transpose()
+        .map_err(|error| {
+            cancellation.cancel();
+            Error::Message(format!("agent RPC server failed: {error}"))
+        })?;
     let mut servers = JoinSet::new();
 
     let http_cancellation = cancellation.clone();
@@ -102,16 +120,10 @@ pub async fn supervise_controller_servers(
     });
 
     if let Some(agent_rpc) = agent_rpc {
-        let rpc_cancellation = cancellation.clone();
         servers.spawn(async move {
-            serve_controller_rpc(
-                agent_rpc.listener,
-                agent_rpc.cluster_id,
-                agent_rpc.tls_files,
-                rpc_cancellation,
-            )
-            .await
-            .map_err(|error| Error::Message(format!("agent RPC server failed: {error}")))?;
+            agent_rpc
+                .await
+                .map_err(|error| Error::Message(format!("agent RPC server failed: {error}")))?;
 
             Ok(ServerKind::AgentRpc)
         });
@@ -144,7 +156,21 @@ fn controller_settings(ctx: &AppContext) -> Result<ControllerSettings> {
         .clone()
         .ok_or_else(|| Error::string("controller settings are missing"))?;
 
-    serde_json::from_value(settings).map_err(Error::wrap)
+    serde_json::from_value(settings).map_err(|_| {
+        Error::string("invalid controller settings: check agent_rpc keys, types, and cluster_id")
+    })
+}
+
+fn deserialize_cluster_id<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<String, D::Error> {
+    let value = String::deserialize(deserializer)?;
+    if !valid_identity_segment(&value) {
+        return Err(serde::de::Error::custom(
+            "cluster_id must be a canonical workload identity segment",
+        ));
+    }
+    Ok(value)
 }
 
 impl From<AgentRpcTlsSettings> for MutualTlsIdentityFiles {
@@ -180,19 +206,7 @@ mod tests {
 
     #[test]
     fn controller_rpc_settings_require_an_explicit_mtls_bundle() {
-        let settings: ControllerSettings = serde_json::from_value(serde_json::json!({
-            "agent_rpc": {
-                "enabled": true,
-                "binding": "127.0.0.1:50051",
-                "cluster_id": "cluster-1",
-                "tls": {
-                    "certificate_path": "/certs/controller.pem",
-                    "private_key_path": "/certs/controller-key.pem",
-                    "client_ca_path": "/certs/agent-ca.pem"
-                }
-            }
-        }))
-        .unwrap();
+        let settings: ControllerSettings = serde_json::from_value(valid_settings()).unwrap();
 
         let AgentRpcSettings {
             enabled,
@@ -204,6 +218,53 @@ mod tests {
         assert_eq!(binding.to_string(), "127.0.0.1:50051");
         assert_eq!(cluster_id, "cluster-1");
         assert_eq!(tls.client_ca_path.to_string_lossy(), "/certs/agent-ca.pem");
+    }
+
+    fn valid_settings() -> serde_json::Value {
+        serde_json::json!({
+            "agent_rpc": {
+                "enabled": true,
+                "binding": "127.0.0.1:50051",
+                "cluster_id": "cluster-1",
+                "tls": {
+                    "certificate_path": "/certs/controller.pem",
+                    "private_key_path": "/certs/controller-key.pem",
+                    "client_ca_path": "/certs/agent-ca.pem"
+                }
+            }
+        })
+    }
+
+    #[test]
+    fn unknown_controller_owned_settings_are_rejected_at_every_level() {
+        for pointer in ["", "/agent_rpc", "/agent_rpc/tls"] {
+            let mut settings = valid_settings();
+            settings
+                .pointer_mut(pointer)
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .insert(
+                    "unexpected_setting".to_owned(),
+                    serde_json::json!("secret-value"),
+                );
+            assert!(serde_json::from_value::<ControllerSettings>(settings).is_err());
+        }
+    }
+
+    #[test]
+    fn configured_cluster_ids_use_the_certificate_identity_rules() {
+        for invalid in ["", ".", "..", "cluster/other", " secret-value "] {
+            let mut settings = valid_settings();
+            settings["agent_rpc"]["cluster_id"] = serde_json::json!(invalid);
+            let error = serde_json::from_value::<ControllerSettings>(settings).unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("cluster_id must be a canonical workload identity segment")
+            );
+            assert!(!error.to_string().contains("secret-value"));
+        }
     }
 
     #[test]

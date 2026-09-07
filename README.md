@@ -83,6 +83,15 @@ The controller development configuration expects PostgreSQL at
 controller-agent RPC is disabled in the development config until an mTLS
 certificate bundle is supplied.
 
+Controller-owned `settings`, `agent_rpc`, and nested TLS settings reject unknown
+keys. Configured cluster/node IDs use the same canonical segment rules as
+certificate identities: 1–128 ASCII letters, digits, dots, underscores, or
+hyphens, excluding `.` and `..`. When private RPC is enabled, its TLS files and
+key/certificate pair are validated before the controller starts admitting HTTP
+requests; setup failure closes both bound listeners. This is not certificate
+enrollment or a bounded-shutdown guarantee. The node agent's `--version` still
+requires no runtime configuration.
+
 ## Testing
 
 ```bash
