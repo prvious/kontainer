@@ -25,7 +25,10 @@ impl StatusResponse {
 #[utoipa::path(
     get,
     path = "/api/v1/status",
-    responses((status = 200, description = "Controller build and liveness only; use /health/ready for readiness", body = StatusResponse))
+    responses(
+        (status = 200, description = "Controller build and liveness only; use /health/ready for readiness", body = StatusResponse),
+        (status = 503, description = "Controller draining new work; probes remain available", body = super::health::HealthResponse)
+    )
 )]
 async fn show() -> Result<Response> {
     format::json(StatusResponse::current())

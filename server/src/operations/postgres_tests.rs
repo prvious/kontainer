@@ -63,8 +63,9 @@ async fn readiness_tracks_postgres_and_shutdown_without_reporting_dependency_det
         ))
     }
     .await;
-    let removed = database.cleanup().await?;
+    let removed = database.cleanup().await;
     let (healthy, draining, healthy_after_reinitialization, unavailable) = evidence?;
+    let removed = removed?;
 
     assert_eq!(healthy, StatusCode::OK);
     assert_eq!(draining, StatusCode::SERVICE_UNAVAILABLE);

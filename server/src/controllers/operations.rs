@@ -76,7 +76,8 @@ impl From<OperationSnapshot> for OperationResponse {
         (status = 200, description = "Current durable operation state", body = OperationResponse),
         (status = 400, description = "Invalid operation identifier"),
         (status = 404, description = "Operation not found"),
-        (status = 500, description = "Operation state unavailable")
+        (status = 500, description = "Operation state unavailable"),
+        (status = 503, description = "Controller draining new work; probes remain available", body = super::health::HealthResponse)
     )
 )]
 pub(crate) async fn show(
