@@ -58,6 +58,13 @@ This decision supersedes every conflicting recommendation in the remaining `docs
 - Use versioned Tonic/protobuf over mandatory mTLS for private controller-agent RPC.
 - Keep domain types, public DTOs, internal protobuf messages, persistence models, and desktop IPC/view models distinct where they cross different trust or compatibility boundaries.
 
+## Controller probe paths
+
+- Canonical controller process probes are `/health/live`, `/health/startup`, and `/health/ready`, outside the `/api/v1` namespace.
+- This decision supersedes the `/livez`, `/startupz`, and `/readyz` path selection in historical ADR-CAND-014 and the lifecycle/observability reports. It does not replace their non-conflicting lifecycle guidance.
+- Keep one implementation per probe. Do not add legacy or alternate path aliases without an identified consumer requirement; this greenfield product has no compatibility obligation.
+- OpenAPI, deployment probes, and documentation must use these canonical paths. The [README](../../README.md#local-development) describes the currently implemented probe semantics; choosing these paths does not imply completion of every 0.1 startup or readiness requirement.
+
 ## Persistence and metrics
 
 - PostgreSQL is the only central database technology.

@@ -11,7 +11,7 @@ server:
   middlewares: {}
 
 database:
-  uri: <%= get_env(name="DATABASE_URL", default="postgres://kontainer:kontainer@127.0.0.1:5432/kontainer_test") %>
+  uri: <%= get_env(name="DATABASE_URL", default="postgres://kontainer:kontainer@127.0.0.1:55466/kontainer_test") %>
   enable_logging: false
   connect_timeout: 500
   idle_timeout: 500

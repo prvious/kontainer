@@ -25,7 +25,10 @@ impl StatusResponse {
 #[utoipa::path(
     get,
     path = "/api/v1/status",
-    responses((status = 200, description = "Controller is running", body = StatusResponse))
+    responses(
+        (status = 200, description = "Controller build and liveness only; use /health/ready for readiness", body = StatusResponse),
+        (status = 503, description = "Controller draining new work; probes remain available", body = super::health::HealthResponse)
+    )
 )]
 async fn show() -> Result<Response> {
     format::json(StatusResponse::current())
@@ -33,8 +36,19 @@ async fn show() -> Result<Response> {
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(show, super::operations::show),
-    components(schemas(StatusResponse, OperationResponse, OperationStateResponse))
+    paths(
+        show,
+        super::operations::show,
+        super::health::live,
+        super::health::startup,
+        super::health::ready
+    ),
+    components(schemas(
+        StatusResponse,
+        OperationResponse,
+        OperationStateResponse,
+        super::health::HealthResponse
+    ))
 )]
 struct ApiDoc;
 
@@ -66,6 +80,9 @@ mod tests {
         let document = ApiDoc::openapi();
 
         assert!(document.paths.paths.contains_key("/api/v1/status"));
+        for path in ["/health/live", "/health/startup", "/health/ready"] {
+            assert!(document.paths.paths.contains_key(path));
+        }
         assert!(
             document
                 .paths

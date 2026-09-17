@@ -21,6 +21,60 @@ use super::{
 const TEST_DATABASE_URL: &str = "KONTAINER_TEST_DATABASE_URL";
 const REQUIRE_POSTGRES_TESTS: &str = "KONTAINER_REQUIRE_POSTGRES_TESTS";
 
+#[tokio::test]
+async fn readiness_tracks_postgres_and_shutdown_without_reporting_dependency_details()
+-> Result<(), Box<dyn Error>> {
+    use crate::{app::App, controllers::health};
+    use axum::{extract::State, http::StatusCode};
+    use loco_rs::app::Hooks;
+    use tokio_util::sync::CancellationToken;
+
+    let Some(database) = PostgresTestDatabase::create(true).await? else {
+        return Ok(());
+    };
+    let evidence = async {
+        let context = App::after_context(
+            AppContext::builder(
+                Environment::Test,
+                database.connection.clone(),
+                Config::from_folder(&Environment::Test, Path::new("config"))?,
+            )
+            .build(),
+        )
+        .await?;
+        let healthy = health::ready(State(context.clone())).await.status();
+        context
+            .shared_store
+            .get::<CancellationToken>()
+            .ok_or_else(|| io::Error::other("controller lifecycle is not initialized"))?
+            .cancel();
+        let draining = health::ready(State(context.clone())).await.status();
+
+        let context = App::after_context(context).await?;
+        let healthy_after_reinitialization = health::ready(State(context.clone())).await.status();
+        database.connection.clone().close().await?;
+        let unavailable = health::ready(State(context)).await.status();
+
+        Ok::<_, Box<dyn Error>>((
+            healthy,
+            draining,
+            healthy_after_reinitialization,
+            unavailable,
+        ))
+    }
+    .await;
+    let removed = database.cleanup().await;
+    let (healthy, draining, healthy_after_reinitialization, unavailable) = evidence?;
+    let removed = removed?;
+
+    assert_eq!(healthy, StatusCode::OK);
+    assert_eq!(draining, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(healthy_after_reinitialization, StatusCode::OK);
+    assert_eq!(unavailable, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(removed);
+    Ok(())
+}
+
 struct PostgresTestDatabase {
     admin_url: Url,
     database_name: String,

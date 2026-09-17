@@ -1,6 +1,6 @@
 use std::{net::SocketAddr, path::PathBuf};
 
-use axum::Router;
+use axum::{Router, middleware};
 use kontainer_rpc_auth::{MutualTlsIdentityFiles, valid_identity_segment};
 use loco_rs::{
     Error, Result,
@@ -64,7 +64,10 @@ pub async fn serve(router: Router, ctx: &AppContext, params: &ServeParams) -> Re
     } else {
         None
     };
-    let cancellation = CancellationToken::new();
+    let cancellation = ctx
+        .shared_store
+        .get::<CancellationToken>()
+        .ok_or_else(|| Error::string("controller lifecycle is not initialized"))?;
     let servers =
         supervise_controller_servers(router, http_listener, agent_rpc, cancellation.clone());
     tokio::pin!(servers);
@@ -105,6 +108,14 @@ pub async fn supervise_controller_servers(
             Error::Message(format!("agent RPC server failed: {error}"))
         })?;
     let mut servers = JoinSet::new();
+
+    if cancellation.is_cancelled() {
+        return Ok(());
+    }
+    let router = router.layer(middleware::from_fn_with_state(
+        cancellation.clone(),
+        crate::controllers::health::admit_request,
+    ));
 
     let http_cancellation = cancellation.clone();
     servers.spawn(async move {

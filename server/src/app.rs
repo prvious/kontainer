@@ -12,6 +12,7 @@ use loco_rs::{
     task::Tasks,
 };
 use migration::Migrator;
+use tokio_util::sync::CancellationToken;
 
 use crate::{controllers, server};
 
@@ -42,13 +43,20 @@ impl Hooks for App {
     }
 
     fn routes(_ctx: &AppContext) -> AppRoutes {
-        AppRoutes::with_default_routes().nest_routes(
-            "/api/v1",
-            vec![
-                controllers::status::routes(),
-                controllers::operations::routes(),
-            ],
-        )
+        AppRoutes::empty()
+            .add_routes(vec![controllers::health::routes()])
+            .nest_routes(
+                "/api/v1",
+                vec![
+                    controllers::status::routes(),
+                    controllers::operations::routes(),
+                ],
+            )
+    }
+
+    async fn after_context(ctx: AppContext) -> Result<AppContext> {
+        ctx.shared_store.insert(CancellationToken::new());
+        Ok(ctx)
     }
 
     async fn serve(
