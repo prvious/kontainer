@@ -65,6 +65,19 @@ impl EngineError {
     }
 
     pub(crate) fn from_bollard(operation: EngineOperation, error: &BollardError) -> Self {
+        // A removed `before` cursor surfaces as a daemon 404. For inventory
+        // that means stale pagination, not an unavailable Engine.
+        if operation == EngineOperation::ListContainers
+            && matches!(
+                error,
+                BollardError::DockerResponseServerError {
+                    status_code: 404,
+                    ..
+                }
+            )
+        {
+            return Self::new(EngineErrorKind::InvalidInput, operation);
+        }
         Self::new(classify_bollard_error(error), operation)
     }
 }
@@ -163,6 +176,20 @@ mod tests {
             EngineError::from_bollard(EngineOperation::ReadVersion, &rejected).kind(),
             EngineErrorKind::DaemonRejected
         );
+    }
+
+    #[test]
+    fn removed_cursor_is_invalid_pagination_not_unavailable() {
+        let not_found = BollardError::DockerResponseServerError {
+            status_code: 404,
+            message: "No such container".to_owned(),
+        };
+        let error = EngineError::from_bollard(EngineOperation::ListContainers, &not_found);
+        assert_eq!(error.kind(), EngineErrorKind::InvalidInput);
+
+        // Other operations keep the daemon-rejected mapping.
+        let error = EngineError::from_bollard(EngineOperation::ReadVersion, &not_found);
+        assert_eq!(error.kind(), EngineErrorKind::DaemonRejected);
     }
 
     #[test]

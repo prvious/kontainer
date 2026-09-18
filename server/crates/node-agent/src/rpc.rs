@@ -204,7 +204,9 @@ mod tests {
         }
     }
 
-    struct BlockingEngine;
+    struct BlockingEngine {
+        entered: Arc<tokio::sync::Semaphore>,
+    }
 
     #[async_trait]
     impl ContainerEngine for BlockingEngine {
@@ -215,13 +217,10 @@ mod tests {
         async fn list_containers(
             &self,
             _request: ContainerPageRequest,
-            cancellation: &CancellationToken,
+            _cancellation: &CancellationToken,
         ) -> Result<ContainerPage, EngineError> {
-            cancellation.cancelled().await;
-            Err(EngineError::new(
-                EngineErrorKind::Cancelled,
-                EngineOperation::ListContainers,
-            ))
+            self.entered.add_permits(1);
+            std::future::pending().await
         }
     }
 
@@ -387,6 +386,7 @@ mod tests {
     #[tokio::test]
     async fn list_containers_maps_engine_failures_to_stable_statuses() {
         for (kind, code) in [
+            (EngineErrorKind::InvalidInput, tonic::Code::InvalidArgument),
             (
                 EngineErrorKind::DeadlineExceeded,
                 tonic::Code::DeadlineExceeded,
@@ -425,17 +425,32 @@ mod tests {
 
     #[tokio::test]
     async fn list_containers_cancellation_wins_without_detached_work() {
-        let service =
-            NodeAgentService::new("node-1", Arc::new(BlockingEngine), CancellationToken::new());
-        let cancellation = service.cancellation.clone();
-        cancellation.cancel();
+        use std::time::Duration;
 
-        let error = service
-            .list_containers(authenticated(ListContainersRequest {
-                page_size: 10,
-                page_token: String::new(),
-            }))
+        let entered = Arc::new(tokio::sync::Semaphore::new(0));
+        let service = NodeAgentService::new(
+            "node-1",
+            Arc::new(BlockingEngine {
+                entered: entered.clone(),
+            }),
+            CancellationToken::new(),
+        );
+        let cancellation = service.cancellation.clone();
+        let call = tokio::spawn(async move {
+            service
+                .list_containers(authenticated(ListContainersRequest {
+                    page_size: 10,
+                    page_token: String::new(),
+                }))
+                .await
+        });
+
+        entered.acquire().await.unwrap().forget();
+        cancellation.cancel();
+        let error = tokio::time::timeout(Duration::from_secs(2), call)
             .await
+            .expect("in-flight listing did not observe shutdown")
+            .expect("listing task panicked")
             .unwrap_err();
         assert_eq!(error.code(), tonic::Code::Cancelled);
     }

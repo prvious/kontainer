@@ -789,6 +789,81 @@ mod tests {
         std::fs::remove_file(socket_path).unwrap();
     }
 
+    #[tokio::test]
+    async fn removed_cursor_is_invalid_pagination() {
+        use tokio::{
+            io::{AsyncReadExt, AsyncWriteExt},
+            net::UnixListener,
+        };
+
+        let socket_path = std::env::temp_dir().join(format!(
+            "kontainer-engine-stale-cursor-{}.sock",
+            std::process::id(),
+        ));
+        let _ = std::fs::remove_file(&socket_path);
+        let listener = UnixListener::bind(&socket_path).unwrap();
+        let engine = LocalDockerEngine::connect_for_node(LocalEngineOptions {
+            socket_path: socket_path.clone(),
+            operation_timeout: Duration::from_secs(2),
+        })
+        .unwrap();
+        let fixture = tokio::spawn(async move {
+            for expected_endpoint in ["/version", "/containers/json"] {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                loop {
+                    let byte = socket.read_u8().await.unwrap();
+                    request.push(byte);
+                    if request.ends_with(b"\r\n\r\n") {
+                        break;
+                    }
+                    assert!(request.len() < 16_384);
+                }
+                if expected_endpoint == "/version" {
+                    let body = r#"{"ApiVersion":"1.47","MinAPIVersion":"1.47","Version":"27.5.1"}"#;
+                    socket
+                        .write_all(
+                            format!(
+                                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                                body.len(),
+                            )
+                            .as_bytes(),
+                        )
+                        .await
+                        .unwrap();
+                } else {
+                    let body = r#"{"message":"No such container"}"#;
+                    socket
+                        .write_all(
+                            format!(
+                                "HTTP/1.1 404 Not Found\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                                body.len(),
+                            )
+                            .as_bytes(),
+                        )
+                        .await
+                        .unwrap();
+                }
+            }
+        });
+
+        let stale = format!("v1:{}", "c".repeat(64));
+        let error = engine
+            .list_containers(
+                ContainerPageRequest::new(10, &stale).unwrap(),
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.kind(), EngineErrorKind::InvalidInput);
+        assert_eq!(error.operation(), EngineOperation::ListContainers);
+        tokio::time::timeout(Duration::from_secs(5), fixture)
+            .await
+            .unwrap()
+            .unwrap();
+        std::fs::remove_file(socket_path).unwrap();
+    }
+
     fn test_engine(operation_timeout: Duration) -> LocalDockerEngine {
         let socket_path = std::env::temp_dir().join(format!(
             "kontainer-engine-test-{}-{}.sock",
