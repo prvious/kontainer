@@ -14,15 +14,18 @@ use axum::{Router, routing::get};
 use kontainer_agent_proto::{
     PROTOCOL_PACKAGE,
     v1::{
-        CheckInRequest, DescribeRequest, controller_intake_client::ControllerIntakeClient,
-        node_agent_client::NodeAgentClient,
+        CheckInRequest, DescribeRequest, ListContainersRequest,
+        controller_intake_client::ControllerIntakeClient, node_agent_client::NodeAgentClient,
     },
 };
 use kontainer_controller::rpc::serve_controller_rpc;
 use kontainer_controller::server::{
     BoundAgentRpcServer, BoundHttpServer, HttpTransport, supervise_controller_servers,
 };
-use kontainer_engine::{ContainerEngine, EngineError};
+use kontainer_engine::{
+    ContainerEngine, ContainerPage, ContainerPageRequest, ContainerState, ContainerSummary,
+    EngineError, EngineErrorKind, EngineOperation,
+};
 use kontainer_node_agent::{NodeAgentService, serve_node_agent_rpc};
 use kontainer_rpc_auth::MutualTlsIdentityFiles;
 use support::pki::{
@@ -50,6 +53,43 @@ struct AvailableEngine;
 impl ContainerEngine for AvailableEngine {
     async fn is_available(&self) -> Result<bool, EngineError> {
         Ok(true)
+    }
+}
+
+struct InventoryEngine {
+    pages: Vec<ContainerPage>,
+    calls: Arc<AtomicUsize>,
+    error: Option<(EngineErrorKind, EngineOperation)>,
+}
+
+#[async_trait]
+impl ContainerEngine for InventoryEngine {
+    async fn is_available(&self) -> Result<bool, EngineError> {
+        Ok(true)
+    }
+
+    async fn list_containers(
+        &self,
+        _request: ContainerPageRequest,
+        _cancellation: &CancellationToken,
+    ) -> Result<ContainerPage, EngineError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        if let Some((kind, operation)) = self.error {
+            return Err(EngineError::new(kind, operation));
+        }
+        let index = self.calls.load(Ordering::SeqCst) - 1;
+        Ok(self.pages[index.min(self.pages.len() - 1)].clone())
+    }
+}
+
+fn inventory_summary(id: &str, name: &str) -> ContainerSummary {
+    ContainerSummary {
+        container_id: id.to_owned(),
+        display_name: name.to_owned(),
+        image_reference: "nginx:latest".to_owned(),
+        state: ContainerState::Running,
+        status: "Up 3s".to_owned(),
+        created_at_seconds: 1_700_000_000,
     }
 }
 
@@ -98,6 +138,148 @@ async fn describe_reports_node_identity_and_engine_health() {
     assert_eq!(response.agent_version, env!("CARGO_PKG_VERSION"));
     assert!(response.docker_connected);
     assert!(!response.architecture.is_empty());
+
+    node_agent.stop().await;
+}
+
+#[tokio::test]
+async fn list_containers_serves_bounded_pages_with_node_provenance() {
+    let pki = TestPki::generate();
+    let first_id = "a".repeat(64);
+    let second_id = "b".repeat(64);
+    let cursor = format!("v1:{first_id}");
+    let engine = Arc::new(InventoryEngine {
+        pages: vec![
+            ContainerPage {
+                containers: vec![inventory_summary(&first_id, "web")],
+                next_page_token: Some(cursor.clone()),
+            },
+            ContainerPage {
+                containers: vec![inventory_summary(&second_id, "worker")],
+                next_page_token: None,
+            },
+        ],
+        calls: Arc::new(AtomicUsize::new(0)),
+        error: None,
+    });
+    let calls = engine.calls.clone();
+    let node_agent = start_node_agent(&pki, engine).await;
+    let mut agent = node_agent_client(node_agent.address, pki.trusted_files(&pki.controller)).await;
+
+    let first = agent
+        .list_containers(ListContainersRequest {
+            page_size: 1,
+            page_token: String::new(),
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(first.containers.len(), 1);
+    assert_eq!(first.containers[0].container_id, first_id);
+    assert_eq!(first.containers[0].display_name, "web");
+    assert_eq!(first.containers[0].node_id, NODE_ID);
+    assert_eq!(first.next_page_token, cursor);
+
+    let second = agent
+        .list_containers(ListContainersRequest {
+            page_size: 1,
+            page_token: cursor,
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(second.containers.len(), 1);
+    assert_eq!(second.containers[0].container_id, second_id);
+    assert_eq!(second.containers[0].node_id, NODE_ID);
+    assert!(second.next_page_token.is_empty());
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+
+    // The private summary carries no environment, command, label, mount,
+    // port, or raw inspect data.
+    let rendered = format!("{:?}", second.containers[0]);
+    assert!(!rendered.contains("secret-canary"));
+
+    node_agent.stop().await;
+}
+
+#[tokio::test]
+async fn list_containers_rejects_invalid_pagination_and_agent_identity() {
+    let pki = TestPki::generate();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let engine = Arc::new(InventoryEngine {
+        pages: vec![ContainerPage {
+            containers: vec![],
+            next_page_token: None,
+        }],
+        calls: calls.clone(),
+        error: None,
+    });
+    let node_agent = start_node_agent(&pki, engine).await;
+
+    let mut agent = node_agent_client(node_agent.address, pki.trusted_files(&pki.controller)).await;
+    for token in ["not-a-cursor", "v1:short"] {
+        let error = agent
+            .list_containers(ListContainersRequest {
+                page_size: 10,
+                page_token: token.to_owned(),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(error.code(), Code::InvalidArgument);
+    }
+    let oversized = agent
+        .list_containers(ListContainersRequest {
+            page_size: 101,
+            page_token: String::new(),
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(oversized.code(), Code::InvalidArgument);
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+
+    // An agent certificate used as a controller identity is rejected before
+    // any Engine access.
+    let mut impostor = node_agent_client(node_agent.address, pki.trusted_files(&pki.agent)).await;
+    let error = impostor
+        .list_containers(ListContainersRequest {
+            page_size: 10,
+            page_token: String::new(),
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), Code::Unauthenticated);
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+
+    node_agent.stop().await;
+}
+
+#[tokio::test]
+async fn list_containers_maps_daemon_failure_without_internals() {
+    let pki = TestPki::generate();
+    let node_agent = start_node_agent(
+        &pki,
+        Arc::new(InventoryEngine {
+            pages: vec![],
+            calls: Arc::new(AtomicUsize::new(0)),
+            error: Some((
+                EngineErrorKind::DaemonRejected,
+                EngineOperation::ListContainers,
+            )),
+        }),
+    )
+    .await;
+    let mut agent = node_agent_client(node_agent.address, pki.trusted_files(&pki.controller)).await;
+
+    let error = agent
+        .list_containers(ListContainersRequest {
+            page_size: 10,
+            page_token: String::new(),
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(error.code(), Code::Unavailable);
+    assert!(!error.message().contains("secret-canary"));
+    assert!(!error.message().contains("/var/run/docker.sock"));
 
     node_agent.stop().await;
 }
