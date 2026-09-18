@@ -62,6 +62,7 @@ impl Hooks for App {
 
     async fn after_context(ctx: AppContext) -> Result<AppContext> {
         ctx.shared_store.insert(CancellationToken::new());
+        crate::server::init_shared_auth_state(&ctx)?;
         Ok(ctx)
     }
 

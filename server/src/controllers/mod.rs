@@ -1,3 +1,4 @@
+pub mod github_login;
 pub mod health;
 pub mod operations;
 pub mod sessions;
@@ -8,10 +9,9 @@ use loco_rs::controller::Routes;
 /// Authentication-lifecycle routes. These validate their own attempt,
 /// refresh, or logout credentials and are mounted outside access-session
 /// middleware. Membership here is explicit; never infer it from a path
-/// prefix. Future GitHub start/callback/redemption routes from #79 register
-/// in this group.
+/// prefix.
 pub fn auth_lifecycle_routes() -> Vec<Routes> {
-    vec![sessions::routes()]
+    vec![sessions::routes(), github_login::routes()]
 }
 
 /// Application routes. Every route in this group requires a live access

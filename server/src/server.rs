@@ -4,7 +4,12 @@ use std::{
     sync::Arc,
 };
 
-use axum::{Router, middleware};
+use axum::{
+    Router,
+    extract::Request,
+    middleware::{self, Next},
+    response::Response,
+};
 use hyper::server::conn::http1;
 use hyper_util::{rt::TokioIo, service::TowerToHyperService};
 use kontainer_rpc_auth::{MutualTlsIdentityFiles, valid_identity_segment};
@@ -18,13 +23,21 @@ use serde::Deserialize;
 use tokio::{net::TcpListener, task::JoinSet};
 use tokio_util::sync::CancellationToken;
 
-use crate::rpc::serve_controller_rpc;
+use crate::{
+    auth::github::{
+        self, ClientSecret, GitHubAuthService, GitHubAuthSettings, GitHubLoginConfig,
+        ReqwestGitHubProvider,
+    },
+    rpc::serve_controller_rpc,
+};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct ControllerSettings {
+pub(crate) struct ControllerSettings {
     agent_rpc: AgentRpcSettings,
     public_http: PublicHttpSettings,
+    #[serde(default)]
+    github_auth: GitHubAuthSettings,
 }
 
 /// Struct shape (not a tagged enum): serde's `deny_unknown_fields` is not
@@ -295,10 +308,15 @@ pub async fn supervise_controller_servers(
     if cancellation.is_cancelled() {
         return Ok(());
     }
-    let router = router.layer(middleware::from_fn_with_state(
-        cancellation.clone(),
-        crate::controllers::health::admit_request,
-    ));
+    let router = router
+        .layer(middleware::from_fn_with_state(
+            cancellation.clone(),
+            crate::controllers::health::admit_request,
+        ))
+        // Path-only access log. Loco's `logger` middleware records the full
+        // URI including query strings, which would persist OAuth `code` and
+        // `state` in diagnostics; it stays disabled in checked-in configs.
+        .layer(middleware::from_fn(path_only_request_log));
 
     let http_cancellation = cancellation.clone();
     match http.transport {
@@ -365,13 +383,88 @@ fn parse_controller_settings(settings: serde_json::Value) -> Result<ControllerSe
     serde_json::from_value(settings)
         .map_err(|_| {
             Error::string(
-                "invalid controller settings: check agent_rpc and public_http keys, types, and cluster_id",
+                "invalid controller settings: check agent_rpc, public_http, and github_auth keys, types, and cluster_id",
             )
         })
         .and_then(|settings: ControllerSettings| {
             settings.public_http.validate()?;
+            settings
+                .github_auth
+                .validate()
+                .map_err(|message| Error::string(&message))?;
             Ok(settings)
         })
+}
+
+/// Method/path/status access log. The query string is never recorded:
+/// OAuth callback parameters must not reach tracing output.
+async fn path_only_request_log(request: Request, next: Next) -> Response {
+    let method = request.method().clone();
+    let path = request.uri().path().to_owned();
+    let response = next.run(request).await;
+    tracing::info!(
+        http.method = %method,
+        http.path = %path,
+        http.status = response.status().as_u16(),
+        "http-request"
+    );
+    response
+}
+
+/// Cluster identity carried in login responses. Inserted once in
+/// [`init_shared_auth_state`] from the static agent RPC settings.
+#[derive(Debug, Clone)]
+pub struct ControllerClusterId(pub String);
+
+/// Build the GitHub login service and cluster identity from validated
+/// settings. A missing secret file or invalid origin fails startup when
+/// login is enabled; a disabled service fails login requests closed.
+pub fn init_shared_auth_state(ctx: &AppContext) -> Result<()> {
+    use std::sync::Arc;
+
+    let settings = controller_settings(ctx)?;
+    ctx.shared_store
+        .insert(ControllerClusterId(settings.agent_rpc.cluster_id.clone()));
+
+    let service = if settings.github_auth.enabled {
+        let secret_path = settings
+            .github_auth
+            .secret_path()
+            .ok_or_else(|| Error::string("github_auth client secret is unavailable"))?;
+        let raw = std::fs::read_to_string(secret_path)
+            .map_err(|_| Error::string("github_auth client secret is unavailable"))?;
+        let secret = raw.trim_end_matches(['\n', '\r']);
+        if secret.is_empty() {
+            return Err(Error::string("github_auth client secret is unavailable"));
+        }
+        github::callback_url(&ctx.config.server.host).map_err(|message| Error::string(&message))?;
+        let allowlisted = settings
+            .github_auth
+            .allowlist()
+            .map_err(|message| Error::string(&message))?;
+        let provider = ReqwestGitHubProvider::new(
+            settings.github_auth.client_id.clone(),
+            ClientSecret::new(secret.to_owned()),
+            github::GITHUB_TOKEN_URL.to_owned(),
+            github::GITHUB_USER_URL.to_owned(),
+        )
+        .map_err(|_| Error::string("github_auth provider is unavailable"))?;
+        GitHubAuthService {
+            config: GitHubLoginConfig {
+                enabled: true,
+                client_id: settings.github_auth.client_id.clone(),
+                allowlisted,
+                authorize_url: github::GITHUB_AUTHORIZE_URL.to_owned(),
+                token_url: github::GITHUB_TOKEN_URL.to_owned(),
+                user_url: github::GITHUB_USER_URL.to_owned(),
+            },
+            provider: Arc::new(provider),
+        }
+    } else {
+        GitHubAuthService::disabled()
+    };
+    ctx.shared_store.insert(service);
+    Ok(())
 }
 
 fn deserialize_cluster_id<'de, D: serde::Deserializer<'de>>(
@@ -552,13 +645,20 @@ mod tests {
                     "client_ca_path": "/certs/agent-ca.pem"
                 }
             },
-            "public_http": { "mode": "plaintext" }
+            "public_http": { "mode": "plaintext" },
+            "github_auth": { "enabled": false }
         })
     }
 
     #[test]
     fn unknown_controller_owned_settings_are_rejected_at_every_level() {
-        for pointer in ["", "/agent_rpc", "/agent_rpc/tls", "/public_http"] {
+        for pointer in [
+            "",
+            "/agent_rpc",
+            "/agent_rpc/tls",
+            "/public_http",
+            "/github_auth",
+        ] {
             let mut settings = valid_settings();
             settings
                 .pointer_mut(pointer)
@@ -610,7 +710,55 @@ mod tests {
 
             assert!(!settings.agent_rpc.enabled);
             assert_eq!(settings.public_http.mode, PublicHttpMode::Plaintext);
+            assert!(!settings.github_auth.enabled);
         }
+    }
+
+    #[test]
+    fn github_auth_settings_require_secret_and_allowlist_when_enabled() {
+        let mut missing_secret = valid_settings();
+        missing_secret["github_auth"] = serde_json::json!({
+            "enabled": true,
+            "client_id": "client-1",
+            "allowlisted_account_ids": "42"
+        });
+        let error = parse_controller_settings(missing_secret).unwrap_err();
+        assert!(!error.to_string().contains("secret-value"));
+
+        let mut bad_client = valid_settings();
+        bad_client["github_auth"] = serde_json::json!({
+            "enabled": true,
+            "client_id": "not valid!",
+            "client_secret_path": "/secrets/github",
+            "allowlisted_account_ids": "42"
+        });
+        assert!(parse_controller_settings(bad_client).is_err());
+
+        let mut empty_allowlist = valid_settings();
+        empty_allowlist["github_auth"] = serde_json::json!({
+            "enabled": true,
+            "client_id": "client-1",
+            "client_secret_path": "/secrets/github",
+            "allowlisted_account_ids": ""
+        });
+        assert!(parse_controller_settings(empty_allowlist).is_err());
+
+        let mut enabled = valid_settings();
+        enabled["github_auth"] = serde_json::json!({
+            "enabled": true,
+            "client_id": "client-1",
+            "client_secret_path": "/secrets/github",
+            "allowlisted_account_ids": "42, 7"
+        });
+        let settings: ControllerSettings = serde_json::from_value(enabled.clone()).unwrap();
+        assert!(settings.github_auth.enabled);
+        assert!(parse_controller_settings(enabled).is_ok());
+
+        // Disabled login ignores the remaining fields but still rejects
+        // unknown keys and secret-bearing error text.
+        let mut disabled = valid_settings();
+        disabled["github_auth"] = serde_json::json!({ "enabled": false });
+        assert!(parse_controller_settings(disabled).is_ok());
     }
 
     #[test]

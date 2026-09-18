@@ -32,3 +32,10 @@ settings:
       client_ca_path: config/test-agent-ca.pem
   public_http:
     mode: plaintext
+  # Login stays disabled in tests; integration tests inject their own
+  # provider through shared state instead of settings.
+  github_auth:
+    enabled: false
+    client_id: ""
+    client_secret_path: ""
+    allowlisted_account_ids: ""

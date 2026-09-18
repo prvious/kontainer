@@ -20,6 +20,7 @@ publish = false
 [workspace.dependencies]
 async-trait = "0.1.89"
 axum = { version = "0.8.4", features = ["ws"] }
+base64 = "0.22.1"
 bollard = { version = "0.21.1", default-features = false, features = ["http", "pipe"] }
 chrono = { version = "0.4.41", features = ["serde"] }
 futures-util = "0.3.31"
@@ -34,6 +35,10 @@ loco-rs = { version = "1.1.0", default-features = false, features = [
 prost = "0.14.1"
 prost-build = "0.14.1"
 protoc-bin-vendored = "3.2.0"
+reqwest = { version = "0.12.23", default-features = false, features = [
+  "json",
+  "rustls-tls-webpki-roots",
+] }
 rustls = { version = "0.23.27", default-features = false, features = [
   "ring",
   "std",
@@ -51,6 +56,7 @@ sea-orm-migration = { version = "2.0.2", default-features = false, features = [
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 sha2 = "0.10.9"
+subtle = "2.6.1"
 thiserror = "2.0.17"
 tokio = { version = "1.47.1", features = ["macros", "net", "rt-multi-thread", "signal", "time"] }
 tokio-stream = { version = "0.1.19", features = ["net"] }
@@ -80,18 +86,22 @@ default-run = "kontainer-controller"
 [dependencies]
 async-trait.workspace = true
 axum.workspace = true
+base64.workspace = true
 chrono.workspace = true
 kontainer-agent-proto = { path = "crates/agent-proto" }
 kontainer-rpc-auth = { path = "crates/rpc-auth" }
+futures-util.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
 loco-rs.workspace = true
 migration = { path = "migration" }
+reqwest.workspace = true
 rustls.workspace = true
 sea-orm.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+subtle.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tokio-rustls = { version = "0.26.5", default-features = false, features = ["ring", "tls12"] }

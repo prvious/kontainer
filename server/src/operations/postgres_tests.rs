@@ -158,6 +158,9 @@ async fn postgres_migration_up_down_status_and_cleanup() -> Result<(), Box<dyn E
             schema.has_table("session_families").await?,
             schema.has_table("refresh_credentials").await?,
             schema.has_table("security_audit_intents").await?,
+            schema.has_table("github_login_attempts").await?,
+            schema.has_table("github_identities").await?,
+            schema.has_table("bootstrap_state").await?,
         ];
 
         Migrator::down(&test_database.connection, None).await?;
@@ -174,6 +177,9 @@ async fn postgres_migration_up_down_status_and_cleanup() -> Result<(), Box<dyn E
             schema.has_table("session_families").await?,
             schema.has_table("refresh_credentials").await?,
             schema.has_table("security_audit_intents").await?,
+            schema.has_table("github_login_attempts").await?,
+            schema.has_table("github_identities").await?,
+            schema.has_table("bootstrap_state").await?,
         ];
 
         Ok::<_, sea_orm::DbErr>((
@@ -189,9 +195,9 @@ async fn postgres_migration_up_down_status_and_cleanup() -> Result<(), Box<dyn E
     let (pending_before, applied_after_up, pending_after_down, tables_after_up, tables_after_down) =
         evidence?;
 
-    assert_eq!(pending_before, 2);
-    assert_eq!(applied_after_up, 2);
-    assert_eq!(pending_after_down, 2);
+    assert_eq!(pending_before, 3);
+    assert_eq!(applied_after_up, 3);
+    assert_eq!(pending_after_down, 3);
     assert!(tables_after_up.into_iter().all(|exists| exists));
     assert!(tables_after_down.into_iter().all(|exists| !exists));
     assert!(removed);
