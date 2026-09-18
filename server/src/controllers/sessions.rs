@@ -9,7 +9,10 @@ use loco_rs::{app::AppContext, controller::Routes};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::auth::actions::{revoke_session_family, rotate_refresh, validate_access};
+use crate::auth::{
+    actions::{revoke_session_family, rotate_refresh, validate_access},
+    request::{self, bearer_credential},
+};
 
 #[derive(Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -55,21 +58,11 @@ fn unauthorized() -> Response {
 }
 
 fn unauthorized_bearer() -> Response {
-    let mut response = unauthorized();
-    response.headers_mut().insert(
-        header::WWW_AUTHENTICATE,
-        header::HeaderValue::from_static("Bearer error=\"invalid_token\""),
-    );
-    response
+    request::unauthorized_bearer()
 }
 
 fn service_unavailable() -> Response {
-    json_no_store(
-        StatusCode::SERVICE_UNAVAILABLE,
-        ErrorBody {
-            error: "unavailable",
-        },
-    )
+    request::service_unavailable()
 }
 
 #[utoipa::path(
@@ -80,7 +73,8 @@ fn service_unavailable() -> Response {
         (status = 200, description = "Rotated credential pair, returned once", body = SessionTokenResponse),
         (status = 401, description = "Invalid, expired, revoked, or reused refresh credential"),
         (status = 503, description = "Session persistence unavailable")
-    )
+    ),
+    security(())
 )]
 pub(crate) async fn refresh(
     State(context): State<AppContext>,
@@ -142,18 +136,6 @@ pub(crate) async fn logout_current(
         Err(revoke_session_family::RevokeSessionError::NotFound) => unauthorized_bearer(),
         Err(revoke_session_family::RevokeSessionError::Persistence(_)) => service_unavailable(),
     }
-}
-
-/// Exactly one `Authorization: Bearer <credential>` header value. Missing,
-/// duplicated, wrong-scheme, query-parameter, and cookie credentials are
-/// rejected without inspecting persistence.
-fn bearer_credential(headers: &HeaderMap) -> Option<&str> {
-    let mut values = headers.get_all(header::AUTHORIZATION).iter();
-    let value = values.next()?.to_str().ok()?;
-    if values.next().is_some() {
-        return None;
-    }
-    value.strip_prefix("Bearer ")
 }
 
 pub fn routes() -> Routes {

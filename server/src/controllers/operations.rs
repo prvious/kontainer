@@ -4,9 +4,12 @@ use serde::Serialize;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use crate::operations::{
-    actions::get::{self, GetOperationError},
-    domain::{OperationSnapshot, OperationState},
+use crate::{
+    auth::domain::PrincipalContext,
+    operations::{
+        actions::get::{self, GetOperationError},
+        domain::{OperationSnapshot, OperationState},
+    },
 };
 
 #[derive(Debug, Serialize, ToSchema, PartialEq, Eq)]
@@ -75,18 +78,20 @@ impl From<OperationSnapshot> for OperationResponse {
     responses(
         (status = 200, description = "Current durable operation state", body = OperationResponse),
         (status = 400, description = "Invalid operation identifier"),
-        (status = 404, description = "Operation not found"),
+        (status = 401, description = "Missing, malformed, expired, or revoked access credential"),
+        (status = 404, description = "Operation not found or not visible to the authenticated principal"),
         (status = 500, description = "Operation state unavailable"),
-        (status = 503, description = "Controller draining new work; probes remain available", body = super::health::HealthResponse)
+        (status = 503, description = "Controller draining new work or session persistence unavailable; the body is either HealthResponse or a generic error")
     )
 )]
 pub(crate) async fn show(
     State(context): State<AppContext>,
+    principal: PrincipalContext,
     Path(operation_id): Path<String>,
 ) -> Result<Response> {
     let operation_id = Uuid::parse_str(&operation_id)
         .map_err(|_| Error::BadRequest("operation id is invalid".to_owned()))?;
-    let snapshot = get::execute(&context.db, operation_id)
+    let snapshot = get::execute(&context.db, &principal, operation_id)
         .await
         .map_err(map_get_error)?;
 

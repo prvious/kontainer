@@ -42,17 +42,22 @@ impl Hooks for App {
         create_app::<Self, Migrator>(mode, environment, config).await
     }
 
-    fn routes(_ctx: &AppContext) -> AppRoutes {
+    fn routes(ctx: &AppContext) -> AppRoutes {
+        // Access-session middleware covers the application group only.
+        // Lifecycle routes validate their own credentials; probes stay
+        // anonymous. Layering is per group, never a path-prefix test.
+        let require_session = axum::middleware::from_fn_with_state(
+            ctx.db.clone(),
+            crate::auth::request::require_access_session,
+        );
+        let protected = controllers::protected_application_routes()
+            .into_iter()
+            .map(|routes| routes.layer(require_session.clone()))
+            .collect::<Vec<_>>();
         AppRoutes::empty()
             .add_routes(vec![controllers::health::routes()])
-            .nest_routes(
-                "/api/v1",
-                vec![
-                    controllers::status::routes(),
-                    controllers::operations::routes(),
-                    controllers::sessions::routes(),
-                ],
-            )
+            .nest_routes("/api/v1", controllers::auth_lifecycle_routes())
+            .nest_routes("/api/v1", protected)
     }
 
     async fn after_context(ctx: AppContext) -> Result<AppContext> {

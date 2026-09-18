@@ -83,6 +83,40 @@ pub struct ValidatedSession {
     pub family_id: Uuid,
 }
 
+/// Authenticated principal derived from live persisted session state.
+///
+/// Handlers receive this type; they never parse credentials or trust
+/// principal claims from request input. The inner UUID is the immutable
+/// persisted principal ID.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PrincipalContext {
+    principal_id: Uuid,
+}
+
+impl PrincipalContext {
+    #[must_use]
+    pub fn new(principal_id: Uuid) -> Self {
+        Self { principal_id }
+    }
+
+    #[must_use]
+    pub fn principal_id(&self) -> Uuid {
+        self.principal_id
+    }
+
+    /// Canonical string stored in operation `principal_ref` columns.
+    #[must_use]
+    pub fn reference(&self) -> String {
+        self.principal_id.to_string()
+    }
+}
+
+impl From<ValidatedSession> for PrincipalContext {
+    fn from(session: ValidatedSession) -> Self {
+        Self::new(session.principal_id)
+    }
+}
+
 /// Credentials issued exactly once, alongside their expirations.
 pub struct IssuedSession {
     pub principal_id: Uuid,
@@ -117,7 +151,7 @@ pub mod actions {
 
 #[cfg(test)]
 mod tests {
-    use super::{PrincipalStatus, RevocationReason};
+    use super::{PrincipalContext, PrincipalStatus, RevocationReason};
 
     #[test]
     fn principal_statuses_have_stable_values() {
@@ -136,6 +170,19 @@ mod tests {
     fn revocation_reasons_are_stable() {
         assert_eq!(RevocationReason::Logout.as_str(), "logout");
         assert_eq!(RevocationReason::RefreshReuse.as_str(), "refresh_reuse");
+    }
+
+    #[test]
+    fn principal_context_exposes_only_the_persisted_id() {
+        let id = uuid::Uuid::now_v7();
+        let context = PrincipalContext::new(id);
+
+        assert_eq!(context.principal_id(), id);
+        assert_eq!(context.reference(), id.to_string());
+        assert_eq!(
+            format!("{context:?}"),
+            format!("PrincipalContext {{ principal_id: {id} }}")
+        );
     }
 
     #[test]

@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 use super::entities::operation;
+use crate::auth::domain::PrincipalContext;
 
 const MAX_CANONICAL_REQUEST_BYTES: usize = 1024 * 1024;
 
@@ -91,23 +92,6 @@ pub struct OperationSnapshot {
     pub operation: DurableOperation,
     pub last_event_sequence: i32,
     pub last_error_code: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PrincipalContext {
-    reference: String,
-}
-
-impl PrincipalContext {
-    pub fn new(reference: impl Into<String>) -> Result<Self, AdmissionInputError> {
-        let reference = validated_text("principal reference", reference.into(), 255)?;
-        Ok(Self { reference })
-    }
-
-    #[must_use]
-    pub fn reference(&self) -> &str {
-        &self.reference
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -232,7 +216,8 @@ fn validated_text(
 mod tests {
     use chrono::{Duration, Utc};
 
-    use super::{AdmissionInputError, AdmitOperationRequest, OperationState, PrincipalContext};
+    use super::{AdmissionInputError, AdmitOperationRequest, OperationState};
+    use crate::auth::domain::PrincipalContext;
 
     #[test]
     fn operation_states_have_stable_persistence_values() {
@@ -250,19 +235,9 @@ mod tests {
     }
 
     #[test]
-    fn admission_rejects_an_empty_principal() {
-        assert_eq!(
-            PrincipalContext::new("  ").unwrap_err(),
-            AdmissionInputError::Empty {
-                field: "principal reference"
-            }
-        );
-    }
-
-    #[test]
     fn admission_rejects_an_expired_idempotency_record() {
         let error = AdmitOperationRequest::new(
-            PrincipalContext::new("bootstrap:test").unwrap(),
+            PrincipalContext::new(uuid::Uuid::now_v7()),
             "operations.create",
             "idempotency-key",
             "test.operation",

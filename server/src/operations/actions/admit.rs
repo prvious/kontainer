@@ -78,7 +78,7 @@ async fn execute_at_failure_point(
     failure_point: FailurePoint,
 ) -> Result<AdmitOperationOutcome, AdmitOperationError> {
     let material = AdmissionMaterial {
-        principal_ref: request.principal().reference().to_owned(),
+        principal_ref: request.principal().reference(),
         scope: request.scope().to_owned(),
         key_hash: sha256(request.idempotency_key().as_bytes()),
         request_hash: sha256(request.canonical_request()),

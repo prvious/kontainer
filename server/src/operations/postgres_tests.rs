@@ -1,8 +1,17 @@
 use std::{error::Error, io, path::Path, time::Duration as StdDuration};
 
-use axum::{Router, body::Body, body::to_bytes, http::Request, routing::get};
+use axum::{
+    Router,
+    body::Body,
+    body::to_bytes,
+    http::{Request, StatusCode, header},
+};
 use chrono::{Duration, Utc};
-use loco_rs::{app::AppContext, config::Config, environment::Environment};
+use loco_rs::{
+    app::{AppContext, Hooks},
+    config::Config,
+    environment::Environment,
+};
 use migration::{Migrator, MigratorTrait, SchemaManager};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
@@ -13,10 +22,14 @@ use uuid::Uuid;
 
 use super::{
     actions::{admit, claim_next, get, mark_uncertain},
-    domain::{AdmitOperationRequest, OperationState, PrincipalContext},
+    domain::{AdmitOperationRequest, OperationState},
     entities::{audit_intent, idempotency_record, operation, operation_event},
 };
-use crate::test_support::PostgresTestDatabase;
+use crate::{
+    app::App,
+    auth::{actions::create_session, domain::PrincipalContext, entities::principal},
+    test_support::PostgresTestDatabase,
+};
 
 #[tokio::test]
 async fn readiness_tracks_postgres_and_shutdown_without_reporting_dependency_details()
@@ -73,11 +86,12 @@ async fn readiness_tracks_postgres_and_shutdown_without_reporting_dependency_det
 }
 
 fn admission_request(
+    principal_id: Uuid,
     idempotency_key: &str,
     canonical_request: &[u8],
 ) -> Result<AdmitOperationRequest, Box<dyn Error>> {
     Ok(AdmitOperationRequest::new(
-        PrincipalContext::new("bootstrap:integration-test")?,
+        PrincipalContext::new(principal_id),
         "operations.integration",
         idempotency_key,
         "test.operation",
@@ -86,6 +100,37 @@ fn admission_request(
         canonical_request.to_vec(),
         Utc::now() + Duration::hours(1),
     )?)
+}
+
+async fn test_principal(database: &sea_orm::DatabaseConnection) -> Result<Uuid, Box<dyn Error>> {
+    let now = Utc::now();
+    let id = Uuid::now_v7();
+    principal::ActiveModel {
+        id: Set(id),
+        kind: Set("human".to_owned()),
+        status: Set("active".to_owned()),
+        authorization_epoch: Set(0),
+        created_at: Set(now),
+        updated_at: Set(now),
+    }
+    .insert(database)
+    .await?;
+    Ok(id)
+}
+
+/// Production route composition: lifecycle routes unlayered, application
+/// routes behind access-session middleware. Tests must exercise this exact
+/// composition rather than hand-built single-route routers.
+async fn production_router(
+    connection: &sea_orm::DatabaseConnection,
+) -> Result<Router, Box<dyn Error>> {
+    let config_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("config");
+    let config = Config::from_folder(&Environment::Test, &config_path)?;
+    let context = App::after_context(
+        AppContext::builder(Environment::Test, connection.clone(), config).build(),
+    )
+    .await?;
+    Ok(App::routes(&context).to_router::<App>(context, Router::new())?)
 }
 
 #[tokio::test]
@@ -160,8 +205,10 @@ async fn postgres_admission_is_atomic_and_idempotent() -> Result<(), Box<dyn Err
     };
 
     let evidence = async {
-        let first_request = admission_request("admit-once", br#"{"replicas":2}"#)?;
-        let second_request = admission_request("admit-once", br#"{"replicas":2}"#)?;
+        let owner = Uuid::now_v7();
+        let principal = PrincipalContext::new(owner);
+        let first_request = admission_request(owner, "admit-once", br#"{"replicas":2}"#)?;
+        let second_request = admission_request(owner, "admit-once", br#"{"replicas":2}"#)?;
         let (first, second) = tokio::join!(
             admit::execute(&test_database.connection, first_request),
             admit::execute(&test_database.connection, second_request),
@@ -174,10 +221,11 @@ async fn postgres_admission_is_atomic_and_idempotent() -> Result<(), Box<dyn Err
         };
         let conflict = admit::execute(
             &test_database.connection,
-            admission_request("admit-once", br#"{"replicas":3}"#)?,
+            admission_request(owner, "admit-once", br#"{"replicas":3}"#)?,
         )
         .await;
-        let snapshot = get::execute(&test_database.connection, first.operation.id).await?;
+        let snapshot =
+            get::execute(&test_database.connection, &principal, first.operation.id).await?;
 
         Ok::<_, Box<dyn Error>>((
             first,
@@ -225,25 +273,21 @@ async fn postgres_operation_is_polled_through_the_versioned_http_route()
     };
 
     let evidence = async {
+        let owner = test_principal(&test_database.connection).await?;
         let admitted = admit::execute(
             &test_database.connection,
-            admission_request("poll-through-http", b"poll")?,
+            admission_request(owner, "poll-through-http", b"poll")?,
         )
         .await?;
-        let config_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("config");
-        let config = Config::from_folder(&Environment::Test, &config_path)?;
-        let context =
-            AppContext::builder(Environment::Test, test_database.connection.clone(), config)
-                .build();
-        let application = Router::new()
-            .route(
-                "/api/v1/operations/{operation_id}",
-                get(crate::controllers::operations::show),
-            )
-            .with_state(context);
+        let session = create_session::execute(&test_database.connection, owner).await?;
+        let application = production_router(&test_database.connection).await?;
         let response = application
             .oneshot(
                 Request::get(format!("/api/v1/operations/{}", admitted.operation.id))
+                    .header(
+                        axum::http::header::AUTHORIZATION,
+                        format!("Bearer {}", session.access_plaintext),
+                    )
                     .body(Body::empty())?,
             )
             .await?;
@@ -272,34 +316,30 @@ async fn postgres_broken_operation_history_is_an_internal_error() -> Result<(), 
     };
 
     let evidence = async {
-        let operation_id = Uuid::now_v7();
-        let now = Utc::now();
-        operation::ActiveModel {
-            id: Set(operation_id),
-            kind: Set("test.broken-history".to_owned()),
-            state: Set(OperationState::Recoverable.as_str().to_owned()),
-            claimed_by: Set(None),
-            claimed_at: Set(None),
-            created_at: Set(now),
-            updated_at: Set(now),
-        }
-        .insert(&test_database.connection)
+        let owner = test_principal(&test_database.connection).await?;
+        let principal = PrincipalContext::new(owner);
+        let admitted = admit::execute(
+            &test_database.connection,
+            admission_request(owner, "broken-history", b"history")?,
+        )
         .await?;
-        let action_error = get::execute(&test_database.connection, operation_id).await;
+        operation_event::Entity::delete_many()
+            .filter(operation_event::Column::OperationId.eq(admitted.operation.id))
+            .exec(&test_database.connection)
+            .await?;
+        let action_error =
+            get::execute(&test_database.connection, &principal, admitted.operation.id).await;
 
-        let config_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("config");
-        let config = Config::from_folder(&Environment::Test, &config_path)?;
-        let context =
-            AppContext::builder(Environment::Test, test_database.connection.clone(), config)
-                .build();
-        let response = Router::new()
-            .route(
-                "/api/v1/operations/{operation_id}",
-                get(crate::controllers::operations::show),
-            )
-            .with_state(context)
+        let session = create_session::execute(&test_database.connection, owner).await?;
+        let response = production_router(&test_database.connection)
+            .await?
             .oneshot(
-                Request::get(format!("/api/v1/operations/{operation_id}")).body(Body::empty())?,
+                Request::get(format!("/api/v1/operations/{}", admitted.operation.id))
+                    .header(
+                        axum::http::header::AUTHORIZATION,
+                        format!("Bearer {}", session.access_plaintext),
+                    )
+                    .body(Body::empty())?,
             )
             .await?;
 
@@ -325,9 +365,10 @@ async fn postgres_skip_locked_prevents_a_double_claim() -> Result<(), Box<dyn Er
     };
 
     let evidence = async {
+        let owner = Uuid::now_v7();
         let admitted = admit::execute(
             &test_database.connection,
-            admission_request("claim-once", b"claim")?,
+            admission_request(owner, "claim-once", b"claim")?,
         )
         .await?;
 
@@ -375,9 +416,11 @@ async fn postgres_rollback_and_uncertain_recovery_are_explicit() -> Result<(), B
     };
 
     let evidence = async {
+        let owner = Uuid::now_v7();
+        let principal = PrincipalContext::new(owner);
         let injected = admit::execute_with_injected_rollback(
             &test_database.connection,
-            admission_request("must-rollback", b"rollback")?,
+            admission_request(owner, "must-rollback", b"rollback")?,
         )
         .await;
         let counts_after_rollback = (
@@ -397,10 +440,11 @@ async fn postgres_rollback_and_uncertain_recovery_are_explicit() -> Result<(), B
 
         let admitted = admit::execute(
             &test_database.connection,
-            admission_request("becomes-uncertain", b"timeout")?,
+            admission_request(owner, "becomes-uncertain", b"timeout")?,
         )
         .await?;
-        let recoverable = get::execute(&test_database.connection, admitted.operation.id).await?;
+        let recoverable =
+            get::execute(&test_database.connection, &principal, admitted.operation.id).await?;
         claim_next::execute(&test_database.connection, "controller:worker")
             .await?
             .ok_or_else(|| io::Error::other("expected admitted operation to be claimed"))?;
@@ -410,7 +454,8 @@ async fn postgres_rollback_and_uncertain_recovery_are_explicit() -> Result<(), B
             "engine_timeout",
         )
         .await?;
-        let uncertain = get::execute(&test_database.connection, admitted.operation.id).await?;
+        let uncertain =
+            get::execute(&test_database.connection, &principal, admitted.operation.id).await?;
 
         Ok::<_, Box<dyn Error>>((injected, counts_after_rollback, recoverable, uncertain))
     }
@@ -438,12 +483,17 @@ async fn postgres_transitions_reject_missing_or_exhausted_history() -> Result<()
     };
 
     let evidence = async {
+        let owner = Uuid::now_v7();
         let mut outcomes = Vec::new();
         for state in [OperationState::Recoverable, OperationState::Running] {
             for exhausted in [false, true] {
                 let admitted = admit::execute(
                     &test_database.connection,
-                    admission_request(&format!("history-{state:?}-{exhausted}"), b"history")?,
+                    admission_request(
+                        owner,
+                        &format!("history-{state:?}-{exhausted}"),
+                        b"history",
+                    )?,
                 )
                 .await?;
                 let operation_id = admitted.operation.id;
@@ -511,5 +561,256 @@ async fn postgres_transitions_reject_missing_or_exhausted_history() -> Result<()
             .all(|outcome| outcome == (true, true, true))
     );
     assert!(removed);
+    Ok(())
+}
+
+#[tokio::test]
+async fn postgres_application_routes_deny_anonymous_requests() -> Result<(), Box<dyn Error>> {
+    let Some(test_database) = PostgresTestDatabase::create(true).await? else {
+        return Ok(());
+    };
+
+    let evidence = async {
+        let router = production_router(&test_database.connection).await?;
+        let mut anonymous = Vec::new();
+        for request in [
+            Request::get("/api/v1/status").body(Body::empty())?,
+            Request::get("/api/v1/openapi.json").body(Body::empty())?,
+            Request::get(format!("/api/v1/operations/{}", Uuid::now_v7())).body(Body::empty())?,
+        ] {
+            let response = router.clone().oneshot(request).await?;
+            let challenge = response.headers().get(header::WWW_AUTHENTICATE).cloned();
+            anonymous.push((response.status(), challenge));
+        }
+        let mut probes = Vec::new();
+        for path in ["/health/live", "/health/startup", "/health/ready"] {
+            let status = router
+                .clone()
+                .oneshot(Request::get(path).body(Body::empty())?)
+                .await?
+                .status();
+            probes.push(status);
+        }
+
+        Ok::<_, Box<dyn Error>>((anonymous, probes))
+    }
+    .await;
+    let removed = test_database.cleanup().await?;
+    let (anonymous, probes) = evidence?;
+
+    for (status, challenge) in anonymous {
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            challenge,
+            Some(header::HeaderValue::from_static(
+                "Bearer error=\"invalid_token\""
+            ))
+        );
+    }
+    assert!(
+        probes.into_iter().all(|status| status == StatusCode::OK),
+        "canonical probes remain the only anonymous routes"
+    );
+    assert!(removed);
+    Ok(())
+}
+
+#[tokio::test]
+async fn postgres_authenticated_sessions_reach_protected_routes() -> Result<(), Box<dyn Error>> {
+    let Some(test_database) = PostgresTestDatabase::create(true).await? else {
+        return Ok(());
+    };
+
+    let evidence = async {
+        let owner = test_principal(&test_database.connection).await?;
+        let session = create_session::execute(&test_database.connection, owner).await?;
+        let authorization = format!("Bearer {}", session.access_plaintext);
+        let router = production_router(&test_database.connection).await?;
+
+        let mut protected = Vec::new();
+        for request in [
+            Request::get("/api/v1/status")
+                .header(header::AUTHORIZATION, &authorization)
+                .body(Body::empty())?,
+            Request::get("/api/v1/openapi.json")
+                .header(header::AUTHORIZATION, &authorization)
+                .body(Body::empty())?,
+        ] {
+            protected.push(router.clone().oneshot(request).await?.status());
+        }
+
+        // Refresh carries its own refresh credential and no access header:
+        // the lifecycle exemption must survive protected composition. It
+        // runs last because rotation invalidates the access credential above.
+        let refresh = router
+            .clone()
+            .oneshot(
+                Request::post("/api/v1/auth/tokens/refresh")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::json!({ "refreshCredential": session.refresh_plaintext })
+                            .to_string(),
+                    ))?,
+            )
+            .await?;
+        let refresh_status = refresh.status();
+
+        Ok::<_, Box<dyn Error>>((refresh_status, protected))
+    }
+    .await;
+    let removed = test_database.cleanup().await?;
+    let (refresh_status, protected) = evidence?;
+
+    assert_eq!(refresh_status, StatusCode::OK);
+    assert!(
+        protected.into_iter().all(|status| status == StatusCode::OK),
+        "valid sessions reach status, OpenAPI, and polling"
+    );
+    assert!(removed);
+    Ok(())
+}
+
+#[tokio::test]
+async fn postgres_operation_polling_is_scoped_to_the_admission_principal()
+-> Result<(), Box<dyn Error>> {
+    let Some(test_database) = PostgresTestDatabase::create(true).await? else {
+        return Ok(());
+    };
+
+    let evidence = async {
+        let owner_a = test_principal(&test_database.connection).await?;
+        let owner_b = test_principal(&test_database.connection).await?;
+        let admitted = admit::execute(
+            &test_database.connection,
+            admission_request(owner_a, "scoped-poll", b"scoped")?,
+        )
+        .await?;
+        let session_a = create_session::execute(&test_database.connection, owner_a).await?;
+        let session_b = create_session::execute(&test_database.connection, owner_b).await?;
+        let router = production_router(&test_database.connection).await?;
+
+        let get_operation = |credential: &str, operation_id: Uuid| {
+            Request::get(format!("/api/v1/operations/{operation_id}"))
+                .header(header::AUTHORIZATION, format!("Bearer {credential}"))
+                .body(Body::empty())
+        };
+        let own = router
+            .clone()
+            .oneshot(get_operation(
+                &session_a.access_plaintext,
+                admitted.operation.id,
+            )?)
+            .await?;
+        let own_status = own.status();
+        let own_body = to_bytes(own.into_body(), 1024 * 1024).await?;
+
+        let foreign = router
+            .clone()
+            .oneshot(get_operation(
+                &session_b.access_plaintext,
+                admitted.operation.id,
+            )?)
+            .await?;
+        let foreign_status = foreign.status();
+        let foreign_body = to_bytes(foreign.into_body(), 1024 * 1024).await?;
+
+        let missing = router
+            .clone()
+            .oneshot(get_operation(&session_b.access_plaintext, Uuid::now_v7())?)
+            .await?;
+        let missing_status = missing.status();
+        let missing_body = to_bytes(missing.into_body(), 1024 * 1024).await?;
+
+        // Header-only transport: the same valid credential in a query string
+        // or cookie, without the header, must not authenticate.
+        let mut bypass = Vec::new();
+        bypass.push(
+            router
+                .clone()
+                .oneshot(
+                    Request::get(format!(
+                        "/api/v1/operations/{}?accessCredential={}",
+                        admitted.operation.id, session_a.access_plaintext
+                    ))
+                    .body(Body::empty())?,
+                )
+                .await?
+                .status(),
+        );
+        bypass.push(
+            router
+                .clone()
+                .oneshot(
+                    Request::get(format!("/api/v1/operations/{}", admitted.operation.id))
+                        .header(
+                            header::COOKIE,
+                            format!("session={}", session_a.access_plaintext),
+                        )
+                        .body(Body::empty())?,
+                )
+                .await?
+                .status(),
+        );
+
+        Ok::<_, Box<dyn Error>>((
+            own_status,
+            own_body,
+            foreign_status,
+            foreign_body,
+            missing_status,
+            missing_body,
+            bypass,
+        ))
+    }
+    .await;
+    let removed = test_database.cleanup().await?;
+    let (own_status, own_body, foreign_status, foreign_body, missing_status, missing_body, bypass) =
+        evidence?;
+
+    assert_eq!(own_status, StatusCode::OK);
+    let document: serde_json::Value = serde_json::from_slice(&own_body)?;
+    assert_eq!(document["state"], OperationState::Recoverable.as_str());
+    assert_eq!(foreign_status, StatusCode::NOT_FOUND);
+    assert_eq!(missing_status, StatusCode::NOT_FOUND);
+    assert_eq!(
+        foreign_body, missing_body,
+        "cross-principal and nonexistent operations are indistinguishable"
+    );
+    assert!(
+        bypass
+            .into_iter()
+            .all(|status| status == StatusCode::UNAUTHORIZED),
+        "query and cookie credentials must not authenticate"
+    );
+    assert!(removed);
+    Ok(())
+}
+
+#[tokio::test]
+async fn postgres_authentication_database_failure_denies_closed() -> Result<(), Box<dyn Error>> {
+    let Some(test_database) = PostgresTestDatabase::create(true).await? else {
+        return Ok(());
+    };
+    let owner = test_principal(&test_database.connection).await?;
+    let session = create_session::execute(&test_database.connection, owner).await?;
+    let router = production_router(&test_database.connection).await?;
+    test_database.connection.clone().close().await?;
+
+    // A well-formed credential against an unavailable database must fail as
+    // a server-side outage, never as an authentication decision, and the
+    // handler must not run (a lookup miss would be 401, a poll would be 200).
+    let response = router
+        .oneshot(
+            Request::get(format!("/api/v1/operations/{}", Uuid::now_v7()))
+                .header(
+                    header::AUTHORIZATION,
+                    format!("Bearer {}", session.access_plaintext),
+                )
+                .body(Body::empty())?,
+        )
+        .await?;
+
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert!(test_database.cleanup().await?);
     Ok(())
 }
