@@ -64,6 +64,9 @@ impl Modify for AccessSessionSecurity {
         super::operations::show,
         super::sessions::refresh,
         super::sessions::logout_current,
+        super::github_login::start,
+        super::github_login::callback,
+        super::github_login::redeem,
         super::health::live,
         super::health::startup,
         super::health::ready
@@ -74,6 +77,10 @@ impl Modify for AccessSessionSecurity {
         OperationStateResponse,
         super::sessions::RefreshRequest,
         super::sessions::SessionTokenResponse,
+        super::github_login::StartLoginRequest,
+        super::github_login::StartLoginResponse,
+        super::github_login::RedeemLoginRequest,
+        super::github_login::GithubLoginResponse,
         super::health::HealthResponse
     )),
     modifiers(&AccessSessionSecurity),
