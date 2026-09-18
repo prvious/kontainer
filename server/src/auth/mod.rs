@@ -4,6 +4,7 @@ pub mod actions;
 pub mod credentials;
 pub mod domain;
 pub mod entities;
+pub mod github;
 pub mod request;
 
 #[cfg(test)]
