@@ -31,14 +31,17 @@ fn response(ok: bool) -> Response {
 }
 
 #[utoipa::path(get, path = "/health/live", responses((status = 200, body = HealthResponse)))]
-pub(crate) async fn live() -> Response {
+/// Canonical liveness probe: the public HTTP listener serves requests.
+/// Part of the documented probe contract; see the controller README section.
+pub async fn live() -> Response {
     response(true)
 }
 
 // The supervisor admits no HTTP requests until static configuration and RPC TLS
 // preparation succeed. Reaching this handler therefore proves startup completed.
+/// Canonical startup probe. Part of the documented probe contract.
 #[utoipa::path(get, path = "/health/startup", responses((status = 200, body = HealthResponse)))]
-pub(crate) async fn startup() -> Response {
+pub async fn startup() -> Response {
     response(true)
 }
 
@@ -46,7 +49,8 @@ pub(crate) async fn startup() -> Response {
     (status = 200, body = HealthResponse),
     (status = 503, body = HealthResponse)
 ))]
-pub(crate) async fn ready(State(context): State<AppContext>) -> Response {
+/// Canonical readiness probe. Part of the documented probe contract.
+pub async fn ready(State(context): State<AppContext>) -> Response {
     let Some(shutdown) = context.shared_store.get::<CancellationToken>() else {
         return response(false);
     };
@@ -54,7 +58,8 @@ pub(crate) async fn ready(State(context): State<AppContext>) -> Response {
 }
 
 /// Requests already admitted may drain; new application requests must not start.
-pub(crate) async fn admit_request(
+/// Public so integration tests exercise the exact production admission policy.
+pub async fn admit_request(
     State(shutdown): State<CancellationToken>,
     request: Request,
     next: Next,

@@ -119,6 +119,26 @@ time. The one-second database probe deadline is an operational default, not an
 availability SLO. `/api/v1/status` reports build/liveness information only. The
 framework defaults `/_ping`, `/_health`, and `/_readiness` are not exposed.
 
+### Public HTTP transport
+
+Production serves the public API (including the probes above) over TLS and
+fails closed before admitting any handler when the identity is missing,
+malformed, or mismatched:
+
+```yaml
+settings:
+  public_http:
+    mode: tls
+    tls:
+      certificate_path: <%= get_env(name="PUBLIC_HTTP_TLS_CERTIFICATE_PATH") %>
+      private_key_path: <%= get_env(name="PUBLIC_HTTP_TLS_PRIVATE_KEY_PATH") %>
+```
+
+Development and Test may use `mode: plaintext` only when the bind address
+and the advertised `server.host` URL are both loopback; production rejects
+plaintext even on loopback. There is no plaintext fallback, redirect
+listener, ACME, rotation, or hot reload.
+
 ## Testing
 
 For real PostgreSQL integration tests, reuse the project's persistent Compose

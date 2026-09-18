@@ -36,3 +36,8 @@ settings:
       certificate_path: <%= get_env(name="AGENT_RPC_TLS_CERTIFICATE_PATH") %>
       private_key_path: <%= get_env(name="AGENT_RPC_TLS_PRIVATE_KEY_PATH") %>
       client_ca_path: <%= get_env(name="AGENT_RPC_TLS_CLIENT_CA_PATH") %>
+  public_http:
+    mode: tls
+    tls:
+      certificate_path: <%= get_env(name="PUBLIC_HTTP_TLS_CERTIFICATE_PATH") %>
+      private_key_path: <%= get_env(name="PUBLIC_HTTP_TLS_PRIVATE_KEY_PATH") %>

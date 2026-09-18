@@ -36,3 +36,5 @@ settings:
       certificate_path: <%= get_env(name="AGENT_RPC_TLS_CERTIFICATE_PATH", default="config/dev-controller.pem") %>
       private_key_path: <%= get_env(name="AGENT_RPC_TLS_PRIVATE_KEY_PATH", default="config/dev-controller-key.pem") %>
       client_ca_path: <%= get_env(name="AGENT_RPC_TLS_CLIENT_CA_PATH", default="config/dev-agent-ca.pem") %>
+  public_http:
+    mode: plaintext
