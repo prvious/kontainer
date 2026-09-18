@@ -12,6 +12,7 @@ service ControllerIntake {
 // work. It never exposes the Docker socket itself.
 service NodeAgent {
   rpc Describe(DescribeRequest) returns (DescribeResponse);
+  rpc ListContainers(ListContainersRequest) returns (ListContainersResponse);
 }
 
 message CheckInRequest {
@@ -32,5 +33,47 @@ message DescribeResponse {
   string agent_version = 2;
   string architecture = 3;
   bool docker_connected = 4;
+}
+
+message ListContainersRequest {
+  // Zero selects the documented default. Values above the hard maximum are
+  // rejected before any Engine access.
+  uint32 page_size = 1;
+  // Empty means the first page. Otherwise an opaque cursor from a previous
+  // response.
+  string page_token = 2;
+}
+
+enum ContainerState {
+  CONTAINER_STATE_UNSPECIFIED = 0;
+  CONTAINER_STATE_UNKNOWN = 1;
+  CONTAINER_STATE_CREATED = 2;
+  CONTAINER_STATE_RUNNING = 3;
+  CONTAINER_STATE_PAUSED = 4;
+  CONTAINER_STATE_RESTARTING = 5;
+  CONTAINER_STATE_REMOVING = 6;
+  CONTAINER_STATE_EXITED = 7;
+  CONTAINER_STATE_DEAD = 8;
+  CONTAINER_STATE_STOPPING = 9;
+}
+
+message ContainerSummary {
+  string container_id = 1;
+  string display_name = 2;
+  string image_reference = 3;
+  ContainerState state = 4;
+  string status = 5;
+  // Unix epoch seconds from the daemon. Public presentation formatting
+  // belongs to the controller edge.
+  int64 created_at_unix_seconds = 6;
+  // Provenance is always the serving agent's configured node ID.
+  string node_id = 7;
+}
+
+message ListContainersResponse {
+  repeated ContainerSummary containers = 1;
+  // Empty when the page is last. Otherwise an opaque cursor for the next
+  // request.
+  string next_page_token = 2;
 }
 
