@@ -5,6 +5,7 @@ use bollard::errors::Error as BollardError;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EngineErrorKind {
     InvalidConfiguration,
+    InvalidInput,
     ConnectionUnavailable,
     DeadlineExceeded,
     Cancelled,
@@ -23,6 +24,7 @@ pub enum EngineOperation {
     ReadVersion,
     ReadSystemInfo,
     Describe,
+    ListContainers,
 }
 
 impl fmt::Display for EngineOperation {
@@ -34,6 +36,7 @@ impl fmt::Display for EngineOperation {
             Self::ReadVersion => "read version",
             Self::ReadSystemInfo => "read system information",
             Self::Describe => "describe",
+            Self::ListContainers => "list containers",
         };
         formatter.write_str(name)
     }

@@ -4,12 +4,19 @@ use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
 
 mod capability;
+mod container;
 mod error;
 mod local;
 
 pub use capability::{
     CapabilityStatus, EngineAccessScope, EngineApiVersion, EngineApiVersionParseError,
     EngineCapabilities, EngineDescription, UnsupportedCapabilityReason,
+};
+pub use container::{
+    ContainerPage, ContainerPageRequest, ContainerState, ContainerSummary,
+    DEFAULT_CONTAINER_PAGE_SIZE, MAX_CONTAINER_PAGE_SIZE, MAX_CONTAINER_PAGE_TOKEN_LEN,
+    MAX_CONTAINER_STATUS_LEN, canonical_display_name, format_page_token, is_valid_container_id,
+    parse_page_token, truncate_status_text,
 };
 pub use error::{EngineError, EngineErrorKind, EngineOperation};
 pub use local::{LocalDockerEngine, LocalEngineOptions};
@@ -25,6 +32,17 @@ pub trait ContainerEngine: Send + Sync {
         Err(EngineError::new(
             EngineErrorKind::UnsupportedCapability,
             EngineOperation::Describe,
+        ))
+    }
+
+    async fn list_containers(
+        &self,
+        _request: ContainerPageRequest,
+        _cancellation: &CancellationToken,
+    ) -> Result<ContainerPage, EngineError> {
+        Err(EngineError::new(
+            EngineErrorKind::UnsupportedCapability,
+            EngineOperation::ListContainers,
         ))
     }
 }
