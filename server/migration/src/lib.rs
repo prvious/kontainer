@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod m20260823_000001_create_durable_operations;
+mod m20260917_000002_create_server_sessions;
 
 pub use sea_orm_migration::prelude::*;
 
@@ -9,9 +10,10 @@ pub struct Migrator;
 #[async_trait::async_trait]
 impl MigratorTrait for Migrator {
     fn migrations() -> Vec<Box<dyn MigrationTrait>> {
-        vec![Box::new(
-            m20260823_000001_create_durable_operations::Migration,
-        )]
+        vec![
+            Box::new(m20260823_000001_create_durable_operations::Migration),
+            Box::new(m20260917_000002_create_server_sessions::Migration),
+        ]
     }
 }
 
@@ -21,6 +23,6 @@ mod tests {
 
     #[test]
     fn durable_operation_migration_is_registered() {
-        assert_eq!(Migrator::migrations().len(), 1);
+        assert_eq!(Migrator::migrations().len(), 2);
     }
 }

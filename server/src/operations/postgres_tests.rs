@@ -1,15 +1,14 @@
-use std::{env, error::Error, io, path::Path, time::Duration as StdDuration};
+use std::{error::Error, io, path::Path, time::Duration as StdDuration};
 
 use axum::{Router, body::Body, body::to_bytes, http::Request, routing::get};
 use chrono::{Duration, Utc};
 use loco_rs::{app::AppContext, config::Config, environment::Environment};
 use migration::{Migrator, MigratorTrait, SchemaManager};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, Database, DatabaseConnection,
-    DbBackend, EntityTrait, PaginatorTrait, QueryFilter, QueryResult, Statement, TransactionTrait,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter,
+    TransactionTrait,
 };
 use tower::ServiceExt;
-use url::Url;
 use uuid::Uuid;
 
 use super::{
@@ -17,9 +16,7 @@ use super::{
     domain::{AdmitOperationRequest, OperationState, PrincipalContext},
     entities::{audit_intent, idempotency_record, operation, operation_event},
 };
-
-const TEST_DATABASE_URL: &str = "KONTAINER_TEST_DATABASE_URL";
-const REQUIRE_POSTGRES_TESTS: &str = "KONTAINER_REQUIRE_POSTGRES_TESTS";
+use crate::test_support::PostgresTestDatabase;
 
 #[tokio::test]
 async fn readiness_tracks_postgres_and_shutdown_without_reporting_dependency_details()
@@ -75,80 +72,6 @@ async fn readiness_tracks_postgres_and_shutdown_without_reporting_dependency_det
     Ok(())
 }
 
-struct PostgresTestDatabase {
-    admin_url: Url,
-    database_name: String,
-    connection: DatabaseConnection,
-}
-
-impl PostgresTestDatabase {
-    async fn create(apply_migrations: bool) -> Result<Option<Self>, Box<dyn Error>> {
-        let Ok(raw_admin_url) = env::var(TEST_DATABASE_URL) else {
-            if env::var(REQUIRE_POSTGRES_TESTS).as_deref() == Ok("1") {
-                return Err(io::Error::other(format!(
-                    "{TEST_DATABASE_URL} is required when {REQUIRE_POSTGRES_TESTS}=1"
-                ))
-                .into());
-            }
-            eprintln!("skipping PostgreSQL integration test: {TEST_DATABASE_URL} is not set");
-            return Ok(None);
-        };
-
-        let mut admin_url = Url::parse(&raw_admin_url)?;
-        admin_url.set_path("/postgres");
-        let database_name = format!("kontainer_test_{}", Uuid::now_v7().simple());
-        let admin = Database::connect(admin_url.as_str()).await?;
-
-        // PostgreSQL does not parameterize database identifiers and SeaQuery does
-        // not model CREATE DATABASE. The name is generated internally from a UUID,
-        // then quoted, so this test-only administrative statement has no caller input.
-        admin
-            .execute_raw(Statement::from_string(
-                DbBackend::Postgres,
-                format!("CREATE DATABASE \"{database_name}\""),
-            ))
-            .await?;
-        admin.close().await?;
-
-        let mut database_url = admin_url.clone();
-        database_url.set_path(&format!("/{database_name}"));
-        let connection = Database::connect(database_url.as_str()).await?;
-        if apply_migrations {
-            Migrator::up(&connection, None).await?;
-        }
-
-        Ok(Some(Self {
-            admin_url,
-            database_name,
-            connection,
-        }))
-    }
-
-    async fn cleanup(self) -> Result<bool, Box<dyn Error>> {
-        self.connection.close().await?;
-        let admin = Database::connect(self.admin_url.as_str()).await?;
-
-        // FORCE makes cleanup deterministic if a failed assertion left a pooled
-        // test connection alive. The database name is the UUID-derived value above.
-        admin
-            .execute_raw(Statement::from_string(
-                DbBackend::Postgres,
-                format!("DROP DATABASE \"{}\" WITH (FORCE)", self.database_name),
-            ))
-            .await?;
-        let remaining: Option<QueryResult> = admin
-            .query_one_raw(Statement::from_sql_and_values(
-                DbBackend::Postgres,
-                "SELECT 1 FROM pg_database WHERE datname = $1",
-                [self.database_name.into()],
-            ))
-            .await?;
-        admin.close().await?;
-
-        Ok(remaining.is_none())
-    }
-}
-
 fn admission_request(
     idempotency_key: &str,
     canonical_request: &[u8],
@@ -186,6 +109,10 @@ async fn postgres_migration_up_down_status_and_cleanup() -> Result<(), Box<dyn E
             schema.has_table("idempotency_records").await?,
             schema.has_table("operation_events").await?,
             schema.has_table("audit_intents").await?,
+            schema.has_table("principals").await?,
+            schema.has_table("session_families").await?,
+            schema.has_table("refresh_credentials").await?,
+            schema.has_table("security_audit_intents").await?,
         ];
 
         Migrator::down(&test_database.connection, None).await?;
@@ -198,6 +125,10 @@ async fn postgres_migration_up_down_status_and_cleanup() -> Result<(), Box<dyn E
             schema.has_table("idempotency_records").await?,
             schema.has_table("operation_events").await?,
             schema.has_table("audit_intents").await?,
+            schema.has_table("principals").await?,
+            schema.has_table("session_families").await?,
+            schema.has_table("refresh_credentials").await?,
+            schema.has_table("security_audit_intents").await?,
         ];
 
         Ok::<_, sea_orm::DbErr>((
@@ -213,9 +144,9 @@ async fn postgres_migration_up_down_status_and_cleanup() -> Result<(), Box<dyn E
     let (pending_before, applied_after_up, pending_after_down, tables_after_up, tables_after_down) =
         evidence?;
 
-    assert_eq!(pending_before, 1);
-    assert_eq!(applied_after_up, 1);
-    assert_eq!(pending_after_down, 1);
+    assert_eq!(pending_before, 2);
+    assert_eq!(applied_after_up, 2);
+    assert_eq!(pending_after_down, 2);
     assert!(tables_after_up.into_iter().all(|exists| exists));
     assert!(tables_after_down.into_iter().all(|exists| !exists));
     assert!(removed);
