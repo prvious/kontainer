@@ -1,10 +1,18 @@
-use std::{error::Error, path::Path};
+use std::{
+    error::Error,
+    path::Path,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
+};
 
 use axum::{
     Router,
     body::{Body, to_bytes},
     http::{HeaderValue, Request, StatusCode, header},
-    routing::{delete, post},
+    middleware,
+    routing::{delete, get, post},
 };
 use chrono::{Duration, Utc};
 use loco_rs::{
@@ -24,8 +32,9 @@ use uuid::Uuid;
 
 use super::{
     actions::{create_session, revoke_session_family, rotate_refresh, validate_access},
-    domain::{IssuedSession, RevocationReason, actions},
+    domain::{IssuedSession, PrincipalContext, RevocationReason, actions},
     entities::{principal, refresh_credential, security_audit_intent, session_family},
+    request::require_access_session,
 };
 use crate::{app::App, test_support::PostgresTestDatabase};
 
@@ -1022,5 +1031,238 @@ async fn postgres_session_openapi_registers_auth_routes_without_secrets()
         !serialized.contains("\"in\":\"cookie\""),
         "no cookie credential transport"
     );
+
+    // Opaque access-session security is the default; probes and the refresh
+    // lifecycle explicitly opt out.
+    assert_eq!(
+        document["components"]["securitySchemes"]["access_session"]["type"],
+        "http"
+    );
+    assert_eq!(
+        document["components"]["securitySchemes"]["access_session"]["scheme"],
+        "bearer"
+    );
+    assert_eq!(
+        document["components"]["securitySchemes"]["access_session"]["bearerFormat"],
+        "opaque"
+    );
+    assert!(
+        document["security"]
+            .as_array()
+            .is_some_and(|security| security
+                .iter()
+                .any(|requirement| requirement.get("access_session").is_some())),
+        "protected operations inherit access-session security"
+    );
+    for path in ["/health/live", "/health/startup", "/health/ready"] {
+        let operation = &document["paths"][path]["get"];
+        assert_eq!(
+            operation.get("security"),
+            Some(&serde_json::json!([{}])),
+            "{path} is an anonymous probe"
+        );
+    }
+    assert_eq!(
+        document["paths"]["/api/v1/auth/tokens/refresh"]["post"].get("security"),
+        Some(&serde_json::json!([{}])),
+        "refresh uses its own refresh credential, not the access session"
+    );
+    // Logout and polling inherit the default; they document their own 401.
+    assert!(
+        document["paths"]["/api/v1/auth/sessions/current"]["delete"]
+            .get("security")
+            .is_none()
+    );
+    assert!(
+        document["paths"]["/api/v1/operations/{operation_id}"]["get"]
+            .get("security")
+            .is_none()
+    );
+    Ok(())
+}
+
+/// Minimal guarded route proving the middleware/extractor contract: the
+/// handler observes only the persisted principal, never request input.
+fn guarded_probe(context: AppContext, calls: Arc<AtomicUsize>) -> Router {
+    Router::new()
+        .route(
+            "/probe",
+            get(move |principal: PrincipalContext| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                let id = principal.principal_id();
+                async move { id.to_string() }
+            }),
+        )
+        .layer(middleware::from_fn_with_state(
+            context.db.clone(),
+            require_access_session,
+        ))
+        .with_state(context)
+}
+
+#[tokio::test]
+async fn postgres_access_middleware_extracts_the_persisted_principal() -> Result<(), Box<dyn Error>>
+{
+    let Some(test_database) = PostgresTestDatabase::create(true).await? else {
+        return Ok(());
+    };
+
+    let evidence = async {
+        let session = issued(&test_database.connection).await?;
+        let context = test_context(test_database.connection.clone()).await?;
+        let calls = Arc::new(AtomicUsize::new(0));
+        let router = guarded_probe(context, calls.clone());
+
+        // Valid access reaches the handler with the persisted principal ID.
+        // Spoofed query, cookie, and extra header input cannot change it.
+        let valid = router
+            .clone()
+            .oneshot(
+                Request::get(format!(
+                    "/probe?principal_id={}&accessCredential={}",
+                    uuid::Uuid::now_v7(),
+                    session.access_plaintext
+                ))
+                .header(
+                    header::AUTHORIZATION,
+                    format!("Bearer {}", session.access_plaintext),
+                )
+                .header(header::COOKIE, "principal_id=forged")
+                .header("x-principal-id", session.principal_id.to_string())
+                .body(Body::empty())?,
+            )
+            .await?;
+        let valid_status = valid.status();
+        let valid_body = to_bytes(valid.into_body(), 256).await?;
+
+        // Header variants never reach the handler and share one challenge.
+        let mut denied = Vec::new();
+        denied.push(
+            router
+                .clone()
+                .oneshot(Request::get("/probe").body(Body::empty())?)
+                .await?,
+        );
+        denied.push(
+            router
+                .clone()
+                .oneshot(
+                    Request::get("/probe")
+                        .header(header::AUTHORIZATION, "Basic abc")
+                        .body(Body::empty())?,
+                )
+                .await?,
+        );
+        let mut duplicated = Request::get("/probe");
+        duplicated = duplicated.header(
+            header::AUTHORIZATION,
+            format!("Bearer {}", session.access_plaintext),
+        );
+        duplicated = duplicated.header(header::AUTHORIZATION, "Bearer not-a-credential");
+        denied.push(
+            router
+                .clone()
+                .oneshot(duplicated.body(Body::empty())?)
+                .await?,
+        );
+        let denied_statuses: Vec<StatusCode> =
+            denied.iter().map(|response| response.status()).collect();
+        let challenges: Vec<Option<HeaderValue>> = denied
+            .iter()
+            .map(|response| response.headers().get(header::WWW_AUTHENTICATE).cloned())
+            .collect();
+
+        Ok::<_, Box<dyn Error>>((
+            valid_status,
+            valid_body,
+            session.principal_id,
+            denied_statuses,
+            challenges,
+            calls.load(Ordering::SeqCst),
+        ))
+    }
+    .await;
+    let removed = test_database.cleanup().await?;
+    let (valid_status, valid_body, principal_id, denied_statuses, challenges, handler_calls) =
+        evidence?;
+
+    assert_eq!(valid_status, StatusCode::OK);
+    assert_eq!(valid_body.as_ref(), principal_id.to_string().as_bytes());
+    assert!(
+        denied_statuses
+            .into_iter()
+            .all(|status| status == StatusCode::UNAUTHORIZED)
+    );
+    assert!(
+        challenges.into_iter().all(|challenge| challenge
+            == Some(HeaderValue::from_static("Bearer error=\"invalid_token\"")))
+    );
+    assert_eq!(
+        handler_calls, 1,
+        "denied requests must not invoke the handler"
+    );
+    assert!(removed);
+    Ok(())
+}
+
+#[tokio::test]
+async fn postgres_access_middleware_denies_closed_sessions_without_the_handler()
+-> Result<(), Box<dyn Error>> {
+    let Some(test_database) = PostgresTestDatabase::create(true).await? else {
+        return Ok(());
+    };
+
+    let evidence = async {
+        let principal = test_principal(&test_database.connection, "active").await?;
+        let session = create_session::execute(&test_database.connection, principal).await?;
+        revoke_session_family::execute(
+            &test_database.connection,
+            session.family_id,
+            RevocationReason::Logout,
+        )
+        .await?;
+        let context = test_context(test_database.connection.clone()).await?;
+        let calls = Arc::new(AtomicUsize::new(0));
+        let router = guarded_probe(context, calls.clone());
+
+        let revoked = router
+            .clone()
+            .oneshot(
+                Request::get("/probe")
+                    .header(
+                        header::AUTHORIZATION,
+                        format!("Bearer {}", session.access_plaintext),
+                    )
+                    .body(Body::empty())?,
+            )
+            .await?
+            .status();
+
+        // A well-formed credential against an unavailable database fails as
+        // an outage, not an authentication decision.
+        test_database.connection.clone().close().await?;
+        let unavailable = router
+            .clone()
+            .oneshot(
+                Request::get("/probe")
+                    .header(
+                        header::AUTHORIZATION,
+                        format!("Bearer {}", session.access_plaintext),
+                    )
+                    .body(Body::empty())?,
+            )
+            .await?;
+        let unavailable_status = unavailable.status();
+
+        Ok::<_, Box<dyn Error>>((revoked, unavailable_status, calls.load(Ordering::SeqCst)))
+    }
+    .await;
+    let removed = test_database.cleanup().await?;
+    let (revoked, unavailable_status, handler_calls) = evidence?;
+
+    assert_eq!(revoked, StatusCode::UNAUTHORIZED);
+    assert_eq!(unavailable_status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(handler_calls, 0, "no denied request may invoke the handler");
+    assert!(removed);
     Ok(())
 }

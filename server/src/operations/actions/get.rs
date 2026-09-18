@@ -4,9 +4,12 @@ use sea_orm::{
 };
 use uuid::Uuid;
 
-use crate::operations::{
-    domain::{CorruptOperationState, OperationSnapshot},
-    entities::{operation, operation_event},
+use crate::{
+    auth::domain::PrincipalContext,
+    operations::{
+        domain::{CorruptOperationState, OperationSnapshot},
+        entities::{idempotency_record, operation, operation_event},
+    },
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -23,12 +26,28 @@ pub enum GetOperationError {
 
 pub async fn execute(
     database: &DatabaseConnection,
+    principal: &PrincipalContext,
     operation_id: Uuid,
 ) -> Result<OperationSnapshot, GetOperationError> {
+    let principal_ref = principal.reference();
     database
         .transaction_with_config(
             |transaction| {
                 Box::pin(async move {
+                    // Visibility derives from the immutable admission-principal
+                    // binding. A missing binding returns the same NotFound as
+                    // a nonexistent operation so callers cannot probe for
+                    // another principal's operations.
+                    let visible = idempotency_record::Entity::find()
+                        .filter(idempotency_record::Column::OperationId.eq(operation_id))
+                        .filter(idempotency_record::Column::PrincipalRef.eq(&principal_ref))
+                        .one(transaction)
+                        .await
+                        .map_err(GetOperationError::Persistence)?
+                        .is_some();
+                    if !visible {
+                        return Err(GetOperationError::NotFound);
+                    }
                     let operation = operation::Entity::find_by_id(operation_id)
                         .one(transaction)
                         .await

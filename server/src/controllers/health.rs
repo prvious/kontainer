@@ -30,7 +30,7 @@ fn response(ok: bool) -> Response {
         .into_response()
 }
 
-#[utoipa::path(get, path = "/health/live", responses((status = 200, body = HealthResponse)))]
+#[utoipa::path(get, path = "/health/live", responses((status = 200, body = HealthResponse)), security(()))]
 /// Canonical liveness probe: the public HTTP listener serves requests.
 /// Part of the documented probe contract; see the controller README section.
 pub async fn live() -> Response {
@@ -40,7 +40,7 @@ pub async fn live() -> Response {
 // The supervisor admits no HTTP requests until static configuration and RPC TLS
 // preparation succeed. Reaching this handler therefore proves startup completed.
 /// Canonical startup probe. Part of the documented probe contract.
-#[utoipa::path(get, path = "/health/startup", responses((status = 200, body = HealthResponse)))]
+#[utoipa::path(get, path = "/health/startup", responses((status = 200, body = HealthResponse)), security(()))]
 pub async fn startup() -> Response {
     response(true)
 }
@@ -48,7 +48,7 @@ pub async fn startup() -> Response {
 #[utoipa::path(get, path = "/health/ready", responses(
     (status = 200, body = HealthResponse),
     (status = 503, body = HealthResponse)
-))]
+), security(()))]
 /// Canonical readiness probe. Part of the documented probe contract.
 pub async fn ready(State(context): State<AppContext>) -> Response {
     let Some(shutdown) = context.shared_store.get::<CancellationToken>() else {
