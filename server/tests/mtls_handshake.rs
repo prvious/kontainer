@@ -19,7 +19,9 @@ use kontainer_agent_proto::{
     },
 };
 use kontainer_controller::rpc::serve_controller_rpc;
-use kontainer_controller::server::{BoundAgentRpcServer, supervise_controller_servers};
+use kontainer_controller::server::{
+    BoundAgentRpcServer, BoundHttpServer, HttpTransport, supervise_controller_servers,
+};
 use kontainer_engine::{ContainerEngine, EngineError};
 use kontainer_node_agent::{NodeAgentService, serve_node_agent_rpc};
 use kontainer_rpc_auth::MutualTlsIdentityFiles;
@@ -278,7 +280,10 @@ async fn shared_shutdown_joins_controller_http_and_rpc_tasks() {
     let mut task = tokio::spawn(async move {
         supervise_controller_servers(
             router,
-            http_listener,
+            BoundHttpServer {
+                listener: http_listener,
+                transport: HttpTransport::Plaintext,
+            },
             Some(BoundAgentRpcServer {
                 listener: rpc_listener,
                 cluster_id: CLUSTER_ID.to_owned(),
@@ -338,7 +343,15 @@ async fn already_cancelled_controller_shutdown_is_successful() {
 
         timeout(
             Duration::from_secs(2),
-            supervise_controller_servers(Router::new(), listener, None, cancellation),
+            supervise_controller_servers(
+                Router::new(),
+                BoundHttpServer {
+                    listener,
+                    transport: HttpTransport::Plaintext,
+                },
+                None,
+                cancellation,
+            ),
         )
         .await
         .expect("already cancelled supervisor did not join")
@@ -360,7 +373,10 @@ async fn rpc_startup_failure_cancels_and_joins_the_http_server() {
         Duration::from_secs(2),
         supervise_controller_servers(
             Router::new(),
-            http_listener,
+            BoundHttpServer {
+                listener: http_listener,
+                transport: HttpTransport::Plaintext,
+            },
             Some(BoundAgentRpcServer {
                 listener: rpc_listener,
                 cluster_id: CLUSTER_ID.to_owned(),
@@ -448,7 +464,10 @@ async fn invalid_tls_fails_before_rpc_polling_or_http_admission() {
             Duration::from_secs(2),
             supervise_controller_servers(
                 router,
-                http_listener,
+                BoundHttpServer {
+                    listener: http_listener,
+                    transport: HttpTransport::Plaintext,
+                },
                 Some(BoundAgentRpcServer {
                     listener: rpc_listener,
                     cluster_id: CLUSTER_ID.to_owned(),

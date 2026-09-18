@@ -30,3 +30,5 @@ settings:
       certificate_path: config/test-controller.pem
       private_key_path: config/test-controller-key.pem
       client_ca_path: config/test-agent-ca.pem
+  public_http:
+    mode: plaintext

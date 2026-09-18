@@ -67,6 +67,13 @@ jobs:
       - name: Check workspace
         run: cargo check --manifest-path server/Cargo.toml --workspace --all-targets
 
+      - name: Guard single crypto provider
+        run: |
+          if cargo tree --manifest-path server/Cargo.toml --workspace -e features | grep -E "aws-lc-rs|aws-lc-sys"; then
+            echo "aws-lc packages must stay out of the tree: ring is the only rustls crypto engine" >&2
+            exit 1
+          fi
+
       - name: Run Clippy
         run: cargo clippy --manifest-path server/Cargo.toml --workspace --all-targets -- -D warnings
 
