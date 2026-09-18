@@ -50,6 +50,7 @@ impl Hooks for App {
                 vec![
                     controllers::status::routes(),
                     controllers::operations::routes(),
+                    controllers::sessions::routes(),
                 ],
             )
     }

@@ -39,6 +39,8 @@ async fn show() -> Result<Response> {
     paths(
         show,
         super::operations::show,
+        super::sessions::refresh,
+        super::sessions::logout_current,
         super::health::live,
         super::health::startup,
         super::health::ready
@@ -47,10 +49,12 @@ async fn show() -> Result<Response> {
         StatusResponse,
         OperationResponse,
         OperationStateResponse,
+        super::sessions::RefreshRequest,
+        super::sessions::SessionTokenResponse,
         super::health::HealthResponse
     ))
 )]
-struct ApiDoc;
+pub(crate) struct ApiDoc;
 
 async fn openapi() -> Result<Response> {
     format::json(ApiDoc::openapi())
