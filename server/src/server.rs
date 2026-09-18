@@ -429,10 +429,9 @@ pub fn init_shared_auth_state(ctx: &AppContext) -> Result<()> {
     let service = if settings.github_auth.enabled {
         let secret_path = settings
             .github_auth
-            .client_secret_path
-            .clone()
+            .secret_path()
             .ok_or_else(|| Error::string("github_auth client secret is unavailable"))?;
-        let raw = std::fs::read_to_string(&secret_path)
+        let raw = std::fs::read_to_string(secret_path)
             .map_err(|_| Error::string("github_auth client secret is unavailable"))?;
         let secret = raw.trim_end_matches(['\n', '\r']);
         if secret.is_empty() {

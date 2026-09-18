@@ -44,3 +44,11 @@ settings:
     tls:
       certificate_path: <%= get_env(name="PUBLIC_HTTP_TLS_CERTIFICATE_PATH") %>
       private_key_path: <%= get_env(name="PUBLIC_HTTP_TLS_PRIVATE_KEY_PATH") %>
+  # GitHub bootstrap login ships disabled. Enabling it requires a client
+  # ID, a secret file, and at least one numeric account ID; anything less
+  # fails startup or login closed.
+  github_auth:
+    enabled: <%= get_env(name="GITHUB_AUTH_ENABLED", default="false") %>
+    client_id: "<%= get_env(name="GITHUB_AUTH_CLIENT_ID", default="") %>"
+    client_secret_path: "<%= get_env(name="GITHUB_AUTH_CLIENT_SECRET_PATH", default="") %>"
+    allowlisted_account_ids: "<%= get_env(name="GITHUB_AUTH_ALLOWLISTED_ACCOUNT_IDS", default="") %>"

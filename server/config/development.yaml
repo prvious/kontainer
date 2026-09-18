@@ -41,3 +41,11 @@ settings:
       client_ca_path: <%= get_env(name="AGENT_RPC_TLS_CLIENT_CA_PATH", default="config/dev-agent-ca.pem") %>
   public_http:
     mode: plaintext
+  # GitHub bootstrap login ships disabled. Enabling it requires a client
+  # ID, a secret file, and at least one numeric account ID; anything less
+  # fails startup or login closed.
+  github_auth:
+    enabled: <%= get_env(name="GITHUB_AUTH_ENABLED", default="false") %>
+    client_id: "<%= get_env(name="GITHUB_AUTH_CLIENT_ID", default="") %>"
+    client_secret_path: "<%= get_env(name="GITHUB_AUTH_CLIENT_SECRET_PATH", default="") %>"
+    allowlisted_account_ids: "<%= get_env(name="GITHUB_AUTH_ALLOWLISTED_ACCOUNT_IDS", default="") %>"

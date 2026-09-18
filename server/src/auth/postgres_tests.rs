@@ -1984,6 +1984,103 @@ async fn postgres_established_owner_relogs_in() -> Result<(), Box<dyn Error>> {
 }
 
 #[tokio::test]
+async fn postgres_github_redemption_maps_provider_and_allowlist_failures()
+-> Result<(), Box<dyn Error>> {
+    let Some(test_database) = PostgresTestDatabase::create(true).await? else {
+        return Ok(());
+    };
+
+    let evidence = async {
+        let origin = GITHUB_TEST_ORIGIN;
+        // Provider denial consumes the attempt without creating rows.
+        let denied_service = test_service(
+            &[11],
+            FakeGitHubProvider::fail(crate::auth::github::GitHubProviderError::Denied),
+        );
+        let denied = full_login(
+            &test_database.connection,
+            &denied_service,
+            origin,
+            verifier_for(51),
+            "provider-code-denied",
+        )
+        .await;
+        let counts_after_denial = login_counts(&test_database.connection).await?;
+
+        // Provider outage surfaces as an outage, not a denial.
+        let outage_service = test_service(
+            &[11],
+            FakeGitHubProvider::fail(crate::auth::github::GitHubProviderError::Unavailable),
+        );
+        let outage = full_login(
+            &test_database.connection,
+            &outage_service,
+            origin,
+            verifier_for(52),
+            "provider-code-outage",
+        )
+        .await;
+        let counts_after_outage = login_counts(&test_database.connection).await?;
+
+        // An authenticated but non-allowlisted identity is denied even
+        // though the provider exchange succeeded.
+        let stranger_service = test_service(&[11], FakeGitHubProvider::succeed(22, "stranger"));
+        let stranger = full_login(
+            &test_database.connection,
+            &stranger_service,
+            origin,
+            verifier_for(53),
+            "provider-code-stranger",
+        )
+        .await;
+        let counts_after_stranger = login_counts(&test_database.connection).await?;
+
+        Ok::<_, Box<dyn Error>>((
+            denied,
+            counts_after_denial,
+            outage,
+            counts_after_outage,
+            stranger,
+            counts_after_stranger,
+        ))
+    }
+    .await;
+    let removed = test_database.cleanup().await?;
+    let (denied, counts_after_denial, outage, counts_after_outage, stranger, counts_after_stranger) =
+        evidence?;
+
+    assert!(
+        denied.unwrap_err().to_string().contains("Denied"),
+        "provider denial must deny redemption"
+    );
+    assert_eq!(
+        counts_after_denial.0, 0,
+        "denial must not create a principal"
+    );
+    assert_eq!(
+        counts_after_denial.4, None,
+        "denial must not claim bootstrap"
+    );
+    assert!(
+        outage
+            .unwrap_err()
+            .to_string()
+            .contains("ProviderUnavailable"),
+        "provider outage must surface as unavailable"
+    );
+    assert_eq!(counts_after_outage.0, 0);
+    assert!(
+        stranger.unwrap_err().to_string().contains("Denied"),
+        "a non-allowlisted identity must be denied"
+    );
+    assert_eq!(counts_after_stranger.0, 0);
+    assert_eq!(counts_after_stranger.2, 0);
+    assert_eq!(counts_after_stranger.4, None);
+    assert!(removed);
+    Ok(())
+}
+
+#[tokio::test]
 async fn postgres_github_adapter_exchanges_before_user_lookup() -> Result<(), Box<dyn Error>> {
     use crate::auth::github::GitHubIdentityProvider;
     use axum::extract::State;
@@ -2153,6 +2250,21 @@ async fn postgres_github_adapter_exchanges_before_user_lookup() -> Result<(), Bo
         .await;
     assert_eq!(
         oversized.unwrap_err(),
+        crate::auth::github::GitHubProviderError::Unavailable
+    );
+
+    // Upstream 5xx is an outage, not an authentication denial.
+    *stub.token_mode.lock().unwrap() = "unavailable".to_owned();
+    *stub.user_mode.lock().unwrap() = "ok".to_owned();
+    let outage = provider
+        .resolve_identity(
+            "stub-code",
+            VERIFIER,
+            "http://127.0.0.1:5151/api/v1/auth/github/callback",
+        )
+        .await;
+    assert_eq!(
+        outage.unwrap_err(),
         crate::auth::github::GitHubProviderError::Unavailable
     );
     Ok(())
@@ -2439,12 +2551,20 @@ async fn postgres_github_lifecycle_denies_misuse() -> Result<(), Box<dyn Error>>
             App::routes(&context).to_router::<App>(context, Router::new())?
         };
         let disabled = disabled_router
+            .clone()
             .oneshot(
                 Request::post("/api/v1/auth/github/login-attempts")
                     .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::from(
                         serde_json::json!({ "codeChallenge": challenge }).to_string(),
                     ))?,
+            )
+            .await?
+            .status();
+        let disabled_callback = disabled_router
+            .oneshot(
+                Request::get("/api/v1/auth/github/callback?code=any&state=any")
+                    .body(Body::empty())?,
             )
             .await?
             .status();
@@ -2458,6 +2578,7 @@ async fn postgres_github_lifecycle_denies_misuse() -> Result<(), Box<dyn Error>>
             denied_text,
             missing_state,
             disabled,
+            disabled_callback,
         ))
     }
     .await;
@@ -2471,6 +2592,7 @@ async fn postgres_github_lifecycle_denies_misuse() -> Result<(), Box<dyn Error>>
         denied_text,
         missing_state,
         disabled,
+        disabled_callback,
     ) = evidence?;
 
     assert_eq!(bad_challenge, StatusCode::BAD_REQUEST);
@@ -2485,6 +2607,11 @@ async fn postgres_github_lifecycle_denies_misuse() -> Result<(), Box<dyn Error>>
     assert!(!denied_text.contains("kta_"));
     assert_eq!(missing_state, StatusCode::BAD_REQUEST);
     assert_eq!(disabled, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        disabled_callback,
+        StatusCode::SERVICE_UNAVAILABLE,
+        "a disabled callback must fail closed before reading attempts"
+    );
     assert!(removed);
     Ok(())
 }

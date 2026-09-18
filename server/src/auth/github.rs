@@ -154,32 +154,22 @@ impl GitHubIdentityProvider for ReqwestGitHubProvider {
         // Bearer material stays in this function; nothing is logged or
         // persisted. Any failure maps to a stable generic error.
         let secret = self.client_secret.expose();
-        let token: serde_json::Value = self
-            .client
-            .post(&self.token_url)
-            .header("Accept", "application/json")
-            .form(&[
-                ("client_id", self.client_id.as_str()),
-                ("client_secret", secret.as_str()),
-                ("code", code),
-                ("redirect_uri", redirect_uri),
-                ("code_verifier", verifier),
-            ])
-            .send()
-            .await
-            .map_err(|_| GitHubProviderError::Unavailable)?
-            .error_for_status()
-            .map_err(|_| GitHubProviderError::Denied)?
-            .bytes()
-            .await
-            .map_err(|_| GitHubProviderError::Unavailable)
-            .and_then(|body| {
-                if body.len() > PROVIDER_BODY_LIMIT {
-                    return Err(GitHubProviderError::Unavailable);
-                }
-                serde_json::from_slice::<serde_json::Value>(&body)
-                    .map_err(|_| GitHubProviderError::Denied)
-            })?;
+        let token = bounded_json(
+            self.client
+                .post(&self.token_url)
+                .header("Accept", "application/json")
+                .form(&[
+                    ("client_id", self.client_id.as_str()),
+                    ("client_secret", secret.as_str()),
+                    ("code", code),
+                    ("redirect_uri", redirect_uri),
+                    ("code_verifier", verifier),
+                ])
+                .send()
+                .await
+                .map_err(|_| GitHubProviderError::Unavailable)?,
+        )
+        .await?;
         let access_token = token
             .get("access_token")
             .and_then(serde_json::Value::as_str)
@@ -188,26 +178,16 @@ impl GitHubIdentityProvider for ReqwestGitHubProvider {
             return Err(GitHubProviderError::Denied);
         }
 
-        let user: serde_json::Value = self
-            .client
-            .get(&self.user_url)
-            .header("Accept", "application/vnd.github+json")
-            .header("Authorization", format!("Bearer {access_token}"))
-            .send()
-            .await
-            .map_err(|_| GitHubProviderError::Unavailable)?
-            .error_for_status()
-            .map_err(|_| GitHubProviderError::Denied)?
-            .bytes()
-            .await
-            .map_err(|_| GitHubProviderError::Unavailable)
-            .and_then(|body| {
-                if body.len() > PROVIDER_BODY_LIMIT {
-                    return Err(GitHubProviderError::Unavailable);
-                }
-                serde_json::from_slice::<serde_json::Value>(&body)
-                    .map_err(|_| GitHubProviderError::Denied)
-            })?;
+        let user = bounded_json(
+            self.client
+                .get(&self.user_url)
+                .header("Accept", "application/vnd.github+json")
+                .header("Authorization", format!("Bearer {access_token}"))
+                .send()
+                .await
+                .map_err(|_| GitHubProviderError::Unavailable)?,
+        )
+        .await?;
         let account_id = user
             .get("id")
             .and_then(serde_json::Value::as_i64)
@@ -222,6 +202,35 @@ impl GitHubIdentityProvider for ReqwestGitHubProvider {
             login: login.to_owned(),
         })
     }
+}
+
+/// Read a provider response into bounded JSON. Transport failures and
+/// upstream 5xx are outages; other error statuses and malformed bodies are
+/// authentication denials. The body streams in chunks so a hostile response
+/// cannot allocate past the limit before it is rejected.
+async fn bounded_json(
+    response: reqwest::Response,
+) -> Result<serde_json::Value, GitHubProviderError> {
+    let status = response.status();
+    if status.is_server_error() {
+        return Err(GitHubProviderError::Unavailable);
+    }
+    if !status.is_success() {
+        return Err(GitHubProviderError::Denied);
+    }
+    let mut buffered = Vec::new();
+    let mut response = response;
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|_| GitHubProviderError::Unavailable)?
+    {
+        if buffered.len() + chunk.len() > PROVIDER_BODY_LIMIT {
+            return Err(GitHubProviderError::Unavailable);
+        }
+        buffered.extend_from_slice(&chunk);
+    }
+    serde_json::from_slice(&buffered).map_err(|_| GitHubProviderError::Denied)
 }
 
 fn validate_account(account_id: i64, login: &str) -> Option<()> {
@@ -251,6 +260,15 @@ pub struct GitHubAuthSettings {
 }
 
 impl GitHubAuthSettings {
+    /// Secret-file reference, if one is configured. An empty path from an
+    /// unset environment default counts as missing.
+    pub fn secret_path(&self) -> Option<&std::path::Path> {
+        self.client_secret_path
+            .as_ref()
+            .filter(|path| !path.as_os_str().is_empty())
+            .map(std::path::PathBuf::as_path)
+    }
+
     /// Validate shape without echoing secret material.
     pub fn validate(&self) -> Result<(), String> {
         if !self.enabled {
@@ -265,7 +283,7 @@ impl GitHubAuthSettings {
         {
             return Err("github_auth client_id is invalid".to_owned());
         }
-        if self.client_secret_path.is_none() {
+        if self.secret_path().is_none() {
             return Err("github_auth client_secret_path is required".to_owned());
         }
         self.allowlist()?;

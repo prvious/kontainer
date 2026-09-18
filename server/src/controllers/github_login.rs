@@ -75,6 +75,25 @@ fn json_no_store(status: StatusCode, value: impl Serialize) -> Response {
         .into_response()
 }
 
+fn service_unavailable_html() -> Response {
+    (
+        StatusCode::SERVICE_UNAVAILABLE,
+        [
+            (header::CACHE_CONTROL, "no-store"),
+            (header::PRAGMA, "no-cache"),
+            (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            (header::REFERRER_POLICY, "no-referrer"),
+            (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
+            (
+                header::CONTENT_SECURITY_POLICY,
+                "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+            ),
+        ],
+        "Sign-in is temporarily unavailable. Return to Kontainer and try again.",
+    )
+        .into_response()
+}
+
 /// Generic browser completion page. Carries no credential, identity, or
 /// provider detail; the desktop learns the outcome through redemption.
 fn callback_html(success: bool) -> Response {
@@ -186,6 +205,14 @@ pub(crate) async fn callback(
     State(context): State<AppContext>,
     Query(query): Query<CallbackQuery>,
 ) -> Response {
+    // Disabled login fails closed before touching attempt storage.
+    let enabled = context
+        .shared_store
+        .get::<crate::auth::github::GitHubAuthService>()
+        .is_some_and(|service| service.is_enabled());
+    if !enabled {
+        return service_unavailable_html();
+    }
     let Some(state) = query.state.filter(|state| !state.is_empty()) else {
         return callback_html(false);
     };
@@ -199,22 +226,7 @@ pub(crate) async fn callback(
     {
         Ok(accept_github_callback::CallbackOutcome::Ready { .. }) => callback_html(true),
         Ok(accept_github_callback::CallbackOutcome::Denied) => callback_html(false),
-        Err(_) => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            [
-                (header::CACHE_CONTROL, "no-store"),
-                (header::PRAGMA, "no-cache"),
-                (header::CONTENT_TYPE, "text/html; charset=utf-8"),
-                (header::REFERRER_POLICY, "no-referrer"),
-                (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
-                (
-                    header::CONTENT_SECURITY_POLICY,
-                    "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
-                ),
-            ],
-            "Sign-in is temporarily unavailable. Return to Kontainer and try again.",
-        )
-            .into_response(),
+        Err(_) => service_unavailable_html(),
     }
 }
 
