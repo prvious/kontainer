@@ -4,8 +4,8 @@
 use std::{env, path::PathBuf, time::Duration};
 
 use kontainer_engine::{
-    ContainerEngine, EngineAccessScope, EngineApiVersion, EngineErrorKind, LocalDockerEngine,
-    LocalEngineOptions,
+    ContainerEngine, ContainerPageRequest, EngineAccessScope, EngineApiVersion, EngineErrorKind,
+    LocalDockerEngine, LocalEngineOptions,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -63,6 +63,91 @@ async fn qualifies_configured_real_engine() {
         manager_description.access_scope,
         node_description.access_scope,
         manager_description.capabilities,
+    );
+}
+
+#[tokio::test]
+async fn qualifies_paged_container_inventory() {
+    use kontainer_engine::{ContainerState, is_valid_container_id};
+
+    const RUNNING_FIXTURE: &str = "kontainer-inventory-running";
+    const EXITED_FIXTURE: &str = "kontainer-inventory-exited";
+
+    let socket_path = required_environment_path(TEST_SOCKET_ENV);
+    let fixture_image = required_environment(TEST_ENGINE_ENV);
+    let engine = LocalDockerEngine::connect_for_node(LocalEngineOptions {
+        socket_path,
+        operation_timeout: Duration::from_secs(10),
+    })
+    .unwrap();
+    let cancellation = CancellationToken::new();
+    let description = engine.describe(&cancellation).await.unwrap();
+
+    // Page size one forces real multi-page traversal through `before`
+    // cursors on the live daemon.
+    let mut page_token = String::new();
+    let mut collected = Vec::new();
+    for _ in 0..1000 {
+        let page = engine
+            .list_containers(
+                ContainerPageRequest::new(1, &page_token).unwrap(),
+                &cancellation,
+            )
+            .await
+            .unwrap();
+        assert!(page.containers.len() <= 1);
+        collected.extend(page.containers);
+        match page.next_page_token {
+            Some(next) => page_token = next,
+            None => break,
+        }
+    }
+
+    let running = collected
+        .iter()
+        .filter(|summary| summary.display_name == RUNNING_FIXTURE)
+        .collect::<Vec<_>>();
+    let exited = collected
+        .iter()
+        .filter(|summary| summary.display_name == EXITED_FIXTURE)
+        .collect::<Vec<_>>();
+    assert_eq!(running.len(), 1, "running fixture must appear exactly once");
+    assert_eq!(exited.len(), 1, "exited fixture must appear exactly once");
+    assert_eq!(running[0].state, ContainerState::Running);
+    assert_eq!(exited[0].state, ContainerState::Exited);
+
+    for summary in &collected {
+        assert!(
+            is_valid_container_id(&summary.container_id),
+            "container_id must be a full ID"
+        );
+        assert!(!summary.display_name.trim().is_empty());
+        assert!(!summary.image_reference.trim().is_empty());
+        assert!(summary.created_at_seconds >= 0);
+        assert!(summary.status.len() <= 256);
+    }
+    let mut ids = collected
+        .iter()
+        .map(|summary| summary.container_id.clone())
+        .collect::<Vec<_>>();
+    ids.sort_unstable();
+    ids.dedup();
+    assert_eq!(ids.len(), collected.len(), "paged walk must not duplicate");
+
+    println!(
+        "KONTAINER_CONTAINER_EVIDENCE fixture_image={fixture_image} daemon_version={} \
+         daemon_api={} negotiated_api={} os={} architecture={} page_size=1 \
+         total_collected={} running={}({:?}) exited={}({:?})",
+        description.daemon_version,
+        description.daemon_api_version,
+        description.negotiated_api_version,
+        description.operating_system,
+        description.architecture,
+        collected.len(),
+        running[0].container_id,
+        running[0].state,
+        exited[0].container_id,
+        exited[0].state,
     );
 }
 

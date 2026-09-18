@@ -99,6 +99,18 @@ jobs:
           echo "KONTAINER_FIXTURE_NAME=$fixture_name" >> "$GITHUB_ENV"
           echo "KONTAINER_TEST_DOCKER_SOCKET=$socket_directory/docker.sock" >> "$GITHUB_ENV"
 
+      - name: Create inventory fixtures
+        run: |
+          set -euo pipefail
+          daemon="docker --host unix:///run/kontainer/docker.sock"
+          docker exec "$KONTAINER_FIXTURE_NAME" $daemon pull alpine:3.20
+          echo "workload_image_digest=$(docker exec "$KONTAINER_FIXTURE_NAME" $daemon image inspect --format '{{index .RepoDigests 0}}' alpine:3.20)"
+          docker exec "$KONTAINER_FIXTURE_NAME" $daemon run --detach \
+            --name kontainer-inventory-running --network none alpine:3.20 sleep infinity
+          docker exec "$KONTAINER_FIXTURE_NAME" $daemon run \
+            --name kontainer-inventory-exited --network none alpine:3.20 true
+          docker exec "$KONTAINER_FIXTURE_NAME" $daemon ps -a
+
       - name: Qualify the typed adapter
         env:
           KONTAINER_TEST_ENGINE_IMAGE: ${{ matrix.engine.image }}
@@ -115,12 +127,21 @@ jobs:
             echo "fixture_digest=$(docker image inspect --format '{{index .RepoDigests 0}}' "$KONTAINER_TEST_ENGINE_IMAGE")"
             docker exec "$KONTAINER_FIXTURE_NAME" \
               docker --host unix:///run/kontainer/docker.sock version
+            docker exec "$KONTAINER_FIXTURE_NAME" \
+              docker --host unix:///run/kontainer/docker.sock ps -a
             echo "command=cargo test --manifest-path server/Cargo.toml --package kontainer-engine --features real-engine-tests --test real_docker qualifies_configured_real_engine -- --nocapture"
             cargo test --manifest-path server/Cargo.toml \
               --package kontainer-engine \
               --features real-engine-tests \
               --test real_docker \
               qualifies_configured_real_engine \
+              -- --nocapture
+            echo "command=cargo test --manifest-path server/Cargo.toml --package kontainer-engine --features real-engine-tests --test real_docker qualifies_paged_container_inventory -- --nocapture"
+            cargo test --manifest-path server/Cargo.toml \
+              --package kontainer-engine \
+              --features real-engine-tests \
+              --test real_docker \
+              qualifies_paged_container_inventory \
               -- --nocapture
           } 2>&1 | tee "$EVIDENCE_FILE"
 
