@@ -97,9 +97,14 @@ keys. Configured cluster/node IDs use the same canonical segment rules as
 certificate identities: 1–128 ASCII letters, digits, dots, underscores, or
 hyphens, excluding `.` and `..`. When private RPC is enabled, its TLS files and
 key/certificate pair are validated before the controller starts admitting HTTP
-requests; setup failure closes both bound listeners. This is not certificate
-enrollment or a bounded-shutdown guarantee. The node agent's `--version` still
-requires no runtime configuration.
+requests; setup failure closes both bound listeners. When `agent_rpc.client`
+is configured, the static agent endpoint, expected DNS server name, and node
+ID are validated with the same TLS bundle before admission: the endpoint must
+be an `https` origin with no routing path, and the peer must present the exact
+configured node-agent workload identity plus a matching `Describe` node ID.
+An unreachable agent does not fail startup; it surfaces only as a typed call
+failure. This is not certificate enrollment or a bounded-shutdown guarantee.
+The node agent's `--version` still requires no runtime configuration.
 
 The [canonical controller probes](docs/v2/approved-greenfield-reset.md#controller-probe-paths)
 are unauthenticated and return only `{"ok": true}` or
