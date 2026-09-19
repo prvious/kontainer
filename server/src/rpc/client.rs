@@ -120,9 +120,12 @@ impl NodeAgentClientConfig {
             .tls_files
             .outbound_verifier(self.expected.clone())
             .map_err(|_| AgentClientError::Unavailable)?;
+        // Deliberately no `Endpoint::connect_timeout` here: tonic's connector
+        // timeout surfaces as a transport error and would map a connect
+        // deadline expiry to `Unavailable` (503) instead of `TimedOut` (504).
+        // The outer deadline in `channel` is the single connect deadline.
         Endpoint::from_shared(self.endpoint.clone())
             .map_err(|_| AgentClientError::Unavailable)?
-            .connect_timeout(self.connect_timeout)
             .timeout(self.rpc_timeout)
             .tls_config_with_verifier(tls_config, verifier)
             .map_err(|_| AgentClientError::Unavailable)

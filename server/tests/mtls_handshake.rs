@@ -404,6 +404,36 @@ async fn production_client_cancellation_wins_without_detached_work() {
 }
 
 #[tokio::test]
+async fn production_client_connect_deadline_expiry_is_a_timeout() {
+    let pki = TestPki::generate();
+    // Accept TCP but never complete the TLS handshake, so the client's own
+    // connect deadline is the only way out. A surfaced transport error here
+    // would misreport a deadline expiry as unavailability.
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let stall = tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        let _held = socket;
+        pending::<()>().await;
+    });
+
+    let client = production_client(
+        address,
+        pki.trusted_files(&pki.controller),
+        NODE_AGENT_NAME,
+        CLUSTER_ID,
+        NODE_ID,
+    );
+    let error = client
+        .describe(&CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert_eq!(error, AgentClientError::TimedOut);
+
+    stall.abort();
+}
+
+#[tokio::test]
 async fn list_containers_serves_bounded_pages_with_node_provenance() {
     let pki = TestPki::generate();
     let first_id = "a".repeat(64);
