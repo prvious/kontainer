@@ -123,6 +123,14 @@ impl NativeClient {
         {
             return Err(NativeClientError::InvalidConfiguration);
         }
+        // A deadline the monotonic clock cannot represent would panic every
+        // call; reject it at construction like every other bound.
+        if tokio::time::Instant::now()
+            .checked_add(config.request_deadline)
+            .is_none()
+        {
+            return Err(NativeClientError::InvalidConfiguration);
+        }
         let http = build_http_client(&config)?;
         Ok(Self {
             origin,
@@ -172,7 +180,11 @@ impl NativeClient {
         body_limit: usize,
         cancellation: &CancellationToken,
     ) -> Result<Vec<u8>, NativeClientError> {
-        let deadline = Instant::now() + self.limits.request_deadline;
+        // Construction already rejected unrepresentable durations; this
+        // `checked_add` keeps the invariant local and total.
+        let deadline = Instant::now()
+            .checked_add(self.limits.request_deadline)
+            .ok_or(NativeClientError::InvalidConfiguration)?;
         tokio::select! {
             biased;
             () = cancellation.cancelled() => Err(NativeClientError::Cancelled),

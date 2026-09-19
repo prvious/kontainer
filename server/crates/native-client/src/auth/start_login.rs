@@ -67,10 +67,18 @@ impl NativeClient {
 
 impl StartLoginReply {
     fn into_attempt(self) -> Result<LoginAttempt, NativeClientError> {
+        let authorize_url =
+            Url::parse(&self.authorize_url).map_err(|_| NativeClientError::InvalidResponse)?;
+        // The URL is handed to the system browser: only HTTPS is acceptable,
+        // so a hostile or misconfigured controller can never steer the
+        // desktop into a local file, data, or registered custom-scheme
+        // handler.
+        if authorize_url.scheme() != "https" {
+            return Err(NativeClientError::InvalidResponse);
+        }
         Ok(LoginAttempt {
             attempt_id: crate::client::parse_uuid(&self.attempt_id)?,
-            authorize_url: Url::parse(&self.authorize_url)
-                .map_err(|_| NativeClientError::InvalidResponse)?,
+            authorize_url,
             expires_at: parse_timestamp(&self.expires_at)?,
         })
     }

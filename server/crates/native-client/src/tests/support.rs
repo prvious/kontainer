@@ -62,6 +62,8 @@ pub(crate) enum Behavior {
     },
     /// Read the request, then drop the connection with a TCP reset.
     Reset,
+    /// Read the request, wait, then drop the connection with a TCP reset.
+    DelayedReset { delay: Duration },
     /// Read the request, then hold the connection open until the peer closes.
     Stall,
 }
@@ -225,9 +227,12 @@ async fn serve(mut stream: TestStream, behavior: Behavior, state: &ServerState) 
         .push(request);
     state.request_seen.notify_one();
     match behavior {
-        Behavior::Reset => {
+        Behavior::Reset | Behavior::DelayedReset { .. } => {
             // SO_LINGER 0 turns close into a reset, which cannot be confused
             // with a clean end of a fixture response.
+            if let Behavior::DelayedReset { delay } = behavior {
+                tokio::time::sleep(delay).await;
+            }
             if let TestStream::Plain(tcp) = &stream {
                 let _ = socket2::SockRef::from(tcp).set_linger(Some(Duration::ZERO));
             }

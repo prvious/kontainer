@@ -184,6 +184,33 @@ async fn logout_rejects_a_success_body() {
 }
 
 #[tokio::test]
+async fn start_login_rejects_a_non_https_authorize_url() {
+    let verifier = LoginVerifier::parse(VERIFIER).unwrap();
+    for scheme in [
+        "file:///etc/passwd",
+        "javascript:alert(1)",
+        "data:text/html,<script>alert(1)</script>",
+        "kontainer://callback",
+        "http://github.com/login/oauth/authorize",
+    ] {
+        let fixture = START_LOGIN_RESPONSE.replace(
+            "https://github.com/login/oauth/authorize?",
+            &format!("{scheme}?"),
+        );
+        let server = TestServer::plain(vec![respond(201, &fixture)]).await;
+        let client = plain_client(&server);
+        assert_eq!(
+            client
+                .start_login(&verifier, &CancellationToken::new())
+                .await
+                .err(),
+            Some(NativeClientError::InvalidResponse),
+            "{scheme} must never reach the system browser"
+        );
+    }
+}
+
+#[tokio::test]
 async fn start_login_maps_documented_statuses() {
     let verifier = LoginVerifier::parse(VERIFIER).unwrap();
     for (status, expected) in [

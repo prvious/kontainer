@@ -83,6 +83,9 @@ fn zero_bounds_are_rejected_before_any_connection() {
         |config: &mut NativeClientConfig| config.connect_timeout = Duration::ZERO,
         |config: &mut NativeClientConfig| config.json_body_limit = 0,
         |config: &mut NativeClientConfig| config.collection_body_limit = 0,
+        // A deadline the monotonic clock cannot represent must fail here, not
+        // panic on the first call.
+        |config: &mut NativeClientConfig| config.request_deadline = Duration::MAX,
     ] {
         let mut config = NativeClientConfig::new("https://controller.example");
         mutate(&mut config);

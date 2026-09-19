@@ -9,8 +9,8 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use super::support::{
-    Behavior, SHORT_DEADLINE, TEST_TIMEOUT, TestServer, client_for, plain_client, respond,
-    test_pki, tls_client, wait,
+    Behavior, SHORT_DEADLINE, TestServer, client_for, plain_client, respond, test_pki, tls_client,
+    wait,
 };
 use crate::client::TrustPolicy;
 use crate::containers::{ContainerPageRequest, NodeId};
@@ -278,7 +278,16 @@ async fn a_truncated_response_body_is_never_retried() {
 
 #[tokio::test]
 async fn the_retry_shares_the_original_deadline() {
-    let server = TestServer::plain(vec![Behavior::Reset, Behavior::Stall]).await;
+    // The first attempt burns most of the budget before failing; a per-attempt
+    // budget would let the retry run a second full deadline and finish near
+    // twice the configured bound.
+    let server = TestServer::plain(vec![
+        Behavior::DelayedReset {
+            delay: SHORT_DEADLINE * 3 / 5,
+        },
+        Behavior::Stall,
+    ])
+    .await;
     let client = client_for(&server.origin(), TrustPolicy::WebPki, Some(SHORT_DEADLINE));
 
     let started = Instant::now();
@@ -300,7 +309,7 @@ async fn the_retry_shares_the_original_deadline() {
         "the deadline expired early: {elapsed:?}"
     );
     assert!(
-        elapsed < TEST_TIMEOUT,
+        elapsed < SHORT_DEADLINE * 3 / 2,
         "the retry extended the original deadline: {elapsed:?}"
     );
     wait(server.wait_for_peer_close()).await;

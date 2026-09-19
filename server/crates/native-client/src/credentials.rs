@@ -77,6 +77,16 @@ pub struct RefreshCredential(SecretValue);
 /// The verifier never crosses the start endpoint; it is presented once at
 /// redemption, in the JSON body. It is redacted, non-serializable,
 /// non-cloneable, and zeroed on drop.
+///
+/// ```compile_fail
+/// let verifier = kontainer_native_client::LoginVerifier::parse(
+///     "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
+/// )
+/// .unwrap();
+/// let control = serde_json::to_string("serde_json is available").unwrap();
+/// assert!(!control.is_empty());
+/// let _ = serde_json::to_string(&verifier).unwrap();
+/// ```
 pub struct LoginVerifier(SecretValue);
 
 impl AccessCredential {
