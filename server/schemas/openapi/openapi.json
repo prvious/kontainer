@@ -1,0 +1,778 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "kontainer-controller",
+    "description": "",
+    "license": {
+      "name": ""
+    },
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/v1/auth/github/callback": {
+      "get": {
+        "tags": [
+          "super::github_login"
+        ],
+        "operationId": "callback",
+        "parameters": [
+          {
+            "name": "code",
+            "in": "query",
+            "description": "Provider authorization code, exchanged server-side only",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "description": "Opaque single-use login state",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "error",
+            "in": "query",
+            "description": "Provider denial signal; never echoed",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Browser step complete; redeem from the desktop"
+          },
+          "400": {
+            "description": "Login did not complete"
+          },
+          "503": {
+            "description": "GitHub login unavailable"
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
+    "/api/v1/auth/github/login-attempts": {
+      "post": {
+        "tags": [
+          "super::github_login"
+        ],
+        "operationId": "start",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartLoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Login attempt with the GitHub authorization URL",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartLoginResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid PKCE challenge"
+          },
+          "503": {
+            "description": "GitHub login unavailable"
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
+    "/api/v1/auth/github/login-attempts/{attempt_id}/redeem": {
+      "post": {
+        "tags": [
+          "super::github_login"
+        ],
+        "operationId": "redeem",
+        "parameters": [
+          {
+            "name": "attempt_id",
+            "in": "path",
+            "description": "Login attempt UUID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RedeemLoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Session issued for the bootstrap Owner; credentials returned once",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GithubLoginResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid attempt identifier"
+          },
+          "403": {
+            "description": "Login denied: unknown, replayed, expired, or non-Owner identity"
+          },
+          "409": {
+            "description": "Browser step not complete yet"
+          },
+          "502": {
+            "description": "GitHub exchange failed"
+          },
+          "503": {
+            "description": "GitHub login unavailable"
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
+    "/api/v1/auth/sessions/current": {
+      "delete": {
+        "tags": [
+          "super::sessions"
+        ],
+        "operationId": "logout_current",
+        "responses": {
+          "204": {
+            "description": "Current session revoked"
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "503": {
+            "description": "Session persistence unavailable"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/tokens/refresh": {
+      "post": {
+        "tags": [
+          "super::sessions"
+        ],
+        "operationId": "refresh",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Rotated credential pair, returned once",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionTokenResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid, expired, revoked, or reused refresh credential"
+          },
+          "503": {
+            "description": "Session persistence unavailable"
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
+    "/api/v1/nodes/{nodeId}/containers": {
+      "get": {
+        "tags": [
+          "super::containers"
+        ],
+        "operationId": "index",
+        "parameters": [
+          {
+            "name": "nodeId",
+            "in": "path",
+            "description": "Configured node ID; only the statically configured node is served",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Page size; defaults to 50, range 1-100",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "maximum": 100,
+              "minimum": 1
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor from a previous page; empty means the first page",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 67
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One bounded page preserving agent order; live collections are best-effort",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContainerPageResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid pagination; no agent call was made",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContainerErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "404": {
+            "description": "Unknown node; only the configured node exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContainerErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Agent unavailable or response invalid; no transport or daemon detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContainerErrorResponse"
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "Agent deadline expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContainerErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/operations/{operation_id}": {
+      "get": {
+        "tags": [
+          "super::operations"
+        ],
+        "operationId": "show",
+        "parameters": [
+          {
+            "name": "operation_id",
+            "in": "path",
+            "description": "Durable operation UUID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current durable operation state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid operation identifier"
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "404": {
+            "description": "Operation not found or not visible to the authenticated principal"
+          },
+          "500": {
+            "description": "Operation state unavailable"
+          },
+          "503": {
+            "description": "Controller draining new work or session persistence unavailable; the body is either HealthResponse or a generic error"
+          }
+        }
+      }
+    },
+    "/api/v1/status": {
+      "get": {
+        "tags": [],
+        "operationId": "show",
+        "responses": {
+          "200": {
+            "description": "Controller build and liveness only; use /health/ready for readiness",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "503": {
+            "description": "Controller draining new work or session persistence unavailable; the body is either HealthResponse or a generic error"
+          }
+        }
+      }
+    },
+    "/health/live": {
+      "get": {
+        "tags": [
+          "super::health"
+        ],
+        "summary": "Canonical liveness probe: the public HTTP listener serves requests.\nPart of the documented probe contract; see the controller README section.",
+        "operationId": "live",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "tags": [
+          "super::health"
+        ],
+        "summary": "Canonical readiness probe. Part of the documented probe contract.",
+        "operationId": "ready",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
+    "/health/startup": {
+      "get": {
+        "tags": [
+          "super::health"
+        ],
+        "summary": "Canonical startup probe. Part of the documented probe contract.",
+        "operationId": "startup",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ContainerErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "ContainerItemResponse": {
+        "type": "object",
+        "required": [
+          "containerId",
+          "displayName",
+          "imageReference",
+          "state",
+          "status",
+          "createdAt",
+          "nodeId"
+        ],
+        "properties": {
+          "containerId": {
+            "type": "string",
+            "description": "Full lowercase-hex daemon container ID."
+          },
+          "createdAt": {
+            "type": "string",
+            "description": "RFC 3339 UTC creation time with millisecond precision."
+          },
+          "displayName": {
+            "type": "string",
+            "description": "Canonical display name without Docker linkage."
+          },
+          "imageReference": {
+            "type": "string",
+            "description": "Image reference as reported by the daemon."
+          },
+          "nodeId": {
+            "type": "string",
+            "description": "Serving node ID from agent configuration, never request input."
+          },
+          "state": {
+            "$ref": "#/components/schemas/ContainerStateResponse",
+            "description": "Typed lifecycle state."
+          },
+          "status": {
+            "type": "string",
+            "description": "Bounded daemon status text."
+          }
+        }
+      },
+      "ContainerPageResponse": {
+        "type": "object",
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContainerItemResponse"
+            },
+            "description": "One bounded page preserving the agent's deterministic newest-first\norder. Live collections are best-effort: containers created or removed\nbetween calls can shift pages. A cursor whose target was removed is\nrejected as invalid pagination; restart traversal from the first page.",
+            "maxItems": 100
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Opaque cursor for the next page, or null when this page is last.\nPass back unchanged; clients never decode or synthesize it."
+          }
+        }
+      },
+      "ContainerStateResponse": {
+        "type": "string",
+        "enum": [
+          "unknown",
+          "created",
+          "running",
+          "paused",
+          "restarting",
+          "removing",
+          "exited",
+          "dead",
+          "stopping"
+        ]
+      },
+      "GithubLoginResponse": {
+        "type": "object",
+        "required": [
+          "clusterId",
+          "principalId",
+          "githubLogin",
+          "accessCredential",
+          "refreshCredential",
+          "accessExpiresAt",
+          "refreshExpiresAt"
+        ],
+        "properties": {
+          "accessCredential": {
+            "type": "string"
+          },
+          "accessExpiresAt": {
+            "type": "string"
+          },
+          "clusterId": {
+            "type": "string"
+          },
+          "githubLogin": {
+            "type": "string"
+          },
+          "principalId": {
+            "type": "string"
+          },
+          "refreshCredential": {
+            "type": "string"
+          },
+          "refreshExpiresAt": {
+            "type": "string"
+          }
+        }
+      },
+      "HealthResponse": {
+        "type": "object",
+        "required": [
+          "ok"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      },
+      "OperationResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "state",
+          "recoverable",
+          "uncertain",
+          "lastEventSequence",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "lastErrorCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "lastEventSequence": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "recoverable": {
+            "type": "boolean"
+          },
+          "state": {
+            "$ref": "#/components/schemas/OperationStateResponse"
+          },
+          "uncertain": {
+            "type": "boolean"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        }
+      },
+      "OperationStateResponse": {
+        "type": "string",
+        "enum": [
+          "recoverable",
+          "running",
+          "uncertain",
+          "succeeded",
+          "failed",
+          "cancelled"
+        ]
+      },
+      "RedeemLoginRequest": {
+        "type": "object",
+        "required": [
+          "codeVerifier"
+        ],
+        "properties": {
+          "codeVerifier": {
+            "type": "string",
+            "description": "Desktop-held PKCE verifier matching the start challenge. JSON body\nonly, never a URL."
+          }
+        },
+        "additionalProperties": false
+      },
+      "RefreshRequest": {
+        "type": "object",
+        "required": [
+          "refreshCredential"
+        ],
+        "properties": {
+          "refreshCredential": {
+            "type": "string",
+            "description": "Opaque refresh credential. Transported in the JSON body only, never\nin a URL, and returned only once at issuance or rotation."
+          }
+        },
+        "additionalProperties": false
+      },
+      "SessionTokenResponse": {
+        "type": "object",
+        "required": [
+          "accessCredential",
+          "refreshCredential",
+          "accessExpiresAt",
+          "refreshExpiresAt"
+        ],
+        "properties": {
+          "accessCredential": {
+            "type": "string"
+          },
+          "accessExpiresAt": {
+            "type": "string"
+          },
+          "refreshCredential": {
+            "type": "string"
+          },
+          "refreshExpiresAt": {
+            "type": "string"
+          }
+        }
+      },
+      "StartLoginRequest": {
+        "type": "object",
+        "required": [
+          "codeChallenge"
+        ],
+        "properties": {
+          "codeChallenge": {
+            "type": "string",
+            "description": "Desktop-generated PKCE S256 challenge. The verifier itself never\ncrosses this endpoint; only the challenge is persisted."
+          }
+        },
+        "additionalProperties": false
+      },
+      "StartLoginResponse": {
+        "type": "object",
+        "required": [
+          "attemptId",
+          "authorizeUrl",
+          "expiresAt"
+        ],
+        "properties": {
+          "attemptId": {
+            "type": "string"
+          },
+          "authorizeUrl": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string"
+          }
+        }
+      },
+      "StatusResponse": {
+        "type": "object",
+        "required": [
+          "status",
+          "version",
+          "architecture"
+        ],
+        "properties": {
+          "architecture": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "access_session": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "opaque"
+      }
+    }
+  },
+  "security": [
+    {
+      "access_session": []
+    }
+  ]
+}
