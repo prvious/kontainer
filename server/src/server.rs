@@ -88,6 +88,8 @@ struct AgentRpcSettings {
     #[serde(deserialize_with = "deserialize_cluster_id")]
     cluster_id: String,
     tls: AgentRpcTlsSettings,
+    #[serde(default)]
+    client: Option<AgentRpcClientSettings>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -96,6 +98,15 @@ struct AgentRpcTlsSettings {
     certificate_path: PathBuf,
     private_key_path: PathBuf,
     client_ca_path: PathBuf,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AgentRpcClientSettings {
+    endpoint: String,
+    server_name: String,
+    #[serde(deserialize_with = "deserialize_node_id")]
+    node_id: String,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -419,12 +430,21 @@ pub struct ControllerClusterId(pub String);
 /// Build the GitHub login service and cluster identity from validated
 /// settings. A missing secret file or invalid origin fails startup when
 /// login is enabled; a disabled service fails login requests closed.
+///
+/// When `agent_rpc.client` is configured, the static controller-to-agent
+/// client is also validated here. Missing, malformed, or mismatched TLS
+/// files fail startup; an unreachable agent does not, and surfaces only as
+/// a typed call failure.
 pub fn init_shared_auth_state(ctx: &AppContext) -> Result<()> {
     use std::sync::Arc;
 
     let settings = controller_settings(ctx)?;
     ctx.shared_store
         .insert(ControllerClusterId(settings.agent_rpc.cluster_id.clone()));
+
+    if let Some(client) = build_agent_client(&settings)? {
+        ctx.shared_store.insert(client);
+    }
 
     let service = if settings.github_auth.enabled {
         let secret_path = settings
@@ -477,6 +497,49 @@ fn deserialize_cluster_id<'de, D: serde::Deserializer<'de>>(
         ));
     }
     Ok(value)
+}
+
+fn deserialize_node_id<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<String, D::Error> {
+    let value = String::deserialize(deserializer)?;
+    if !valid_identity_segment(&value) {
+        return Err(serde::de::Error::custom(
+            "node_id must be a canonical workload identity segment",
+        ));
+    }
+    Ok(value)
+}
+
+/// Validate the static outbound agent settings without connecting.
+///
+/// Returns `None` when no outbound client is configured. A configured
+/// endpoint, DNS name, node ID, and TLS bundle are parsed here so invalid
+/// settings and bad TLS files fail startup before HTTP admission.
+fn build_agent_client(
+    settings: &ControllerSettings,
+) -> Result<Option<crate::rpc::NodeAgentClientConfig>, Error> {
+    let Some(client) = &settings.agent_rpc.client else {
+        return Ok(None);
+    };
+    let tls_files: MutualTlsIdentityFiles = settings.agent_rpc.tls.clone().into();
+    crate::rpc::NodeAgentClientConfig::new(
+        client.endpoint.clone(),
+        client.server_name.clone(),
+        settings.agent_rpc.cluster_id.clone(),
+        client.node_id.clone(),
+        tls_files,
+    )
+    .map(Some)
+    .map_err(|error| {
+        let tls = &settings.agent_rpc.tls;
+        Error::Message(format!(
+            "invalid agent client configuration ({} / {} / {}): {error}",
+            tls.certificate_path.display(),
+            tls.private_key_path.display(),
+            tls.client_ca_path.display()
+        ))
+    })
 }
 
 /// Load and validate the public TLS identity before any listener admits
@@ -626,6 +689,7 @@ mod tests {
             binding,
             cluster_id,
             tls,
+            client: _,
         } = settings.agent_rpc;
         assert!(enabled);
         assert_eq!(binding.to_string(), "127.0.0.1:50051");
@@ -698,6 +762,84 @@ mod tests {
                     .contains("cluster_id must be a canonical workload identity segment")
             );
             assert!(!error.to_string().contains("secret-value"));
+        }
+    }
+
+    #[test]
+    fn agent_client_settings_use_the_certificate_identity_rules() {
+        for invalid in ["", ".", "..", "node/other", " secret-value "] {
+            let mut settings = valid_settings();
+            settings["agent_rpc"]["client"] = serde_json::json!({
+                "endpoint": "https://127.0.0.1:50052",
+                "server_name": "node-1.agent.kontainer.test",
+                "node_id": invalid,
+            });
+            let error = serde_json::from_value::<ControllerSettings>(settings).unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("node_id must be a canonical workload identity segment"),
+                "{invalid} must be rejected"
+            );
+            assert!(!error.to_string().contains("secret-value"));
+        }
+    }
+
+    #[test]
+    fn unknown_agent_client_settings_are_rejected() {
+        let mut settings = valid_settings();
+        settings["agent_rpc"]["client"] = serde_json::json!({
+            "endpoint": "https://127.0.0.1:50052",
+            "server_name": "node-1.agent.kontainer.test",
+            "node_id": "node-1",
+            "unexpected_setting": "secret-value",
+        });
+        let error = parse_controller_settings(settings).unwrap_err();
+        assert!(!error.to_string().contains("secret-value"));
+    }
+
+    #[test]
+    fn agent_client_is_optional_but_validates_tls_at_startup() {
+        // No client configured: no outbound client, startup still succeeds.
+        let settings: ControllerSettings = serde_json::from_value(valid_settings()).unwrap();
+        assert!(settings.agent_rpc.client.is_none());
+        assert!(super::build_agent_client(&settings).unwrap().is_none());
+
+        // Client configured with missing TLS files: startup fails closed
+        // without leaking file contents.
+        let mut with_client = valid_settings();
+        with_client["agent_rpc"]["client"] = serde_json::json!({
+            "endpoint": "https://127.0.0.1:50052",
+            "server_name": "node-1.agent.kontainer.test",
+            "node_id": "node-1",
+        });
+        let settings: ControllerSettings = serde_json::from_value(with_client).unwrap();
+        let error = super::build_agent_client(&settings).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("invalid agent client configuration")
+        );
+        assert!(!error.to_string().contains("secret-value"));
+
+        // Invalid endpoints fail before any TLS work.
+        for endpoint in [
+            "http://127.0.0.1:50052",
+            "https://127.0.0.1:50052/containers",
+            "not-a-url",
+        ] {
+            let mut bad_endpoint = valid_settings();
+            bad_endpoint["agent_rpc"]["client"] = serde_json::json!({
+                "endpoint": endpoint,
+                "server_name": "node-1.agent.kontainer.test",
+                "node_id": "node-1",
+            });
+            let settings: ControllerSettings = serde_json::from_value(bad_endpoint).unwrap();
+            let error = super::build_agent_client(&settings).unwrap_err();
+            assert!(
+                error.to_string().contains("agent endpoint is invalid"),
+                "{endpoint} must be rejected"
+            );
         }
     }
 

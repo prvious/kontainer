@@ -1,6 +1,9 @@
-use std::{fs, io, path::PathBuf};
+use std::{fs, io, path::PathBuf, sync::Arc};
 
+use rustls::client::danger::ServerCertVerifier;
 use tonic::transport::{Certificate, ClientTlsConfig, Identity, ServerTlsConfig};
+
+use crate::{OutboundPeerVerifier, WorkloadIdentity};
 
 #[derive(Debug, Clone)]
 pub struct MutualTlsIdentityFiles {
@@ -41,6 +44,38 @@ impl MutualTlsIdentityFiles {
             .domain_name(expected_server_name)
             .identity(identity)
             .ca_certificate(peer_ca))
+    }
+
+    /// Client TLS config for use with a custom [`OutboundPeerVerifier`].
+    ///
+    /// Unlike [`Self::client_config`], this sets no CA roots: the custom
+    /// verifier owns trust. The caller must combine the returned config with
+    /// [`Self::outbound_verifier`] via
+    /// `Endpoint::tls_config_with_verifier`, which parses and validates the
+    /// certificate material.
+    pub fn client_config_for_custom_verifier(
+        &self,
+        expected_server_name: impl Into<String>,
+    ) -> io::Result<ClientTlsConfig> {
+        let identity = self.load_identity()?;
+        Ok(ClientTlsConfig::new()
+            .domain_name(expected_server_name)
+            .identity(identity))
+    }
+
+    /// Build the identity-bound outbound verifier for `expected`.
+    ///
+    /// Reads only the peer CA file; certificate and key validation happens
+    /// when the Tonic endpoint is built. Errors stay generic and never
+    /// include certificate material.
+    pub fn outbound_verifier(
+        &self,
+        expected: WorkloadIdentity,
+    ) -> io::Result<Arc<dyn ServerCertVerifier>> {
+        let peer_ca_pem = fs::read(&self.peer_ca_path)?;
+        let verifier = OutboundPeerVerifier::new(&peer_ca_pem, expected)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        Ok(Arc::new(verifier))
     }
 
     fn load_identity(&self) -> io::Result<Identity> {

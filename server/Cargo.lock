@@ -2732,6 +2732,7 @@ dependencies = [
 name = "kontainer-rpc-auth"
 version = "0.1.0"
 dependencies = [
+ "rustls",
  "tonic",
  "x509-parser",
 ]

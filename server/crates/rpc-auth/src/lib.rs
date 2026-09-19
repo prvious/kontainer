@@ -3,6 +3,7 @@
 mod identity;
 mod interceptor;
 mod tls;
+mod verifier;
 
 pub use identity::{
     AuthenticatedPeerIdentity, IdentityError, WorkloadIdentity, WorkloadKind,
@@ -10,3 +11,4 @@ pub use identity::{
 };
 pub use interceptor::PeerIdentityInterceptor;
 pub use tls::MutualTlsIdentityFiles;
+pub use verifier::{OutboundPeerVerifier, VerifierBuildError};
