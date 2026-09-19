@@ -443,7 +443,8 @@ pub fn init_shared_auth_state(ctx: &AppContext) -> Result<()> {
         .insert(ControllerClusterId(settings.agent_rpc.cluster_id.clone()));
 
     if let Some(client) = build_agent_client(&settings)? {
-        ctx.shared_store.insert(client);
+        ctx.shared_store
+            .insert(crate::rpc::SharedAgentClient(Arc::new(client)));
     }
 
     let service = if settings.github_auth.enabled {

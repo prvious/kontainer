@@ -11,8 +11,12 @@
 
 use std::time::Duration;
 
-use kontainer_agent_proto::v1::{DescribeRequest, node_agent_client::NodeAgentClient};
+use kontainer_agent_proto::v1::{
+    ContainerState as ProtoContainerState, DescribeRequest, ListContainersRequest,
+    node_agent_client::NodeAgentClient,
+};
 use kontainer_rpc_auth::{MutualTlsIdentityFiles, WorkloadIdentity};
+use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tonic::transport::{Channel, Endpoint};
 
@@ -173,6 +177,42 @@ impl NodeAgentClientConfig {
         })
     }
 
+    /// Call `ListContainers` on the statically configured agent.
+    ///
+    /// Only the page size and opaque page token vary per call. The endpoint,
+    /// DNS name, and expected identity come only from this client's
+    /// configuration. The returned page preserves the agent's deterministic
+    /// order and cursor unchanged.
+    pub async fn list_containers(
+        &self,
+        page_size: u32,
+        page_token: String,
+        cancellation: &CancellationToken,
+    ) -> Result<AgentContainerPage, AgentClientError> {
+        let channel = self.channel(cancellation).await?;
+
+        let mut client = NodeAgentClient::new(channel);
+        let mut request = tonic::Request::new(ListContainersRequest {
+            page_size,
+            page_token,
+        });
+        request.set_timeout(self.rpc_timeout);
+
+        let response = tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => return Err(AgentClientError::Cancelled),
+            result = tokio::time::timeout(self.rpc_timeout, client.list_containers(request)) => {
+                match result {
+                    Ok(Ok(response)) => response.into_inner(),
+                    Ok(Err(status)) => return Err(map_rpc_status(status)),
+                    Err(_) => return Err(AgentClientError::TimedOut),
+                }
+            }
+        };
+
+        self.validate_container_page(page_size, response)
+    }
+
     /// Open the single static channel, observing connect deadlines and
     /// caller/shutdown cancellation without spawning detached work.
     async fn channel(&self, cancellation: &CancellationToken) -> Result<Channel, AgentClientError> {
@@ -190,6 +230,65 @@ impl NodeAgentClientConfig {
             }
         }
     }
+
+    /// Validate one agent inventory page against the configured identity and
+    /// the #82 bounds. Order is preserved; any violation is a redacted
+    /// invalid response rather than a partial page.
+    fn validate_container_page(
+        &self,
+        page_size: u32,
+        response: kontainer_agent_proto::v1::ListContainersResponse,
+    ) -> Result<AgentContainerPage, AgentClientError> {
+        let expected_node = self
+            .expected
+            .node_id()
+            .ok_or(AgentClientError::InvalidResponse)?;
+        let limit = usize::try_from(page_size).unwrap_or(MAX_CONTAINER_PAGE_SIZE);
+        // The controller always sends an explicit 1..=100 size; zero would
+        // mean the agent default, so bound it by the hard maximum instead of
+        // trusting an unbounded page.
+        let bound = if limit == 0 {
+            MAX_CONTAINER_PAGE_SIZE
+        } else {
+            limit
+        };
+        if response.containers.len() > bound || response.containers.len() > MAX_CONTAINER_PAGE_SIZE
+        {
+            return Err(AgentClientError::InvalidResponse);
+        }
+        if !response.next_page_token.is_empty() && !is_valid_page_token(&response.next_page_token) {
+            return Err(AgentClientError::InvalidResponse);
+        }
+
+        let mut containers = Vec::with_capacity(response.containers.len());
+        for item in response.containers {
+            let state = validate_summary(&item, expected_node)?;
+            containers.push(AgentContainerSummary {
+                container_id: item.container_id,
+                display_name: item.display_name,
+                image_reference: item.image_reference,
+                state,
+                status: item.status,
+                created_at_seconds: item.created_at_unix_seconds,
+                node_id: item.node_id,
+            });
+        }
+
+        Ok(AgentContainerPage {
+            containers,
+            next_page_token: if response.next_page_token.is_empty() {
+                None
+            } else {
+                Some(response.next_page_token)
+            },
+        })
+    }
+
+    /// Expected node ID, for shared-store diagnostics without exposing TLS.
+    #[must_use]
+    pub fn node_id(&self) -> &str {
+        self.expected.node_id().unwrap_or_default()
+    }
 }
 
 /// Controller-owned `Describe` result, distinct from protobuf types.
@@ -200,6 +299,78 @@ pub struct AgentDescription {
     pub architecture: String,
     pub docker_connected: bool,
 }
+
+/// Controller-owned container state, distinct from protobuf and Engine types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentContainerState {
+    Unknown,
+    Created,
+    Running,
+    Paused,
+    Restarting,
+    Removing,
+    Exited,
+    Dead,
+    Stopping,
+}
+
+/// Controller-owned container summary, distinct from protobuf types. Only the
+/// seven allowlisted fields cross the RPC boundary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentContainerSummary {
+    pub container_id: String,
+    pub display_name: String,
+    pub image_reference: String,
+    pub state: AgentContainerState,
+    pub status: String,
+    pub created_at_seconds: i64,
+    pub node_id: String,
+}
+
+/// Controller-owned container page preserving agent order and cursor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentContainerPage {
+    pub containers: Vec<AgentContainerSummary>,
+    pub next_page_token: Option<String>,
+}
+
+/// Narrow injectable handle for node inventory reads.
+///
+/// Production inserts the configured [`NodeAgentClientConfig`]; tests insert
+/// a fake. The handle carries only pagination and cancellation: no request
+/// input can select an endpoint, DNS name, or identity.
+#[async_trait::async_trait]
+pub trait AgentContainerClient: std::fmt::Debug + Send + Sync {
+    async fn list_containers(
+        &self,
+        page_size: u32,
+        page_token: String,
+        cancellation: &CancellationToken,
+    ) -> Result<AgentContainerPage, AgentClientError>;
+
+    fn node_id(&self) -> &str;
+}
+
+#[async_trait::async_trait]
+impl AgentContainerClient for NodeAgentClientConfig {
+    async fn list_containers(
+        &self,
+        page_size: u32,
+        page_token: String,
+        cancellation: &CancellationToken,
+    ) -> Result<AgentContainerPage, AgentClientError> {
+        NodeAgentClientConfig::list_containers(self, page_size, page_token, cancellation).await
+    }
+
+    fn node_id(&self) -> &str {
+        NodeAgentClientConfig::node_id(self)
+    }
+}
+
+/// Shared inventory client stored in [`loco_rs::app::AppContext::shared_store`].
+/// Cloned per request; the inner client is the single static configuration.
+#[derive(Debug, Clone)]
+pub struct SharedAgentClient(pub Arc<dyn AgentContainerClient>);
 
 /// Stable, redacted call failures. No endpoint, address, TLS, or daemon
 /// detail crosses this boundary.
@@ -215,6 +386,9 @@ pub enum AgentClientError {
     IdentityMismatch,
     /// The response was malformed.
     InvalidResponse,
+    /// Pagination was rejected locally or by the agent (including a stale
+    /// cursor whose live target disappeared).
+    InvalidPagination,
 }
 
 impl std::fmt::Display for AgentClientError {
@@ -225,6 +399,7 @@ impl std::fmt::Display for AgentClientError {
             Self::Cancelled => formatter.write_str("agent request was cancelled"),
             Self::IdentityMismatch => formatter.write_str("agent identity did not match"),
             Self::InvalidResponse => formatter.write_str("agent response was invalid"),
+            Self::InvalidPagination => formatter.write_str("pagination is invalid"),
         }
     }
 }
@@ -316,7 +491,65 @@ fn map_rpc_status(status: tonic::Status) -> AgentClientError {
         Code::DeadlineExceeded => AgentClientError::TimedOut,
         Code::Unauthenticated | Code::PermissionDenied => AgentClientError::IdentityMismatch,
         Code::Unavailable => AgentClientError::Unavailable,
+        Code::InvalidArgument => AgentClientError::InvalidPagination,
         _ => AgentClientError::InvalidResponse,
+    }
+}
+
+/// #82 pagination bounds mirrored without an Engine dependency so the
+/// controller never forwards an unbounded page or cursor shape.
+pub(crate) const MAX_CONTAINER_PAGE_SIZE: usize = 100;
+pub(crate) const MAX_CONTAINER_PAGE_TOKEN_LEN: usize = 67;
+const MAX_CONTAINER_STATUS_LEN: usize = 256;
+const CONTAINER_ID_LEN: usize = 64;
+
+pub(crate) fn is_valid_container_id(value: &str) -> bool {
+    value.len() == CONTAINER_ID_LEN
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+}
+
+fn is_valid_page_token(token: &str) -> bool {
+    if token.is_empty() || token.len() > MAX_CONTAINER_PAGE_TOKEN_LEN {
+        return false;
+    }
+    token.strip_prefix("v1:").is_some_and(is_valid_container_id)
+}
+
+/// Validate one proto summary against the configured node and the #82
+/// required fields. Mirrors the Engine adapter so a negative timestamp,
+/// missing display name, or blank image never becomes a 200 page.
+fn validate_summary(
+    item: &kontainer_agent_proto::v1::ContainerSummary,
+    expected_node: &str,
+) -> Result<AgentContainerState, AgentClientError> {
+    if !is_valid_container_id(&item.container_id) {
+        return Err(AgentClientError::InvalidResponse);
+    }
+    if item.node_id != expected_node {
+        return Err(AgentClientError::InvalidResponse);
+    }
+    if item.status.len() > MAX_CONTAINER_STATUS_LEN {
+        return Err(AgentClientError::InvalidResponse);
+    }
+    if item.created_at_unix_seconds < 0
+        || item.display_name.is_empty()
+        || item.image_reference.trim().is_empty()
+    {
+        return Err(AgentClientError::InvalidResponse);
+    }
+    match ProtoContainerState::try_from(item.state) {
+        Ok(ProtoContainerState::Unknown) => Ok(AgentContainerState::Unknown),
+        Ok(ProtoContainerState::Created) => Ok(AgentContainerState::Created),
+        Ok(ProtoContainerState::Running) => Ok(AgentContainerState::Running),
+        Ok(ProtoContainerState::Paused) => Ok(AgentContainerState::Paused),
+        Ok(ProtoContainerState::Restarting) => Ok(AgentContainerState::Restarting),
+        Ok(ProtoContainerState::Removing) => Ok(AgentContainerState::Removing),
+        Ok(ProtoContainerState::Exited) => Ok(AgentContainerState::Exited),
+        Ok(ProtoContainerState::Dead) => Ok(AgentContainerState::Dead),
+        Ok(ProtoContainerState::Stopping) => Ok(AgentContainerState::Stopping),
+        Ok(ProtoContainerState::Unspecified) | Err(_) => Err(AgentClientError::InvalidResponse),
     }
 }
 
@@ -380,6 +613,14 @@ mod tests {
             "agent identity did not match"
         );
         assert_eq!(
+            super::AgentClientError::InvalidPagination.to_string(),
+            "pagination is invalid"
+        );
+        assert_eq!(
+            super::map_rpc_status(tonic::Status::invalid_argument("stale cursor")),
+            super::AgentClientError::InvalidPagination
+        );
+        assert_eq!(
             super::map_rpc_status(tonic::Status::deadline_exceeded("slow")),
             super::AgentClientError::TimedOut
         );
@@ -387,5 +628,69 @@ mod tests {
             super::map_rpc_status(tonic::Status::unavailable("down")),
             super::AgentClientError::Unavailable
         );
+    }
+
+    #[test]
+    fn container_ids_and_page_tokens_use_the_agent_bounds() {
+        let id = "a".repeat(64);
+        assert!(super::is_valid_container_id(&id));
+        assert!(!super::is_valid_container_id("abc"));
+        assert!(!super::is_valid_container_id(&"A".repeat(64)));
+        assert!(super::is_valid_page_token(&format!("v1:{id}")));
+        assert!(!super::is_valid_page_token(""));
+        assert!(!super::is_valid_page_token("not-a-cursor"));
+        assert!(!super::is_valid_page_token("v1:short"));
+        assert!(!super::is_valid_page_token(&"x".repeat(68)));
+    }
+
+    #[test]
+    fn summaries_require_engine_mandatory_fields() {
+        use kontainer_agent_proto::v1::{
+            ContainerState as ProtoState, ContainerSummary as ProtoSummary,
+        };
+        let valid = ProtoSummary {
+            container_id: "a".repeat(64),
+            display_name: "web".to_owned(),
+            image_reference: "nginx:latest".to_owned(),
+            state: ProtoState::Running as i32,
+            status: "Up 3s".to_owned(),
+            created_at_unix_seconds: 1_700_000_000,
+            node_id: "node-1".to_owned(),
+        };
+        assert!(super::validate_summary(&valid, "node-1").is_ok());
+        for mutate in [
+            ("negative time", {
+                let mut item = valid.clone();
+                item.created_at_unix_seconds = -1;
+                item
+            }),
+            ("empty display", {
+                let mut item = valid.clone();
+                item.display_name.clear();
+                item
+            }),
+            ("blank image", {
+                let mut item = valid.clone();
+                item.image_reference = "   ".to_owned();
+                item
+            }),
+            ("wrong node", {
+                let mut item = valid.clone();
+                item.node_id = "node-2".to_owned();
+                item
+            }),
+            ("unspecified state", {
+                let mut item = valid.clone();
+                item.state = ProtoState::Unspecified as i32;
+                item
+            }),
+        ] {
+            assert_eq!(
+                super::validate_summary(&mutate.1, "node-1"),
+                Err(super::AgentClientError::InvalidResponse),
+                "{} must be an invalid response",
+                mutate.0
+            );
+        }
     }
 }

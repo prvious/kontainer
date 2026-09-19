@@ -1037,9 +1037,10 @@ async fn postgres_session_openapi_registers_auth_routes_without_secrets()
     assert!(!serialized.contains("kta_") && !serialized.contains("ktr_"));
     assert!(!serialized.contains("secret-canary"));
     // Kontainer credentials travel in the JSON body or the Authorization
-    // header only. The GitHub callback is the single exception: its query
-    // parameters carry only the provider `code`, opaque `state`, and
-    // provider `error` signal, never a Kontainer credential or verifier.
+    // header only. The GitHub callback is the single credential-adjacent
+    // exception: its query parameters carry only the provider `code`, opaque
+    // `state`, and provider `error` signal, never a Kontainer credential or
+    // verifier. Bounded pagination cursors are the only other query transport.
     assert!(
         !serialized.contains("\"in\":\"cookie\""),
         "no cookie credential transport"
@@ -1056,9 +1057,11 @@ async fn postgres_session_openapi_registers_auth_routes_without_secrets()
                 {
                     if parameter.get("in") == Some(&serde_json::json!("query")) {
                         let name = parameter.get("name").cloned().unwrap_or_default();
-                        let allowed = path == "/api/v1/auth/github/callback"
-                            && ["code", "state", "error"]
-                                .contains(&name.as_str().unwrap_or_default());
+                        let name = name.as_str().unwrap_or_default();
+                        let allowed = (path == "/api/v1/auth/github/callback"
+                            && ["code", "state", "error"].contains(&name))
+                            || (path == "/api/v1/nodes/{nodeId}/containers"
+                                && ["limit", "cursor"].contains(&name));
                         if !allowed {
                             violations.push(format!("{method} {path} query {name}"));
                         }
