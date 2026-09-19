@@ -106,6 +106,26 @@ impl ContainerEngine for BlockingEngine {
     }
 }
 
+struct BlockingInventoryEngine {
+    entered: Arc<Semaphore>,
+}
+
+#[async_trait]
+impl ContainerEngine for BlockingInventoryEngine {
+    async fn is_available(&self) -> Result<bool, EngineError> {
+        Ok(true)
+    }
+
+    async fn list_containers(
+        &self,
+        _request: ContainerPageRequest,
+        _cancellation: &CancellationToken,
+    ) -> Result<ContainerPage, EngineError> {
+        self.entered.add_permits(1);
+        pending().await
+    }
+}
+
 struct RunningServer {
     address: std::net::SocketAddr,
     cancellation: CancellationToken,
@@ -431,6 +451,164 @@ async fn production_client_connect_deadline_expiry_is_a_timeout() {
     assert_eq!(error, AgentClientError::TimedOut);
 
     stall.abort();
+}
+
+#[tokio::test]
+async fn production_client_lists_bounded_pages_with_provenance() {
+    let pki = TestPki::generate();
+    let first_id = "a".repeat(64);
+    let second_id = "b".repeat(64);
+    let cursor = format!("v1:{first_id}");
+    let engine = Arc::new(InventoryEngine {
+        pages: vec![
+            ContainerPage {
+                containers: vec![inventory_summary(&first_id, "web")],
+                next_page_token: Some(cursor.clone()),
+            },
+            ContainerPage {
+                containers: vec![inventory_summary(&second_id, "worker")],
+                next_page_token: None,
+            },
+        ],
+        calls: Arc::new(AtomicUsize::new(0)),
+        error: None,
+    });
+    let calls = engine.calls.clone();
+    let node_agent = start_node_agent(&pki, engine).await;
+    let client = production_client(
+        node_agent.address,
+        pki.trusted_files(&pki.controller),
+        NODE_AGENT_NAME,
+        CLUSTER_ID,
+        NODE_ID,
+    );
+
+    let first = client
+        .list_containers(1, String::new(), &CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(first.containers.len(), 1);
+    assert_eq!(first.containers[0].container_id, first_id);
+    assert_eq!(first.containers[0].display_name, "web");
+    assert_eq!(first.containers[0].node_id, NODE_ID);
+    assert_eq!(first.next_page_token.as_deref(), Some(cursor.as_str()));
+
+    let second = client
+        .list_containers(1, cursor, &CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(second.containers.len(), 1);
+    assert_eq!(second.containers[0].container_id, second_id);
+    assert!(second.next_page_token.is_none());
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+
+    node_agent.stop().await;
+}
+
+#[tokio::test]
+async fn production_client_maps_pagination_and_daemon_failures_without_internals() {
+    let pki = TestPki::generate();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let engine = Arc::new(InventoryEngine {
+        pages: vec![ContainerPage {
+            containers: vec![],
+            next_page_token: None,
+        }],
+        calls: calls.clone(),
+        error: None,
+    });
+    let node_agent = start_node_agent(&pki, engine).await;
+    let client = production_client(
+        node_agent.address,
+        pki.trusted_files(&pki.controller),
+        NODE_AGENT_NAME,
+        CLUSTER_ID,
+        NODE_ID,
+    );
+
+    // Oversized and malformed pagination never reach Engine access: the agent
+    // rejects them as invalid input, which the client preserves as a typed
+    // pagination failure.
+    for (size, token) in [
+        (101, String::new()),
+        (10, "not-a-cursor".to_owned()),
+        (10, "v1:short".to_owned()),
+    ] {
+        let error = client
+            .list_containers(size, token, &CancellationToken::new())
+            .await
+            .unwrap_err();
+        assert_eq!(error, AgentClientError::InvalidPagination);
+    }
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    node_agent.stop().await;
+
+    // Daemon failures stay redacted unavailable errors.
+    let failing = start_node_agent(
+        &pki,
+        Arc::new(InventoryEngine {
+            pages: vec![],
+            calls: Arc::new(AtomicUsize::new(0)),
+            error: Some((
+                EngineErrorKind::DaemonRejected,
+                EngineOperation::ListContainers,
+            )),
+        }),
+    )
+    .await;
+    let client = production_client(
+        failing.address,
+        pki.trusted_files(&pki.controller),
+        NODE_AGENT_NAME,
+        CLUSTER_ID,
+        NODE_ID,
+    );
+    let error = client
+        .list_containers(10, String::new(), &CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert_eq!(error, AgentClientError::Unavailable);
+    assert_eq!(error.to_string(), "agent is unavailable");
+    failing.stop().await;
+}
+
+#[tokio::test]
+async fn production_client_list_cancellation_wins_without_detached_work() {
+    let pki = TestPki::generate();
+    let entered = Arc::new(Semaphore::new(0));
+    let node_agent = start_node_agent(
+        &pki,
+        Arc::new(BlockingInventoryEngine {
+            entered: entered.clone(),
+        }),
+    )
+    .await;
+    let client = production_client(
+        node_agent.address,
+        pki.trusted_files(&pki.controller),
+        NODE_AGENT_NAME,
+        CLUSTER_ID,
+        NODE_ID,
+    );
+    let cancellation = CancellationToken::new();
+    let call_cancellation = cancellation.clone();
+    let call = tokio::spawn(async move {
+        client
+            .list_containers(10, String::new(), &call_cancellation)
+            .await
+    });
+
+    entered.acquire().await.unwrap().forget();
+    cancellation.cancel();
+
+    let error = timeout(Duration::from_secs(2), call)
+        .await
+        .expect("in-flight listing did not observe cancellation")
+        .expect("listing task panicked")
+        .unwrap_err();
+    assert_eq!(error, AgentClientError::Cancelled);
+
+    node_agent.stop().await;
 }
 
 #[tokio::test]
