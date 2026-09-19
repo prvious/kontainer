@@ -121,6 +121,8 @@ pub fn routes() -> Routes {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
     use super::{ApiDoc, OPENAPI_ARTIFACT, OpenApi, StatusResponse};
 
     #[test]
@@ -205,8 +207,10 @@ mod tests {
             .expect("nodeId is documented");
         assert_eq!(node["in"], "path");
 
-        // Exact page DTO: items plus nullable nextCursor, seven allowlisted
-        // item fields, no Docker internals.
+        // Exact page DTO: exactly items plus nextCursor, and exactly the
+        // seven allowlisted item fields. Exact key sets — not a partial
+        // allowlist or a substring blacklist — are what stop an added
+        // environment, port, label, mount, or networking field.
         let page = &value["components"]["schemas"]["ContainerPageResponse"];
         assert!(
             page["required"]
@@ -215,34 +219,38 @@ mod tests {
                     && required.contains(&serde_json::json!("nextCursor")))
         );
         assert_eq!(page["properties"]["items"]["maxItems"], 100);
+        let page_fields: BTreeSet<&str> = page["properties"]
+            .as_object()
+            .expect("page schema documents properties")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            page_fields,
+            BTreeSet::from(["items", "nextCursor"]),
+            "page envelope exposes exactly items and nextCursor"
+        );
+
         let item = &value["components"]["schemas"]["ContainerItemResponse"];
-        for field in [
-            "containerId",
-            "displayName",
-            "imageReference",
-            "state",
-            "status",
-            "createdAt",
-            "nodeId",
-        ] {
-            assert!(
-                item["properties"].get(field).is_some(),
-                "page item documents {field}"
-            );
-        }
-        let serialized = serde_json::to_string(&value).unwrap();
-        for forbidden in ["command", "environment", "label", "mount", "inspect"] {
-            // Field names above are allowlisted; raw Docker fields must not
-            // appear as schema properties.
-            if forbidden == "label" {
-                continue;
-            }
-            assert!(
-                !serialized.contains(&format!("\"{forbidden}\"")),
-                "{forbidden} leaked into OpenAPI"
-            );
-        }
-        assert!(!serialized.contains("secret-canary"));
+        let item_fields: BTreeSet<&str> = item["properties"]
+            .as_object()
+            .expect("item schema documents properties")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            item_fields,
+            BTreeSet::from([
+                "containerId",
+                "displayName",
+                "imageReference",
+                "state",
+                "status",
+                "createdAt",
+                "nodeId",
+            ]),
+            "page item exposes exactly the seven allowlisted fields"
+        );
     }
 
     #[test]
