@@ -42,7 +42,7 @@ pub struct CredentialError;
 ///
 /// A credential cannot be serialized into a body, log, or telemetry field:
 ///
-/// ```compile_fail
+/// ```compile_fail,E0277
 /// let credential = kontainer_native_client::AccessCredential::parse(
 ///     "kta_11111111111111111111111111111111.2222222222222222222222222222222222222222222222222222222222222222",
 /// )
@@ -61,7 +61,7 @@ pub struct AccessCredential(SecretValue);
 /// refresh credential is presented again, so it must never be retried or
 /// duplicated.
 ///
-/// ```compile_fail
+/// ```compile_fail,E0277
 /// let credential = kontainer_native_client::RefreshCredential::parse(
 ///     "ktr_33333333333333333333333333333333.4444444444444444444444444444444444444444444444444444444444444444",
 /// )
@@ -78,7 +78,7 @@ pub struct RefreshCredential(SecretValue);
 /// redemption, in the JSON body. It is redacted, non-serializable,
 /// non-cloneable, and zeroed on drop.
 ///
-/// ```compile_fail
+/// ```compile_fail,E0277
 /// let verifier = kontainer_native_client::LoginVerifier::parse(
 ///     "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk",
 /// )
