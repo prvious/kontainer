@@ -1,3 +1,8 @@
+pub mod client;
+
+pub use client::{
+    AgentClientConfigError, AgentClientError, AgentDescription, NodeAgentClientConfig,
+};
 use kontainer_agent_proto::{
     PROTOCOL_PACKAGE,
     v1::{

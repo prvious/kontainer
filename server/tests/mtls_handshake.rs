@@ -19,6 +19,7 @@ use kontainer_agent_proto::{
     },
 };
 use kontainer_controller::rpc::serve_controller_rpc;
+use kontainer_controller::rpc::{AgentClientError, NodeAgentClientConfig};
 use kontainer_controller::server::{
     BoundAgentRpcServer, BoundHttpServer, HttpTransport, supervise_controller_servers,
 };
@@ -139,6 +140,266 @@ async fn describe_reports_node_identity_and_engine_health() {
     assert!(response.docker_connected);
     assert!(!response.architecture.is_empty());
 
+    node_agent.stop().await;
+}
+
+#[tokio::test]
+async fn production_client_describes_the_configured_agent() {
+    let pki = TestPki::generate();
+    let node_agent = start_node_agent(&pki, Arc::new(AvailableEngine)).await;
+    let client = production_client(
+        node_agent.address,
+        pki.trusted_files(&pki.controller),
+        NODE_AGENT_NAME,
+        CLUSTER_ID,
+        NODE_ID,
+    );
+
+    let description = client.describe(&CancellationToken::new()).await.unwrap();
+
+    assert_eq!(description.node_id, NODE_ID);
+    assert_eq!(description.agent_version, env!("CARGO_PKG_VERSION"));
+    assert!(description.docker_connected);
+    assert!(!description.architecture.is_empty());
+
+    node_agent.stop().await;
+}
+
+#[tokio::test]
+async fn production_client_rejects_wrong_workload_cluster_and_node_before_rpc() {
+    let pki = TestPki::generate();
+    // Wrong workload: server presents a controller identity where a node
+    // agent is expected.
+    let wrong_workload = start_node_agent_with_tls(
+        &pki,
+        pki.trusted_files(&pki.wrong_workload),
+        NODE_ID,
+        Arc::new(AvailableEngine),
+    )
+    .await;
+    let client = production_client(
+        wrong_workload.address,
+        pki.trusted_files(&pki.controller),
+        "wrong-workload.kontainer.test",
+        CLUSTER_ID,
+        NODE_ID,
+    );
+    // The server DNS matches the presented certificate, so WebPKI passes and
+    // the failure must come from the workload-identity check.
+    let error = client
+        .describe(&CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        AgentClientError::Unavailable | AgentClientError::IdentityMismatch
+    ));
+    wrong_workload.stop().await;
+
+    // Wrong cluster: same node, different cluster.
+    let wrong_cluster = start_node_agent_with_tls(
+        &pki,
+        pki.trusted_files(&pki.wrong_cluster),
+        NODE_ID,
+        Arc::new(AvailableEngine),
+    )
+    .await;
+    let client = production_client(
+        wrong_cluster.address,
+        pki.trusted_files(&pki.controller),
+        "wrong-cluster.kontainer.test",
+        CLUSTER_ID,
+        NODE_ID,
+    );
+    let error = client
+        .describe(&CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        AgentClientError::Unavailable | AgentClientError::IdentityMismatch
+    ));
+    wrong_cluster.stop().await;
+
+    // Wrong node: the certificate is valid for node-1, but the controller is
+    // statically configured for node-2.
+    let node_agent = start_node_agent(&pki, Arc::new(AvailableEngine)).await;
+    let client = production_client(
+        node_agent.address,
+        pki.trusted_files(&pki.controller),
+        NODE_AGENT_NAME,
+        CLUSTER_ID,
+        "node-2",
+    );
+    let error = client
+        .describe(&CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        AgentClientError::Unavailable | AgentClientError::IdentityMismatch
+    ));
+    node_agent.stop().await;
+}
+
+#[tokio::test]
+async fn production_client_rejects_unknown_ca_wrong_dns_and_plaintext() {
+    let pki = TestPki::generate();
+
+    // Unknown CA: server certificate is signed by an untrusted CA.
+    let untrusted = start_node_agent_with_tls(
+        &pki,
+        pki.trusted_files(&pki.untrusted_agent),
+        NODE_ID,
+        Arc::new(AvailableEngine),
+    )
+    .await;
+    let client = production_client(
+        untrusted.address,
+        pki.trusted_files(&pki.controller),
+        "untrusted-agent.kontainer.test",
+        CLUSTER_ID,
+        NODE_ID,
+    );
+    let error = client
+        .describe(&CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert_eq!(error, AgentClientError::Unavailable);
+    assert_eq!(error.to_string(), "agent is unavailable");
+    untrusted.stop().await;
+
+    // Wrong DNS name: the certificate is trusted, but the expected server
+    // name does not match its DNS SAN.
+    let node_agent = start_node_agent(&pki, Arc::new(AvailableEngine)).await;
+    let node_address = node_agent.address;
+    let client = production_client(
+        node_address,
+        pki.trusted_files(&pki.controller),
+        "wrong-dns.kontainer.test",
+        CLUSTER_ID,
+        NODE_ID,
+    );
+    let error = client
+        .describe(&CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert_eq!(error, AgentClientError::Unavailable);
+    node_agent.stop().await;
+
+    // Plaintext endpoints never validate: the static endpoint must be https.
+    let tls_files = pki.trusted_files(&pki.controller);
+    let plaintext = NodeAgentClientConfig::new(
+        format!("http://{node_address}"),
+        NODE_AGENT_NAME.to_owned(),
+        CLUSTER_ID.to_owned(),
+        NODE_ID.to_owned(),
+        tls_files,
+    )
+    .unwrap_err();
+    assert_eq!(plaintext.to_string(), "agent endpoint is invalid");
+
+    // Missing client TLS files fail construction, not the first call.
+    let directory = tempfile::tempdir().unwrap();
+    let missing = directory.path().join("missing.pem");
+    let missing_files = MutualTlsIdentityFiles::new(&missing, &missing, &missing);
+    let error = NodeAgentClientConfig::new(
+        format!("https://{node_address}"),
+        NODE_AGENT_NAME.to_owned(),
+        CLUSTER_ID.to_owned(),
+        NODE_ID.to_owned(),
+        missing_files,
+    )
+    .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("agent client TLS files are invalid")
+    );
+
+    // An unreachable agent constructs successfully; the failure is a typed
+    // call error rather than a startup failure.
+    let unreachable_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let unreachable = unreachable_listener.local_addr().unwrap();
+    drop(unreachable_listener);
+    let client = production_client(
+        unreachable,
+        pki.trusted_files(&pki.controller),
+        NODE_AGENT_NAME,
+        CLUSTER_ID,
+        NODE_ID,
+    );
+    let error = client
+        .describe(&CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert_eq!(error, AgentClientError::Unavailable);
+}
+
+#[tokio::test]
+async fn production_client_rejects_a_mismatched_reported_node_id() {
+    let pki = TestPki::generate();
+    // TLS passes (the certificate is node-1), but the handler reports
+    // node-2. The client must not trust the protobuf claim.
+    let node_agent = start_node_agent_with_tls(
+        &pki,
+        pki.trusted_files(&pki.agent),
+        "node-2",
+        Arc::new(AvailableEngine),
+    )
+    .await;
+    let client = production_client(
+        node_agent.address,
+        pki.trusted_files(&pki.controller),
+        NODE_AGENT_NAME,
+        CLUSTER_ID,
+        NODE_ID,
+    );
+
+    let error = client
+        .describe(&CancellationToken::new())
+        .await
+        .unwrap_err();
+    assert_eq!(error, AgentClientError::IdentityMismatch);
+    assert_eq!(error.to_string(), "agent identity did not match");
+
+    node_agent.stop().await;
+}
+
+#[tokio::test]
+async fn production_client_cancellation_wins_without_detached_work() {
+    let pki = TestPki::generate();
+    let entered = Arc::new(Semaphore::new(0));
+    let node_agent = start_node_agent(
+        &pki,
+        Arc::new(BlockingEngine {
+            entered: entered.clone(),
+        }),
+    )
+    .await;
+    let client = production_client(
+        node_agent.address,
+        pki.trusted_files(&pki.controller),
+        NODE_AGENT_NAME,
+        CLUSTER_ID,
+        NODE_ID,
+    );
+    let cancellation = CancellationToken::new();
+    let call_cancellation = cancellation.clone();
+    let call = tokio::spawn(async move { client.describe(&call_cancellation).await });
+
+    entered.acquire().await.unwrap().forget();
+    cancellation.cancel();
+
+    let error = timeout(Duration::from_secs(2), call)
+        .await
+        .expect("in-flight Describe did not observe cancellation")
+        .expect("Describe task panicked")
+        .unwrap_err();
+    assert_eq!(error, AgentClientError::Cancelled);
+
+    // Caller cancellation ends the client call; the server still shuts down
+    // cleanly afterwards, proving no detached client work keeps it alive.
     node_agent.stop().await;
 }
 
@@ -694,12 +955,20 @@ async fn start_controller(pki: &TestPki) -> RunningServer {
 }
 
 async fn start_node_agent(pki: &TestPki, engine: Arc<dyn ContainerEngine>) -> RunningServer {
+    start_node_agent_with_tls(pki, pki.trusted_files(&pki.agent), NODE_ID, engine).await
+}
+
+async fn start_node_agent_with_tls(
+    _pki: &TestPki,
+    tls_files: MutualTlsIdentityFiles,
+    service_node_id: &str,
+    engine: Arc<dyn ContainerEngine>,
+) -> RunningServer {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let cancellation = CancellationToken::new();
-    let service = NodeAgentService::new(NODE_ID, engine, cancellation.clone());
+    let service = NodeAgentService::new(service_node_id, engine, cancellation.clone());
     let task_cancellation = cancellation.clone();
-    let tls_files = pki.trusted_files(&pki.agent);
     let task = tokio::spawn(async move {
         serve_node_agent_rpc(
             listener,
@@ -717,6 +986,23 @@ async fn start_node_agent(pki: &TestPki, engine: Arc<dyn ContainerEngine>) -> Ru
         cancellation,
         task,
     }
+}
+
+fn production_client(
+    address: std::net::SocketAddr,
+    tls_files: MutualTlsIdentityFiles,
+    server_name: &str,
+    cluster_id: &str,
+    node_id: &str,
+) -> NodeAgentClientConfig {
+    NodeAgentClientConfig::new(
+        format!("https://{address}"),
+        server_name.to_owned(),
+        cluster_id.to_owned(),
+        node_id.to_owned(),
+        tls_files,
+    )
+    .expect("production client fixture must validate")
 }
 
 async fn controller_client(
