@@ -1,0 +1,14 @@
+{
+  "items": [
+    {
+      "containerId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "displayName": "web.1",
+      "imageReference": "nginx:1.27",
+      "state": "running",
+      "status": "Up 3 minutes",
+      "createdAt": "2026-09-19T06:00:00.000Z",
+      "nodeId": "node-2"
+    }
+  ],
+  "nextCursor": null
+}

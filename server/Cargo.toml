@@ -3,6 +3,7 @@ members = [
   ".",
   "crates/agent-proto",
   "crates/engine",
+  "crates/native-client",
   "crates/node-agent",
   "crates/rpc-auth",
   "crates/stream-protocol",
