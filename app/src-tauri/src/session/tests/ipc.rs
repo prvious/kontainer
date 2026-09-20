@@ -1,0 +1,144 @@
+//! The closed IPC contract, checked against the fixture the TypeScript tests
+//! also read. Rust owns the serialization; TypeScript owns the interface.
+
+use uuid::Uuid;
+
+use crate::session::errors::SessionError;
+use crate::session::models::{LoginHint, SessionDocument, SessionView};
+
+use super::fakes::Harness;
+
+const FIXTURE: &str = include_str!("../../../../tests/fixtures/session-ipc.json");
+/// The registered command surface; `generate_handler!` in `lib.rs` is checked
+/// against this list so the fixture cannot describe commands that no longer
+/// exist.
+const LIB_SOURCE: &str = include_str!("../../lib.rs");
+
+fn fixture() -> serde_json::Value {
+    serde_json::from_str(FIXTURE).expect("fixture parses")
+}
+
+#[test]
+fn session_view_matches_the_shared_fixture() {
+    let view = SessionView {
+        profile_id: Uuid::parse_str("018f2e34-0000-7000-8000-0000000000bb").expect("uuid"),
+        origin: "https://controller.example/".to_owned(),
+        cluster_id: "test".to_owned(),
+        principal_id: Uuid::parse_str("018f2e34-0000-7000-8000-0000000000aa").expect("uuid"),
+        github_login: "owner".to_owned(),
+        label: Some("Default".to_owned()),
+        access_expires_at_unix_ms: 1_760_000_000_000,
+    };
+    let serialized = serde_json::to_value(&view).expect("serializes");
+    assert_eq!(serialized, fixture()["sessionView"]);
+
+    // Optionality must stay optional on the wire.
+    let without_label = SessionView {
+        label: None,
+        ..view
+    };
+    let serialized = serde_json::to_value(&without_label).expect("serializes");
+    assert!(serialized["label"].is_null());
+}
+
+#[test]
+fn login_hint_matches_the_shared_fixture() {
+    let hint = LoginHint {
+        origin: "https://controller.example/".to_owned(),
+        label: Some("Default".to_owned()),
+    };
+    assert_eq!(
+        serde_json::to_value(&hint).expect("serializes"),
+        fixture()["loginHint"]
+    );
+}
+
+#[test]
+fn error_codes_match_the_shared_fixture() {
+    let serialized: Vec<String> = SessionError::ALL
+        .iter()
+        .map(|error| {
+            serde_json::to_value(error)
+                .expect("serializes")
+                .as_str()
+                .expect("code is a string")
+                .to_owned()
+        })
+        .collect();
+    let expected: Vec<String> = fixture()["errorCodes"]
+        .as_array()
+        .expect("array")
+        .iter()
+        .map(|value| value.as_str().expect("string").to_owned())
+        .collect();
+    assert_eq!(serialized, expected);
+}
+
+#[test]
+fn the_fixture_lists_exactly_the_registered_commands() {
+    let commands: Vec<String> = fixture()["commands"]
+        .as_array()
+        .expect("array")
+        .iter()
+        .map(|value| value.as_str().expect("string").to_owned())
+        .collect();
+    for command in &commands {
+        assert!(
+            LIB_SOURCE.contains(&format!("actions::session::{command}::{command}")),
+            "{command} is missing from the invoke handler"
+        );
+    }
+    // And every registered custody command is described by the fixture.
+    for line in LIB_SOURCE.lines() {
+        let Some(rest) = line.trim().strip_prefix("actions::session::") else {
+            continue;
+        };
+        let name = rest
+            .trim_end_matches(',')
+            .rsplit("::")
+            .next()
+            .expect("command name");
+        assert!(commands.iter().any(|command| command == name), "{name}");
+    }
+}
+
+#[tokio::test]
+async fn custody_outputs_never_carry_credentials() {
+    let harness = Harness::new();
+    let view = harness.login_ok().await;
+    let output = format!(
+        "{} {:?}",
+        serde_json::to_string(&view).expect("view serializes"),
+        SessionError::CleanupUncertain,
+    );
+    for canary in [
+        "kta_",
+        "ktr_",
+        "access_credential",
+        "refresh_credential",
+        "Bearer",
+    ] {
+        assert!(!output.contains(canary), "{canary} leaked into IPC output");
+    }
+}
+
+#[tokio::test]
+async fn login_hint_reports_only_stored_hints() {
+    use std::sync::atomic::Ordering;
+
+    let harness = Harness::new();
+    assert!(harness.manager.login_hint().is_none());
+
+    let hint = LoginHint {
+        origin: "https://controller.example/".to_owned(),
+        label: Some("Default".to_owned()),
+    };
+    harness
+        .metadata
+        .set_document(SessionDocument::new(Some(hint.clone()), None));
+    assert_eq!(harness.manager.login_hint(), Some(hint));
+
+    // A broken store yields no hint rather than an error or stale data.
+    harness.metadata.corrupt_reads.store(true, Ordering::SeqCst);
+    assert!(harness.manager.login_hint().is_none());
+}
