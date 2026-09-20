@@ -1,0 +1,11 @@
+{
+  "id": "018f2e34-0000-7000-8000-0000000000cc",
+  "kind": "service.restart",
+  "state": "running",
+  "recoverable": false,
+  "uncertain": false,
+  "lastEventSequence": 3,
+  "lastErrorCode": null,
+  "createdAt": "2026-09-19T06:50:00.000Z",
+  "updatedAt": "2026-09-19T06:51:00.000Z"
+}

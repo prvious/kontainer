@@ -1,0 +1,5 @@
+{
+  "attemptId": "018f2e34-0000-7000-8000-000000000001",
+  "authorizeUrl": "https://github.com/login/oauth/authorize?client_id=kontainer-test&redirect_uri=http%3A%2F%2Flocalhost%3A5150%2Fapi%2Fv1%2Fauth%2Fgithub%2Fcallback&state=0123456789abcdef&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256",
+  "expiresAt": "2026-09-19T06:57:00.123Z"
+}

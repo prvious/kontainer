@@ -1,0 +1,303 @@
+{
+  "paths": {
+    "/api/v1/nodes/{nodeId}/containers": {
+      "get": {
+        "operationId": "index",
+        "parameters": [
+          {
+            "description": "Configured node ID; only the statically configured node is served",
+            "in": "path",
+            "name": "nodeId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size; defaults to 50, range 1-100",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "format": "int32",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Opaque cursor from a previous page; empty means the first page",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "maxLength": 67,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContainerPageResponse"
+                }
+              }
+            },
+            "description": "One bounded page preserving agent order; live collections are best-effort"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContainerErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid pagination; no agent call was made"
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContainerErrorResponse"
+                }
+              }
+            },
+            "description": "Unknown node; only the configured node exists"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContainerErrorResponse"
+                }
+              }
+            },
+            "description": "Agent unavailable or response invalid; no transport or daemon detail"
+          },
+          "504": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContainerErrorResponse"
+                }
+              }
+            },
+            "description": "Agent deadline expired"
+          }
+        },
+        "tags": [
+          "super::containers"
+        ]
+      }
+    },
+    "/api/v1/operations/{operation_id}": {
+      "get": {
+        "operationId": "show",
+        "parameters": [
+          {
+            "description": "Durable operation UUID",
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationResponse"
+                }
+              }
+            },
+            "description": "Current durable operation state"
+          },
+          "400": {
+            "description": "Invalid operation identifier"
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "404": {
+            "description": "Operation not found or not visible to the authenticated principal"
+          },
+          "500": {
+            "description": "Operation state unavailable"
+          },
+          "503": {
+            "description": "Controller draining new work or session persistence unavailable; the body is either HealthResponse or a generic error"
+          }
+        },
+        "tags": [
+          "super::operations"
+        ]
+      }
+    }
+  },
+  "schemas": {
+    "ContainerErrorResponse": {
+      "properties": {
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "error"
+      ],
+      "type": "object"
+    },
+    "ContainerItemResponse": {
+      "properties": {
+        "containerId": {
+          "description": "Full lowercase-hex daemon container ID.",
+          "type": "string"
+        },
+        "createdAt": {
+          "description": "RFC 3339 UTC creation time with millisecond precision.",
+          "type": "string"
+        },
+        "displayName": {
+          "description": "Canonical display name without Docker linkage.",
+          "type": "string"
+        },
+        "imageReference": {
+          "description": "Image reference as reported by the daemon.",
+          "type": "string"
+        },
+        "nodeId": {
+          "description": "Serving node ID from agent configuration, never request input.",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/components/schemas/ContainerStateResponse",
+          "description": "Typed lifecycle state."
+        },
+        "status": {
+          "description": "Bounded daemon status text.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "containerId",
+        "displayName",
+        "imageReference",
+        "state",
+        "status",
+        "createdAt",
+        "nodeId"
+      ],
+      "type": "object"
+    },
+    "ContainerPageResponse": {
+      "properties": {
+        "items": {
+          "description": "One bounded page preserving the agent's deterministic newest-first\norder. Live collections are best-effort: containers created or removed\nbetween calls can shift pages. A cursor whose target was removed is\nrejected as invalid pagination; restart traversal from the first page.",
+          "items": {
+            "$ref": "#/components/schemas/ContainerItemResponse"
+          },
+          "maxItems": 100,
+          "type": "array"
+        },
+        "nextCursor": {
+          "description": "Opaque cursor for the next page, or null when this page is last.\nPass back unchanged; clients never decode or synthesize it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "nextCursor"
+      ],
+      "type": "object"
+    },
+    "ContainerStateResponse": {
+      "enum": [
+        "unknown",
+        "created",
+        "running",
+        "paused",
+        "restarting",
+        "removing",
+        "exited",
+        "dead",
+        "stopping"
+      ],
+      "type": "string"
+    },
+    "OperationResponse": {
+      "properties": {
+        "createdAt": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "lastErrorCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lastEventSequence": {
+          "format": "int32",
+          "type": "integer"
+        },
+        "recoverable": {
+          "type": "boolean"
+        },
+        "state": {
+          "$ref": "#/components/schemas/OperationStateResponse"
+        },
+        "uncertain": {
+          "type": "boolean"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "state",
+        "recoverable",
+        "uncertain",
+        "lastEventSequence",
+        "createdAt",
+        "updatedAt"
+      ],
+      "type": "object"
+    },
+    "OperationStateResponse": {
+      "enum": [
+        "recoverable",
+        "running",
+        "uncertain",
+        "succeeded",
+        "failed",
+        "cancelled"
+      ],
+      "type": "string"
+    }
+  },
+  "securitySchemes": {
+    "access_session": {
+      "bearerFormat": "opaque",
+      "scheme": "bearer",
+      "type": "http"
+    }
+  }
+}

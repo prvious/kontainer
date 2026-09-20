@@ -1,0 +1,285 @@
+{
+  "paths": {
+    "/api/v1/auth/github/login-attempts": {
+      "post": {
+        "operationId": "start",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartLoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartLoginResponse"
+                }
+              }
+            },
+            "description": "Login attempt with the GitHub authorization URL"
+          },
+          "400": {
+            "description": "Invalid PKCE challenge"
+          },
+          "503": {
+            "description": "GitHub login unavailable"
+          }
+        },
+        "security": [
+          {}
+        ],
+        "tags": [
+          "super::github_login"
+        ]
+      }
+    },
+    "/api/v1/auth/github/login-attempts/{attempt_id}/redeem": {
+      "post": {
+        "operationId": "redeem",
+        "parameters": [
+          {
+            "description": "Login attempt UUID",
+            "in": "path",
+            "name": "attempt_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RedeemLoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GithubLoginResponse"
+                }
+              }
+            },
+            "description": "Session issued for the bootstrap Owner; credentials returned once"
+          },
+          "400": {
+            "description": "Invalid attempt identifier"
+          },
+          "403": {
+            "description": "Login denied: unknown, replayed, expired, or non-Owner identity"
+          },
+          "409": {
+            "description": "Browser step not complete yet"
+          },
+          "502": {
+            "description": "GitHub exchange failed"
+          },
+          "503": {
+            "description": "GitHub login unavailable"
+          }
+        },
+        "security": [
+          {}
+        ],
+        "tags": [
+          "super::github_login"
+        ]
+      }
+    },
+    "/api/v1/auth/sessions/current": {
+      "delete": {
+        "operationId": "logout_current",
+        "responses": {
+          "204": {
+            "description": "Current session revoked"
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "503": {
+            "description": "Session persistence unavailable"
+          }
+        },
+        "tags": [
+          "super::sessions"
+        ]
+      }
+    },
+    "/api/v1/auth/tokens/refresh": {
+      "post": {
+        "operationId": "refresh",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionTokenResponse"
+                }
+              }
+            },
+            "description": "Rotated credential pair, returned once"
+          },
+          "401": {
+            "description": "Invalid, expired, revoked, or reused refresh credential"
+          },
+          "503": {
+            "description": "Session persistence unavailable"
+          }
+        },
+        "security": [
+          {}
+        ],
+        "tags": [
+          "super::sessions"
+        ]
+      }
+    }
+  },
+  "schemas": {
+    "GithubLoginResponse": {
+      "properties": {
+        "accessCredential": {
+          "type": "string"
+        },
+        "accessExpiresAt": {
+          "type": "string"
+        },
+        "clusterId": {
+          "type": "string"
+        },
+        "githubLogin": {
+          "type": "string"
+        },
+        "principalId": {
+          "type": "string"
+        },
+        "refreshCredential": {
+          "type": "string"
+        },
+        "refreshExpiresAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "clusterId",
+        "principalId",
+        "githubLogin",
+        "accessCredential",
+        "refreshCredential",
+        "accessExpiresAt",
+        "refreshExpiresAt"
+      ],
+      "type": "object"
+    },
+    "RedeemLoginRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "codeVerifier": {
+          "description": "Desktop-held PKCE verifier matching the start challenge. JSON body\nonly, never a URL.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "codeVerifier"
+      ],
+      "type": "object"
+    },
+    "RefreshRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "refreshCredential": {
+          "description": "Opaque refresh credential. Transported in the JSON body only, never\nin a URL, and returned only once at issuance or rotation.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "refreshCredential"
+      ],
+      "type": "object"
+    },
+    "SessionTokenResponse": {
+      "properties": {
+        "accessCredential": {
+          "type": "string"
+        },
+        "accessExpiresAt": {
+          "type": "string"
+        },
+        "refreshCredential": {
+          "type": "string"
+        },
+        "refreshExpiresAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "accessCredential",
+        "refreshCredential",
+        "accessExpiresAt",
+        "refreshExpiresAt"
+      ],
+      "type": "object"
+    },
+    "StartLoginRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "codeChallenge": {
+          "description": "Desktop-generated PKCE S256 challenge. The verifier itself never\ncrosses this endpoint; only the challenge is persisted.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "codeChallenge"
+      ],
+      "type": "object"
+    },
+    "StartLoginResponse": {
+      "properties": {
+        "attemptId": {
+          "type": "string"
+        },
+        "authorizeUrl": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "attemptId",
+        "authorizeUrl",
+        "expiresAt"
+      ],
+      "type": "object"
+    }
+  },
+  "securitySchemes": {
+    "access_session": {
+      "bearerFormat": "opaque",
+      "scheme": "bearer",
+      "type": "http"
+    }
+  }
+}

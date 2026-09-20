@@ -1,0 +1,50 @@
+#![forbid(unsafe_code)]
+
+//! UI-neutral Rust client for the Kontainer controller public API.
+//!
+//! This crate implements exactly the 0.1 contracts: GitHub bootstrap login
+//! attempt/redemption, refresh and logout, the bounded node-container
+//! collection, and owner-scoped operation polling. It is the native
+//! networking boundary that Tauri (and any future native caller) reuses
+//! instead of the WebView.
+//!
+//! Boundaries enforced here:
+//!
+//! - HTTPS is mandatory except for explicit loopback development origins.
+//! - Redirects, ambient proxies, transparent compression, cookies, and
+//!   implicit transport retries are disabled.
+//! - Access, refresh, and PKCE credentials are per-call arguments held in
+//!   redacted, non-serializable, non-cloneable wrappers. [`NativeClient`]
+//!   stores no credential and sets no default authorization header.
+//! - Every call takes one absolute deadline plus an explicit
+//!   [`CancellationToken`](tokio_util::sync::CancellationToken) and spawns no
+//!   work of its own; dropping a call drops the connection.
+//! - Response bodies stream into bounded buffers, and only the container and
+//!   operation GETs repeat once after a classified pre-response transient
+//!   failure under the original deadline.
+//!
+//! This crate has no Tauri, WebView, controller, Docker, database, or
+//! protobuf dependency.
+
+mod auth;
+mod client;
+mod containers;
+mod credentials;
+mod error;
+mod operations;
+
+#[cfg(test)]
+mod tests;
+
+pub use auth::{AuthenticatedSession, LoginAttempt, SessionCredentials};
+pub use client::{
+    DEFAULT_COLLECTION_BODY_LIMIT, DEFAULT_CONNECT_TIMEOUT, DEFAULT_JSON_BODY_LIMIT,
+    DEFAULT_REQUEST_DEADLINE, NativeClient, NativeClientConfig, TrustPolicy,
+};
+pub use containers::{
+    ContainerItem, ContainerPage, ContainerPageRequest, ContainerState, DEFAULT_CONTAINER_LIMIT,
+    MAX_CONTAINER_CURSOR_LEN, MAX_CONTAINER_LIMIT, NodeId,
+};
+pub use credentials::{AccessCredential, CredentialError, LoginVerifier, RefreshCredential};
+pub use error::NativeClientError;
+pub use operations::{OperationSnapshot, OperationState};

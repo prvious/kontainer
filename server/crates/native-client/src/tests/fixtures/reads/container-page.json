@@ -1,0 +1,23 @@
+{
+  "items": [
+    {
+      "containerId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "displayName": "web.1",
+      "imageReference": "nginx:1.27",
+      "state": "running",
+      "status": "Up 3 minutes",
+      "createdAt": "2026-09-19T06:00:00.000Z",
+      "nodeId": "node-1"
+    },
+    {
+      "containerId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "displayName": "worker.1",
+      "imageReference": "alpine:3.20",
+      "state": "exited",
+      "status": "Exited (0) 1 minute ago",
+      "createdAt": "2026-09-19T05:00:00.000Z",
+      "nodeId": "node-1"
+    }
+  ],
+  "nextCursor": "v1:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+}
