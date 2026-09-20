@@ -37,10 +37,7 @@ pub async fn check_auth(url: String, token: String) -> Result<CheckAuthResponse,
     }
 
     if !response.status().is_success() {
-        return Err(format!(
-            "Agent responded with status {}",
-            response.status()
-        ));
+        return Err(format!("Agent responded with status {}", response.status()));
     }
 
     let body: CheckAuthResponse = response
