@@ -76,6 +76,35 @@ fn origins_require_https_except_for_loopback_development() {
 }
 
 #[test]
+fn accepted_origins_expose_one_canonical_value() {
+    for (raw, canonical) in [
+        ("https://controller.example", "https://controller.example/"),
+        ("https://controller.example/", "https://controller.example/"),
+        // Host case and the default port are normalized away, so two strings
+        // for one origin can never compare unequal across runs.
+        ("https://CONTROLLER.example", "https://controller.example/"),
+        (
+            "https://controller.example:443",
+            "https://controller.example/",
+        ),
+        (
+            "https://controller.example:8443",
+            "https://controller.example:8443/",
+        ),
+        ("http://localhost:5150", "http://localhost:5150/"),
+        ("https://127.0.0.1:5150", "https://127.0.0.1:5150/"),
+        ("https://[::1]:5150", "https://[::1]:5150/"),
+    ] {
+        let client = NativeClient::new(NativeClientConfig::new(raw)).expect("origin builds");
+        assert_eq!(
+            client.controller_origin(),
+            canonical,
+            "{raw} must render as one canonical origin"
+        );
+    }
+}
+
+#[test]
 fn zero_bounds_are_rejected_before_any_connection() {
     for mutate in [
         (|config: &mut NativeClientConfig| config.request_deadline = Duration::ZERO)

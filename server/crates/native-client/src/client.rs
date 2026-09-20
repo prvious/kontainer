@@ -143,6 +143,16 @@ impl NativeClient {
         })
     }
 
+    /// The validated controller origin in its canonical rendered form.
+    ///
+    /// Callers that must persist or compare an origin use this value instead
+    /// of re-rendering their own input, so both sides of a comparison agree on
+    /// exactly one canonical string.
+    #[must_use]
+    pub fn controller_origin(&self) -> &str {
+        self.origin.as_str()
+    }
+
     /// Join a controller-absolute path onto the validated origin.
     pub(crate) fn endpoint(&self, path: &str) -> Result<Url, NativeClientError> {
         self.origin
