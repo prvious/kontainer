@@ -2675,6 +2675,7 @@ dependencies = [
  "hyper-util",
  "kontainer-agent-proto",
  "kontainer-engine",
+ "kontainer-lifecycle",
  "kontainer-node-agent",
  "kontainer-rpc-auth",
  "loco-rs",
@@ -2713,6 +2714,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "kontainer-lifecycle"
+version = "0.1.0"
+
+[[package]]
 name = "kontainer-native-client"
 version = "0.1.0"
 dependencies = [
@@ -2740,6 +2745,7 @@ dependencies = [
  "async-trait",
  "kontainer-agent-proto",
  "kontainer-engine",
+ "kontainer-lifecycle",
  "kontainer-rpc-auth",
  "tokio",
  "tokio-stream",
@@ -2753,8 +2759,14 @@ dependencies = [
 name = "kontainer-rpc-auth"
 version = "0.1.0"
 dependencies = [
+ "hyper",
+ "hyper-util",
  "rustls",
+ "tokio",
+ "tokio-rustls",
+ "tokio-util",
  "tonic",
+ "tower",
  "x509-parser",
 ]
 
@@ -5628,6 +5640,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "libc",
  "pin-project-lite",
  "tokio",

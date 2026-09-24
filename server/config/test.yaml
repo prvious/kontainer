@@ -22,6 +22,7 @@ database:
   dangerously_recreate: true
 
 settings:
+  shutdown_grace: "20s"
   agent_rpc:
     enabled: false
     binding: 127.0.0.1:50052

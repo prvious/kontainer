@@ -1,7 +1,9 @@
 use std::{
+    future::Future,
     net::{IpAddr, SocketAddr},
     path::PathBuf,
     sync::Arc,
+    time::Instant,
 };
 
 use axum::{
@@ -11,8 +13,9 @@ use axum::{
     response::Response,
 };
 use hyper::server::conn::http1;
-use hyper_util::{rt::TokioIo, service::TowerToHyperService};
-use kontainer_rpc_auth::{MutualTlsIdentityFiles, valid_identity_segment};
+use hyper_util::{rt::TokioIo, server::conn::auto, service::TowerToHyperService};
+use kontainer_lifecycle::{DrainClock, ShutdownGrace};
+use kontainer_rpc_auth::{MutualTlsIdentityFiles, spawn_tracked, valid_identity_segment};
 use loco_rs::{
     Error, Result,
     app::AppContext,
@@ -20,8 +23,8 @@ use loco_rs::{
     environment::Environment,
 };
 use serde::Deserialize;
-use tokio::{net::TcpListener, task::JoinSet};
-use tokio_util::sync::CancellationToken;
+use tokio::{net::TcpListener, sync::mpsc::UnboundedSender, task::JoinSet};
+use tokio_util::{sync::CancellationToken, task::TaskTracker};
 
 use crate::{
     auth::github::{
@@ -36,9 +39,72 @@ use crate::{
 pub(crate) struct ControllerSettings {
     agent_rpc: AgentRpcSettings,
     public_http: PublicHttpSettings,
+    #[serde(default, deserialize_with = "deserialize_shutdown_grace")]
+    shutdown_grace: ShutdownGrace,
     #[serde(default)]
     github_auth: GitHubAuthSettings,
 }
+
+fn deserialize_shutdown_grace<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<ShutdownGrace, D::Error> {
+    let value = String::deserialize(deserializer)?;
+    value.parse().map_err(serde::de::Error::custom)
+}
+
+#[derive(Clone)]
+pub struct ControllerShutdown {
+    draining: CancellationToken,
+    force: CancellationToken,
+    clock: Arc<DrainClock>,
+}
+
+impl ControllerShutdown {
+    pub fn new(grace: ShutdownGrace) -> Self {
+        Self {
+            draining: CancellationToken::new(),
+            force: CancellationToken::new(),
+            clock: Arc::new(DrainClock::new(grace)),
+        }
+    }
+
+    pub fn begin_drain(&self) -> Instant {
+        let deadline = self.clock.begin();
+        self.draining.cancel();
+        deadline
+    }
+
+    pub fn draining(&self) -> CancellationToken {
+        self.draining.clone()
+    }
+
+    pub fn force(&self) -> CancellationToken {
+        self.force.clone()
+    }
+}
+
+impl From<CancellationToken> for ControllerShutdown {
+    fn from(draining: CancellationToken) -> Self {
+        Self {
+            draining,
+            force: CancellationToken::new(),
+            clock: Arc::new(DrainClock::new(ShutdownGrace::default())),
+        }
+    }
+}
+
+pub fn init_shutdown_state(ctx: &AppContext) -> Result<()> {
+    let grace = controller_settings(ctx)?.shutdown_grace;
+    let shutdown = ControllerShutdown::new(grace);
+    // Existing probe and admission state continues to use the drain token.
+    ctx.shared_store.insert(shutdown.draining());
+    ctx.shared_store.insert(shutdown.clone());
+    ctx.shared_store.insert(ForceCancellation(shutdown.force()));
+    Ok(())
+}
+
+#[derive(Clone)]
+pub struct ForceCancellation(pub CancellationToken);
 
 /// Struct shape (not a tagged enum): serde's `deny_unknown_fields` is not
 /// honored for internally tagged enums, so the mode/bundle consistency is
@@ -147,9 +213,9 @@ pub async fn serve(router: Router, ctx: &AppContext, params: &ServeParams) -> Re
     } else {
         None
     };
-    let cancellation = ctx
+    let shutdown = ctx
         .shared_store
-        .get::<CancellationToken>()
+        .get::<ControllerShutdown>()
         .ok_or_else(|| Error::string("controller lifecycle is not initialized"))?;
     let servers = supervise_controller_servers(
         router,
@@ -158,14 +224,14 @@ pub async fn serve(router: Router, ctx: &AppContext, params: &ServeParams) -> Re
             transport,
         },
         agent_rpc,
-        cancellation.clone(),
+        shutdown.clone(),
     );
     tokio::pin!(servers);
 
     tokio::select! {
         result = &mut servers => result,
         _ = shutdown_signal() => {
-            cancellation.cancel();
+            shutdown.begin_drain();
             servers.await
         }
     }
@@ -196,64 +262,138 @@ impl std::fmt::Debug for HttpTransport {
     }
 }
 
-/// Serve the public router over TLS: accept TCP connections, handshake each
-/// one concurrently, and serve HTTP/1 per connection. Handshake and protocol
-/// failures are connection-local; only listener failures fail the server.
-/// Cancellation stops admission immediately, cancels pending handshakes, and
-/// gracefully drains admitted connections before every task is joined.
+#[derive(Clone)]
+struct TrackedExecutor {
+    tasks: TaskTracker,
+    force: CancellationToken,
+    failures: UnboundedSender<&'static str>,
+}
+
+impl<F> hyper::rt::Executor<F> for TrackedExecutor
+where
+    F: Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    fn execute(&self, future: F) {
+        let force = self.force.clone();
+        spawn_tracked(
+            &self.tasks,
+            &self.failures,
+            "public HTTP request",
+            async move {
+                tokio::select! {
+                    _ = force.cancelled() => {}
+                    _ = future => {}
+                }
+            },
+        );
+    }
+}
+
+/// Listener tasks stop admission; the supervisor owns all connection tasks.
 async fn serve_tls(
     listener: TcpListener,
     router: Router,
     config: Arc<rustls::ServerConfig>,
     cancellation: CancellationToken,
+    force: CancellationToken,
+    connections: TaskTracker,
+    failures: UnboundedSender<&'static str>,
 ) -> Result<ServerKind> {
     let acceptor = tokio_rustls::TlsAcceptor::from(config);
-    let mut connections = JoinSet::new();
-    let mut failure: Option<Error> = None;
-
     loop {
         tokio::select! {
             biased;
             _ = cancellation.cancelled() => break,
-            completion = connections.join_next(), if !connections.is_empty() => {
-                match completion {
-                    Some(Ok(())) => {}
-                    Some(Err(error)) => {
-                        failure = Some(Error::wrap(error));
-                        cancellation.cancel();
-                        break;
-                    }
-                    None => {}
-                }
-            }
             accepted = listener.accept() => {
                 let (socket, peer) = match accepted {
                     Ok(accepted) => accepted,
-                    Err(error) => {
-                        failure = Some(Error::wrap(error));
-                        cancellation.cancel();
-                        break;
-                    }
+                    Err(error) => return Err(Error::wrap(error)),
                 };
                 let router = router.clone();
                 let acceptor = acceptor.clone();
                 let connection_cancel = cancellation.clone();
-                connections.spawn(async move {
-                    serve_tls_connection(router, acceptor, socket, peer, connection_cancel).await;
+                let connection_force = force.clone();
+                spawn_tracked(&connections, &failures, "public HTTPS connection", async move {
+                    tokio::select! {
+                        biased;
+                        _ = connection_force.cancelled() => {}
+                        _ = serve_tls_connection(router, acceptor, socket, peer, connection_cancel) => {}
+                    }
                 });
             }
         }
     }
+    Ok(ServerKind::Https)
+}
 
-    while let Some(completion) = connections.join_next().await {
-        if failure.is_none()
-            && let Err(error) = completion
-        {
-            failure = Some(Error::wrap(error));
-        }
+async fn serve_plain(
+    listener: TcpListener,
+    router: Router,
+    draining: CancellationToken,
+    force: CancellationToken,
+    connections: TaskTracker,
+    requests: TaskTracker,
+    failures: UnboundedSender<&'static str>,
+) -> Result<ServerKind> {
+    loop {
+        let (socket, peer) = tokio::select! {
+            biased;
+            _ = draining.cancelled() => return Ok(ServerKind::Http),
+            accepted = listener.accept() => accepted.map_err(Error::wrap)?,
+        };
+        let router = router.clone();
+        let connection_draining = draining.clone();
+        let connection_force = force.clone();
+        let requests = requests.clone();
+        let request_failures = failures.clone();
+        spawn_tracked(
+            &connections,
+            &failures,
+            "public HTTP connection",
+            async move {
+                tokio::select! {
+                    biased;
+                    _ = connection_force.cancelled() => {}
+                    _ = serve_plain_connection(socket, peer, router, connection_draining, connection_force.clone(), requests, request_failures) => {}
+                }
+            },
+        );
     }
+}
 
-    failure.map_or(Ok(ServerKind::Https), Err)
+async fn serve_plain_connection(
+    socket: tokio::net::TcpStream,
+    peer: SocketAddr,
+    router: Router,
+    draining: CancellationToken,
+    force: CancellationToken,
+    requests: TaskTracker,
+    failures: UnboundedSender<&'static str>,
+) {
+    use tower::Service as _;
+
+    let mut make_service = router.into_make_service_with_connect_info::<SocketAddr>();
+    let service = match make_service.call(peer).await {
+        Ok(service) => service,
+        Err(error) => match error {},
+    };
+    let builder = auto::Builder::new(TrackedExecutor {
+        tasks: requests,
+        force,
+        failures,
+    });
+    let connection = builder
+        .serve_connection_with_upgrades(TokioIo::new(socket), TowerToHyperService::new(service));
+    tokio::pin!(connection);
+    tokio::select! {
+        biased;
+        _ = draining.cancelled() => {
+            connection.as_mut().graceful_shutdown();
+            let _ = connection.await;
+        }
+        _ = &mut connection => {}
+    }
 }
 
 async fn serve_tls_connection(
@@ -298,8 +438,16 @@ pub async fn supervise_controller_servers(
     router: Router,
     http: BoundHttpServer,
     agent_rpc: Option<BoundAgentRpcServer>,
-    cancellation: CancellationToken,
+    shutdown: impl Into<ControllerShutdown>,
 ) -> Result<()> {
+    let shutdown = shutdown.into();
+    let cancellation = shutdown.draining();
+    let force = shutdown.force();
+    let http_connections = TaskTracker::new();
+    let http_requests = TaskTracker::new();
+    let rpc_connections = TaskTracker::new();
+    let rpc_requests = TaskTracker::new();
+    let (failures, mut task_failures) = tokio::sync::mpsc::unbounded_channel();
     let agent_rpc = agent_rpc
         .map(|agent_rpc| {
             serve_controller_rpc(
@@ -307,16 +455,21 @@ pub async fn supervise_controller_servers(
                 agent_rpc.cluster_id,
                 agent_rpc.tls_files,
                 cancellation.clone(),
+                force.clone(),
+                rpc_connections.clone(),
+                rpc_requests.clone(),
+                failures.clone(),
             )
         })
         .transpose()
         .map_err(|error| {
-            cancellation.cancel();
+            shutdown.begin_drain();
             Error::Message(format!("agent RPC server failed: {error}"))
         })?;
     let mut servers = JoinSet::new();
 
     if cancellation.is_cancelled() {
+        shutdown.begin_drain();
         return Ok(());
     }
     let router = router
@@ -329,24 +482,28 @@ pub async fn supervise_controller_servers(
         // `state` in diagnostics; it stays disabled in checked-in configs.
         .layer(middleware::from_fn(path_only_request_log));
 
-    let http_cancellation = cancellation.clone();
     match http.transport {
         HttpTransport::Plaintext => {
-            servers.spawn(async move {
-                axum::serve(
-                    http.listener,
-                    router.into_make_service_with_connect_info::<SocketAddr>(),
-                )
-                .with_graceful_shutdown(http_cancellation.cancelled_owned())
-                .await
-                .map_err(Error::wrap)?;
-
-                Ok(ServerKind::Http)
-            });
+            servers.spawn(serve_plain(
+                http.listener,
+                router,
+                cancellation.clone(),
+                force.clone(),
+                http_connections.clone(),
+                http_requests.clone(),
+                failures.clone(),
+            ));
         }
         HttpTransport::Tls(config) => {
-            let tls_cancellation = cancellation.clone();
-            servers.spawn(serve_tls(http.listener, router, config, tls_cancellation));
+            servers.spawn(serve_tls(
+                http.listener,
+                router,
+                config,
+                cancellation.clone(),
+                force.clone(),
+                http_connections.clone(),
+                failures.clone(),
+            ));
         }
     }
 
@@ -360,21 +517,68 @@ pub async fn supervise_controller_servers(
         });
     }
 
-    let first_completion = tokio::select! {
+    let mut failure = tokio::select! {
         biased;
         _ = cancellation.cancelled() => None,
-        completion = servers.join_next() => completion,
+        completion = servers.join_next() => completion.map(unexpected_server_completion),
+        kind = task_failures.recv() => kind.map(|kind| Error::Message(format!("{kind} task failed"))),
+    };
+    let deadline = shutdown.begin_drain();
+
+    let graceful = async {
+        while let Some(completion) = servers.join_next().await {
+            if failure.is_none()
+                && let Err(error) = completed_server(completion)
+            {
+                failure = Some(error);
+            }
+        }
+        http_connections.close();
+        http_requests.close();
+        rpc_connections.close();
+        rpc_requests.close();
+        tokio::join!(
+            http_connections.wait(),
+            http_requests.wait(),
+            rpc_connections.wait(),
+            rpc_requests.wait(),
+        );
     };
 
-    let mut failure = first_completion.map(unexpected_server_completion);
-    cancellation.cancel();
+    if tokio::time::timeout_at(deadline.into(), graceful)
+        .await
+        .is_err()
+    {
+        tracing::error!(
+            role = "controller",
+            public_http_connections = http_connections.len(),
+            public_http_requests = http_requests.len(),
+            agent_rpc_connections = rpc_connections.len(),
+            agent_rpc_requests = rpc_requests.len(),
+            listener_tasks = servers.len(),
+            "shutdown deadline exceeded"
+        );
+        force.cancel();
+        servers.shutdown().await;
+        http_connections.close();
+        http_requests.close();
+        rpc_connections.close();
+        rpc_requests.close();
+        tokio::join!(
+            http_connections.wait(),
+            http_requests.wait(),
+            rpc_connections.wait(),
+            rpc_requests.wait(),
+        );
+        return Err(
+            failure.unwrap_or_else(|| Error::string("controller shutdown deadline exceeded"))
+        );
+    }
 
-    while let Some(completion) = servers.join_next().await {
-        if failure.is_none()
-            && let Err(error) = completed_server(completion)
-        {
-            failure = Some(error);
-        }
+    if failure.is_none()
+        && let Ok(kind) = task_failures.try_recv()
+    {
+        failure = Some(Error::Message(format!("{kind} task failed")));
     }
 
     failure.map_or(Ok(()), Err)
@@ -394,7 +598,7 @@ fn parse_controller_settings(settings: serde_json::Value) -> Result<ControllerSe
     serde_json::from_value(settings)
         .map_err(|_| {
             Error::string(
-                "invalid controller settings: check agent_rpc, public_http, and github_auth keys, types, and cluster_id",
+                "invalid controller settings: check agent_rpc, public_http, github_auth, shutdown_grace, and cluster_id keys and types",
             )
         })
         .and_then(|settings: ControllerSettings| {
@@ -713,6 +917,73 @@ mod tests {
             "public_http": { "mode": "plaintext" },
             "github_auth": { "enabled": false }
         })
+    }
+
+    #[test]
+    fn controller_shutdown_grace_uses_shared_default_and_rejects_invalid_values() {
+        let default = parse_controller_settings(valid_settings()).unwrap();
+        assert_eq!(
+            default.shutdown_grace.duration(),
+            std::time::Duration::from_secs(20)
+        );
+
+        let mut settings = valid_settings();
+        settings["shutdown_grace"] = serde_json::json!("250ms");
+        let configured = parse_controller_settings(settings.clone()).unwrap();
+        assert_eq!(
+            configured.shutdown_grace.duration(),
+            std::time::Duration::from_millis(250)
+        );
+
+        for value in [
+            serde_json::json!("0s"),
+            serde_json::json!("1h"),
+            serde_json::json!(20),
+        ] {
+            settings["shutdown_grace"] = value;
+            assert!(parse_controller_settings(settings.clone()).is_err());
+        }
+    }
+
+    #[test]
+    fn controller_rendered_shutdown_grace_child() {
+        let Ok(expected) = std::env::var("KONTAINER_TEST_SHUTDOWN_GRACE_CHILD") else {
+            return;
+        };
+        let config = Config::from_folder(&Environment::Development, Path::new("config")).unwrap();
+        let settings = parse_controller_settings(config.settings.unwrap());
+        if expected == "invalid" {
+            assert!(settings.is_err());
+        } else {
+            assert_eq!(
+                settings.unwrap().shutdown_grace.duration(),
+                expected
+                    .parse::<kontainer_lifecycle::ShutdownGrace>()
+                    .unwrap()
+                    .duration(),
+            );
+        }
+    }
+
+    #[test]
+    fn controller_environment_override_changes_rendered_settings() {
+        for (value, expected) in [("750ms", "750ms"), ("0s", "invalid")] {
+            let result = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "server::tests::controller_rendered_shutdown_grace_child",
+                ])
+                .env("SHUTDOWN_GRACE", value)
+                .env("KONTAINER_TEST_SHUTDOWN_GRACE_CHILD", expected)
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "SHUTDOWN_GRACE={value} was not applied: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            assert!(String::from_utf8_lossy(&result.stdout).contains("1 passed"));
+        }
     }
 
     #[test]

@@ -1,6 +1,15 @@
-use std::{fs, io, path::PathBuf, sync::Arc};
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use rustls::client::danger::ServerCertVerifier;
+use rustls::{
+    RootCertStore,
+    pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject},
+    server::WebPkiClientVerifier,
+};
 use tonic::transport::{Certificate, ClientTlsConfig, Identity, ServerTlsConfig};
 
 use crate::{OutboundPeerVerifier, WorkloadIdentity};
@@ -32,6 +41,60 @@ impl MutualTlsIdentityFiles {
         Ok(ServerTlsConfig::new()
             .identity(identity)
             .client_ca_root(peer_ca))
+    }
+
+    /// Prepare the mandatory mTLS identity before either listener admits work.
+    pub fn server_acceptor(&self) -> io::Result<tokio_rustls::TlsAcceptor> {
+        let certificate = read_rpc_tls_file("certificate", &self.certificate_path)?;
+        let private_key = read_rpc_tls_file("private key", &self.private_key_path)?;
+        let peer_ca = read_rpc_tls_file("client CA", &self.peer_ca_path)?;
+        let chain: Vec<_> = CertificateDer::pem_slice_iter(&certificate)
+            .collect::<Result<_, _>>()
+            .map_err(|_| invalid_rpc_tls_file("certificate", &self.certificate_path))?;
+        if chain.is_empty() {
+            return Err(invalid_rpc_tls_file("certificate", &self.certificate_path));
+        }
+        let key = PrivateKeyDer::from_pem_slice(&private_key)
+            .map_err(|_| invalid_rpc_tls_file("private key", &self.private_key_path))?;
+        let mut roots = RootCertStore::empty();
+        for certificate in CertificateDer::pem_slice_iter(&peer_ca) {
+            roots
+                .add(
+                    certificate
+                        .map_err(|_| invalid_rpc_tls_file("client CA", &self.peer_ca_path))?,
+                )
+                .map_err(|_| invalid_rpc_tls_file("client CA", &self.peer_ca_path))?;
+        }
+        if roots.is_empty() {
+            return Err(invalid_rpc_tls_file("client CA", &self.peer_ca_path));
+        }
+        let provider = Arc::new(rustls::crypto::ring::default_provider());
+        let verifier =
+            WebPkiClientVerifier::builder_with_provider(Arc::new(roots), provider.clone())
+                .build()
+                .map_err(|_| invalid_rpc_tls_file("client CA", &self.peer_ca_path))?;
+        let mut config = rustls::ServerConfig::builder_with_provider(provider)
+            .with_protocol_versions(rustls::ALL_VERSIONS)
+            .map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "invalid RPC TLS protocol configuration",
+                )
+            })?
+            .with_client_cert_verifier(verifier)
+            .with_single_cert(chain, key)
+            .map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "invalid RPC certificate/private key pair ({} / {})",
+                        self.certificate_path.display(),
+                        self.private_key_path.display()
+                    ),
+                )
+            })?;
+        config.alpn_protocols.push(b"h2".to_vec());
+        Ok(tokio_rustls::TlsAcceptor::from(Arc::new(config)))
     }
 
     pub fn client_config(
@@ -87,6 +150,22 @@ impl MutualTlsIdentityFiles {
     fn load_peer_ca(&self) -> io::Result<Certificate> {
         fs::read(&self.peer_ca_path).map(Certificate::from_pem)
     }
+}
+
+fn invalid_rpc_tls_file(label: &str, path: &Path) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!("invalid RPC {label} ({})", path.display()),
+    )
+}
+
+fn read_rpc_tls_file(label: &str, path: &Path) -> io::Result<Vec<u8>> {
+    fs::read(path).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("RPC {label} ({}): {error}", path.display()),
+        )
+    })
 }
 
 #[cfg(test)]

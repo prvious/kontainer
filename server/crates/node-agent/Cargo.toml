@@ -9,6 +9,7 @@ publish.workspace = true
 async-trait.workspace = true
 kontainer-agent-proto = { path = "../agent-proto" }
 kontainer-engine = { path = "../engine" }
+kontainer-lifecycle = { path = "../lifecycle" }
 kontainer-rpc-auth = { path = "../rpc-auth" }
 tokio.workspace = true
 tokio-stream.workspace = true

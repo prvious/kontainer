@@ -8,6 +8,7 @@
 //! traffic reached application code.
 
 use std::{
+    future::pending,
     net::SocketAddr,
     path::{Path, PathBuf},
     sync::{
@@ -21,8 +22,12 @@ use axum::{Router, routing::get};
 use kontainer_controller::{
     app::App,
     controllers::health,
-    server::{BoundHttpServer, HttpTransport, PublicTlsSettings, load_public_tls_config, serve},
+    server::{
+        BoundHttpServer, ControllerShutdown, HttpTransport, PublicTlsSettings,
+        load_public_tls_config, serve,
+    },
 };
+use kontainer_lifecycle::ShutdownGrace;
 use loco_rs::{app::Hooks, config::Config, environment::Environment};
 use rcgen::{
     BasicConstraints, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa, Issuer, KeyPair,
@@ -32,6 +37,7 @@ use sea_orm::DatabaseConnection;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
+    sync::Semaphore,
     time::timeout,
 };
 use tokio_rustls::{TlsConnector, client::TlsStream};
@@ -252,6 +258,70 @@ async fn join_server(server: tokio::task::JoinHandle<()>, cancellation: &Cancell
         .await
         .expect("TLS supervisor did not join after cancellation")
         .unwrap();
+}
+
+#[tokio::test]
+async fn tls_deadline_drops_a_stuck_handler() {
+    struct DropCount(Arc<AtomicUsize>);
+    impl Drop for DropCount {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    let pki = PublicTestPki::generate();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let config = load_public_tls_config(&pki.identity()).unwrap();
+    let entered = Arc::new(Semaphore::new(0));
+    let dropped = Arc::new(AtomicUsize::new(0));
+    let handler_entered = entered.clone();
+    let handler_dropped = dropped.clone();
+    let router = Router::new().route(
+        "/stuck",
+        get(move || {
+            let entered = handler_entered.clone();
+            let dropped = handler_dropped.clone();
+            async move {
+                let _guard = DropCount(dropped);
+                entered.add_permits(1);
+                pending::<&'static str>().await
+            }
+        }),
+    );
+    let shutdown = ControllerShutdown::new("100ms".parse::<ShutdownGrace>().unwrap());
+    let task_shutdown = shutdown.clone();
+    let task = tokio::spawn(async move {
+        kontainer_controller::server::supervise_controller_servers(
+            router,
+            BoundHttpServer {
+                listener,
+                transport: HttpTransport::Tls(config),
+            },
+            None,
+            task_shutdown,
+        )
+        .await
+    });
+    let connector = tls_connector(&pki.ca_pem);
+    let mut stream = tls_stream(address, &connector, "localhost").await.unwrap();
+    stream
+        .write_all(b"GET /stuck HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .await
+        .unwrap();
+    entered.acquire().await.unwrap().forget();
+    shutdown.begin_drain();
+
+    let result = timeout(BUDGET, task).await.unwrap().unwrap();
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("deadline exceeded")
+    );
+    assert!(shutdown.force().is_cancelled());
+    assert_eq!(dropped.load(Ordering::SeqCst), 1);
+    assert!(TcpStream::connect(address).await.is_err());
 }
 
 #[tokio::test]
