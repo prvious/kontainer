@@ -33,12 +33,9 @@ pub(crate) fn sanitize(
 ) -> Result<(), MetadataError> {
     let hint = legacy_hint(app);
 
-    // Preserve any already-versioned document; otherwise replace whatever
-    // legacy flat keys exist with a fresh hint-only document.
-    let document = match documents.read_document() {
-        Ok(Some(document)) => document,
-        _ => SessionDocument::new(hint, None),
-    };
+    // Preserve a versioned document, replace missing or corrupt metadata, and
+    // abort if the store itself is unavailable.
+    let document = sanitized_document(documents.read_document(), hint)?;
     documents.clear_foreign_keys();
     documents.write_document(&document)?;
 
@@ -50,6 +47,17 @@ pub(crate) fn sanitize(
     profiles.clear();
     profiles.save().map_err(|_| MetadataError::Unavailable)?;
     Ok(())
+}
+
+fn sanitized_document(
+    stored: Result<Option<SessionDocument>, MetadataError>,
+    hint: Option<LoginHint>,
+) -> Result<SessionDocument, MetadataError> {
+    match stored {
+        Ok(Some(document)) => Ok(document),
+        Ok(None) | Err(MetadataError::Corrupt) => Ok(SessionDocument::new(hint, None)),
+        Err(MetadataError::Unavailable) => Err(MetadataError::Unavailable),
+    }
 }
 
 /// Best-effort read of the previously active label and origin. Nothing here is
@@ -156,5 +164,13 @@ mod tests {
         ]);
         let hint = profile_json(entries, Some("p")).expect("hint");
         assert!(hint.label.is_none());
+    }
+
+    #[test]
+    fn unavailable_metadata_aborts_sanitization() {
+        assert_eq!(
+            sanitized_document(Err(MetadataError::Unavailable), None),
+            Err(MetadataError::Unavailable)
+        );
     }
 }

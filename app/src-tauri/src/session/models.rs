@@ -35,7 +35,7 @@ pub(crate) enum AnchorState {
     CommitPending,
     /// A logout is between "revocation attempted" and "local deletion done".
     LogoutPending,
-    /// Revocation is confirmed but the local credential still exists.
+    /// Server status is settled or unknown, but local cleanup remains.
     CleanupPending,
     /// No credential is held for this profile.
     LoggedOut,

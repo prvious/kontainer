@@ -26,7 +26,7 @@ pub(crate) enum SessionError {
     ControllerUnavailable,
     /// The controller response violated the documented contract.
     InvalidResponse,
-    /// A different authenticated pair is already bound to this installation.
+    /// A session is active, or this profile is bound to another pair.
     ProfileConflict,
     /// The stored session is invalid or was invalidated; log in again.
     ///
@@ -37,9 +37,8 @@ pub(crate) enum SessionError {
     VaultUnavailable,
     /// The OS credential vault rejected a write.
     ///
-    /// When a freshly issued successor is retained in memory, `retry_commit`
-    /// can finish the commit without a controller call; otherwise a fresh
-    /// login is required and the anchor is left non-restorable.
+    /// A freshly issued successor retained in memory can be committed with
+    /// `retry_commit` without another controller call.
     VaultWriteFailed,
     /// The non-secret metadata store could not be read or saved, or no local
     /// commit exists to retry.
@@ -50,7 +49,7 @@ pub(crate) enum SessionError {
     LocalCleanupFailed,
     /// Custody cannot prove the session is revoked or was never issued: an
     /// uncommitted rotation window, or a logout with no reachable credential.
-    /// Only an explicit login clears it.
+    /// An explicit logout or commit retry must resolve it before login.
     CleanupUncertain,
 }
 

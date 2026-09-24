@@ -6,7 +6,7 @@ use std::sync::atomic::Ordering;
 use crate::session::errors::SessionError;
 use crate::session::models::{AnchorRecord, AnchorState};
 
-use super::fakes::{future_ms, issued, position, Harness, ORIGIN};
+use super::fakes::{future_ms, issued, login_input, position, Harness, ORIGIN};
 
 #[tokio::test]
 async fn logout_revokes_before_deleting_and_reports_logged_out() {
@@ -64,6 +64,77 @@ async fn revoke_failure_preserves_custody_for_retry() {
     harness.controllers.script().logout.push_back(Ok(()));
     harness.manager.logout().await.expect("retry");
     assert!(!harness.vault.has_profile(view.profile_id));
+}
+
+#[tokio::test]
+async fn failed_logout_keeps_memory_cleanup_only_until_retry() {
+    let harness = Harness::new();
+    let view = harness.login_ok().await;
+    harness.vault.delete_profile_silently(view.profile_id);
+    harness
+        .controllers
+        .script()
+        .logout
+        .push_back(Err(SessionError::ControllerUnavailable));
+
+    assert_eq!(
+        harness.manager.logout().await.expect_err("revoke fails"),
+        SessionError::RevokeFailed
+    );
+    assert_eq!(
+        harness.manager.restore().await.expect_err("cleanup only"),
+        SessionError::CleanupUncertain
+    );
+    let starts = harness.count("start_login");
+    assert_eq!(
+        harness
+            .manager
+            .login(login_input(ORIGIN))
+            .await
+            .expect_err("cleanup blocks login"),
+        SessionError::CleanupUncertain
+    );
+    assert_eq!(harness.count("start_login"), starts);
+
+    harness.controllers.script().logout.push_back(Ok(()));
+    harness.manager.logout().await.expect("logout retry");
+    assert_eq!(harness.manager.restore().await.expect("logged out"), None);
+    harness.login_ok().await;
+}
+
+#[tokio::test]
+async fn failed_logout_without_an_anchor_preserves_active_custody_for_retry() {
+    let harness = Harness::new();
+    harness.login_ok().await;
+    harness.vault.remove_anchor_silently();
+    harness
+        .controllers
+        .script()
+        .logout
+        .push_back(Err(SessionError::ControllerUnavailable));
+
+    assert_eq!(
+        harness.manager.logout().await.expect_err("revoke fails"),
+        SessionError::RevokeFailed
+    );
+    assert_eq!(
+        harness.manager.restore().await.expect_err("cleanup only"),
+        SessionError::CleanupUncertain
+    );
+    let starts = harness.count("start_login");
+    assert_eq!(
+        harness
+            .manager
+            .login(login_input(ORIGIN))
+            .await
+            .expect_err("cleanup blocks login"),
+        SessionError::CleanupUncertain
+    );
+    assert_eq!(harness.count("start_login"), starts);
+
+    harness.controllers.script().logout.push_back(Ok(()));
+    harness.manager.logout().await.expect("logout retry");
+    assert_eq!(harness.manager.restore().await.expect("logged out"), None);
 }
 
 #[tokio::test]
@@ -341,9 +412,12 @@ async fn logout_without_a_usable_record_is_cleanup_uncertain() {
     assert_eq!(error, SessionError::CleanupUncertain);
     assert_eq!(harness.count("logout"), 0);
     assert_eq!(harness.count("refresh"), 0);
-    // Local custody is still cleared: the unusable record is gone and the
-    // desktop is logged out locally.
-    assert_eq!(harness.vault.anchor_state(), Some(AnchorState::LoggedOut));
+    // Local material is cleared, but the durable marker stays pending because
+    // remote revocation was never proved.
+    assert_eq!(
+        harness.vault.anchor_state(),
+        Some(AnchorState::LogoutPending)
+    );
     assert!(!harness.vault.has_profile(anchor.profile_id));
     assert!(harness
         .metadata
@@ -351,19 +425,39 @@ async fn logout_without_a_usable_record_is_cleanup_uncertain() {
         .expect("document")
         .session
         .is_none());
+    assert_eq!(
+        harness.manager.logout().await.expect_err("still uncertain"),
+        SessionError::CleanupUncertain
+    );
+    let starts = harness.count("start_login");
+    assert_eq!(
+        harness
+            .manager
+            .login(login_input(ORIGIN))
+            .await
+            .expect_err("pending cleanup blocks login"),
+        SessionError::CleanupUncertain
+    );
+    assert_eq!(harness.count("start_login"), starts);
 }
 
 #[tokio::test]
-async fn logout_with_an_unvalidatable_stored_origin_clears_locally() {
+async fn logout_with_an_unvalidatable_stored_origin_stays_uncertain() {
     let harness = Harness::new();
     let anchor = harness.seed_ready_session();
     harness.controllers.fail_origin();
 
-    harness.manager.logout().await.expect("logout");
+    assert_eq!(
+        harness.manager.logout().await.expect_err("unreachable"),
+        SessionError::CleanupUncertain
+    );
     assert_eq!(harness.count("logout"), 0);
     assert_eq!(harness.count("refresh"), 0);
     assert!(!harness.vault.has_profile(anchor.profile_id));
-    assert_eq!(harness.vault.anchor_state(), Some(AnchorState::LoggedOut));
+    assert_eq!(
+        harness.vault.anchor_state(),
+        Some(AnchorState::LogoutPending)
+    );
 }
 
 #[tokio::test]
@@ -409,7 +503,10 @@ async fn logout_with_a_rejected_access_and_no_record_is_uncertain() {
     let error = harness.manager.logout().await.expect_err("rejected");
     // A rejected access credential does not prove the family is gone.
     assert_eq!(error, SessionError::CleanupUncertain);
-    assert_eq!(harness.vault.anchor_state(), Some(AnchorState::LoggedOut));
+    assert_eq!(
+        harness.vault.anchor_state(),
+        Some(AnchorState::LogoutPending)
+    );
 }
 
 #[tokio::test]

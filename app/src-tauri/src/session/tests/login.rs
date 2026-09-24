@@ -38,6 +38,7 @@ async fn login_commits_record_metadata_and_anchor_before_publishing() {
     assert_eq!(
         harness.entries(),
         vec![
+            "read_anchor",
             "start_login",
             "open_browser",
             "redeem_begin",
@@ -79,6 +80,18 @@ async fn login_reuses_the_profile_uuid_for_the_same_pair_and_updates_origin() {
     let harness = Harness::new();
     let first = harness.login_ok().await;
 
+    assert_eq!(
+        harness
+            .manager
+            .login(login_input(OTHER_ORIGIN))
+            .await
+            .expect_err("active session blocks login"),
+        SessionError::ProfileConflict
+    );
+    assert_eq!(harness.count("start_login"), 1);
+
+    harness.controllers.script().logout.push_back(Ok(()));
+    harness.manager.logout().await.expect("logout");
     harness
         .controllers
         .script()
@@ -116,12 +129,6 @@ async fn different_pair_conflicts_without_overwriting_records() {
         .profile(before_anchor.profile_id)
         .expect("record");
 
-    harness
-        .controllers
-        .script()
-        .redeem
-        .push_back(Ok(Redemption::Ready(redeemed_for(9, OTHER_PRINCIPAL_ID))));
-    harness.controllers.script().logout.push_back(Ok(()));
     let error = harness
         .manager
         .login(login_input(ORIGIN))
@@ -147,15 +154,19 @@ async fn different_pair_conflicts_without_overwriting_records() {
         document.session.expect("session").principal_id,
         before_anchor.principal_id
     );
-    // The newly issued family was revoked instead of stored.
-    assert_eq!(harness.count("logout"), 1);
+    assert_eq!(harness.count("start_login"), 0);
+    assert_eq!(harness.count("logout"), 0);
 }
 
 #[tokio::test]
 async fn conflicting_login_reports_cleanup_uncertain_when_revoke_fails() {
     let harness = Harness::new();
-    harness.seed_ready_session();
-    let before = harness.vault.anchor().expect("anchor");
+    let ready = harness.seed_ready_session();
+    let before = crate::session::models::AnchorRecord {
+        state: AnchorState::LoggedOut,
+        ..ready
+    };
+    harness.vault.seed_anchor(&before);
 
     harness
         .controllers
@@ -174,6 +185,32 @@ async fn conflicting_login_reports_cleanup_uncertain_when_revoke_fails() {
         .expect_err("conflict cleanup fails");
     assert_eq!(error, SessionError::CleanupUncertain);
     assert_eq!(harness.vault.anchor(), Some(before));
+
+    harness
+        .controllers
+        .script()
+        .logout
+        .push_back(Err(SessionError::ControllerUnavailable));
+    assert_eq!(
+        harness
+            .manager
+            .logout()
+            .await
+            .expect_err("orphan cleanup fails"),
+        SessionError::RevokeFailed
+    );
+    assert_eq!(
+        harness.vault.anchor_state(),
+        Some(AnchorState::LogoutPending)
+    );
+    assert_eq!(
+        harness
+            .restarted_manager()
+            .restore()
+            .await
+            .expect_err("restart stays pending"),
+        SessionError::CleanupUncertain
+    );
 }
 
 #[tokio::test]
@@ -558,10 +595,91 @@ async fn pending_anchor_write_failure_with_failed_revoke_is_uncertain() {
         .expect_err("revoke fails too");
     assert_eq!(error, SessionError::CleanupUncertain);
     assert!(harness.vault.anchor().is_none());
+
+    harness
+        .vault
+        .fail_pending_anchor_writes
+        .store(false, Ordering::SeqCst);
+    harness.controllers.script().logout.push_back(Ok(()));
+    harness.manager.logout().await.expect("cleanup retry");
+    assert_eq!(harness.count("logout"), 2);
 }
 
 #[tokio::test]
-async fn a_stale_held_successor_cannot_overwrite_a_new_login() {
+async fn durable_pending_anchors_block_login_commit() {
+    for (state, expected) in [
+        (AnchorState::Ready, SessionError::ProfileConflict),
+        (AnchorState::CommitPending, SessionError::CleanupUncertain),
+        (AnchorState::LogoutPending, SessionError::CleanupUncertain),
+        (AnchorState::CleanupPending, SessionError::CleanupUncertain),
+    ] {
+        let harness = Harness::new();
+        let anchor = harness.seed_ready_session();
+        harness
+            .vault
+            .seed_anchor(&crate::session::models::AnchorRecord {
+                state,
+                ..anchor.clone()
+            });
+        assert_eq!(
+            harness
+                .manager
+                .login(login_input(ORIGIN))
+                .await
+                .expect_err("pending custody blocks commit"),
+            expected
+        );
+        assert_eq!(harness.count("start_login"), 0);
+        assert_eq!(harness.vault.anchor_state(), Some(state));
+        assert_eq!(
+            harness
+                .vault
+                .profile(anchor.profile_id)
+                .expect("original record")
+                .generation,
+            anchor.generation
+        );
+    }
+}
+
+#[tokio::test]
+async fn post_redemption_read_failure_retains_credentials_for_logout() {
+    let harness = Harness::new();
+    harness
+        .controllers
+        .script()
+        .redeem
+        .push_back(Ok(Redemption::Ready(redeemed(1))));
+    harness
+        .controllers
+        .script()
+        .logout
+        .push_back(Err(SessionError::ControllerUnavailable));
+    harness
+        .vault
+        .fail_anchor_read_number
+        .store(2, Ordering::SeqCst);
+
+    assert_eq!(
+        harness
+            .manager
+            .login(login_input(ORIGIN))
+            .await
+            .expect_err("anchor read and cleanup fail"),
+        SessionError::CleanupUncertain
+    );
+    assert_eq!(
+        harness.manager.restore().await.expect_err("held cleanup"),
+        SessionError::CleanupUncertain
+    );
+
+    harness.controllers.script().logout.push_back(Ok(()));
+    harness.manager.logout().await.expect("logout retry");
+    assert_eq!(harness.manager.restore().await.expect("logged out"), None);
+}
+
+#[tokio::test]
+async fn a_held_successor_blocks_login_until_committed() {
     let harness = Harness::new();
     let anchor = harness.seed_ready_session();
     harness
@@ -578,46 +696,24 @@ async fn a_stale_held_successor_cannot_overwrite_a_new_login() {
         SessionError::VaultWriteFailed
     );
 
-    // A fresh login succeeds while the successor is still held, and revokes
-    // the superseded family instead of dropping it alive.
     harness
         .vault
         .fail_profile_writes
         .store(false, Ordering::SeqCst);
-    harness.controllers.script().logout.push_back(Ok(()));
-    harness
-        .controllers
-        .script()
-        .redeem
-        .push_back(Ok(Redemption::Ready(redeemed(3))));
-    let view = harness
-        .manager
-        .login(login_input(ORIGIN))
-        .await
-        .expect("fresh login");
-    assert_eq!(view.principal_id, PRINCIPAL_ID);
-    assert!(
-        harness
-            .entries()
-            .iter()
-            .any(|entry| entry == "logout:controller.example:02020202"),
-        "the superseded successor must be revoked"
-    );
-
-    // The stale retry must not revert the newer session.
+    let starts = harness.count("start_login");
     assert_eq!(
         harness
             .manager
-            .retry_commit()
+            .login(login_input(ORIGIN))
             .await
-            .expect_err("stale retry"),
-        SessionError::LocalStateFailed
+            .expect_err("held custody blocks login"),
+        SessionError::CleanupUncertain
     );
+    assert_eq!(harness.count("start_login"), starts);
+
+    let view = harness.manager.retry_commit().await.expect("commit retry");
     let record = harness.vault.profile(anchor.profile_id).expect("record");
-    assert_eq!(
-        record.generation, 2,
-        "the fresh login commits its generation"
-    );
+    assert_eq!(record.generation, 2);
     assert_eq!(harness.vault.anchor().expect("anchor").generation, 2);
     assert_eq!(
         harness.manager.restore().await.expect("restore"),
@@ -660,7 +756,7 @@ async fn a_different_pair_after_logout_still_conflicts() {
 }
 
 #[tokio::test]
-async fn a_superseded_held_successor_is_revoked_at_its_own_origin() {
+async fn failed_held_revocation_is_preserved_for_logout_retry() {
     let harness = Harness::new();
     harness.seed_ready_session();
     harness
@@ -678,32 +774,37 @@ async fn a_superseded_held_successor_is_revoked_at_its_own_origin() {
         .fail_profile_writes
         .store(false, Ordering::SeqCst);
 
-    // The same pair signs in at a different controller origin, superseding the
-    // held successor that belongs to the previous origin.
-    harness.controllers.script().logout.push_back(Ok(()));
     harness
         .controllers
         .script()
-        .redeem
-        .push_back(Ok(Redemption::Ready(redeemed(3))));
-    let view = harness
-        .manager
-        .login(login_input(OTHER_ORIGIN))
-        .await
-        .expect("login at the new origin");
-    assert_eq!(view.origin, OTHER_ORIGIN);
+        .logout
+        .push_back(Err(SessionError::ControllerUnavailable));
+    assert_eq!(
+        harness.manager.logout().await.expect_err("revoke fails"),
+        SessionError::RevokeFailed
+    );
+
+    {
+        let mut script = harness.controllers.script();
+        script.logout.push_back(Ok(()));
+        script
+            .refresh
+            .push_back(Ok(issued(3, future_ms(), future_ms())));
+        script.logout.push_back(Ok(()));
+    }
+    harness.manager.logout().await.expect("logout retry");
 
     let entries = harness.entries();
     assert!(
         entries
             .iter()
             .any(|entry| entry == "logout:controller.example:02020202"),
-        "the superseded successor must be revoked at its own origin"
+        "the held successor must remain available for retry"
     );
     assert!(
         !entries
             .iter()
             .any(|entry| entry.starts_with("logout:other.example:")),
-        "no previous credential may follow the origin change"
+        "no credential may follow an origin change"
     );
 }

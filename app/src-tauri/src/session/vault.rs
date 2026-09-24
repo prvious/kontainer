@@ -41,8 +41,7 @@ pub(crate) enum VaultError {
 ///
 /// `read_anchor` addresses the one fixed, integrity-bearing record; profile
 /// records are addressed only by the UUID that record supplied. Read payloads
-/// are returned in a [`Zeroizing`] buffer so a credential copy cannot outlive
-/// the caller's stack frame.
+/// are returned in a [`Zeroizing`] buffer that clears its owned bytes on drop.
 pub(crate) trait CredentialVault: Send + Sync + 'static {
     fn read_anchor(&self) -> VaultFuture<'_, Result<Option<Zeroizing<Vec<u8>>>, VaultError>>;
     fn write_anchor(&self, payload: Vec<u8>) -> VaultFuture<'_, Result<(), VaultError>>;
@@ -222,6 +221,8 @@ fn build_entry(store: &Arc<CredentialStore>, user: &str) -> Result<Entry, Keyrin
     // session credential is only meaningful for this machine and user.
     #[cfg(target_os = "windows")]
     let modifiers = std::collections::HashMap::from([("persistence", "Local")]);
+    #[cfg(target_os = "windows")]
+    let modifiers = Some(&modifiers);
     #[cfg(not(target_os = "windows"))]
     let modifiers = None;
     store.build(VAULT_SERVICE, user, modifiers)

@@ -49,6 +49,10 @@ struct SessionSlots {
     /// retained only in this process, and only so the operator can retry the
     /// commit or log out.
     held: Option<HeldCommit>,
+    /// Issued credentials that could not be committed or conclusively revoked.
+    orphaned: Vec<OrphanedCredentials>,
+    /// A logout owns the retained credentials; they are not authenticated state.
+    cleanup_only: bool,
     login: Option<Arc<LoginSlot>>,
 }
 
@@ -65,6 +69,11 @@ struct HeldCommit {
     /// The failure that stopped the commit. It is reported by `restore` while
     /// the commit stays held; a failed `retry_commit` derives a fresh code.
     error: SessionError,
+}
+
+struct OrphanedCredentials {
+    origin: String,
+    credentials: IssuedCredentials,
 }
 
 /// Registration of one in-flight login attempt.
@@ -92,7 +101,74 @@ impl Drop for LoginGuard<'_> {
                 slots.login = None;
             }
         }
-        let _ = self.slot.done.send(true);
+        self.slot.done.send_replace(true);
+    }
+}
+
+/// Retains newly issued credentials if their command future exits before they
+/// are either committed or conclusively revoked.
+struct IssuedGuard<'a> {
+    manager: &'a SessionManager,
+    issued: Option<OrphanedCredentials>,
+}
+
+impl IssuedGuard<'_> {
+    fn credentials(&self) -> &IssuedCredentials {
+        &self
+            .issued
+            .as_ref()
+            .expect("issued credentials")
+            .credentials
+    }
+
+    fn discard(&mut self) {
+        self.issued = None;
+    }
+
+    fn take(&mut self) -> IssuedCredentials {
+        self.issued.take().expect("issued credentials").credentials
+    }
+}
+
+impl Drop for IssuedGuard<'_> {
+    fn drop(&mut self) {
+        if let Some(issued) = self.issued.take() {
+            self.manager.slots().orphaned.push(issued);
+        }
+    }
+}
+
+/// Owns in-memory custody during logout and restores anything not consumed.
+struct MemoryCustody<'a> {
+    manager: &'a SessionManager,
+    active: Option<ActiveSession>,
+    held: Option<HeldCommit>,
+    orphaned: Vec<OrphanedCredentials>,
+    cleanup_only: bool,
+}
+
+impl MemoryCustody<'_> {
+    fn finish(&mut self, result: Result<(), SessionError>) -> Result<(), SessionError> {
+        if result.is_ok() {
+            self.cleanup_only = false;
+        }
+        result
+    }
+}
+
+impl Drop for MemoryCustody<'_> {
+    fn drop(&mut self) {
+        let mut slots = self.manager.slots();
+        debug_assert!(slots.active.is_none());
+        debug_assert!(slots.held.is_none());
+        if slots.active.is_none() {
+            slots.active = self.active.take();
+        }
+        if slots.held.is_none() {
+            slots.held = self.held.take();
+        }
+        slots.orphaned.append(&mut self.orphaned);
+        slots.cleanup_only = self.cleanup_only;
     }
 }
 
@@ -123,6 +199,8 @@ impl SessionManager {
             slots: Mutex::new(SessionSlots {
                 active: None,
                 held: None,
+                orphaned: Vec::new(),
+                cleanup_only: false,
                 login: None,
             }),
             ops: AsyncMutex::new(()),
@@ -143,17 +221,17 @@ impl SessionManager {
             let mut slots = self.slots();
             slots.login.replace(slot.clone())
         };
+        let _guard = LoginGuard {
+            manager: self,
+            slot: slot.clone(),
+        };
         if let Some(previous) = previous {
             previous.cancel.cancel();
             wait_for_done(&previous).await;
         }
-        let guard = LoginGuard {
-            manager: self,
-            slot: slot.clone(),
-        };
-        let result = self.run_login(input, &slot).await;
-        drop(guard);
-        result
+        let controller = self.controllers.for_origin(&input.origin)?;
+        self.ensure_login_allowed().await?;
+        self.run_login(controller.as_ref(), input, &slot).await
     }
 
     /// Cancel the active attempt and join its cleanup.
@@ -165,23 +243,42 @@ impl SessionManager {
         Ok(())
     }
 
+    async fn ensure_login_allowed(&self) -> Result<(), SessionError> {
+        let _ops = self.ops.lock().await;
+        if let Some(error) = self.login_error() {
+            return Err(error);
+        }
+        match self.load_anchor().await? {
+            None
+            | Some(AnchorRecord {
+                state: AnchorState::LoggedOut,
+                ..
+            }) => Ok(()),
+            Some(AnchorRecord {
+                state: AnchorState::Ready,
+                ..
+            }) => Err(SessionError::ProfileConflict),
+            Some(_) => Err(SessionError::CleanupUncertain),
+        }
+    }
+
     /// Restore the stored session, rotating once through the vault.
     ///
     /// An already-published in-process session is returned unchanged so a
     /// repeated call never consumes another credential.
     pub(crate) async fn restore(&self) -> Result<Option<SessionView>, SessionError> {
+        if let Some(error) = self.custody_error() {
+            return Err(error);
+        }
         if let Some(view) = self.active_view() {
             return Ok(Some(view));
-        }
-        if let Some(error) = self.held_error() {
-            return Err(error);
         }
         let _ops = self.ops.lock().await;
+        if let Some(error) = self.custody_error() {
+            return Err(error);
+        }
         if let Some(view) = self.active_view() {
             return Ok(Some(view));
-        }
-        if let Some(error) = self.held_error() {
-            return Err(error);
         }
         let Some(anchor) = self.load_anchor().await? else {
             self.clear_stale_session_document()?;
@@ -203,18 +300,44 @@ impl SessionManager {
     }
 
     /// Finish a login or rotation whose successor was issued but never became
-    /// durable. Local writes only; no controller call.
+    /// durable. Cleanup of a mismatched anchor is attempted through its
+    /// controller.
     pub(crate) async fn retry_commit(&self) -> Result<SessionView, SessionError> {
         let _ops = self.ops.lock().await;
+        {
+            let slots = self.slots();
+            if slots.cleanup_only || !slots.orphaned.is_empty() {
+                return Err(SessionError::CleanupUncertain);
+            }
+        }
         let Some(held) = self.take_held() else {
             return Err(SessionError::LocalStateFailed);
         };
-        // A held successor is only valid while the vault still sits in the
-        // pending generation it was issued from; a newer login supersedes it.
+        let HeldCommit {
+            view,
+            anchor: held_anchor,
+            credentials,
+            error: held_error,
+        } = held;
+        let mut issued = IssuedGuard {
+            manager: self,
+            issued: Some(OrphanedCredentials {
+                origin: held_anchor.origin.clone(),
+                credentials,
+            }),
+        };
+        let held = |credentials: IssuedCredentials| HeldCommit {
+            view: view.clone(),
+            anchor: held_anchor.clone(),
+            credentials,
+            error: held_error,
+        };
+        // A held successor is valid only while the vault still sits in the
+        // pending generation it was issued from.
         let anchor = match self.load_anchor().await {
             Ok(anchor) => anchor,
             Err(error) => {
-                self.hold(held);
+                self.hold(held(issued.take()));
                 return Err(error);
             }
         };
@@ -222,33 +345,41 @@ impl SessionManager {
             anchor,
             Some(anchor)
                 if anchor.state == AnchorState::CommitPending
-                    && anchor.generation + 1 == held.anchor.generation
+                    && anchor.generation + 1 == held_anchor.generation
         );
         if !still_pending {
-            // A newer login superseded this successor. Revoke it rather than
-            // leaving a live family with no local record; a failed revoke is
-            // still better than a silent drop, and the family dies at expiry.
-            if let Ok(controller) = self.controllers.for_origin(&held.anchor.origin) {
-                let _ = self
-                    .revoke_issued(controller.as_ref(), &held.credentials)
-                    .await;
+            let controller = match self.controllers.for_origin(&held_anchor.origin) {
+                Ok(controller) => controller,
+                Err(_) => {
+                    self.hold(held(issued.take()));
+                    return Err(SessionError::CleanupUncertain);
+                }
+            };
+            if self
+                .revoke_issued(controller.as_ref(), issued.credentials())
+                .await
+                .is_err()
+            {
+                self.hold(held(issued.take()));
+                return Err(SessionError::RevokeFailed);
             }
+            issued.discard();
             return Err(SessionError::LocalStateFailed);
         }
-        self.commit_successor(held.view, held.anchor, held.credentials)
-            .await
+        self.commit_successor(view, held_anchor, issued).await
     }
 
     /// Commit an issued successor: credential record, non-secret summary,
     /// trusted anchor, then in-memory publication.
     ///
-    /// Any failure keeps the successor held for [`Self::retry_commit`] or an
-    /// explicit logout, and no part of it becomes observable as a session.
+    /// Reported commit failures keep the successor held for
+    /// [`Self::retry_commit`] or logout. A dropped future leaves it in
+    /// cleanup-only custody for logout.
     async fn commit_successor(
         &self,
         view: SessionView,
         anchor: AnchorRecord,
-        credentials: IssuedCredentials,
+        mut issued: IssuedGuard<'_>,
     ) -> Result<SessionView, SessionError> {
         let held = |credentials: IssuedCredentials, error: SessionError| HeldCommit {
             view: view.clone(),
@@ -256,11 +387,11 @@ impl SessionManager {
             credentials,
             error,
         };
-        let record = build_profile_record(&anchor, anchor.generation, &credentials);
+        let record = build_profile_record(&anchor, anchor.generation, issued.credentials());
         let payload = match encode_profile(&record) {
             Ok(payload) => payload,
             Err(_) => {
-                self.hold(held(credentials, SessionError::VaultWriteFailed));
+                self.hold(held(issued.take(), SessionError::VaultWriteFailed));
                 return Err(SessionError::VaultWriteFailed);
             }
         };
@@ -270,21 +401,20 @@ impl SessionManager {
             .await
             .is_err()
         {
-            self.hold(held(credentials, SessionError::VaultWriteFailed));
+            self.hold(held(issued.take(), SessionError::VaultWriteFailed));
             return Err(SessionError::VaultWriteFailed);
         }
         drop(payload);
         let document = SessionDocument::new(None, Some(metadata_session_from(&view)));
         if self.metadata.write_document(&document).is_err() {
-            self.hold(held(credentials, SessionError::LocalStateFailed));
+            self.hold(held(issued.take(), SessionError::LocalStateFailed));
             return Err(SessionError::LocalStateFailed);
         }
         if self.write_anchor(&anchor).await.is_err() {
-            self.hold(held(credentials, SessionError::VaultWriteFailed));
+            self.hold(held(issued.take(), SessionError::VaultWriteFailed));
             return Err(SessionError::VaultWriteFailed);
         }
-        let access = credentials.access;
-        self.publish(view.clone(), access);
+        self.publish(view.clone(), issued)?;
         Ok(view)
     }
 
@@ -299,60 +429,75 @@ impl SessionManager {
         // The anchor is read before any in-memory credential is taken so a
         // transient vault failure leaves the retryable state untouched.
         let anchor = self.load_anchor().await?;
-        let active = self.take_active();
-        let held = self.take_held();
-        let label = active
+        let mut memory = self.take_memory();
+        let label = memory
+            .active
             .as_ref()
             .and_then(|session| session.view.label.clone())
             .or_else(|| self.stored_label());
 
-        let Some(anchor) = anchor else {
-            // No anchor claims a session: revoke whatever this process still
-            // holds, best effort, since there is no durable state to retry.
-            if let Some(held) = held {
-                if let Ok(controller) = self.controllers.for_origin(&held.anchor.origin) {
-                    let _ = self
-                        .revoke_issued(controller.as_ref(), &held.credentials)
-                        .await;
-                }
+        let memory_cleanup_marked = match anchor.as_ref() {
+            Some(anchor) if anchor.state == AnchorState::LogoutPending => true,
+            Some(anchor) if memory.held.is_some() || !memory.orphaned.is_empty() => {
+                self.write_anchor(&AnchorRecord {
+                    state: AnchorState::LogoutPending,
+                    ..anchor.clone()
+                })
+                .await?;
+                true
             }
-            if let Some(session) = active {
-                if let Ok(controller) = self.controllers.for_origin(&session.view.origin) {
-                    let _ = controller
-                        .logout(&session.access, &CancellationToken::new())
-                        .await;
+            _ => false,
+        };
+
+        self.revoke_orphaned(&mut memory).await?;
+
+        let Some(anchor) = anchor else {
+            self.revoke_held(&mut memory).await?;
+            if let Some(session) = memory.active.as_ref() {
+                let controller = self
+                    .controllers
+                    .for_origin(&session.view.origin)
+                    .map_err(|_| SessionError::CleanupUncertain)?;
+                match controller
+                    .logout(&session.access, &CancellationToken::new())
+                    .await
+                {
+                    Ok(()) => memory.active = None,
+                    Err(SessionError::ReloginRequired) => {
+                        return Err(SessionError::CleanupUncertain);
+                    }
+                    Err(_) => return Err(SessionError::RevokeFailed),
                 }
             }
             self.clear_stale_session_document()?;
-            return Ok(());
+            return memory.finish(Ok(()));
         };
 
         match anchor.state {
             AnchorState::LoggedOut | AnchorState::CleanupPending => {
-                self.finish_logout_local(&anchor, label).await
+                self.revoke_held(&mut memory).await?;
+                memory.active = None;
+                let result = self.finish_logout_local(&anchor, label).await;
+                memory.finish(result)
             }
             AnchorState::Ready | AnchorState::CommitPending | AnchorState::LogoutPending => {
                 // The anchor must be non-restorable before any network attempt.
-                if anchor.state != AnchorState::LogoutPending {
+                if !memory_cleanup_marked {
                     self.write_anchor(&AnchorRecord {
                         state: AnchorState::LogoutPending,
                         ..anchor.clone()
                     })
                     .await?;
                 }
-                let Ok(controller) = self.controllers.for_origin(&anchor.origin) else {
-                    // An un-validatable stored origin can never be reached;
-                    // local custody is cleared without a network attempt.
-                    return self.finish_logout_local(&anchor, label).await;
+                self.revoke_held(&mut memory).await?;
+                let controller = match self.controllers.for_origin(&anchor.origin) {
+                    Ok(controller) => controller,
+                    Err(_) if memory.active.is_none() => {
+                        self.finish_uncertain_logout(&anchor, label).await?;
+                        return Err(SessionError::CleanupUncertain);
+                    }
+                    Err(_) => return Err(SessionError::CleanupUncertain),
                 };
-
-                // A successor still held by this process is the newest live
-                // family; its predecessor, when one existed, is represented by
-                // the vault record handled below.
-                if let Some(held) = held {
-                    self.revoke_issued(controller.as_ref(), &held.credentials)
-                        .await?;
-                }
 
                 let record = self
                     .load_profile(anchor.profile_id)
@@ -362,45 +507,51 @@ impl SessionManager {
                     });
                 match record {
                     Some(record) => {
-                        // The live access credential is the cheapest honest
-                        // revocation; only a rejected access credential needs
-                        // the persisted rotation.
-                        if let Some(session) = active {
+                        if let Some(session) = memory.active.as_ref() {
                             match controller
                                 .logout(&session.access, &CancellationToken::new())
                                 .await
                             {
                                 Ok(()) => {
-                                    return self.finish_logout_local(&anchor, label).await;
+                                    memory.active = None;
+                                    let result = self.finish_logout_local(&anchor, label).await;
+                                    return memory.finish(result);
                                 }
-                                Err(SessionError::ReloginRequired) => {}
-                                Err(_) => return Err(SessionError::RevokeFailed),
+                                Err(SessionError::ReloginRequired) => memory.active = None,
+                                Err(_) => {
+                                    // The durable refresh record is sufficient
+                                    // for retry; the rejected access session is
+                                    // no longer published as authenticated.
+                                    memory.active = None;
+                                    return Err(SessionError::RevokeFailed);
+                                }
                             }
                         }
-                        self.logout_record(controller.as_ref(), &anchor, &record, label)
-                            .await
+                        let result = self
+                            .logout_record(controller.as_ref(), &anchor, &record, label)
+                            .await;
+                        memory.finish(result)
                     }
                     None => {
-                        // No usable record. A live access credential may still
-                        // revoke the family; a rejected one proves nothing, and
-                        // there is no refresh credential left to rotate.
-                        if let Some(session) = active {
+                        if let Some(session) = memory.active.as_ref() {
                             match controller
                                 .logout(&session.access, &CancellationToken::new())
                                 .await
                             {
-                                Ok(()) => return self.finish_logout_local(&anchor, label).await,
+                                Ok(()) => {
+                                    memory.active = None;
+                                    let result = self.finish_logout_local(&anchor, label).await;
+                                    return memory.finish(result);
+                                }
                                 Err(SessionError::ReloginRequired) => {
-                                    self.finish_logout_local(&anchor, label).await?;
+                                    memory.active = None;
+                                    self.finish_uncertain_logout(&anchor, label).await?;
                                     return Err(SessionError::CleanupUncertain);
                                 }
                                 Err(_) => return Err(SessionError::RevokeFailed),
                             }
                         }
-                        // Nothing reachable can revoke a session the anchor
-                        // still claims: clean up locally and do not report a
-                        // verified logout.
-                        self.finish_logout_local(&anchor, label).await?;
+                        self.finish_uncertain_logout(&anchor, label).await?;
                         Err(SessionError::CleanupUncertain)
                     }
                 }
@@ -419,13 +570,13 @@ impl SessionManager {
 
     async fn run_login(
         &self,
+        controller: &dyn Controller,
         input: SessionLoginInput,
         slot: &LoginSlot,
     ) -> Result<SessionView, SessionError> {
         if slot.cancel.is_cancelled() {
             return Err(SessionError::LoginCancelled);
         }
-        let controller = self.controllers.for_origin(&input.origin)?;
         let verifier = LoginVerifier::generate();
         let start = controller.start_login(&verifier, &slot.cancel).await?;
         self.browser.open(&start.authorize_url)?;
@@ -452,8 +603,7 @@ impl SessionManager {
         };
         // The verifier exists only for this loop and is dropped with it.
         drop(verifier);
-        self.commit_login(controller.as_ref(), redeemed, input, slot)
-            .await
+        self.commit_login(controller, redeemed, input, slot).await
     }
 
     async fn commit_login(
@@ -463,52 +613,69 @@ impl SessionManager {
         input: SessionLoginInput,
         slot: &LoginSlot,
     ) -> Result<SessionView, SessionError> {
+        let RedeemedSession {
+            cluster_id,
+            principal_id,
+            github_login,
+            issued: credentials,
+        } = redeemed;
+        let mut issued = IssuedGuard {
+            manager: self,
+            issued: Some(OrphanedCredentials {
+                origin: controller.canonical_origin().to_owned(),
+                credentials,
+            }),
+        };
         let _ops = self.ops.lock().await;
         if slot.cancel.is_cancelled() {
-            // The browser step completed just as the operator cancelled: the
-            // family exists and must be revoked before it is forgotten.
-            if self
-                .revoke_issued(controller, &redeemed.issued)
-                .await
-                .is_ok()
-            {
-                return Err(SessionError::LoginCancelled);
-            }
-            return Err(SessionError::CleanupUncertain);
+            return self
+                .reject_issued(controller, &mut issued, SessionError::LoginCancelled)
+                .await;
+        }
+        if let Some(error) = self.login_error() {
+            return self.reject_issued(controller, &mut issued, error).await;
         }
 
-        let existing = self.load_anchor().await?;
-        let profile_id = match &existing {
-            None => Uuid::new_v4(),
+        let existing = match self.load_anchor().await {
+            Ok(existing) => existing,
+            Err(error) => return self.reject_issued(controller, &mut issued, error).await,
+        };
+        let (profile_id, old_generation) = match &existing {
+            None => (Uuid::new_v4(), 0),
             Some(anchor)
-                if anchor.cluster_id == redeemed.cluster_id
-                    && anchor.principal_id == redeemed.principal_id =>
+                if anchor.state == AnchorState::LoggedOut
+                    && anchor.cluster_id == cluster_id
+                    && anchor.principal_id == principal_id =>
             {
-                anchor.profile_id
+                (anchor.profile_id, anchor.generation)
+            }
+            Some(anchor)
+                if matches!(
+                    anchor.state,
+                    AnchorState::CommitPending
+                        | AnchorState::LogoutPending
+                        | AnchorState::CleanupPending
+                ) =>
+            {
+                return self
+                    .reject_issued(controller, &mut issued, SessionError::CleanupUncertain)
+                    .await;
             }
             Some(_) => {
-                // A different pair never overwrites the existing profile or
-                // vault entry; the newly issued family is revoked instead.
-                if self
-                    .revoke_issued(controller, &redeemed.issued)
-                    .await
-                    .is_ok()
-                {
-                    return Err(SessionError::ProfileConflict);
-                }
-                return Err(SessionError::CleanupUncertain);
+                return self
+                    .reject_issued(controller, &mut issued, SessionError::ProfileConflict)
+                    .await;
             }
         };
 
-        let old_generation = existing.as_ref().map_or(0, |anchor| anchor.generation);
         let new_generation = old_generation + 1;
         let label = sanitize_label(input.label.clone()).or_else(|| self.stored_label());
         let pending = AnchorRecord {
             version: ANCHOR_VERSION,
             profile_id,
             origin: controller.canonical_origin().to_owned(),
-            cluster_id: redeemed.cluster_id.clone(),
-            principal_id: redeemed.principal_id,
+            cluster_id: cluster_id.clone(),
+            principal_id,
             generation: old_generation,
             state: AnchorState::CommitPending,
         };
@@ -522,39 +689,38 @@ impl SessionManager {
             origin: pending.origin.clone(),
             cluster_id: pending.cluster_id.clone(),
             principal_id: pending.principal_id,
-            github_login: redeemed.github_login.clone(),
+            github_login,
             label: label.clone(),
-            access_expires_at_unix_ms: redeemed.issued.access_expires_at_unix_ms,
+            access_expires_at_unix_ms: issued.credentials().access_expires_at_unix_ms,
         };
 
-        // 1. A successor held from an earlier failed commit is superseded by
-        // this login; revoke it through its *own* origin, because the incoming
-        // login may target a different controller and no credential may follow
-        // an origin change.
-        if let Some(held) = self.take_held() {
-            if let Ok(held_controller) = self.controllers.for_origin(&held.anchor.origin) {
-                let _ = self
-                    .revoke_issued(held_controller.as_ref(), &held.credentials)
-                    .await;
-            }
-        }
-
-        // 2. The anchor becomes non-restorable before the credential exists.
+        // The anchor becomes non-restorable before the issued credential is
+        // committed.
         if self.write_anchor(&pending).await.is_err() {
-            // The credentials were issued but cannot be committed; revoke them
-            // rather than dropping a live family.
-            if self
-                .revoke_issued(controller, &redeemed.issued)
-                .await
-                .is_ok()
-            {
-                return Err(SessionError::VaultWriteFailed);
-            }
-            return Err(SessionError::CleanupUncertain);
+            return self
+                .reject_issued(controller, &mut issued, SessionError::VaultWriteFailed)
+                .await;
         }
 
-        // 3-6. Credential record, non-secret summary, anchor, publication.
-        self.commit_successor(view, ready, redeemed.issued).await
+        self.commit_successor(view, ready, issued).await
+    }
+
+    async fn reject_issued<T>(
+        &self,
+        controller: &dyn Controller,
+        issued: &mut IssuedGuard<'_>,
+        error: SessionError,
+    ) -> Result<T, SessionError> {
+        if self
+            .revoke_issued(controller, issued.credentials())
+            .await
+            .is_ok()
+        {
+            issued.discard();
+            Err(error)
+        } else {
+            Err(SessionError::CleanupUncertain)
+        }
     }
 
     async fn restore_ready(&self, anchor: AnchorRecord) -> Result<SessionView, SessionError> {
@@ -617,7 +783,7 @@ impl SessionManager {
                 .invalidate_to_relogin(&anchor, session.label.clone())
                 .await);
         };
-        let issued = match controller
+        let credentials = match controller
             .refresh_session(&refresh, &CancellationToken::new())
             .await
         {
@@ -633,6 +799,13 @@ impl SessionManager {
             // revokes the family.
             Err(_) => return Err(SessionError::CleanupUncertain),
         };
+        let issued = IssuedGuard {
+            manager: self,
+            issued: Some(OrphanedCredentials {
+                origin: anchor.origin.clone(),
+                credentials,
+            }),
+        };
 
         let new_generation = anchor.generation + 1;
         let ready = AnchorRecord {
@@ -647,7 +820,7 @@ impl SessionManager {
             principal_id: anchor.principal_id,
             github_login: session.github_login.clone(),
             label: sanitize_label(session.label.clone()),
-            access_expires_at_unix_ms: issued.access_expires_at_unix_ms,
+            access_expires_at_unix_ms: issued.credentials().access_expires_at_unix_ms,
         };
         self.commit_successor(view, ready, issued).await
     }
@@ -709,6 +882,19 @@ impl SessionManager {
         };
         self.write_anchor(&logged_out).await?;
         self.finish_logged_out_document(&logged_out, label)
+    }
+
+    /// Remove unusable local material without claiming remote revocation.
+    async fn finish_uncertain_logout(
+        &self,
+        anchor: &AnchorRecord,
+        label: Option<String>,
+    ) -> Result<(), SessionError> {
+        self.vault
+            .delete_profile(anchor.profile_id)
+            .await
+            .map_err(|_| SessionError::LocalCleanupFailed)?;
+        self.finish_logged_out_document(anchor, label)
     }
 
     /// Local-only invalidation after a session the desktop will not trust:
@@ -821,8 +1007,7 @@ impl SessionManager {
         match self.vault.read_anchor().await {
             Ok(None) => Ok(None),
             // An undecodable anchor supplies no trusted UUID, so it is treated
-            // as absent rather than as a usable record; a fresh login replaces
-            // it and any orphaned entry stays unreachable.
+            // as absent rather than as a usable record.
             Ok(Some(bytes)) => Ok(decode_anchor(&bytes).ok()),
             Err(_) => Err(SessionError::VaultUnavailable),
         }
@@ -853,27 +1038,47 @@ impl SessionManager {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    fn publish(&self, view: SessionView, access: AccessCredential) {
+    fn publish(&self, view: SessionView, mut issued: IssuedGuard<'_>) -> Result<(), SessionError> {
         let mut slots = self.slots();
+        if slots.cleanup_only || !slots.orphaned.is_empty() {
+            drop(slots);
+            return Err(SessionError::CleanupUncertain);
+        }
+        let access = issued.take().access;
         // A published session supersedes any successor still held from an
         // earlier failed commit.
         slots.active = Some(ActiveSession { view, access });
         slots.held = None;
+        Ok(())
     }
 
     fn active_view(&self) -> Option<SessionView> {
-        self.slots()
-            .active
-            .as_ref()
-            .map(|session| session.view.clone())
+        let slots = self.slots();
+        if slots.cleanup_only || !slots.orphaned.is_empty() {
+            None
+        } else {
+            slots.active.as_ref().map(|session| session.view.clone())
+        }
     }
 
-    fn take_active(&self) -> Option<ActiveSession> {
-        self.slots().active.take()
+    fn login_error(&self) -> Option<SessionError> {
+        let slots = self.slots();
+        if slots.cleanup_only || slots.held.is_some() || !slots.orphaned.is_empty() {
+            Some(SessionError::CleanupUncertain)
+        } else if slots.active.is_some() {
+            Some(SessionError::ProfileConflict)
+        } else {
+            None
+        }
     }
 
-    fn held_error(&self) -> Option<SessionError> {
-        self.slots().held.as_ref().map(|held| held.error)
+    fn custody_error(&self) -> Option<SessionError> {
+        let slots = self.slots();
+        if slots.cleanup_only || !slots.orphaned.is_empty() {
+            Some(SessionError::CleanupUncertain)
+        } else {
+            slots.held.as_ref().map(|held| held.error)
+        }
     }
 
     fn hold(&self, held: HeldCommit) {
@@ -882,6 +1087,47 @@ impl SessionManager {
 
     fn take_held(&self) -> Option<HeldCommit> {
         self.slots().held.take()
+    }
+
+    fn take_memory(&self) -> MemoryCustody<'_> {
+        let mut slots = self.slots();
+        slots.cleanup_only = true;
+        MemoryCustody {
+            manager: self,
+            active: slots.active.take(),
+            held: slots.held.take(),
+            orphaned: std::mem::take(&mut slots.orphaned),
+            cleanup_only: true,
+        }
+    }
+
+    async fn revoke_orphaned(&self, memory: &mut MemoryCustody<'_>) -> Result<(), SessionError> {
+        while let Some(issued) = memory.orphaned.last() {
+            let controller = self
+                .controllers
+                .for_origin(&issued.origin)
+                .map_err(|_| SessionError::CleanupUncertain)?;
+            self.revoke_issued(controller.as_ref(), &issued.credentials)
+                .await
+                .map_err(|_| SessionError::RevokeFailed)?;
+            memory.orphaned.pop();
+        }
+        Ok(())
+    }
+
+    async fn revoke_held(&self, memory: &mut MemoryCustody<'_>) -> Result<(), SessionError> {
+        let Some(held) = memory.held.as_ref() else {
+            return Ok(());
+        };
+        let controller = self
+            .controllers
+            .for_origin(&held.anchor.origin)
+            .map_err(|_| SessionError::CleanupUncertain)?;
+        self.revoke_issued(controller.as_ref(), &held.credentials)
+            .await
+            .map_err(|_| SessionError::RevokeFailed)?;
+        memory.held = None;
+        Ok(())
     }
 
     fn take_login(&self) -> Option<Arc<LoginSlot>> {
@@ -953,4 +1199,63 @@ fn now_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|elapsed| elapsed.as_millis() as i64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod completion_tests {
+    use super::*;
+    use crate::session::tests::fakes::{login_input, redeemed, Harness, ORIGIN};
+
+    #[tokio::test]
+    async fn a_late_waiter_observes_login_completion() {
+        let harness = Harness::new();
+        let (done, receiver) = watch::channel(false);
+        drop(receiver);
+        let slot = Arc::new(LoginSlot {
+            cancel: CancellationToken::new(),
+            done,
+        });
+        harness.manager.slots().login = Some(slot.clone());
+
+        drop(LoginGuard {
+            manager: &harness.manager,
+            slot: slot.clone(),
+        });
+
+        tokio::time::timeout(Duration::from_millis(10), wait_for_done(&slot))
+            .await
+            .expect("completion remains observable");
+    }
+
+    #[tokio::test]
+    async fn cancellation_after_redemption_retains_failed_cleanup_for_logout() {
+        let harness = Harness::new();
+        harness
+            .controllers
+            .script()
+            .logout
+            .push_back(Err(SessionError::ControllerUnavailable));
+        let controller = harness.controllers.for_origin(ORIGIN).expect("controller");
+        let slot = LoginSlot {
+            cancel: CancellationToken::new(),
+            done: watch::channel(false).0,
+        };
+        slot.cancel.cancel();
+
+        assert_eq!(
+            harness
+                .manager
+                .commit_login(controller.as_ref(), redeemed(1), login_input(ORIGIN), &slot,)
+                .await
+                .expect_err("cancelled"),
+            SessionError::CleanupUncertain
+        );
+        assert_eq!(
+            harness.manager.restore().await.expect_err("orphaned"),
+            SessionError::CleanupUncertain
+        );
+        harness.controllers.script().logout.push_back(Ok(()));
+        harness.manager.logout().await.expect("cleanup retry");
+        assert_eq!(harness.count("logout"), 2);
+    }
 }

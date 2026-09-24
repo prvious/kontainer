@@ -2,7 +2,7 @@
 //! tests can assert exact ordering across vault, controller, and metadata.
 
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use kontainer_native_client::{AccessCredential, LoginVerifier, RefreshCredential};
@@ -119,6 +119,8 @@ pub(crate) struct FakeVault {
     anchor: Mutex<Option<Vec<u8>>>,
     profiles: Mutex<HashMap<Uuid, Vec<u8>>>,
     pub(crate) fail_reads: AtomicBool,
+    pub(crate) fail_anchor_read_number: AtomicUsize,
+    anchor_reads: AtomicUsize,
     pub(crate) fail_profile_writes: AtomicBool,
     /// Fails only `Ready` anchor writes, so a test can stop the commit step
     /// without breaking the earlier pending-anchor write.
@@ -137,6 +139,8 @@ impl FakeVault {
             anchor: Mutex::new(None),
             profiles: Mutex::new(HashMap::new()),
             fail_reads: AtomicBool::new(false),
+            fail_anchor_read_number: AtomicUsize::new(0),
+            anchor_reads: AtomicUsize::new(0),
             fail_profile_writes: AtomicBool::new(false),
             fail_ready_anchor_writes: AtomicBool::new(false),
             fail_pending_anchor_writes: AtomicBool::new(false),
@@ -204,7 +208,10 @@ impl FakeVault {
 impl CredentialVault for FakeVault {
     fn read_anchor(&self) -> VaultFuture<'_, Result<Option<Zeroizing<Vec<u8>>>, VaultError>> {
         record(&self.log, "read_anchor");
-        if self.fail_reads.load(Ordering::SeqCst) {
+        let read_number = self.anchor_reads.fetch_add(1, Ordering::SeqCst) + 1;
+        if self.fail_reads.load(Ordering::SeqCst)
+            || self.fail_anchor_read_number.load(Ordering::SeqCst) == read_number
+        {
             return Box::pin(async { Err(VaultError::Unavailable) });
         }
         let value = self.anchor.lock().unwrap().clone().map(Zeroizing::new);
@@ -585,6 +592,15 @@ impl Harness {
             .iter()
             .filter(|item| item.starts_with(prefix))
             .count()
+    }
+
+    pub(crate) fn restarted_manager(&self) -> SessionManager {
+        SessionManager::new(
+            self.vault.clone(),
+            self.metadata.clone(),
+            self.controllers.clone(),
+            self.browser.clone(),
+        )
     }
 
     /// Complete one login against the default origin and pair.
