@@ -65,7 +65,7 @@ Use the action-per-file pattern for discrete operations.
 - Register every new Tauri command in `app/src-tauri/src/lib.rs`.
 - Keep Rust and TypeScript types in sync for any data crossing the Tauri boundary.
 - For serialized Rust structs sent to TypeScript, use `#[serde(rename_all = "camelCase")]` unless a sibling pattern clearly differs.
-- Session state is stored locally in `session.json` via `tauri-plugin-store`.
+- Session state is stored locally in `session.json` via `tauri-plugin-store`; credentials live in the OS vault and Rust memory, never in that file.
 - Always use TanStack Query to call Tauri commands from React — wrap `invoke` calls in `useQuery`/`useMutation` hooks instead of calling them directly in components or effects.
 
 ## Architecture Notes

@@ -1,0 +1,34 @@
+{
+    "commands": ["session_login", "session_cancel_login", "session_restore", "session_retry_commit", "session_logout", "session_login_hint"],
+    "sessionView": {
+        "profileId": "018f2e34-0000-7000-8000-0000000000bb",
+        "origin": "https://controller.example/",
+        "clusterId": "test",
+        "principalId": "018f2e34-0000-7000-8000-0000000000aa",
+        "githubLogin": "owner",
+        "label": "Default",
+        "accessExpiresAtUnixMs": 1760000000000
+    },
+    "loginHint": {
+        "origin": "https://controller.example/",
+        "label": "Default"
+    },
+    "errorCodes": [
+        "invalid_origin",
+        "browser_open_failed",
+        "login_cancelled",
+        "login_expired",
+        "login_denied",
+        "provider_unavailable",
+        "controller_unavailable",
+        "invalid_response",
+        "profile_conflict",
+        "relogin_required",
+        "vault_unavailable",
+        "vault_write_failed",
+        "local_state_failed",
+        "revoke_failed",
+        "local_cleanup_failed",
+        "cleanup_uncertain"
+    ]
+}

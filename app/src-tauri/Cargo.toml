@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
+rust-version = "1.98"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -28,4 +29,21 @@ reqwest = { version = "0.12", features = ["json"] }
 tauri-plugin-window-state = "2.4.1"
 tokio-tungstenite = { version = "0.28.0", features = ["connect"] }
 futures-util = "0.3.31"
+# Desktop session custody: the UI-neutral controller client, the OS credential
+# vault, and the async/concurrency primitives the custody layer needs.
+kontainer-native-client = { path = "../../server/crates/native-client" }
+keyring-core = "1.0.0"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "test-util", "time"] }
+tokio-util = "0.7"
+uuid = { version = "1", features = ["serde", "v4"] }
+zeroize = "1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+apple-native-keyring-store = { version = "1", features = ["keychain"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+zbus-secret-service-keyring-store = { version = "1", features = ["crypto-rust"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-native-keyring-store = "1"
 

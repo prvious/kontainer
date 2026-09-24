@@ -20,10 +20,7 @@ pub async fn fetch_providers(url: String) -> Result<Vec<String>, String> {
         .map_err(|e| format!("Could not fetch providers from {url}: {e}"))?;
 
     if !response.status().is_success() {
-        return Err(format!(
-            "Agent responded with status {}",
-            response.status()
-        ));
+        return Err(format!("Agent responded with status {}", response.status()));
     }
 
     let body: ProvidersResponse = response
