@@ -382,6 +382,37 @@
         }
       }
     },
+    "/api/v1/status/deep": {
+      "get": {
+        "tags": [
+          "deep"
+        ],
+        "operationId": "deep_status",
+        "responses": {
+          "200": {
+            "description": "Authenticated dependency diagnostic; component failures are states, not HTTP errors",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeepStatusResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "503": {
+            "description": "Controller draining new work or session persistence unavailable; the body is either HealthResponse or a generic error"
+          }
+        },
+        "security": [
+          {
+            "access_session": []
+          }
+        ]
+      }
+    },
     "/health/live": {
       "get": {
         "tags": [
@@ -467,6 +498,26 @@
   },
   "components": {
     "schemas": {
+      "AgentRpcState": {
+        "type": "string",
+        "enum": [
+          "up",
+          "down",
+          "timeout"
+        ]
+      },
+      "BuildResponse": {
+        "type": "object",
+        "required": [
+          "version"
+        ],
+        "properties": {
+          "version": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "ContainerErrorResponse": {
         "type": "object",
         "required": [
@@ -558,6 +609,38 @@
           "stopping"
         ]
       },
+      "DatabaseState": {
+        "type": "string",
+        "enum": [
+          "reachable",
+          "unreachable",
+          "timeout"
+        ]
+      },
+      "DeepStatusResponse": {
+        "type": "object",
+        "required": [
+          "build",
+          "migration",
+          "database",
+          "agentRpc"
+        ],
+        "properties": {
+          "agentRpc": {
+            "$ref": "#/components/schemas/AgentRpcState"
+          },
+          "build": {
+            "$ref": "#/components/schemas/BuildResponse"
+          },
+          "database": {
+            "$ref": "#/components/schemas/DatabaseState"
+          },
+          "migration": {
+            "$ref": "#/components/schemas/MigrationState"
+          }
+        },
+        "additionalProperties": false
+      },
       "GithubLoginResponse": {
         "type": "object",
         "required": [
@@ -603,6 +686,13 @@
             "type": "boolean"
           }
         }
+      },
+      "MigrationState": {
+        "type": "string",
+        "enum": [
+          "current",
+          "unknown"
+        ]
       },
       "OperationResponse": {
         "type": "object",

@@ -334,13 +334,17 @@ pub struct AgentContainerPage {
     pub next_page_token: Option<String>,
 }
 
-/// Narrow injectable handle for node inventory reads.
+/// Narrow injectable handle for node diagnostics and inventory reads.
 ///
 /// Production inserts the configured [`NodeAgentClientConfig`]; tests insert
-/// a fake. The handle carries only pagination and cancellation: no request
-/// input can select an endpoint, DNS name, or identity.
+/// a fake. No request input can select an endpoint, DNS name, or identity.
 #[async_trait::async_trait]
-pub trait AgentContainerClient: std::fmt::Debug + Send + Sync {
+pub trait AgentClient: std::fmt::Debug + Send + Sync {
+    async fn describe(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> Result<AgentDescription, AgentClientError>;
+
     async fn list_containers(
         &self,
         page_size: u32,
@@ -352,7 +356,14 @@ pub trait AgentContainerClient: std::fmt::Debug + Send + Sync {
 }
 
 #[async_trait::async_trait]
-impl AgentContainerClient for NodeAgentClientConfig {
+impl AgentClient for NodeAgentClientConfig {
+    async fn describe(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> Result<AgentDescription, AgentClientError> {
+        NodeAgentClientConfig::describe(self, cancellation).await
+    }
+
     async fn list_containers(
         &self,
         page_size: u32,
@@ -367,10 +378,10 @@ impl AgentContainerClient for NodeAgentClientConfig {
     }
 }
 
-/// Shared inventory client stored in [`loco_rs::app::AppContext::shared_store`].
+/// Shared agent client stored in [`loco_rs::app::AppContext::shared_store`].
 /// Cloned per request; the inner client is the single static configuration.
 #[derive(Debug, Clone)]
-pub struct SharedAgentClient(pub Arc<dyn AgentContainerClient>);
+pub struct SharedAgentClient(pub Arc<dyn AgentClient>);
 
 /// Stable, redacted call failures. No endpoint, address, TLS, or daemon
 /// detail crosses this boundary.

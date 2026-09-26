@@ -9,6 +9,8 @@ use super::containers::{
 use super::operations::{OperationResponse, OperationStateResponse};
 use crate::auth::domain::PrincipalContext;
 
+mod deep;
+
 #[derive(Debug, Serialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct StatusResponse {
@@ -66,6 +68,7 @@ impl Modify for AccessSessionSecurity {
 #[openapi(
     paths(
         show,
+        deep::show,
         super::operations::show,
         super::containers::index,
         super::sessions::refresh,
@@ -79,6 +82,11 @@ impl Modify for AccessSessionSecurity {
     ),
     components(schemas(
         StatusResponse,
+        deep::DeepStatusResponse,
+        deep::BuildResponse,
+        deep::MigrationState,
+        deep::DatabaseState,
+        deep::AgentRpcState,
         OperationResponse,
         OperationStateResponse,
         ContainerPageResponse,
@@ -116,6 +124,7 @@ async fn openapi(_principal: PrincipalContext) -> Result<Response> {
 pub fn routes() -> Routes {
     Routes::new()
         .get("/status", show)
+        .get("/status/deep", deep::show)
         .get("/openapi.json", openapi)
 }
 
@@ -164,6 +173,51 @@ mod tests {
                 .as_str()
                 .is_some_and(|description| description.contains("not visible")),
             "polling documents the anti-oracle 404"
+        );
+    }
+
+    #[test]
+    fn deep_status_openapi_has_exact_closed_fields() {
+        let document = serde_json::to_value(ApiDoc::openapi()).unwrap();
+        let route = &document["paths"]["/api/v1/status/deep"]["get"];
+        assert!(route["responses"]["200"].is_object());
+        assert!(route["responses"]["401"].is_object());
+        assert!(route["responses"]["503"].is_object());
+        assert_eq!(route["operationId"], "deep_status");
+        assert_eq!(
+            route["security"],
+            serde_json::json!([{"access_session": []}])
+        );
+
+        let schemas = &document["components"]["schemas"];
+        let response = &schemas["DeepStatusResponse"];
+        let fields: BTreeSet<&str> = response["properties"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            fields,
+            BTreeSet::from(["build", "migration", "database", "agentRpc"])
+        );
+        assert_eq!(response["additionalProperties"], false);
+        assert_eq!(response["required"].as_array().unwrap().len(), 4);
+        let build = &schemas["BuildResponse"];
+        assert_eq!(build["additionalProperties"], false);
+        assert_eq!(build["properties"].as_object().unwrap().len(), 1);
+        assert!(build["properties"]["version"].is_object());
+        assert_eq!(
+            schemas["MigrationState"]["enum"],
+            serde_json::json!(["current", "unknown"])
+        );
+        assert_eq!(
+            schemas["DatabaseState"]["enum"],
+            serde_json::json!(["reachable", "unreachable", "timeout"])
+        );
+        assert_eq!(
+            schemas["AgentRpcState"]["enum"],
+            serde_json::json!(["up", "down", "timeout"])
         );
     }
 
