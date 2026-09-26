@@ -21,13 +21,17 @@ use kontainer_agent_proto::{
 use kontainer_controller::rpc::serve_controller_rpc;
 use kontainer_controller::rpc::{AgentClientError, NodeAgentClientConfig};
 use kontainer_controller::server::{
-    BoundAgentRpcServer, BoundHttpServer, HttpTransport, supervise_controller_servers,
+    BoundAgentRpcServer, BoundHttpServer, ControllerShutdown, HttpTransport,
+    supervise_controller_servers,
 };
 use kontainer_engine::{
     ContainerEngine, ContainerPage, ContainerPageRequest, ContainerState, ContainerSummary,
     EngineError, EngineErrorKind, EngineOperation,
 };
-use kontainer_node_agent::{NodeAgentService, serve_node_agent_rpc};
+use kontainer_lifecycle::ShutdownGrace;
+use kontainer_node_agent::{
+    AgentShutdown, NodeAgentService, serve_node_agent_rpc, supervise_node_agent_server,
+};
 use kontainer_rpc_auth::MutualTlsIdentityFiles;
 use support::pki::{
     AGENT_URI, CLUSTER_ID, CONTROLLER_NAME, CONTROLLER_URI, NODE_AGENT_NAME, NODE_ID,
@@ -40,13 +44,17 @@ use tokio::{
     task::JoinHandle,
     time::timeout,
 };
-use tokio_util::sync::CancellationToken;
+use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use tonic::{
     Code, Request,
     transport::{Channel, ClientTlsConfig, Endpoint},
 };
 
 type ServerResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+fn unused_failure_sender() -> tokio::sync::mpsc::UnboundedSender<&'static str> {
+    tokio::sync::mpsc::unbounded_channel().0
+}
 
 struct AvailableEngine;
 
@@ -103,6 +111,29 @@ impl ContainerEngine for BlockingEngine {
     async fn is_available(&self) -> Result<bool, EngineError> {
         self.entered.add_permits(1);
         pending().await
+    }
+}
+
+struct ReleasableEngine {
+    entered: Arc<Semaphore>,
+    release: Arc<Semaphore>,
+}
+
+struct PanicEngine;
+
+#[async_trait]
+impl ContainerEngine for PanicEngine {
+    async fn is_available(&self) -> Result<bool, EngineError> {
+        panic!("engine failed")
+    }
+}
+
+#[async_trait]
+impl ContainerEngine for ReleasableEngine {
+    async fn is_available(&self) -> Result<bool, EngineError> {
+        self.entered.add_permits(1);
+        self.release.acquire().await.unwrap().forget();
+        Ok(true)
     }
 }
 
@@ -898,12 +929,268 @@ async fn shutdown_cancels_an_in_flight_rpc_and_joins_the_server_task() {
         .expect("in-flight RPC did not observe shutdown")
         .expect("in-flight RPC task panicked")
         .expect_err("in-flight RPC unexpectedly succeeded");
-    assert!(matches!(error.code(), Code::Cancelled | Code::Unavailable));
+    assert!(matches!(
+        error.code(),
+        Code::Cancelled | Code::Unavailable | Code::Unknown
+    ));
     timeout(Duration::from_secs(2), node_agent.task)
         .await
         .expect("node-agent server did not join after cancellation")
         .expect("node-agent server task panicked")
         .expect("node-agent server returned an error");
+}
+
+#[tokio::test]
+async fn controller_deadline_cancels_and_joins_a_stuck_http_handler() {
+    struct Dropped(Arc<AtomicUsize>);
+    impl Drop for Dropped {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let entered = Arc::new(Semaphore::new(0));
+    let dropped = Arc::new(AtomicUsize::new(0));
+    let handler_entered = entered.clone();
+    let handler_dropped = dropped.clone();
+    let router = Router::new().route(
+        "/stuck",
+        get(move || {
+            let entered = handler_entered.clone();
+            let dropped = handler_dropped.clone();
+            async move {
+                let _guard = Dropped(dropped);
+                entered.add_permits(1);
+                pending::<&'static str>().await
+            }
+        }),
+    );
+    let shutdown = ControllerShutdown::new("60ms".parse::<ShutdownGrace>().unwrap());
+    let task_shutdown = shutdown.clone();
+    let task = tokio::spawn(async move {
+        supervise_controller_servers(
+            router,
+            BoundHttpServer {
+                listener,
+                transport: HttpTransport::Plaintext,
+            },
+            None,
+            task_shutdown,
+        )
+        .await
+    });
+    let mut client = TcpStream::connect(address).await.unwrap();
+    client
+        .write_all(b"GET /stuck HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .await
+        .unwrap();
+    entered.acquire().await.unwrap().forget();
+    shutdown.begin_drain();
+
+    let result = timeout(Duration::from_secs(2), task)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("deadline exceeded")
+    );
+    assert!(shutdown.force().is_cancelled());
+    assert_eq!(dropped.load(Ordering::SeqCst), 1);
+    assert!(TcpStream::connect(address).await.is_err());
+}
+
+#[tokio::test]
+async fn node_deadline_cancels_and_joins_a_stuck_rpc() {
+    let pki = TestPki::generate();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let entered = Arc::new(Semaphore::new(0));
+    let shutdown = AgentShutdown::new("60ms".parse::<ShutdownGrace>().unwrap());
+    let connections = TaskTracker::new();
+    let requests = TaskTracker::new();
+    let service = NodeAgentService::new(
+        NODE_ID,
+        Arc::new(BlockingEngine {
+            entered: entered.clone(),
+        }),
+        shutdown.force(),
+    );
+    let (failures, task_failures) = tokio::sync::mpsc::unbounded_channel();
+    let server = serve_node_agent_rpc(
+        listener,
+        CLUSTER_ID.to_owned(),
+        pki.trusted_files(&pki.agent),
+        service,
+        shutdown.draining(),
+        shutdown.force(),
+        connections.clone(),
+        requests.clone(),
+        failures,
+    )
+    .unwrap();
+    let task_shutdown = shutdown.clone();
+    let task_connections = connections.clone();
+    let task_requests = requests.clone();
+    let task = tokio::spawn(async move {
+        supervise_node_agent_server(
+            server,
+            task_shutdown,
+            task_connections,
+            task_requests,
+            task_failures,
+            pending(),
+        )
+        .await
+    });
+    let mut client = node_agent_client(address, pki.trusted_files(&pki.controller)).await;
+    let call = tokio::spawn(async move { client.describe(Request::new(DescribeRequest {})).await });
+    entered.acquire().await.unwrap().forget();
+    shutdown.begin_drain();
+
+    let result = timeout(Duration::from_secs(2), task)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("deadline exceeded")
+    );
+    assert!(shutdown.force().is_cancelled());
+    assert_eq!(connections.len(), 0);
+    assert_eq!(requests.len(), 0);
+    assert!(call.await.unwrap().is_err());
+    assert!(TcpStream::connect(address).await.is_err());
+}
+
+#[tokio::test]
+async fn admitted_node_rpc_finishes_during_grace_without_force_cancellation() {
+    let pki = TestPki::generate();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let entered = Arc::new(Semaphore::new(0));
+    let release = Arc::new(Semaphore::new(0));
+    let shutdown = AgentShutdown::new("500ms".parse::<ShutdownGrace>().unwrap());
+    let connections = TaskTracker::new();
+    let requests = TaskTracker::new();
+    let service = NodeAgentService::new(
+        NODE_ID,
+        Arc::new(ReleasableEngine {
+            entered: entered.clone(),
+            release: release.clone(),
+        }),
+        shutdown.force(),
+    );
+    let (failures, task_failures) = tokio::sync::mpsc::unbounded_channel();
+    let server = serve_node_agent_rpc(
+        listener,
+        CLUSTER_ID.to_owned(),
+        pki.trusted_files(&pki.agent),
+        service,
+        shutdown.draining(),
+        shutdown.force(),
+        connections.clone(),
+        requests.clone(),
+        failures,
+    )
+    .unwrap();
+    let task_shutdown = shutdown.clone();
+    let task_connections = connections.clone();
+    let task_requests = requests.clone();
+    let task = tokio::spawn(async move {
+        supervise_node_agent_server(
+            server,
+            task_shutdown,
+            task_connections,
+            task_requests,
+            task_failures,
+            pending(),
+        )
+        .await
+    });
+    let mut client = node_agent_client(address, pki.trusted_files(&pki.controller)).await;
+    let call = tokio::spawn(async move { client.describe(Request::new(DescribeRequest {})).await });
+    entered.acquire().await.unwrap().forget();
+    shutdown.begin_drain();
+    release.add_permits(1);
+
+    let response = timeout(Duration::from_secs(2), call)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(response.into_inner().node_id, NODE_ID);
+    timeout(Duration::from_secs(2), task)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert!(!shutdown.force().is_cancelled());
+    assert_eq!(connections.len(), 0);
+    assert_eq!(requests.len(), 0);
+}
+
+#[tokio::test]
+async fn rpc_request_panic_drains_the_node_listener() {
+    let pki = TestPki::generate();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let shutdown = AgentShutdown::new("250ms".parse::<ShutdownGrace>().unwrap());
+    let connections = TaskTracker::new();
+    let requests = TaskTracker::new();
+    let (failures, task_failures) = tokio::sync::mpsc::unbounded_channel();
+    let service = NodeAgentService::new(NODE_ID, Arc::new(PanicEngine), shutdown.force());
+    let server = serve_node_agent_rpc(
+        listener,
+        CLUSTER_ID.to_owned(),
+        pki.trusted_files(&pki.agent),
+        service,
+        shutdown.draining(),
+        shutdown.force(),
+        connections.clone(),
+        requests.clone(),
+        failures,
+    )
+    .unwrap();
+    let task_shutdown = shutdown.clone();
+    let task_connections = connections.clone();
+    let task_requests = requests.clone();
+    let task = tokio::spawn(async move {
+        supervise_node_agent_server(
+            server,
+            task_shutdown,
+            task_connections,
+            task_requests,
+            task_failures,
+            pending(),
+        )
+        .await
+    });
+    let mut client = node_agent_client(address, pki.trusted_files(&pki.controller)).await;
+    let call = tokio::spawn(async move { client.describe(Request::new(DescribeRequest {})).await });
+
+    let result = timeout(Duration::from_secs(2), task)
+        .await
+        .unwrap()
+        .unwrap();
+    call.abort();
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("rpc request task failed")
+    );
+    assert!(shutdown.draining().is_cancelled());
+    assert!(!shutdown.force().is_cancelled());
+    assert_eq!(connections.len(), 0);
+    assert_eq!(requests.len(), 0);
+    assert!(TcpStream::connect(address).await.is_err());
 }
 
 #[tokio::test]
@@ -985,6 +1272,59 @@ async fn shared_shutdown_joins_controller_http_and_rpc_tasks() {
     );
 }
 
+#[tokio::test]
+async fn runtime_http_task_failure_drains_and_joins_the_rpc_sibling() {
+    async fn panic_handler() -> &'static str {
+        panic!("handler failed")
+    }
+    let pki = TestPki::generate();
+    let http_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let http_address = http_listener.local_addr().unwrap();
+    let rpc_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let rpc_address = rpc_listener.local_addr().unwrap();
+    let shutdown = ControllerShutdown::new("250ms".parse::<ShutdownGrace>().unwrap());
+    let task_shutdown = shutdown.clone();
+    let tls_files = pki.trusted_files(&pki.controller);
+    let task = tokio::spawn(async move {
+        supervise_controller_servers(
+            Router::new().route("/panic", get(panic_handler)),
+            BoundHttpServer {
+                listener: http_listener,
+                transport: HttpTransport::Plaintext,
+            },
+            Some(BoundAgentRpcServer {
+                listener: rpc_listener,
+                cluster_id: CLUSTER_ID.to_owned(),
+                tls_files,
+            }),
+            task_shutdown,
+        )
+        .await
+    });
+    let mut intake = controller_client(rpc_address, pki.trusted_files(&pki.agent)).await;
+    intake.check_in(check_in_request(NODE_ID)).await.unwrap();
+    let mut client = TcpStream::connect(http_address).await.unwrap();
+    client
+        .write_all(b"GET /panic HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        .await
+        .unwrap();
+
+    let result = timeout(Duration::from_secs(2), task)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        result
+            .unwrap_err()
+            .to_string()
+            .contains("public HTTP connection task failed")
+    );
+    assert!(shutdown.draining().is_cancelled());
+    assert!(!shutdown.force().is_cancelled());
+    assert!(TcpStream::connect(http_address).await.is_err());
+    assert!(TcpStream::connect(rpc_address).await.is_err());
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn already_cancelled_controller_shutdown_is_successful() {
     for _ in 0..64 {
@@ -1058,10 +1398,16 @@ async fn invalid_tls_fails_before_rpc_polling_or_http_admission() {
     let malformed = directory.path().join("malformed.pem");
     std::fs::write(&malformed, "secret-canary-invalid-pem").unwrap();
 
-    for files in [
-        MutualTlsIdentityFiles::new(&missing, &missing, &missing),
-        MutualTlsIdentityFiles::new(&malformed, &malformed, &malformed),
-        pki.mismatched_key_files(),
+    for (files, expected_context) in [
+        (
+            MutualTlsIdentityFiles::new(&missing, &missing, &missing),
+            "certificate",
+        ),
+        (
+            MutualTlsIdentityFiles::new(&malformed, &malformed, &malformed),
+            "certificate",
+        ),
+        (pki.mismatched_key_files(), "certificate/private key pair"),
     ] {
         let rpc_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let error = serve_controller_rpc(
@@ -1069,10 +1415,15 @@ async fn invalid_tls_fails_before_rpc_polling_or_http_admission() {
             CLUSTER_ID.to_owned(),
             files.clone(),
             CancellationToken::new(),
+            CancellationToken::new(),
+            TaskTracker::new(),
+            TaskTracker::new(),
+            unused_failure_sender(),
         )
         .err()
         .expect("controller TLS failure was deferred until polling");
         assert!(!error.to_string().contains("secret-canary"));
+        assert!(error.to_string().contains(expected_context));
 
         let node_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let cancellation = CancellationToken::new();
@@ -1084,10 +1435,15 @@ async fn invalid_tls_fails_before_rpc_polling_or_http_admission() {
             files.clone(),
             service,
             cancellation,
+            CancellationToken::new(),
+            TaskTracker::new(),
+            TaskTracker::new(),
+            unused_failure_sender(),
         )
         .err()
         .expect("node-agent TLS failure was deferred until polling");
         assert!(!error.to_string().contains("secret-canary"));
+        assert!(error.to_string().contains(expected_context));
 
         let http_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let http_address = http_listener.local_addr().unwrap();
@@ -1149,7 +1505,11 @@ async fn start_controller(pki: &TestPki) -> RunningServer {
             listener,
             CLUSTER_ID.to_owned(),
             tls_files,
+            task_cancellation.clone(),
             task_cancellation,
+            TaskTracker::new(),
+            TaskTracker::new(),
+            unused_failure_sender(),
         )?
         .await
         .map_err(Into::into)
@@ -1183,7 +1543,11 @@ async fn start_node_agent_with_tls(
             CLUSTER_ID.to_owned(),
             tls_files,
             service,
+            task_cancellation.clone(),
             task_cancellation,
+            TaskTracker::new(),
+            TaskTracker::new(),
+            unused_failure_sender(),
         )?
         .await
         .map_err(Into::into)

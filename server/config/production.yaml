@@ -31,6 +31,7 @@ database:
   dangerously_recreate: false
 
 settings:
+  shutdown_grace: "<%= get_env(name="SHUTDOWN_GRACE", default="20s") %>"
   agent_rpc:
     enabled: true
     binding: <%= get_env(name="AGENT_RPC_BINDING", default="0.0.0.0:50051") %>

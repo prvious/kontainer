@@ -103,7 +103,7 @@ ID are validated with the same TLS bundle before admission: the endpoint must
 be an `https` origin with no routing path, and the peer must present the exact
 configured node-agent workload identity plus a matching `Describe` node ID.
 An unreachable agent does not fail startup; it surfaces only as a typed call
-failure. This is not certificate enrollment or a bounded-shutdown guarantee.
+failure. This is not certificate enrollment.
 The node agent's `--version` still requires no runtime configuration.
 
 The [canonical controller probes](docs/v2/approved-greenfield-reset.md#controller-probe-paths)
@@ -119,8 +119,14 @@ are unauthenticated and return only `{"ok": true}` or
 Shutdown immediately makes readiness false and rejects newly admitted application
 requests with HTTP 503, while requests already admitted may finish. Probes remain
 meaningful on any connection still being served during drain; the listeners stop
-accepting connections as part of shutdown. This does not yet bound total drain
-time. The one-second database probe deadline is an operational default, not an
+accepting connections as part of shutdown. Both binaries share a 20-second
+default drain budget. The controller reads `settings.shutdown_grace` (overridable
+with `SHUTDOWN_GRACE` in development and production); the node agent reads
+`KONTAINER_NODE_SHUTDOWN_GRACE`. Values must be positive integer durations with
+`ms`, `s`, or `m` units, such as `750ms` or `30s`. The first shutdown cause fixes
+one deadline. At that deadline, unfinished connections and requests are cancelled,
+their tasks are joined, and the process exits with an error. The one-second database
+probe deadline is an operational default, not an
 availability SLO. `/api/v1/status` reports build/liveness information only. The
 framework defaults `/_ping`, `/_health`, and `/_readiness` are not exposed.
 

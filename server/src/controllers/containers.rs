@@ -17,7 +17,6 @@ use axum::{
 use chrono::SecondsFormat;
 use loco_rs::{app::AppContext, controller::Routes};
 use serde::Serialize;
-use tokio_util::sync::CancellationToken;
 use utoipa::ToSchema;
 
 use crate::{
@@ -250,13 +249,16 @@ pub(crate) async fn index(
     let Ok((limit, cursor)) = parse_pagination(query.as_deref()) else {
         return invalid_pagination();
     };
-    let Some(shutdown) = context.shared_store.get::<CancellationToken>() else {
+    let Some(shutdown) = context
+        .shared_store
+        .get::<crate::server::ForceCancellation>()
+    else {
         return agent_unavailable();
     };
 
     // Directly await the RPC: dropping the HTTP request drops this future,
     // so cancellation joins the in-flight call without detached work.
-    let page = match client.0.list_containers(limit, cursor, &shutdown).await {
+    let page = match client.0.list_containers(limit, cursor, &shutdown.0).await {
         Ok(page) => page,
         Err(error) => return map_agent_error(error),
     };

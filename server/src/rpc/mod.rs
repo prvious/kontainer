@@ -17,9 +17,10 @@ use kontainer_rpc_auth::{
 };
 use std::{error::Error, future::Future};
 use tokio::net::TcpListener;
-use tokio_stream::wrappers::TcpListenerStream;
+use tokio::sync::mpsc::UnboundedSender;
 use tokio_util::sync::CancellationToken;
-use tonic::transport::Server;
+use tokio_util::task::TaskTracker;
+use tonic::service::{Interceptor, Routes};
 use tonic::{Request, Response, Status};
 
 #[derive(Debug, Default)]
@@ -55,28 +56,39 @@ impl ControllerIntake for ControllerIntakeService {
 }
 
 /// Validate TLS eagerly; polling the returned future begins RPC admission.
+#[allow(clippy::too_many_arguments)] // Explicit lifecycle and task ownership.
 pub fn serve_controller_rpc(
     listener: TcpListener,
     cluster_id: String,
     tls_files: MutualTlsIdentityFiles,
     cancellation: CancellationToken,
-) -> Result<
-    impl Future<Output = Result<(), tonic::transport::Error>> + Send,
-    Box<dyn Error + Send + Sync>,
-> {
-    let peer_identity = PeerIdentityInterceptor::new(cluster_id, WorkloadKind::NodeAgent)?;
-    let tls_config = tls_files.server_config()?;
-
-    Ok(Server::builder()
-        .tls_config(tls_config)?
-        .add_service(ControllerIntakeServer::with_interceptor(
-            ControllerIntakeService,
-            peer_identity,
-        ))
-        .serve_with_incoming_shutdown(
-            TcpListenerStream::new(listener),
-            cancellation.cancelled_owned(),
-        ))
+    force: CancellationToken,
+    connections: TaskTracker,
+    request_tasks: TaskTracker,
+    failures: UnboundedSender<&'static str>,
+) -> Result<impl Future<Output = std::io::Result<()>> + Send, Box<dyn Error + Send + Sync>> {
+    let mut peer_identity = PeerIdentityInterceptor::new(cluster_id, WorkloadKind::NodeAgent)?;
+    let acceptor = tls_files.server_acceptor()?;
+    let admission = cancellation.clone();
+    let service =
+        ControllerIntakeServer::with_interceptor(ControllerIntakeService, move |request| {
+            let request = peer_identity.call(request)?;
+            if admission.is_cancelled() {
+                Err(Status::unavailable("controller is draining"))
+            } else {
+                Ok(request)
+            }
+        });
+    Ok(kontainer_rpc_auth::serve_rpc_listener(
+        listener,
+        acceptor,
+        Routes::new(service).prepare(),
+        cancellation,
+        force,
+        connections,
+        request_tasks,
+        failures,
+    ))
 }
 
 #[cfg(test)]

@@ -6,4 +6,4 @@ pub mod server;
 
 pub use config::AgentConfig;
 pub use rpc::NodeAgentService;
-pub use server::serve_node_agent_rpc;
+pub use server::{AgentShutdown, serve_node_agent_rpc, supervise_node_agent_server};

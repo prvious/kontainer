@@ -1,5 +1,6 @@
 use std::{env, error::Error, net::SocketAddr};
 
+use kontainer_lifecycle::ShutdownGrace;
 use kontainer_rpc_auth::{MutualTlsIdentityFiles, valid_identity_segment};
 
 #[derive(Debug, Clone)]
@@ -8,6 +9,7 @@ pub struct AgentConfig {
     pub cluster_id: String,
     pub binding: SocketAddr,
     pub tls_files: MutualTlsIdentityFiles,
+    pub shutdown_grace: ShutdownGrace,
 }
 
 impl AgentConfig {
@@ -21,6 +23,7 @@ impl AgentConfig {
                 required_environment_variable("KONTAINER_NODE_RPC_TLS_PRIVATE_KEY_PATH")?,
                 required_environment_variable("KONTAINER_NODE_RPC_TLS_CLIENT_CA_PATH")?,
             ),
+            shutdown_grace: shutdown_grace_from_environment_with(|name| env::var(name))?,
         };
         config.validate()?;
         Ok(config)
@@ -39,6 +42,18 @@ impl AgentConfig {
     }
 }
 
+fn shutdown_grace_from_environment_with(
+    lookup: impl FnOnce(&str) -> Result<String, env::VarError>,
+) -> Result<ShutdownGrace, Box<dyn Error + Send + Sync>> {
+    match lookup("KONTAINER_NODE_SHUTDOWN_GRACE") {
+        Ok(value) => Ok(value.parse()?),
+        Err(env::VarError::NotPresent) => Ok(ShutdownGrace::default()),
+        Err(env::VarError::NotUnicode(_)) => {
+            Err("KONTAINER_NODE_SHUTDOWN_GRACE is not valid text".into())
+        }
+    }
+}
+
 fn required_environment_variable(name: &str) -> Result<String, Box<dyn Error + Send + Sync>> {
     env::var(name)
         .ok()
@@ -52,8 +67,40 @@ fn environment_variable(name: &str, default: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::AgentConfig;
+    use super::{AgentConfig, shutdown_grace_from_environment_with};
+    use kontainer_lifecycle::ShutdownGrace;
     use kontainer_rpc_auth::MutualTlsIdentityFiles;
+
+    #[test]
+    fn shutdown_grace_environment_values_use_the_shared_parser_and_default() {
+        assert_eq!(
+            shutdown_grace_from_environment_with(|name| {
+                assert_eq!(name, "KONTAINER_NODE_SHUTDOWN_GRACE");
+                Err(std::env::VarError::NotPresent)
+            })
+            .unwrap()
+            .duration(),
+            std::time::Duration::from_secs(20),
+        );
+        assert_eq!(
+            shutdown_grace_from_environment_with(|name| {
+                assert_eq!(name, "KONTAINER_NODE_SHUTDOWN_GRACE");
+                Ok("750ms".to_owned())
+            })
+            .unwrap()
+            .duration(),
+            std::time::Duration::from_millis(750),
+        );
+        for invalid in ["0s", "1h"] {
+            assert!(
+                shutdown_grace_from_environment_with(|name| {
+                    assert_eq!(name, "KONTAINER_NODE_SHUTDOWN_GRACE");
+                    Ok(invalid.to_owned())
+                })
+                .is_err()
+            );
+        }
+    }
 
     #[test]
     fn node_and_cluster_settings_use_the_certificate_identity_rules() {
@@ -62,6 +109,7 @@ mod tests {
             cluster_id: "cluster-1".to_owned(),
             binding: "127.0.0.1:50052".parse().unwrap(),
             tls_files: MutualTlsIdentityFiles::new("cert.pem", "key.pem", "ca.pem"),
+            shutdown_grace: ShutdownGrace::default(),
         };
         assert!(config.validate().is_ok());
 

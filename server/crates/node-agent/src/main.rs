@@ -3,9 +3,11 @@
 use std::{env, error::Error, ffi::OsString, sync::Arc};
 
 use kontainer_engine::{LocalDockerEngine, LocalEngineOptions};
-use kontainer_node_agent::{AgentConfig, NodeAgentService, serve_node_agent_rpc};
+use kontainer_node_agent::{
+    AgentConfig, AgentShutdown, NodeAgentService, serve_node_agent_rpc, supervise_node_agent_server,
+};
 use tokio::net::TcpListener;
-use tokio_util::sync::CancellationToken;
+use tokio_util::task::TaskTracker;
 use tracing_subscriber::EnvFilter;
 
 fn is_version_request(arguments: &[OsString]) -> bool {
@@ -29,32 +31,37 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
     let config = AgentConfig::from_environment()?;
     let listener = TcpListener::bind(config.binding).await?;
-    let cancellation = CancellationToken::new();
+    let shutdown = AgentShutdown::new(config.shutdown_grace);
+    let connections = TaskTracker::new();
+    let requests = TaskTracker::new();
+    let (failures, task_failures) = tokio::sync::mpsc::unbounded_channel();
     let service = NodeAgentService::new(
         config.node_id,
         Arc::new(LocalDockerEngine::connect_for_node(
             LocalEngineOptions::default(),
         )?),
-        cancellation.clone(),
+        shutdown.force(),
     );
     let server = serve_node_agent_rpc(
         listener,
         config.cluster_id,
         config.tls_files,
         service,
-        cancellation.clone(),
+        shutdown.draining(),
+        shutdown.force(),
+        connections.clone(),
+        requests.clone(),
+        failures,
     )?;
-    tokio::pin!(server);
-
-    let result = tokio::select! {
-        result = &mut server => result,
-        _ = shutdown_signal() => {
-            cancellation.cancel();
-            server.await
-        }
-    };
-    cancellation.cancel();
-    result.map_err(Into::into)
+    supervise_node_agent_server(
+        server,
+        shutdown,
+        connections,
+        requests,
+        task_failures,
+        shutdown_signal(),
+    )
+    .await
 }
 
 async fn shutdown_signal() {
