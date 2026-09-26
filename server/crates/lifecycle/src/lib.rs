@@ -83,9 +83,9 @@ impl DrainClock {
     /// The first caller fixes the absolute deadline; later causes cannot extend it.
     pub fn begin(&self) -> Instant {
         *self.deadline.get_or_init(|| {
-            Instant::now()
-                .checked_add(self.grace.duration())
-                .expect("validated shutdown grace remains representable")
+            let now = Instant::now();
+            // A duration accepted at startup may no longer fit when draining begins.
+            now.checked_add(self.grace.duration()).unwrap_or(now)
         })
     }
 }
@@ -126,5 +126,14 @@ mod tests {
     fn first_drain_fixes_the_deadline() {
         let clock = DrainClock::new("1s".parse().unwrap());
         assert_eq!(clock.begin(), clock.begin());
+    }
+
+    #[test]
+    fn unrepresentable_deadline_expires_immediately_instead_of_panicking() {
+        let clock = DrainClock::new(ShutdownGrace(Duration::MAX));
+        let before = Instant::now();
+        assert!(before.checked_add(Duration::MAX).is_none());
+        let deadline = clock.begin();
+        assert!(deadline >= before && deadline <= Instant::now());
     }
 }
