@@ -530,7 +530,19 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl crate::rpc::AgentContainerClient for FakeAgent {
+    impl crate::rpc::AgentClient for FakeAgent {
+        async fn describe(
+            &self,
+            _cancellation: &tokio_util::sync::CancellationToken,
+        ) -> Result<crate::rpc::AgentDescription, AgentClientError> {
+            Ok(crate::rpc::AgentDescription {
+                node_id: self.node_id.clone(),
+                agent_version: "test".to_owned(),
+                architecture: "test".to_owned(),
+                docker_connected: false,
+            })
+        }
+
         async fn list_containers(
             &self,
             page_size: u32,
@@ -639,7 +651,7 @@ mod tests {
             .unwrap();
         let agent = std::sync::Arc::new(agent);
         context.shared_store.insert(crate::rpc::SharedAgentClient(
-            agent.clone() as std::sync::Arc<dyn crate::rpc::AgentContainerClient>
+            agent.clone() as std::sync::Arc<dyn crate::rpc::AgentClient>
         ));
         let router = crate::app::App::routes(&context)
             .to_router::<crate::app::App>(context, axum::Router::new())?;

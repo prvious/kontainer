@@ -130,6 +130,17 @@ probe deadline is an operational default, not an
 availability SLO. `/api/v1/status` reports build/liveness information only. The
 framework defaults `/_ping`, `/_health`, and `/_readiness` are not exposed.
 
+Operators with a valid access session can request `/api/v1/status/deep` for a
+redacted dependency diagnostic. It returns the controller build version and
+`migration` (`current` or `unknown`), `database` (`reachable`, `unreachable`, or
+`timeout`), and `agentRpc` (`up`, `down`, or `timeout`) states. Dependency
+failures appear in an HTTP 200 response; the request still requires a live
+session and is rejected during drain. The diagnostic checks dependencies for
+up to four seconds and is separate from `/health/ready`, whose one-second
+PostgreSQL check remains the admission signal. An `up` agent RPC state means
+its authenticated `Describe` call succeeded; it does not mean Docker is
+connected.
+
 ### Public HTTP transport
 
 Production serves the public API (including the probes above) over TLS and

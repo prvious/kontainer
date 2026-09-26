@@ -113,6 +113,228 @@ async fn test_context(database: sea_orm::DatabaseConnection) -> Result<AppContex
     Ok(App::after_context(context).await?)
 }
 
+#[derive(Debug)]
+struct DeepStatusFakeAgent {
+    calls: Arc<AtomicUsize>,
+}
+
+#[async_trait::async_trait]
+impl crate::rpc::AgentClient for DeepStatusFakeAgent {
+    async fn describe(
+        &self,
+        _cancellation: &tokio_util::sync::CancellationToken,
+    ) -> Result<crate::rpc::AgentDescription, crate::rpc::AgentClientError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Ok(crate::rpc::AgentDescription {
+            node_id: "secret-node-canary".to_owned(),
+            agent_version: "secret-agent-version-canary".to_owned(),
+            architecture: "secret-architecture-canary".to_owned(),
+            docker_connected: false,
+        })
+    }
+
+    async fn list_containers(
+        &self,
+        _page_size: u32,
+        _page_token: String,
+        _cancellation: &tokio_util::sync::CancellationToken,
+    ) -> Result<crate::rpc::AgentContainerPage, crate::rpc::AgentClientError> {
+        Err(crate::rpc::AgentClientError::Unavailable)
+    }
+
+    fn node_id(&self) -> &str {
+        "secret-node-canary"
+    }
+}
+
+#[tokio::test]
+async fn postgres_deep_status_enforces_session_and_drain_before_diagnostics()
+-> Result<(), Box<dyn Error>> {
+    let Some(test_database) = PostgresTestDatabase::create(true).await? else {
+        return Ok(());
+    };
+    let evidence = async {
+        let session = issued(&test_database.connection).await?;
+        let context = test_context(test_database.connection.clone()).await?;
+        let agent_calls = Arc::new(AtomicUsize::new(0));
+        let drain = context
+            .shared_store
+            .get::<tokio_util::sync::CancellationToken>()
+            .unwrap();
+        let router = App::routes(&context)
+            .to_router::<App>(context.clone(), Router::new())?
+            .layer(middleware::from_fn_with_state(
+                drain.clone(),
+                crate::controllers::health::admit_request,
+            ));
+        let path = "/api/v1/status/deep";
+        let valid = router
+            .clone()
+            .oneshot(
+                Request::get(path)
+                    .header(
+                        header::AUTHORIZATION,
+                        format!("Bearer {}", session.access_plaintext),
+                    )
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(valid.status(), StatusCode::OK);
+        assert_eq!(
+            valid.headers().get(header::CACHE_CONTROL).unwrap(),
+            "no-store"
+        );
+        let body: serde_json::Value =
+            serde_json::from_slice(&to_bytes(valid.into_body(), 4096).await?)?;
+        assert_eq!(
+            body,
+            serde_json::json!({
+                "build": {"version": env!("CARGO_PKG_VERSION")},
+                "migration": "current",
+                "database": "reachable",
+                "agentRpc": "down"
+            })
+        );
+
+        context
+            .shared_store
+            .insert(crate::rpc::SharedAgentClient(Arc::new(
+                DeepStatusFakeAgent {
+                    calls: agent_calls.clone(),
+                },
+            )));
+        let with_agent = router
+            .clone()
+            .oneshot(
+                Request::get(path)
+                    .header(
+                        header::AUTHORIZATION,
+                        format!("Bearer {}", session.access_plaintext),
+                    )
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(with_agent.status(), StatusCode::OK);
+        assert_eq!(
+            with_agent.headers().get(header::CACHE_CONTROL).unwrap(),
+            "no-store"
+        );
+        let with_agent_body = to_bytes(with_agent.into_body(), 4096).await?;
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&with_agent_body)?,
+            serde_json::json!({
+                "build": {"version": env!("CARGO_PKG_VERSION")},
+                "migration": "current",
+                "database": "reachable",
+                "agentRpc": "up"
+            })
+        );
+        assert!(!String::from_utf8_lossy(&with_agent_body).contains("canary"));
+        assert_eq!(agent_calls.load(Ordering::SeqCst), 1);
+
+        let anonymous = router
+            .clone()
+            .oneshot(Request::get(path).body(Body::empty())?)
+            .await?;
+        assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            anonymous.headers().get(header::CACHE_CONTROL).unwrap(),
+            "no-store"
+        );
+        assert_eq!(
+            anonymous.headers().get(header::WWW_AUTHENTICATE).unwrap(),
+            "Bearer error=\"invalid_token\""
+        );
+        assert_eq!(agent_calls.load(Ordering::SeqCst), 1);
+
+        revoke_session_family::execute(
+            &test_database.connection,
+            session.family_id,
+            RevocationReason::Logout,
+        )
+        .await?;
+        let revoked = router
+            .clone()
+            .oneshot(
+                Request::get(path)
+                    .header(
+                        header::AUTHORIZATION,
+                        format!("Bearer {}", session.access_plaintext),
+                    )
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(revoked.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            revoked.headers().get(header::CACHE_CONTROL).unwrap(),
+            "no-store"
+        );
+        assert_eq!(
+            revoked.headers().get(header::WWW_AUTHENTICATE).unwrap(),
+            "Bearer error=\"invalid_token\""
+        );
+        assert_eq!(agent_calls.load(Ordering::SeqCst), 1);
+
+        drain.cancel();
+        let draining = router
+            .oneshot(Request::get(path).body(Body::empty())?)
+            .await?;
+        assert_eq!(draining.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            draining.headers().get(header::CACHE_CONTROL).unwrap(),
+            "no-store"
+        );
+        let draining_body: serde_json::Value =
+            serde_json::from_slice(&to_bytes(draining.into_body(), 4096).await?)?;
+        assert_eq!(draining_body, serde_json::json!({"ok": false}));
+        assert_eq!(agent_calls.load(Ordering::SeqCst), 1);
+
+        let manager = SchemaManager::new(&test_database.connection);
+        manager
+            .drop_table(
+                Table::drop()
+                    .table(Alias::new("session_families"))
+                    .cascade()
+                    .to_owned(),
+            )
+            .await?;
+        let broken_context = test_context(test_database.connection.clone()).await?;
+        broken_context
+            .shared_store
+            .insert(crate::rpc::SharedAgentClient(Arc::new(
+                DeepStatusFakeAgent {
+                    calls: agent_calls.clone(),
+                },
+            )));
+        let broken = App::routes(&broken_context)
+            .to_router::<App>(broken_context, Router::new())?
+            .oneshot(
+                Request::get(path)
+                    .header(
+                        header::AUTHORIZATION,
+                        format!("Bearer {}", session.access_plaintext),
+                    )
+                    .body(Body::empty())?,
+            )
+            .await?;
+        assert_eq!(broken.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            broken.headers().get(header::CACHE_CONTROL).unwrap(),
+            "no-store"
+        );
+        let broken_body: serde_json::Value =
+            serde_json::from_slice(&to_bytes(broken.into_body(), 4096).await?)?;
+        assert_eq!(broken_body, serde_json::json!({"error": "unavailable"}));
+        assert_eq!(agent_calls.load(Ordering::SeqCst), 1);
+        Ok::<_, Box<dyn Error>>(())
+    }
+    .await;
+    let removed = test_database.cleanup().await?;
+    evidence?;
+    assert!(removed);
+    Ok(())
+}
+
 #[tokio::test]
 async fn postgres_session_create_validate_then_logout_revokes() -> Result<(), Box<dyn Error>> {
     let Some(test_database) = PostgresTestDatabase::create(true).await? else {
