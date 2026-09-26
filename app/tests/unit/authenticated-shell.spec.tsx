@@ -55,6 +55,51 @@ describe("authenticated custody shell", () => {
         ).toBe(true);
     });
 
+    it("keeps local settings available without mounting resource screens", async () => {
+        vi.clearAllMocks();
+        vi.mocked(invoke).mockImplementation(async (command: string) => {
+            if (command === "session_restore") return session;
+            if (command === "load_app_settings") return { refreshInterval: 5000 };
+            return null;
+        });
+        render(
+            <AuthProvider>
+                <TestApp />
+            </AuthProvider>,
+        );
+        await userEvent.setup().click(await screen.findByRole("link", { name: "Settings" }));
+        await waitFor(() => expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument());
+        expect(screen.getByText(session.origin)).toBeInTheDocument();
+        expect(
+            vi
+                .mocked(invoke)
+                .mock.calls.map(([command]) => command)
+                .every((command) => ["session_restore", "load_app_settings"].includes(command)),
+        ).toBe(true);
+    });
+
+    it("hides an unported resource route reached by a deep link", async () => {
+        vi.clearAllMocks();
+        vi.mocked(invoke).mockImplementation(async (command: string) => {
+            if (command === "session_restore") return session;
+            if (command === "load_app_settings") return { refreshInterval: 5000 };
+            return null;
+        });
+        render(
+            <AuthProvider>
+                <TestApp initialPath='/tasks' />
+            </AuthProvider>,
+        );
+        await waitFor(() => expect(screen.getByText("Cluster resources are temporarily unavailable.")).toBeInTheDocument());
+        expect(screen.queryByRole("heading", { name: /containers/i })).not.toBeInTheDocument();
+        expect(
+            vi
+                .mocked(invoke)
+                .mock.calls.map(([command]) => command)
+                .every((command) => ["session_restore", "load_app_settings"].includes(command)),
+        ).toBe(true);
+    });
+
     it("signs out through Rust custody and returns to login", async () => {
         vi.clearAllMocks();
         vi.mocked(invoke).mockImplementation(async (command: string) => {

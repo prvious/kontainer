@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { createFileRoute, redirect, useRouter } from "@tanstack/react-router";
+import { Link, Outlet, createFileRoute, redirect, useLocation, useRouter } from "@tanstack/react-router";
 import { AccentLine } from "@/components/accent-line";
 import { ClusterSwitcher } from "@/components/cluster-switcher";
 import { Logo } from "@/components/logo";
@@ -35,6 +35,8 @@ export const Route = createFileRoute("/_authenticated")({
 function AuthenticatedLayout() {
     const { session, issue, retryCommit, retryRestore, logout } = useAuth();
     const router = useRouter();
+    const pathname = useLocation({ select: (location) => location.pathname });
+    const settingsOpen = pathname === "/settings" || pathname === "/settings/";
 
     useEffect(() => {
         if (session) return;
@@ -58,32 +60,45 @@ function AuthenticatedLayout() {
         <div className='flex h-screen flex-col bg-background'>
             <AccentLine />
             <header data-tauri-drag-region className='flex h-[38px] shrink-0 items-center justify-between border-b border-border bg-titlebar-bg/90 px-4'>
-                <Logo />
-                <ClusterSwitcher variant='titlebar' />
-            </header>
-            <main className='flex flex-1 items-center justify-center p-6'>
-                <div className='w-full max-w-md space-y-4 border border-border bg-card p-6'>
-                    <h1 className='text-xl font-semibold'>Connected</h1>
-                    <p className='text-sm text-muted-foreground'>
-                        Signed in as {session.githubLogin} to {session.origin}
-                    </p>
-                    <p className='text-sm text-muted-foreground'>Cluster resources are temporarily unavailable.</p>
-                    {issue && (
-                        <SessionIssue
-                            code={issue}
-                            onRetryCommit={() => {
-                                void retryCommit().catch(() => {});
-                            }}
-                            onRetryRestore={() => {
-                                void retryRestore().catch(() => {});
-                            }}
-                            onLogout={() => {
-                                void retryLogout();
-                            }}
-                        />
-                    )}
+                <Link to='/' aria-label='Home'>
+                    <Logo />
+                </Link>
+                <div className='flex items-center gap-5'>
+                    <Link to='/settings' className='font-mono text-xs text-muted-foreground hover:text-foreground'>
+                        Settings
+                    </Link>
+                    <ClusterSwitcher variant='titlebar' />
                 </div>
-            </main>
+            </header>
+            {issue && (
+                <SessionIssue
+                    code={issue}
+                    onRetryCommit={() => {
+                        void retryCommit().catch(() => {});
+                    }}
+                    onRetryRestore={() => {
+                        void retryRestore().catch(() => {});
+                    }}
+                    onLogout={() => {
+                        void retryLogout();
+                    }}
+                />
+            )}
+            {settingsOpen ? (
+                <main className='flex-1 overflow-y-auto'>
+                    <Outlet />
+                </main>
+            ) : (
+                <main className='flex flex-1 items-center justify-center p-6'>
+                    <div className='w-full max-w-md space-y-4 border border-border bg-card p-6'>
+                        <h1 className='text-xl font-semibold'>Connected</h1>
+                        <p className='text-sm text-muted-foreground'>
+                            Signed in as {session.githubLogin} to {session.origin}
+                        </p>
+                        <p className='text-sm text-muted-foreground'>Cluster resources are temporarily unavailable.</p>
+                    </div>
+                </main>
+            )}
         </div>
     );
 }
