@@ -1,7 +1,7 @@
 import { Loader2, Check, Globe, Github, Key } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
-type AuthStep = "browser" | "auth" | "token";
+type AuthStep = "browser" | "auth" | "session";
 
 export function AuthenticatingScreen({ provider, agentUrl, step, onCancel }: { provider: string; agentUrl: string; step: AuthStep; onCancel: () => void }) {
     const providerLabel = provider.charAt(0).toUpperCase() + provider.slice(1);
@@ -9,7 +9,7 @@ export function AuthenticatingScreen({ provider, agentUrl, step, onCancel }: { p
     const steps: { id: AuthStep; label: string; icon: typeof Globe }[] = [
         { id: "browser", label: "Browser Opened", icon: Globe },
         { id: "auth", label: `${providerLabel} Auth`, icon: Github },
-        { id: "token", label: "Receiving Token", icon: Key },
+        { id: "session", label: "Saving Session", icon: Key },
     ];
 
     const currentIdx = steps.findIndex((s) => s.id === step);
@@ -63,7 +63,7 @@ export function AuthenticatingScreen({ provider, agentUrl, step, onCancel }: { p
                 </Button>
 
                 {/* Agent URL */}
-                <p className='font-mono text-[10px] text-muted-foreground'>Connecting to {agentUrl}</p>
+                <p className='font-mono text-[10px] text-muted-foreground'>Connecting to controller {agentUrl}</p>
             </div>
         </div>
     );

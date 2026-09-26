@@ -57,30 +57,34 @@ const mockSettings: SettingsContextValue = {
 
 const defaultAuthReturn = {
     user: { id: "u1", name: "Test User", email: "test@example.com", avatarUrl: "", provider: "github" },
-    token: "test-token",
+    session: {
+        profileId: "p1",
+        origin: "https://controller.example",
+        clusterId: "cluster-1",
+        principalId: "u1",
+        githubLogin: "test",
+        label: "Production",
+        accessExpiresAtUnixMs: 2_000_000_000_000,
+    },
+    issue: null,
+    token: null,
     expiresAt: Math.floor(Date.now() / 1000) + 3600,
-    agentUrl: "https://agent.example.com",
+    agentUrl: "https://controller.example",
     isLoading: false,
     profiles: [
         {
             id: "p1",
             label: "Production",
-            agentUrl: "https://agent.example.com",
-            userId: "u1",
-            userName: "Test User",
-            userEmail: "test@example.com",
-            userAvatarUrl: "",
-            userProvider: "github",
-            token: "test-token",
-            expiresAt: Math.floor(Date.now() / 1000) + 3600,
+            agentUrl: "https://controller.example",
         },
     ],
     activeProfileId: "p1",
     login: vi.fn(),
     logout: vi.fn(),
-    switchProfile: vi.fn(),
-    removeProfile: vi.fn(),
-    updateProfile: vi.fn(),
+    retryCommit: vi.fn(),
+    retryRestore: vi.fn(),
+    cancelLogin: vi.fn(),
+    clearIssue: vi.fn(),
 };
 
 function createTestRouter() {
@@ -239,20 +243,19 @@ describe("SettingsPage - Connection section", () => {
         vi.mocked(useAuth).mockReturnValue(defaultAuthReturn);
     });
 
-    it("shows active profile label and agent URL", async () => {
+    it("shows active profile label and controller URL", async () => {
         renderWithProviders();
 
         await waitFor(() => {
-            const labelInput = screen.getByLabelText("Display name") as HTMLInputElement;
-            const urlInput = screen.getByLabelText("Agent URL") as HTMLInputElement;
-            expect(labelInput.value).toBe("Production");
-            expect(urlInput.value).toBe("https://agent.example.com");
+            expect(screen.getByText("Production")).toBeInTheDocument();
+            expect(screen.getByText("https://controller.example")).toBeInTheDocument();
         });
     });
 
     it("shows no-connection message when no active profile", async () => {
         vi.mocked(useAuth).mockReturnValue({
             ...defaultAuthReturn,
+            session: null,
             profiles: [],
             activeProfileId: null,
         });
@@ -260,16 +263,16 @@ describe("SettingsPage - Connection section", () => {
         renderWithProviders();
 
         await waitFor(() => {
-            expect(screen.getByText("No active connection. Connect to a cluster first.")).toBeInTheDocument();
+            expect(screen.getByText("No active connection. Connect to a controller first.")).toBeInTheDocument();
         });
     });
 
-    it("disables save button when no changes", async () => {
+    it("does not expose plaintext profile editing", async () => {
         renderWithProviders();
 
         await waitFor(() => {
-            const saveButton = screen.getByRole("button", { name: "Save" });
-            expect(saveButton).toBeDisabled();
+            expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+            expect(screen.queryByRole("textbox", { name: "Display name" })).not.toBeInTheDocument();
         });
     });
 });

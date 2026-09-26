@@ -1,499 +1,250 @@
-import { useState } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, act } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { AuthProvider } from "@/contexts/auth-context";
 import { useAuth } from "@/hooks/use-auth";
-import type { CheckAuthResponse, ParsedToken } from "@/types/auth";
-import type { StoredProfiles } from "@/types/connection";
+import type { SessionView } from "@/types/session";
 
-const mockParsedToken: ParsedToken = {
-    userId: "123",
-    expiresAt: 9999999999,
-};
-
-const mockCheckAuthResponse: CheckAuthResponse = {
-    user: {
-        id: "123",
-        name: "Jane Doe",
-        email: "jane@example.com",
-        avatarUrl: "https://example.com/avatar.png",
-        provider: "github",
-    },
-    status: "ok",
-};
-
-const emptyProfiles: StoredProfiles = {
-    profiles: [],
-    activeProfileId: null,
+const session: SessionView = {
+    profileId: "9e91e40b-09d0-44b8-9e1b-329455b25617",
+    origin: "https://controller.example/",
+    clusterId: "cluster-1",
+    principalId: "0a749bf5-21a9-43ba-81b4-7065cddbb30f",
+    githubLogin: "jane",
+    label: "Production",
+    accessExpiresAtUnixMs: 2_000_000_000_000,
 };
 
 function TestConsumer() {
-    const { user, token, expiresAt, agentUrl, isLoading, profiles, activeProfileId, login, logout, switchProfile, removeProfile } = useAuth();
-    const [loginError, setLoginError] = useState<string | null>(null);
+    const auth = useAuth();
     return (
         <div>
-            <span data-testid='user'>{user ? user.name : "none"}</span>
-            <span data-testid='token'>{token ?? "none"}</span>
-            <span data-testid='expiresAt'>{expiresAt?.toString() ?? "none"}</span>
-            <span data-testid='agentUrl'>{agentUrl ?? "none"}</span>
-            <span data-testid='isLoading'>{isLoading ? "true" : "false"}</span>
-            <span data-testid='loginError'>{loginError ?? "none"}</span>
-            <span data-testid='profileCount'>{profiles.length}</span>
-            <span data-testid='activeProfileId'>{activeProfileId ?? "none"}</span>
-            <button onClick={() => login("http://localhost:3000").catch((e) => setLoginError(typeof e === "string" ? e : e.message))}>Login</button>
-            <button onClick={() => logout()}>Logout</button>
-            <button data-testid='switch' onClick={() => switchProfile("profile-2")}>
-                Switch
+            <span data-testid='user'>{auth.user?.name ?? "none"}</span>
+            <span data-testid='session'>{auth.session?.profileId ?? "none"}</span>
+            <span data-testid='token'>{auth.token ?? "none"}</span>
+            <span data-testid='origin'>{auth.agentUrl ?? "none"}</span>
+            <span data-testid='issue'>{auth.issue ?? "none"}</span>
+            <span data-testid='loading'>{String(auth.isLoading)}</span>
+            <span data-testid='profiles'>{auth.profiles.length}</span>
+            <span data-testid='profile-id'>{auth.activeProfileId ?? "none"}</span>
+            <button
+                onClick={() => {
+                    void auth.login("https://controller.example", "Production").catch(() => {});
+                }}
+            >
+                Login
             </button>
-            <button data-testid='remove' onClick={() => removeProfile("profile-2")}>
-                Remove
+            <button
+                onClick={() => {
+                    void auth.logout().catch(() => {});
+                }}
+            >
+                Logout
+            </button>
+            <button
+                onClick={() => {
+                    void auth.retryCommit().catch(() => {});
+                }}
+            >
+                Retry commit
+            </button>
+            <button
+                onClick={() => {
+                    void auth.retryRestore().catch(() => {});
+                }}
+            >
+                Retry restore
+            </button>
+            <button
+                onClick={() => {
+                    void auth.cancelLogin().catch(() => {});
+                }}
+            >
+                Cancel login
             </button>
         </div>
     );
 }
 
-describe("AuthProvider", () => {
-    let sessionIdCallback: ((event: { payload: { sessionId: string } }) => void) | null = null;
-    let tokenCallback: ((event: { payload: { token: string } }) => void) | null = null;
-    let errorCallback: ((event: { payload: { error: string } }) => void) | null = null;
+function renderAuth() {
+    return render(
+        <AuthProvider>
+            <TestConsumer />
+        </AuthProvider>,
+    );
+}
 
+async function restored() {
+    await waitFor(() => expect(screen.getByTestId("loading")).toHaveTextContent("false"));
+}
+
+describe("AuthProvider custody", () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        sessionIdCallback = null;
-        tokenCallback = null;
-        errorCallback = null;
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        vi.mocked(listen).mockImplementation(async (event: string, handler: any) => {
-            if (event === "auth://session-id") sessionIdCallback = handler;
-            if (event === "auth://token") tokenCallback = handler;
-            if (event === "auth://error") errorCallback = handler;
-            return () => {};
-        });
-
-        // Default: load_profiles returns empty
-        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === "load_profiles") return emptyProfiles;
-            return undefined;
-        });
+        vi.mocked(invoke).mockImplementation(async (command: string) => (command === "session_restore" ? null : undefined));
     });
 
-    function renderWithProvider() {
-        return render(
-            <AuthProvider>
-                <TestConsumer />
-            </AuthProvider>,
-        );
-    }
-
-    it("provides null user initially and isLoading becomes false after mount", async () => {
-        renderWithProvider();
-
-        await act(async () => {});
-
+    it("starts without a profile and never holds a React credential", async () => {
+        renderAuth();
+        await restored();
         expect(screen.getByTestId("user")).toHaveTextContent("none");
         expect(screen.getByTestId("token")).toHaveTextContent("none");
-        expect(screen.getByTestId("expiresAt")).toHaveTextContent("none");
-        expect(screen.getByTestId("isLoading")).toHaveTextContent("false");
-        expect(screen.getByTestId("profileCount")).toHaveTextContent("0");
+        expect(screen.getByTestId("profiles")).toHaveTextContent("0");
+        expect(invoke).toHaveBeenCalledWith("session_restore", undefined);
     });
 
-    it("login calls auth_listen and opens browser with session ID", async () => {
-        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === "load_profiles") return emptyProfiles;
-            if (cmd === "auth_listen") {
-                // Simulate: session ID arrives from background WS
-                sessionIdCallback?.({ payload: { sessionId: "abc123" } });
-                // Don't deliver token yet
-                return undefined;
-            }
-            return undefined;
-        });
-
-        renderWithProvider();
-        await act(async () => {});
-
+    it("logs in only through the Rust custody command", async () => {
+        vi.mocked(invoke).mockImplementation(async (command: string) => (command === "session_login" ? session : null));
+        renderAuth();
+        await restored();
         await act(async () => {
             screen.getByText("Login").click();
         });
-
-        expect(invoke).toHaveBeenCalledWith("auth_listen", { url: "http://localhost:3000" });
-        expect(openUrl).toHaveBeenCalledWith("http://localhost:3000/auth/github?session=abc123");
-
-        // Clean up: deliver token so login() resolves
-        await act(async () => {
-            tokenCallback?.({ payload: { token: "fake.jwt.token" } });
-        });
+        await waitFor(() => expect(screen.getByTestId("session")).toHaveTextContent(session.profileId));
+        expect(invoke).toHaveBeenCalledWith("session_login", { origin: "https://controller.example", label: "Production" });
+        expect(vi.mocked(invoke).mock.calls.every(([command]) => !["auth_listen", "load_profiles", "save_profile"].includes(command))).toBe(true);
+        expect(screen.getByTestId("token")).toHaveTextContent("none");
     });
 
-    it("handles token delivery and saves profile", async () => {
-        const savedProfile: StoredProfiles = {
-            profiles: [
-                {
-                    id: "test-uuid",
-                    label: "Default",
-                    agentUrl: "http://localhost:3000",
-                    userId: "123",
-                    userName: "Jane Doe",
-                    userEmail: "jane@example.com",
-                    userAvatarUrl: "https://example.com/avatar.png",
-                    userProvider: "github",
-                    token: "fake.jwt.token",
-                    expiresAt: 9999999999,
-                },
-            ],
-            activeProfileId: "test-uuid",
-        };
+    it("derives one non-secret profile and display identity from SessionView", async () => {
+        vi.mocked(invoke).mockResolvedValue(session);
+        renderAuth();
+        await restored();
+        expect(screen.getByTestId("user")).toHaveTextContent("jane");
+        expect(screen.getByTestId("profiles")).toHaveTextContent("1");
+        expect(screen.getByTestId("profile-id")).toHaveTextContent(session.profileId);
+        expect(screen.getByTestId("origin")).toHaveTextContent(session.origin);
+        expect(screen.getByTestId("token")).toHaveTextContent("none");
+    });
 
-        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === "load_profiles") return savedProfile;
-            if (cmd === "parse_auth_token") return mockParsedToken;
-            if (cmd === "check_auth") return mockCheckAuthResponse;
-            if (cmd === "save_profile") return undefined;
-            if (cmd === "auth_listen") {
-                // Background task delivers token immediately
-                tokenCallback?.({ payload: { token: "fake.jwt.token" } });
-                return undefined;
-            }
-            return undefined;
+    it("shows vault_write_failed as a distinct login state", async () => {
+        vi.mocked(invoke).mockImplementation(async (command: string) => {
+            if (command === "session_login") throw "vault_write_failed";
+            return null;
         });
-
-        renderWithProvider();
-        await act(async () => {});
-
+        renderAuth();
+        await restored();
         await act(async () => {
             screen.getByText("Login").click();
         });
-
-        expect(invoke).toHaveBeenCalledWith("parse_auth_token", {
-            token: "fake.jwt.token",
-        });
-        expect(invoke).toHaveBeenCalledWith("check_auth", {
-            url: "http://localhost:3000",
-            token: "fake.jwt.token",
-        });
-        expect(invoke).toHaveBeenCalledWith("save_profile", expect.objectContaining({ input: expect.objectContaining({ agentUrl: "http://localhost:3000" }) }));
-        expect(screen.getByTestId("user")).toHaveTextContent("Jane Doe");
-        expect(screen.getByTestId("token")).toHaveTextContent("fake.jwt.token");
-        expect(screen.getByTestId("expiresAt")).toHaveTextContent("9999999999");
+        await waitFor(() => expect(screen.getByTestId("issue")).toHaveTextContent("vault_write_failed"));
+        expect(screen.getByTestId("session")).toHaveTextContent("none");
     });
 
-    it("logout calls delete_session before clearing state", async () => {
-        const callOrder: string[] = [];
-
-        const savedProfile: StoredProfiles = {
-            profiles: [
-                {
-                    id: "test-uuid",
-                    label: "Default",
-                    agentUrl: "http://localhost:3000",
-                    userId: "123",
-                    userName: "Jane Doe",
-                    userEmail: "jane@example.com",
-                    userAvatarUrl: "https://example.com/avatar.png",
-                    userProvider: "github",
-                    token: "fake.jwt.token",
-                    expiresAt: 9999999999,
-                },
-            ],
-            activeProfileId: "test-uuid",
-        };
-
-        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === "load_profiles") return savedProfile;
-            if (cmd === "parse_auth_token") return mockParsedToken;
-            if (cmd === "check_auth") return mockCheckAuthResponse;
-            if (cmd === "auth_listen") {
-                tokenCallback?.({ payload: { token: "fake.jwt.token" } });
-                return undefined;
-            }
-            if (cmd === "delete_session") {
-                callOrder.push("delete_session");
-                savedProfile.profiles = [];
-                savedProfile.activeProfileId = null;
-                return undefined;
-            }
-            if (cmd === "save_profile") return undefined;
-            return undefined;
+    it("retries a held commit without another login", async () => {
+        vi.mocked(invoke).mockImplementation(async (command: string) => {
+            if (command === "session_login") throw "vault_write_failed";
+            if (command === "session_retry_commit") return session;
+            return null;
         });
-
-        renderWithProvider();
-        await act(async () => {});
-
-        // Authenticate first
+        renderAuth();
+        await restored();
         await act(async () => {
             screen.getByText("Login").click();
         });
+        await waitFor(() => expect(screen.getByTestId("issue")).toHaveTextContent("vault_write_failed"));
+        await act(async () => {
+            screen.getByText("Retry commit").click();
+        });
+        await waitFor(() => expect(screen.getByTestId("session")).toHaveTextContent(session.profileId));
+        expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "session_login")).toHaveLength(1);
+    });
 
-        expect(screen.getByTestId("user")).toHaveTextContent("Jane Doe");
-
-        // Then logout
+    it("logs out through Rust before clearing the session", async () => {
+        vi.mocked(invoke).mockImplementation(async (command: string) => (command === "session_restore" ? session : undefined));
+        renderAuth();
+        await restored();
         await act(async () => {
             screen.getByText("Logout").click();
         });
-
-        expect(callOrder).toContain("delete_session");
-        expect(screen.getByTestId("user")).toHaveTextContent("none");
-        expect(screen.getByTestId("token")).toHaveTextContent("none");
-        expect(screen.getByTestId("expiresAt")).toHaveTextContent("none");
+        await waitFor(() => expect(screen.getByTestId("session")).toHaveTextContent("none"));
+        expect(invoke).toHaveBeenCalledWith("session_logout", undefined);
     });
 
-    it("logout clears state even if delete_session fails", async () => {
-        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === "load_profiles") return emptyProfiles;
-            if (cmd === "parse_auth_token") return mockParsedToken;
-            if (cmd === "check_auth") return mockCheckAuthResponse;
-            if (cmd === "auth_listen") {
-                tokenCallback?.({ payload: { token: "fake.jwt.token" } });
-                return undefined;
-            }
-            if (cmd === "delete_session") throw new Error("keychain error");
-            if (cmd === "save_profile") return undefined;
+    it("keeps the held session visible when revocation fails", async () => {
+        vi.mocked(invoke).mockImplementation(async (command: string) => {
+            if (command === "session_restore") return session;
+            if (command === "session_logout") throw "revoke_failed";
             return undefined;
         });
-
-        const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-
-        renderWithProvider();
-        await act(async () => {});
-
-        // Authenticate first
-        await act(async () => {
-            screen.getByText("Login").click();
-        });
-
-        expect(screen.getByTestId("user")).toHaveTextContent("Jane Doe");
-
-        // Logout (delete_session will fail)
+        renderAuth();
+        await restored();
         await act(async () => {
             screen.getByText("Logout").click();
         });
-
-        // State should still be cleared
-        expect(screen.getByTestId("user")).toHaveTextContent("none");
-        expect(screen.getByTestId("token")).toHaveTextContent("none");
-
-        consoleSpy.mockRestore();
+        await waitFor(() => expect(screen.getByTestId("issue")).toHaveTextContent("revoke_failed"));
+        expect(screen.getByTestId("session")).toHaveTextContent(session.profileId);
     });
 
-    it("rejects login when parse_auth_token fails", async () => {
-        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === "load_profiles") return emptyProfiles;
-            if (cmd === "auth_listen") {
-                tokenCallback?.({ payload: { token: "bad.token.here" } });
-                return undefined;
-            }
-            if (cmd === "parse_auth_token") throw new Error("parse failed");
+    it("clears authenticated state when local cleanup remains", async () => {
+        vi.mocked(invoke).mockImplementation(async (command: string) => {
+            if (command === "session_restore") return session;
+            if (command === "session_logout") throw "local_cleanup_failed";
+            return undefined;
+        });
+        renderAuth();
+        await restored();
+        await act(async () => {
+            screen.getByText("Logout").click();
+        });
+        await waitFor(() => expect(screen.getByTestId("issue")).toHaveTextContent("local_cleanup_failed"));
+        expect(screen.getByTestId("session")).toHaveTextContent("none");
+    });
+
+    it("renders revoked restore as re-login-required", async () => {
+        vi.mocked(invoke).mockRejectedValue("relogin_required");
+        renderAuth();
+        await restored();
+        expect(screen.getByTestId("issue")).toHaveTextContent("relogin_required");
+        expect(screen.getByTestId("session")).toHaveTextContent("none");
+    });
+
+    it("maps unknown native errors to a closed code without showing raw text", async () => {
+        vi.mocked(invoke).mockRejectedValue("secret native error canary");
+        renderAuth();
+        await restored();
+        expect(screen.getByTestId("issue")).toHaveTextContent("invalid_response");
+        expect(document.body.textContent).not.toContain("secret native error canary");
+    });
+
+    it("calls the Rust cancellation command", async () => {
+        renderAuth();
+        await restored();
+        await act(async () => {
+            screen.getByText("Cancel login").click();
+        });
+        expect(invoke).toHaveBeenCalledWith("session_cancel_login", undefined);
+    });
+
+    it("logs in, restores after a React restart, and logs out through custody", async () => {
+        let nativeSession: SessionView | null = null;
+        vi.mocked(invoke).mockImplementation(async (command: string) => {
+            if (command === "session_restore") return nativeSession;
+            if (command === "session_login") return (nativeSession = session);
+            if (command === "session_logout") nativeSession = null;
             return undefined;
         });
 
-        renderWithProvider();
-        await act(async () => {});
-
+        const firstMount = renderAuth();
+        await restored();
         await act(async () => {
             screen.getByText("Login").click();
         });
+        await waitFor(() => expect(screen.getByTestId("session")).toHaveTextContent(session.profileId));
+        firstMount.unmount();
 
-        expect(screen.getByTestId("user")).toHaveTextContent("none");
-        expect(screen.getByTestId("loginError")).toHaveTextContent("parse failed");
-    });
-
-    it("rejects login promise on auth_listen error", async () => {
-        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === "load_profiles") return emptyProfiles;
-            if (cmd === "auth_listen") {
-                // Background task emits error event
-                errorCallback?.({ payload: { error: "session expired" } });
-                return undefined;
-            }
-            return undefined;
-        });
-
-        renderWithProvider();
-        await act(async () => {});
-
+        renderAuth();
+        await restored();
+        expect(screen.getByTestId("session")).toHaveTextContent(session.profileId);
         await act(async () => {
-            screen.getByText("Login").click();
+            screen.getByText("Logout").click();
         });
-
-        expect(screen.getByTestId("user")).toHaveTextContent("none");
-        expect(screen.getByTestId("loginError")).toHaveTextContent("session expired");
-    });
-
-    it("restores active profile on mount", async () => {
-        const existingProfiles: StoredProfiles = {
-            profiles: [
-                {
-                    id: "p1",
-                    label: "Production",
-                    agentUrl: "https://prod.example.com",
-                    userId: "u1",
-                    userName: "Alice",
-                    userEmail: "alice@example.com",
-                    userAvatarUrl: "https://example.com/alice.png",
-                    userProvider: "github",
-                    token: "prod-token",
-                    expiresAt: 9999999999,
-                },
-            ],
-            activeProfileId: "p1",
-        };
-
-        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === "load_profiles") return existingProfiles;
-            return undefined;
-        });
-
-        renderWithProvider();
-        await act(async () => {});
-
-        expect(screen.getByTestId("user")).toHaveTextContent("Alice");
-        expect(screen.getByTestId("agentUrl")).toHaveTextContent("https://prod.example.com");
-        expect(screen.getByTestId("profileCount")).toHaveTextContent("1");
-        expect(screen.getByTestId("activeProfileId")).toHaveTextContent("p1");
-    });
-
-    it("switchProfile changes the active profile", async () => {
-        const twoProfiles: StoredProfiles = {
-            profiles: [
-                {
-                    id: "p1",
-                    label: "Production",
-                    agentUrl: "https://prod.example.com",
-                    userId: "u1",
-                    userName: "Alice",
-                    userEmail: "alice@example.com",
-                    userAvatarUrl: "https://example.com/alice.png",
-                    userProvider: "github",
-                    token: "prod-token",
-                    expiresAt: 9999999999,
-                },
-                {
-                    id: "profile-2",
-                    label: "Dev",
-                    agentUrl: "https://dev.example.com",
-                    userId: "u1",
-                    userName: "Alice Dev",
-                    userEmail: "alice@dev.com",
-                    userAvatarUrl: "https://example.com/alice-dev.png",
-                    userProvider: "github",
-                    token: "dev-token",
-                    expiresAt: 9999999999,
-                },
-            ],
-            activeProfileId: "p1",
-        };
-
-        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === "load_profiles") return twoProfiles;
-            if (cmd === "set_active_profile") {
-                twoProfiles.activeProfileId = "profile-2";
-                return undefined;
-            }
-            return undefined;
-        });
-
-        renderWithProvider();
-        await act(async () => {});
-
-        expect(screen.getByTestId("user")).toHaveTextContent("Alice");
-
-        await act(async () => {
-            screen.getByTestId("switch").click();
-        });
-
-        expect(invoke).toHaveBeenCalledWith("set_active_profile", { profileId: "profile-2" });
-        expect(screen.getByTestId("user")).toHaveTextContent("Alice Dev");
-        expect(screen.getByTestId("agentUrl")).toHaveTextContent("https://dev.example.com");
-        expect(screen.getByTestId("activeProfileId")).toHaveTextContent("profile-2");
-    });
-
-    it("rejects login when check_auth fails after parse succeeds", async () => {
-        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === "load_profiles") return emptyProfiles;
-            if (cmd === "auth_listen") {
-                tokenCallback?.({ payload: { token: "valid.jwt.token" } });
-                return undefined;
-            }
-            if (cmd === "parse_auth_token") return mockParsedToken;
-            if (cmd === "check_auth") throw "auth_failed";
-            return undefined;
-        });
-
-        renderWithProvider();
-        await act(async () => {});
-
-        await act(async () => {
-            screen.getByText("Login").click();
-        });
-
-        // login() should reject and the error should surface to the caller
-        expect(screen.getByTestId("user")).toHaveTextContent("none");
-        expect(screen.getByTestId("loginError")).toHaveTextContent("auth_failed");
-    });
-
-    it("removeProfile deletes a non-active profile", async () => {
-        const twoProfiles: StoredProfiles = {
-            profiles: [
-                {
-                    id: "p1",
-                    label: "Production",
-                    agentUrl: "https://prod.example.com",
-                    userId: "u1",
-                    userName: "Alice",
-                    userEmail: "alice@example.com",
-                    userAvatarUrl: "https://example.com/alice.png",
-                    userProvider: "github",
-                    token: "prod-token",
-                    expiresAt: 9999999999,
-                },
-                {
-                    id: "profile-2",
-                    label: "Dev",
-                    agentUrl: "https://dev.example.com",
-                    userId: "u1",
-                    userName: "Alice Dev",
-                    userEmail: "alice@dev.com",
-                    userAvatarUrl: "https://example.com/alice-dev.png",
-                    userProvider: "github",
-                    token: "dev-token",
-                    expiresAt: 9999999999,
-                },
-            ],
-            activeProfileId: "p1",
-        };
-
-        const afterRemove: StoredProfiles = {
-            profiles: [twoProfiles.profiles[0]],
-            activeProfileId: "p1",
-        };
-
-        let removed = false;
-
-        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === "load_profiles") return removed ? afterRemove : twoProfiles;
-            if (cmd === "delete_profile") {
-                removed = true;
-                return undefined;
-            }
-            return undefined;
-        });
-
-        renderWithProvider();
-        await act(async () => {});
-
-        expect(screen.getByTestId("profileCount")).toHaveTextContent("2");
-
-        await act(async () => {
-            screen.getByTestId("remove").click();
-        });
-
-        expect(invoke).toHaveBeenCalledWith("delete_profile", { profileId: "profile-2" });
-        expect(screen.getByTestId("profileCount")).toHaveTextContent("1");
-        // Active profile unchanged
-        expect(screen.getByTestId("user")).toHaveTextContent("Alice");
+        await waitFor(() => expect(screen.getByTestId("session")).toHaveTextContent("none"));
+        expect(
+            vi
+                .mocked(invoke)
+                .mock.calls.map(([command]) => command)
+                .filter((command) => command.startsWith("session_")),
+        ).toEqual(["session_restore", "session_login", "session_restore", "session_logout"]);
     });
 });

@@ -1,286 +1,131 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { openUrl } from "@tauri-apps/plugin-opener";
-import type { AuthUser, ParsedToken, CheckAuthResponse } from "@/types/auth";
-import type { ConnectionProfile, StoredProfiles } from "@/types/connection";
+import { useCallback, useState } from "react";
+import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { AuthContext } from "@/contexts/auth-context-value";
+import { useSessionCancelLogin } from "@/hooks/session/use-session-cancel-login";
+import { useSessionLogin } from "@/hooks/session/use-session-login";
+import { useSessionLogout } from "@/hooks/session/use-session-logout";
+import { useSessionRestore, sessionRestoreKey } from "@/hooks/session/use-session-restore";
+import { useSessionRetryCommit } from "@/hooks/session/use-session-retry-commit";
+import { sessionErrorCode, type SessionErrorCode, type SessionView } from "@/types/session";
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
-    const [user, setUser] = useState<AuthUser | null>(null);
-    const [token, setToken] = useState<string | null>(null);
-    const [expiresAt, setExpiresAt] = useState<number | null>(null);
-    const [agentUrl, setAgentUrl] = useState<string | null>(null);
-    const [isLoading, setIsLoading] = useState(true);
-    const [profiles, setProfiles] = useState<ConnectionProfile[]>([]);
-    const [activeProfileId, setActiveProfileId] = useState<string | null>(null);
+function SessionAuthProvider({ children }: { children: React.ReactNode }) {
+    const queryClient = useQueryClient();
+    const restore = useSessionRestore();
+    const loginCommand = useSessionLogin();
+    const logoutCommand = useSessionLogout();
+    const retryCommitCommand = useSessionRetryCommit();
+    const cancelLoginCommand = useSessionCancelLogin();
+    const [actionError, setActionError] = useState<SessionErrorCode | null>(null);
 
-    const pendingLabelRef = useRef<string>("Default");
+    const session = restore.data ?? null;
+    const issue = actionError ?? (restore.error ? sessionErrorCode(restore.error) : null);
 
-    const clearState = useCallback(() => {
-        setUser(null);
-        setToken(null);
-        setExpiresAt(null);
-        setAgentUrl(null);
-    }, []);
-
-    const applyProfile = useCallback((profile: ConnectionProfile) => {
-        setUser({
-            id: profile.userId,
-            name: profile.userName,
-            email: profile.userEmail,
-            avatarUrl: profile.userAvatarUrl,
-            provider: profile.userProvider,
-        });
-        setToken(profile.token);
-        setExpiresAt(profile.expiresAt);
-        setAgentUrl(profile.agentUrl);
-        setActiveProfileId(profile.id);
-    }, []);
-
-    const logout = useCallback(async () => {
-        try {
-            await invoke("delete_session");
-        } catch (err) {
-            console.error("Failed to delete session:", err);
-        }
-        clearState();
-
-        // Reload profiles after removing the active one
-        try {
-            const data = await invoke<StoredProfiles>("load_profiles");
-            setProfiles(data.profiles);
-            setActiveProfileId(data.activeProfileId);
-        } catch (err) {
-            console.error("Failed to reload profiles after logout:", err);
-            setProfiles([]);
-            setActiveProfileId(null);
-        }
-    }, [clearState]);
-
-    const handleToken = useCallback(async (jwt: string, loginAgentUrl: string) => {
-        // These MUST succeed — let errors propagate to caller
-        const parsed = await invoke<ParsedToken>("parse_auth_token", { token: jwt });
-        const authResponse = await invoke<CheckAuthResponse>("check_auth", {
-            url: loginAgentUrl,
-            token: jwt,
-        });
-
-        const profileId = crypto.randomUUID();
-        const label = pendingLabelRef.current;
-
-        setUser(authResponse.user);
-        setToken(jwt);
-        setExpiresAt(parsed.expiresAt);
-        setAgentUrl(loginAgentUrl);
-
-        try {
-            await invoke("save_profile", {
-                input: {
-                    id: profileId,
-                    label,
-                    agentUrl: loginAgentUrl,
-                    userId: authResponse.user.id,
-                    userName: authResponse.user.name,
-                    userEmail: authResponse.user.email,
-                    userAvatarUrl: authResponse.user.avatarUrl,
-                    userProvider: authResponse.user.provider,
-                    token: jwt,
-                    expiresAt: parsed.expiresAt,
-                },
-            });
-        } catch (err) {
-            console.error("Failed to save profile:", err);
-        }
-
-        try {
-            const data = await invoke<StoredProfiles>("load_profiles");
-            setProfiles(data.profiles);
-            setActiveProfileId(data.activeProfileId);
-        } catch (err) {
-            console.error("Failed to reload profiles:", err);
-            setActiveProfileId(profileId);
-        }
-    }, []);
-
-    // Restore session on mount
-    useEffect(() => {
-        let cancelled = false;
-
-        async function restore() {
-            try {
-                const data = await invoke<StoredProfiles>("load_profiles");
-                if (cancelled) return;
-
-                setProfiles(data.profiles);
-                setActiveProfileId(data.activeProfileId);
-
-                if (data.activeProfileId) {
-                    const active = data.profiles.find((p) => p.id === data.activeProfileId);
-                    if (active) {
-                        const now = Math.floor(Date.now() / 1000);
-                        if (active.expiresAt <= now) {
-                            await invoke("delete_profile", { profileId: active.id });
-                            const refreshed = await invoke<StoredProfiles>("load_profiles");
-                            if (!cancelled) {
-                                setProfiles(refreshed.profiles);
-                                setActiveProfileId(refreshed.activeProfileId);
-                            }
-                            return;
-                        }
-
-                        setUser({
-                            id: active.userId,
-                            name: active.userName,
-                            email: active.userEmail,
-                            avatarUrl: active.userAvatarUrl,
-                            provider: active.userProvider,
-                        });
-                        setToken(active.token);
-                        setExpiresAt(active.expiresAt);
-                        setAgentUrl(active.agentUrl);
-                    }
-                }
-            } catch (err) {
-                console.error("Failed to restore session:", err);
-            } finally {
-                if (!cancelled) {
-                    setIsLoading(false);
-                }
+    const publishSession = useCallback(
+        (view: SessionView | null) => {
+            // Legacy resource queries have no profile key. Remove them on
+            // replacement or logout; new queries use the local profile UUID.
+            queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== "session" });
+            queryClient.getMutationCache().clear();
+            queryClient.setQueryData(sessionRestoreKey, view);
+            queryClient.removeQueries({ queryKey: ["session", "login-hint"] });
+            if (view) {
+                queryClient.setQueryData(["session", "login-hint"], { origin: view.origin, label: view.label });
             }
-        }
-
-        restore();
-
-        return () => {
-            cancelled = true;
-        };
-    }, []);
+        },
+        [queryClient],
+    );
 
     const login = useCallback(
-        async (url: string, label?: string, provider?: string) => {
-            pendingLabelRef.current = label || "Default";
-            const authProvider = provider || "github";
-
-            // Set up all event listeners BEFORE starting the WebSocket
-            const unlistenSessionId = await listen<{ sessionId: string }>("auth://session-id", (event) => {
-                openUrl(`${url}/auth/${authProvider}?session=${event.payload.sessionId}`);
-            });
-
-            let resolveToken: (jwt: string) => void;
-            let rejectToken: (err: Error) => void;
-            const tokenPromise = new Promise<string>((resolve, reject) => {
-                resolveToken = resolve;
-                rejectToken = reject;
-            });
-
-            const unlistenToken = await listen<{ token: string }>("auth://token", (event) => {
-                resolveToken(event.payload.token);
-            });
-
-            const unlistenError = await listen<{ error: string }>("auth://error", (event) => {
-                rejectToken(new Error(event.payload.error));
-            });
-
+        async (origin: string, label?: string) => {
+            setActionError(null);
             try {
-                // Fire-and-forget: starts the background WebSocket
-                await invoke("auth_listen", { url });
-
-                // Wait for token or error event from the background task
-                const jwt = await tokenPromise;
-                await handleToken(jwt, url);
-            } finally {
-                unlistenSessionId();
-                unlistenToken();
-                unlistenError();
+                const view = await loginCommand.mutateAsync({ origin, label: label ?? null });
+                publishSession(view);
+            } catch (error) {
+                const code = sessionErrorCode(error);
+                setActionError(code);
+                throw code;
             }
         },
-        [handleToken],
+        [loginCommand, publishSession],
     );
 
-    const switchProfile = useCallback(
-        async (profileId: string) => {
-            try {
-                await invoke("set_active_profile", { profileId });
-                const data = await invoke<StoredProfiles>("load_profiles");
-                setProfiles(data.profiles);
-                setActiveProfileId(data.activeProfileId);
-
-                const profile = data.profiles.find((p) => p.id === profileId);
-                if (profile) {
-                    applyProfile(profile);
-                }
-            } catch (err) {
-                console.error("Failed to switch profile:", err);
-                throw err;
-            }
-        },
-        [applyProfile],
-    );
-
-    const removeProfile = useCallback(async (profileId: string) => {
+    const logout = useCallback(async () => {
+        setActionError(null);
         try {
-            await invoke("delete_profile", { profileId });
-            const data = await invoke<StoredProfiles>("load_profiles");
-            setProfiles(data.profiles);
-            setActiveProfileId(data.activeProfileId);
-        } catch (err) {
-            console.error("Failed to remove profile:", err);
-        }
-    }, []);
-
-    const updateProfile = useCallback(
-        async (profileId: string, updates: Partial<Pick<ConnectionProfile, "label" | "agentUrl">>) => {
-            const profile = profiles.find((p) => p.id === profileId);
-            if (!profile) return;
-
-            const updated = { ...profile, ...updates };
-
-            await invoke("save_profile", {
-                input: {
-                    id: updated.id,
-                    label: updated.label,
-                    agentUrl: updated.agentUrl,
-                    userId: updated.userId,
-                    userName: updated.userName,
-                    userEmail: updated.userEmail,
-                    userAvatarUrl: updated.userAvatarUrl,
-                    userProvider: updated.userProvider,
-                    token: updated.token,
-                    expiresAt: updated.expiresAt,
-                },
-            });
-
-            const data = await invoke<StoredProfiles>("load_profiles");
-            setProfiles(data.profiles);
-            setActiveProfileId(data.activeProfileId);
-
-            // Update local agentUrl if the active profile was changed
-            if (profileId === activeProfileId && updates.agentUrl) {
-                setAgentUrl(updates.agentUrl);
+            await logoutCommand.mutateAsync();
+            publishSession(null);
+        } catch (error) {
+            const code = sessionErrorCode(error);
+            if (["local_cleanup_failed", "cleanup_uncertain", "relogin_required"].includes(code)) {
+                publishSession(null);
             }
-        },
-        [profiles, activeProfileId],
-    );
+            setActionError(code);
+            throw code;
+        }
+    }, [logoutCommand, publishSession]);
+
+    const retryCommit = useCallback(async () => {
+        setActionError(null);
+        try {
+            publishSession(await retryCommitCommand.mutateAsync());
+        } catch (error) {
+            const code = sessionErrorCode(error);
+            setActionError(code);
+            throw code;
+        }
+    }, [retryCommitCommand, publishSession]);
+
+    const retryRestore = useCallback(async () => {
+        setActionError(null);
+        const result = await restore.refetch();
+        if (result.error) {
+            const code = sessionErrorCode(result.error);
+            setActionError(code);
+            throw code;
+        }
+    }, [restore]);
+
+    const cancelLogin = useCallback(async () => {
+        try {
+            await cancelLoginCommand.mutateAsync();
+        } catch (error) {
+            const code = sessionErrorCode(error);
+            setActionError(code);
+            throw code;
+        }
+    }, [cancelLoginCommand]);
 
     return (
         <AuthContext
             value={{
-                user,
-                token,
-                expiresAt,
-                agentUrl,
-                isLoading,
-                profiles,
-                activeProfileId,
+                session,
+                issue,
+                user: session ? { id: session.principalId, name: session.githubLogin, email: "", avatarUrl: "", provider: "github" } : null,
+                token: null,
+                expiresAt: session ? Math.floor(session.accessExpiresAtUnixMs / 1000) : null,
+                agentUrl: session?.origin ?? null,
+                isLoading: restore.isPending,
+                profiles: session ? [{ id: session.profileId, label: session.label ?? session.githubLogin, agentUrl: session.origin }] : [],
+                activeProfileId: session?.profileId ?? null,
                 login,
                 logout,
-                switchProfile,
-                removeProfile,
-                updateProfile,
+                retryCommit,
+                retryRestore,
+                cancelLogin,
+                clearIssue: () => setActionError(null),
             }}
         >
             {children}
         </AuthContext>
+    );
+}
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+    const [queryClient] = useState(() => new QueryClient());
+    return (
+        <QueryClientProvider client={queryClient}>
+            <SessionAuthProvider>{children}</SessionAuthProvider>
+        </QueryClientProvider>
     );
 }
