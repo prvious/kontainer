@@ -2,147 +2,70 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useTasks } from "@/hooks/use-tasks";
 import { AuthContext } from "@/contexts/auth-context-value";
-import { SettingsContext } from "@/contexts/settings-context-value";
+import { useConfiguredNode, useContainerInventory, configuredNodeKey, containerInventoryKey } from "@/hooks/use-container-inventory";
 import type { AuthContextValue } from "@/contexts/auth-context-value";
-import type { SettingsContextValue } from "@/contexts/settings-context-value";
-import type { TaskItem } from "@/types/tasks";
+import fixture from "../fixtures/inventory-ipc.json";
 
-function createTestQueryClient() {
-    return new QueryClient({
-        defaultOptions: {
-            queries: { retry: false, gcTime: 0 },
-        },
-    });
-}
+const profileId = "018f2e34-0000-7000-8000-0000000000bb";
+const reportInventoryCustodyError = vi.fn();
+const auth = { reportInventoryCustodyError } as unknown as AuthContextValue;
 
-const mockAuth: AuthContextValue = {
-    user: { id: "1", name: "Test", email: "test@test.com", avatarUrl: "", provider: "github" },
-    token: "test-jwt",
-    expiresAt: Math.floor(Date.now() / 1000) + 9999,
-    agentUrl: "http://localhost:3000",
-    isLoading: false,
-    login: vi.fn(),
-    logout: vi.fn(),
-};
-
-const mockSettings: SettingsContextValue = {
-    refreshInterval: 5000,
-    setRefreshInterval: vi.fn(),
-};
-
-function renderHookWithProviders(authOverrides: Partial<AuthContextValue> = {}, settingsOverrides: Partial<SettingsContextValue> = {}) {
-    const queryClient = createTestQueryClient();
-    const auth = { ...mockAuth, ...authOverrides };
-    const settings = { ...mockSettings, ...settingsOverrides };
-
+function createWrapper() {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const wrapper = ({ children }: { children: React.ReactNode }) => (
         <AuthContext value={auth}>
-            <SettingsContext value={settings}>
-                <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
-            </SettingsContext>
+            <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
         </AuthContext>
     );
-
-    return renderHook(() => useTasks(), { wrapper });
+    return { queryClient, wrapper };
 }
 
-const sampleTasks: TaskItem[] = [
-    {
-        id: "task1",
-        serviceId: "svc1",
-        serviceName: "web",
-        slot: 1,
-        nodeId: "node1",
-        nodeName: "worker-1",
-        state: "running",
-        desiredState: "running",
-        exitCode: null,
-        error: "",
-        timestamp: new Date().toISOString(),
-        containerId: "abc123",
-        image: "nginx:latest",
-    },
-    {
-        id: "task2",
-        serviceId: "svc2",
-        serviceName: "api",
-        slot: 1,
-        nodeId: "node2",
-        nodeName: "worker-2",
-        state: "failed",
-        desiredState: "running",
-        exitCode: 1,
-        error: "container exited",
-        timestamp: new Date().toISOString(),
-        containerId: "def456",
-        image: "node:20",
-    },
-];
-
-describe("useTasks", () => {
+describe("native container inventory queries", () => {
     beforeEach(() => {
         vi.clearAllMocks();
     });
 
-    it("fetches tasks successfully", async () => {
-        vi.mocked(invoke).mockResolvedValue({ tasks: sampleTasks });
-
-        const { result } = renderHookWithProviders();
-
-        await waitFor(() => {
-            expect(result.current.isSuccess).toBe(true);
-        });
-
-        expect(result.current.data).toEqual(sampleTasks);
-        expect(invoke).toHaveBeenCalledWith("list_tasks", {
-            url: "http://localhost:3000",
-            token: "test-jwt",
-        });
+    it("discovers the node using only the local profile UUID", async () => {
+        vi.mocked(invoke).mockResolvedValue("node-1");
+        const { queryClient, wrapper } = createWrapper();
+        const { result } = renderHook(() => useConfiguredNode(profileId), { wrapper });
+        await waitFor(() => expect(result.current.data).toBe("node-1"));
+        expect(invoke).toHaveBeenCalledExactlyOnceWith("get_configured_node", { profileId });
+        expect(queryClient.getQueryData(configuredNodeKey(profileId))).toBe("node-1");
     });
 
-    it("returns error when fetch fails", async () => {
-        vi.mocked(invoke).mockRejectedValue(new Error("network error"));
-
-        const { result } = renderHookWithProviders();
-
-        await waitFor(() => {
-            expect(result.current.isError).toBe(true);
+    it("keys each page by profile, node, cursor, and limit without credentials", async () => {
+        vi.mocked(invoke).mockResolvedValue(fixture.containerPage);
+        const { queryClient, wrapper } = createWrapper();
+        const cursor = "v1:" + "a".repeat(64);
+        const { result } = renderHook(() => useContainerInventory(profileId, "node-1", cursor, 50), { wrapper });
+        await waitFor(() => expect(result.current.data).toEqual(fixture.containerPage));
+        expect(invoke).toHaveBeenCalledExactlyOnceWith("list_container_inventory", {
+            profileId,
+            nodeId: "node-1",
+            cursor,
+            limit: 50,
         });
-
-        expect(result.current.error).toBeTruthy();
+        expect(queryClient.getQueryData(containerInventoryKey(profileId, "node-1", cursor, 50))).toEqual(fixture.containerPage);
     });
 
-    it("does not fetch when token is missing", () => {
-        vi.mocked(invoke).mockResolvedValue({ tasks: [] });
-
-        const { result } = renderHookWithProviders({ token: null });
-
-        expect(result.current.isLoading).toBe(false);
-        expect(result.current.fetchStatus).toBe("idle");
-        expect(invoke).not.toHaveBeenCalled();
+    it("reports a rejected session once without query retries or raw error text", async () => {
+        vi.mocked(invoke).mockRejectedValue("relogin_required");
+        const { wrapper } = createWrapper();
+        const { result } = renderHook(() => useConfiguredNode(profileId), { wrapper });
+        await waitFor(() => expect(result.current.isError).toBe(true));
+        expect(result.current.error).toBe("relogin_required");
+        expect(reportInventoryCustodyError).toHaveBeenCalledExactlyOnceWith(profileId, "relogin_required");
+        expect(invoke).toHaveBeenCalledTimes(1);
     });
 
-    it("does not fetch when agentUrl is missing", () => {
-        vi.mocked(invoke).mockResolvedValue({ tasks: [] });
-
-        const { result } = renderHookWithProviders({ agentUrl: null });
-
-        expect(result.current.isLoading).toBe(false);
-        expect(result.current.fetchStatus).toBe("idle");
-        expect(invoke).not.toHaveBeenCalled();
-    });
-
-    it("respects refresh interval from settings", async () => {
-        vi.mocked(invoke).mockResolvedValue({ tasks: sampleTasks });
-
-        const { result } = renderHookWithProviders({}, { refreshInterval: 10000 });
-
-        await waitFor(() => {
-            expect(result.current.isSuccess).toBe(true);
-        });
-
-        expect(result.current.data).toEqual(sampleTasks);
+    it("re-discovers after a missing node", async () => {
+        vi.mocked(invoke).mockRejectedValue("node_not_found");
+        const { queryClient, wrapper } = createWrapper();
+        const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+        const { result } = renderHook(() => useContainerInventory(profileId, "old-node", null, 50), { wrapper });
+        await waitFor(() => expect(result.current.isError).toBe(true));
+        expect(invalidate).toHaveBeenCalledWith({ queryKey: configuredNodeKey(profileId) });
     });
 });

@@ -18,7 +18,6 @@ pub mod list_service_tasks;
 pub mod list_services;
 pub mod list_stacks;
 pub mod list_task_stats;
-pub mod list_tasks;
 pub mod list_volumes;
 pub mod ping_agent;
 pub mod prune_images;

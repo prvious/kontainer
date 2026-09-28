@@ -70,6 +70,7 @@ impl Modify for AccessSessionSecurity {
         show,
         deep::show,
         super::operations::show,
+        super::nodes::configured,
         super::containers::index,
         super::sessions::refresh,
         super::sessions::logout_current,
@@ -93,6 +94,7 @@ impl Modify for AccessSessionSecurity {
         ContainerItemResponse,
         ContainerStateResponse,
         ContainerErrorResponse,
+        super::nodes::ConfiguredNodeResponse,
         super::sessions::RefreshRequest,
         super::sessions::SessionTokenResponse,
         super::github_login::StartLoginRequest,
@@ -219,6 +221,25 @@ mod tests {
             schemas["AgentRpcState"]["enum"],
             serde_json::json!(["up", "down", "timeout"])
         );
+    }
+
+    #[test]
+    fn configured_node_openapi_has_one_closed_field() {
+        let document = serde_json::to_value(ApiDoc::openapi()).unwrap();
+        let route = &document["paths"]["/api/v1/nodes/configured"]["get"];
+        assert_eq!(route["operationId"], "configured_node");
+        assert_eq!(
+            route["security"],
+            serde_json::json!([{"access_session": []}])
+        );
+        assert!(route["responses"]["200"].is_object());
+        assert!(route["responses"]["401"].is_object());
+        assert!(route["responses"]["503"].is_object());
+        let response = &document["components"]["schemas"]["ConfiguredNodeResponse"];
+        assert_eq!(response["additionalProperties"], false);
+        assert_eq!(response["properties"].as_object().unwrap().len(), 1);
+        assert!(response["properties"]["nodeId"].is_object());
+        assert_eq!(response["required"], serde_json::json!(["nodeId"]));
     }
 
     #[test]

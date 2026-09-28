@@ -37,6 +37,7 @@ function AuthenticatedLayout() {
     const router = useRouter();
     const pathname = useLocation({ select: (location) => location.pathname });
     const settingsOpen = pathname === "/settings" || pathname === "/settings/";
+    const containersOpen = pathname === "/tasks" || pathname === "/tasks/";
 
     useEffect(() => {
         if (session) return;
@@ -64,6 +65,9 @@ function AuthenticatedLayout() {
                     <Logo />
                 </Link>
                 <div className='flex items-center gap-5'>
+                    <Link to='/tasks' className='font-mono text-xs text-muted-foreground hover:text-foreground'>
+                        Containers
+                    </Link>
                     <Link to='/settings' className='font-mono text-xs text-muted-foreground hover:text-foreground'>
                         Settings
                     </Link>
@@ -84,7 +88,7 @@ function AuthenticatedLayout() {
                     }}
                 />
             )}
-            {settingsOpen ? (
+            {settingsOpen || containersOpen ? (
                 <main className='flex-1 overflow-y-auto'>
                     <Outlet />
                 </main>
@@ -95,7 +99,10 @@ function AuthenticatedLayout() {
                         <p className='text-sm text-muted-foreground'>
                             Signed in as {session.githubLogin} to {session.origin}
                         </p>
-                        <p className='text-sm text-muted-foreground'>Cluster resources are temporarily unavailable.</p>
+                        <p className='text-sm text-muted-foreground'>Browse the configured node’s containers.</p>
+                        <Link to='/tasks' className='inline-block text-sm text-primary underline-offset-4 hover:underline'>
+                            Open Containers
+                        </Link>
                     </div>
                 </main>
             )}

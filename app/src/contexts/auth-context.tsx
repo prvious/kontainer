@@ -7,6 +7,7 @@ import { useSessionLogout } from "@/hooks/session/use-session-logout";
 import { useSessionRestore, sessionRestoreKey } from "@/hooks/session/use-session-restore";
 import { useSessionRetryCommit } from "@/hooks/session/use-session-retry-commit";
 import { sessionErrorCode, type SessionErrorCode, type SessionView } from "@/types/session";
+import type { InventoryErrorCode } from "@/types/inventory";
 
 function SessionAuthProvider({ children }: { children: React.ReactNode }) {
     const queryClient = useQueryClient();
@@ -33,6 +34,24 @@ function SessionAuthProvider({ children }: { children: React.ReactNode }) {
             }
         },
         [queryClient],
+    );
+
+    const reportInventoryCustodyError = useCallback(
+        (profileId: string, code: InventoryErrorCode) => {
+            const current = queryClient.getQueryData<SessionView | null>(sessionRestoreKey);
+            if (current?.profileId !== profileId) return;
+            const sessionCode: SessionErrorCode | null =
+                code === "unauthenticated"
+                    ? "relogin_required"
+                    : ["relogin_required", "vault_unavailable", "vault_write_failed", "local_state_failed", "cleanup_uncertain"].includes(code)
+                      ? (code as SessionErrorCode)
+                      : null;
+            if (sessionCode) {
+                publishSession(null);
+                setActionError(sessionCode);
+            }
+        },
+        [publishSession, queryClient],
     );
 
     const login = useCallback(
@@ -100,6 +119,7 @@ function SessionAuthProvider({ children }: { children: React.ReactNode }) {
         <AuthContext
             value={{
                 session,
+                reportInventoryCustodyError,
                 issue,
                 user: session ? { id: session.principalId, name: session.githubLogin, email: "", avatarUrl: "", provider: "github" } : null,
                 token: null,

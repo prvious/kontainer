@@ -46,7 +46,7 @@ describe("authenticated custody shell", () => {
         );
         await waitFor(() => expect(screen.getByText("Connected")).toBeInTheDocument());
         expect(screen.getByText(/Signed in as jane to https:\/\/controller.example\//)).toBeInTheDocument();
-        expect(screen.getByText("Cluster resources are temporarily unavailable.")).toBeInTheDocument();
+        expect(screen.getByText("Browse the configured node’s containers.")).toBeInTheDocument();
         expect(
             vi
                 .mocked(invoke)
@@ -78,10 +78,35 @@ describe("authenticated custody shell", () => {
         ).toBe(true);
     });
 
-    it("hides an unported resource route reached by a deep link", async () => {
+    it("opens Containers from a deep link while leaving other resource routes hidden", async () => {
         vi.clearAllMocks();
         vi.mocked(invoke).mockImplementation(async (command: string) => {
             if (command === "session_restore") return session;
+            if (command === "load_app_settings") return { refreshInterval: 5000 };
+            if (command === "get_configured_node") return null;
+            return null;
+        });
+        render(
+            <AuthProvider>
+                <TestApp initialPath='/tasks' />
+            </AuthProvider>,
+        );
+        await waitFor(() => expect(screen.getByRole("heading", { name: /containers/i })).toBeInTheDocument());
+        expect(screen.getByText("No node is configured on this controller.")).toBeInTheDocument();
+        expect(
+            vi
+                .mocked(invoke)
+                .mock.calls.map(([command]) => command)
+                .every((command) => ["session_restore", "load_app_settings", "get_configured_node"].includes(command)),
+        ).toBe(true);
+    });
+
+    it("returns to login when inventory reports a session rejected after refresh", async () => {
+        vi.clearAllMocks();
+        vi.mocked(invoke).mockImplementation(async (command: string) => {
+            if (command === "session_restore") return session;
+            if (command === "get_configured_node") return "node-1";
+            if (command === "list_container_inventory") throw "relogin_required";
             if (command === "load_app_settings") return { refreshInterval: 5000 };
             return null;
         });
@@ -90,14 +115,9 @@ describe("authenticated custody shell", () => {
                 <TestApp initialPath='/tasks' />
             </AuthProvider>,
         );
-        await waitFor(() => expect(screen.getByText("Cluster resources are temporarily unavailable.")).toBeInTheDocument());
-        expect(screen.queryByRole("heading", { name: /containers/i })).not.toBeInTheDocument();
-        expect(
-            vi
-                .mocked(invoke)
-                .mock.calls.map(([command]) => command)
-                .every((command) => ["session_restore", "load_app_settings"].includes(command)),
-        ).toBe(true);
+        await waitFor(() => expect(screen.getByRole("button", { name: "Connect with GitHub" })).toBeInTheDocument());
+        expect(screen.getByText("Your session expired or was revoked. Sign in again.")).toBeInTheDocument();
+        expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "list_container_inventory")).toHaveLength(1);
     });
 
     it("signs out through Rust custody and returns to login", async () => {

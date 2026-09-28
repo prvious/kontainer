@@ -4,7 +4,7 @@ use reqwest::Method;
 use tokio_util::sync::CancellationToken;
 
 use super::{ContainerPage, ContainerPageBody, ContainerPageRequest, NodeId};
-use crate::client::{NativeClient, RetryPolicy, decode_json};
+use crate::client::{ErrorBodyPolicy, NativeClient, RetryPolicy, decode_json};
 use crate::credentials::AccessCredential;
 use crate::error::NativeClientError;
 
@@ -21,8 +21,8 @@ impl NativeClient {
     /// [`NativeClientError::InvalidPagination`] when the limit or cursor is
     /// outside the documented bounds (no request leaves the client),
     /// [`NativeClientError::NotFound`] for an unknown node,
-    /// [`NativeClientError::ServiceUnavailable`] when the node agent is
-    /// unavailable, and [`NativeClientError::GatewayTimeout`] when the agent
+    /// [`NativeClientError::AgentUnavailable`] when the node agent is
+    /// unavailable, and [`NativeClientError::AgentTimeout`] when the agent
     /// deadline expires. This is a read-only GET, so a classified
     /// pre-response transient failure is retried exactly once inside the
     /// call's original deadline.
@@ -44,11 +44,12 @@ impl NativeClient {
         }
         let request = self.authorized_request(Method::GET, url, access)?;
         let body = self
-            .execute(
+            .execute_with_error_policy(
                 request,
                 RetryPolicy::Once,
                 self.limits.collection_body_limit,
                 cancellation,
+                ErrorBodyPolicy::Inventory,
             )
             .await?;
         decode_json::<ContainerPageBody>(&body)?.into_page(node_id)

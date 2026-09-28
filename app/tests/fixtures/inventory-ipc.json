@@ -1,0 +1,34 @@
+{
+    "commands": ["get_configured_node", "list_container_inventory"],
+    "configuredNode": "node-1",
+    "containerPage": {
+        "items": [
+            {
+                "containerId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "displayName": "web",
+                "imageReference": "nginx:latest",
+                "state": "running",
+                "status": "Up 3 minutes",
+                "createdAt": "2026-09-19T06:00:00.000Z",
+                "nodeId": "node-1"
+            }
+        ],
+        "nextCursor": "v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "errorCodes": [
+        "unauthenticated",
+        "relogin_required",
+        "vault_unavailable",
+        "vault_write_failed",
+        "local_state_failed",
+        "cleanup_uncertain",
+        "invalid_node_id",
+        "invalid_pagination",
+        "node_not_found",
+        "forbidden",
+        "controller_unavailable",
+        "agent_unavailable",
+        "agent_timeout",
+        "invalid_response"
+    ]
+}

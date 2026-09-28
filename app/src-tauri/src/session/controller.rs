@@ -9,8 +9,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use kontainer_native_client::{
-    AccessCredential, LoginVerifier, NativeClient, NativeClientConfig, NativeClientError,
-    RefreshCredential,
+    AccessCredential, ContainerPage, ContainerPageRequest, LoginVerifier, NativeClient,
+    NativeClientConfig, NativeClientError, NodeId, RefreshCredential,
 };
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -78,6 +78,20 @@ pub(crate) trait Controller: Send + Sync + 'static {
         access: &'a AccessCredential,
         cancellation: &'a CancellationToken,
     ) -> ControllerFuture<'a, Result<(), SessionError>>;
+
+    fn discover_node<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<Option<NodeId>, NativeClientError>>;
+
+    fn list_containers<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        node_id: &'a NodeId,
+        page: &'a ContainerPageRequest,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ContainerPage, NativeClientError>>;
 }
 
 /// Builds a controller for a validated controller origin.
@@ -188,6 +202,27 @@ impl Controller for NativeController {
                 .await
                 .map_err(map_logout_error)
         })
+    }
+
+    fn discover_node<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<Option<NodeId>, NativeClientError>> {
+        Box::pin(self.client.discover_node(access, cancellation))
+    }
+
+    fn list_containers<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        node_id: &'a NodeId,
+        page: &'a ContainerPageRequest,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ContainerPage, NativeClientError>> {
+        Box::pin(
+            self.client
+                .list_containers(access, node_id, page, cancellation),
+        )
     }
 }
 

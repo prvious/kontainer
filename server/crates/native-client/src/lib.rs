@@ -31,6 +31,7 @@ mod client;
 mod containers;
 mod credentials;
 mod error;
+mod nodes;
 mod operations;
 
 #[cfg(test)]

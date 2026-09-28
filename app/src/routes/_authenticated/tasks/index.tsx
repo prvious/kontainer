@@ -1,238 +1,169 @@
+import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { useTasks } from "@/hooks/use-tasks";
-import { useNodes } from "@/hooks/use-nodes";
-import { useClusterMetrics } from "@/hooks/use-cluster-metrics";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { AlertCircle, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
+import { useAuth } from "@/hooks/use-auth";
+import { useConfiguredNode, useContainerInventory } from "@/hooks/use-container-inventory";
+import { inventoryErrorCode, type ContainerState, type InventoryErrorCode } from "@/types/inventory";
 import { PageHeader } from "@/components/page-header";
-import { TableShell } from "@/components/table-shell";
-import { TableToolbar } from "@/components/table-toolbar";
-import { ColumnHeaders } from "@/components/column-headers";
-import { RefreshButton } from "@/components/refresh-button";
-import { AlertCircle, Container, ScrollText, Terminal } from "lucide-react";
-import { useState, useMemo } from "react";
-import type { TaskItem } from "@/types/tasks";
-import type { ContainerMetrics } from "@/types/metrics";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
-const QUERY_KEYS: string[][] = [["tasks"], ["cluster-metrics"]];
+const PAGE_SIZE = 50;
 
-function formatMemory(bytes: number): string {
-    if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
-    if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
-    if (bytes >= 1e6) return `${Math.round(bytes / 1e6)} MB`;
-    return `${Math.round(bytes / 1e3)} KB`;
+const errorMessages: Record<InventoryErrorCode, string> = {
+    unauthenticated: "Your session is no longer available. Sign in again.",
+    relogin_required: "Your session expired or was revoked. Sign in again.",
+    vault_unavailable: "The credential vault is unavailable. Unlock it and retry restore.",
+    vault_write_failed: "The refreshed session could not be saved. Retry saving it.",
+    local_state_failed: "Local session state could not be read or saved.",
+    cleanup_uncertain: "Session cleanup needs attention before inventory can continue.",
+    invalid_node_id: "The configured node ID is invalid.",
+    invalid_pagination: "This page is no longer available. Start again from page one.",
+    node_not_found: "The configured node changed or is no longer available.",
+    forbidden: "Your session cannot read this inventory.",
+    controller_unavailable: "The controller is unavailable. Try again.",
+    agent_unavailable: "The node agent is unavailable. Try again.",
+    agent_timeout: "The node agent did not respond in time. Try again.",
+    invalid_response: "The controller returned an invalid inventory response.",
+};
+
+function ErrorPanel({ error, retry, reset }: { error: unknown; retry: () => void; reset?: () => void }) {
+    const code = inventoryErrorCode(error);
+    return (
+        <div role='alert' className='flex flex-col items-center gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-6 py-10 text-center'>
+            <AlertCircle className='size-5 text-destructive' />
+            <p className='text-sm text-foreground'>{errorMessages[code]}</p>
+            {code === "invalid_pagination" && reset ? (
+                <Button variant='outline' size='sm' onClick={reset}>
+                    First page
+                </Button>
+            ) : !["unauthenticated", "relogin_required", "vault_write_failed", "cleanup_uncertain"].includes(code) ? (
+                <Button variant='outline' size='sm' onClick={retry}>
+                    Retry
+                </Button>
+            ) : null}
+        </div>
+    );
 }
 
-function formatUptime(timestamp: string): string {
-    const ms = Date.now() - new Date(timestamp).getTime();
-    if (!Number.isFinite(ms) || ms < 0) return "--";
-    const seconds = Math.floor(ms / 1000);
-    if (seconds < 60) return "just now";
-    const minutes = Math.floor(seconds / 60);
-    if (minutes < 60) return `${minutes}m`;
-    const hours = Math.floor(minutes / 60);
-    if (hours < 24) return `${hours}h ${minutes % 60}m`;
-    const days = Math.floor(hours / 24);
-    return `${days}d ${hours % 24}h`;
+function LoadingRows() {
+    return (
+        <div aria-label='Loading containers' className='space-y-2 rounded-lg border border-border p-4'>
+            {[1, 2, 3, 4].map((row) => (
+                <Skeleton key={row} className='h-9 w-full' />
+            ))}
+        </div>
+    );
 }
 
-function statusInfo(state: string): { label: string; dotColor: string; textColor: string } {
-    const s = state.toLowerCase();
-    if (s === "running") return { label: "UP", dotColor: "bg-accent-green", textColor: "text-accent-green" };
-    if (["paused", "preparing", "pending", "assigned", "accepted"].includes(s))
-        return { label: "PAUSE", dotColor: "bg-accent-orange", textColor: "text-accent-orange" };
-    return { label: "EXIT", dotColor: "bg-accent-red", textColor: "text-accent-red" };
+function stateVariant(state: ContainerState): "secondary" | "outline" | "destructive" {
+    if (state === "running") return "secondary";
+    if (state === "exited" || state === "dead") return "destructive";
+    return "outline";
 }
 
-const CONTAINER_COLUMNS = [
-    { label: "STATUS", width: 70 },
-    { label: "NAME" },
-    { label: "IMAGE", width: 200 },
-    { label: "CPU", width: 60, align: "right" as const },
-    { label: "MEM", width: 70, align: "right" as const },
-    { label: "PORTS", width: 100 },
-    { label: "UPTIME", width: 80, align: "right" as const },
-    { label: "", width: 60 },
-];
-
-function TaskRow({ task, metrics }: { task: TaskItem; metrics: ContainerMetrics | undefined }) {
-    const status = statusInfo(task.state);
-    const isError = task.state.toLowerCase().includes("failed") || task.state.toLowerCase().includes("rejected");
+function ContainerInventory({ profileId, nodeId }: { profileId: string; nodeId: string }) {
+    const [cursors, setCursors] = useState<(string | null)[]>([null]);
+    const cursor = cursors[cursors.length - 1];
+    const inventory = useContainerInventory(profileId, nodeId, cursor, PAGE_SIZE);
+    const page = inventory.data;
 
     return (
-        <div className={`flex items-center border-b border-border px-4 py-2.5 hover:bg-bg-elevated/50 ${isError ? "bg-accent-red/5" : ""}`}>
-            {/* STATUS */}
-            <div style={{ width: 70 }} className='flex items-center gap-1.5'>
-                <span className={`size-1.5 shrink-0 rounded-full ${status.dotColor}`} />
-                <span className={`font-mono text-[10px] font-semibold ${status.textColor}`}>{status.label}</span>
-            </div>
-
-            {/* NAME */}
-            <div style={{ flex: 1 }} className='min-w-0'>
-                <span className='truncate font-mono text-xs text-foreground'>{task.serviceName}</span>
-            </div>
-
-            {/* IMAGE */}
-            <div style={{ width: 200 }}>
-                <span className='truncate font-mono text-xs text-muted-foreground'>{task.image}</span>
-            </div>
-
-            {/* CPU */}
-            <div style={{ width: 60 }} className='text-right'>
-                {metrics ? (
-                    <span className={`font-mono text-xs ${metrics.cpuPercent > 8 ? "text-accent-orange" : "text-foreground"}`}>
-                        {metrics.cpuPercent.toFixed(1)}%
-                    </span>
-                ) : (
-                    <span className='font-mono text-xs text-muted-foreground'>&mdash;</span>
-                )}
-            </div>
-
-            {/* MEM */}
-            <div style={{ width: 70 }} className='text-right'>
-                {metrics ? (
-                    <span className={`font-mono text-xs ${metrics.memoryUsed >= 1e9 ? "text-accent-orange" : "text-foreground"}`}>
-                        {formatMemory(metrics.memoryUsed)}
-                    </span>
-                ) : (
-                    <span className='font-mono text-xs text-muted-foreground'>&mdash;</span>
-                )}
-            </div>
-
-            {/* PORTS */}
-            <div style={{ width: 100 }}>
-                <span className='font-mono text-xs text-muted-foreground'>&mdash;</span>
-            </div>
-
-            {/* UPTIME */}
-            <div style={{ width: 80 }} className='text-right'>
-                <span className='font-mono text-xs text-muted-foreground'>{formatUptime(task.timestamp)}</span>
-            </div>
-
-            {/* Actions */}
-            <div style={{ width: 60 }} className='flex items-center justify-end gap-1'>
-                <TooltipProvider>
-                    <Tooltip>
-                        <TooltipTrigger className='inline-flex size-6 items-center justify-center rounded text-muted-foreground hover:text-foreground'>
-                            <Terminal className='size-3' />
-                        </TooltipTrigger>
-                        <TooltipContent>Terminal</TooltipContent>
-                    </Tooltip>
-                </TooltipProvider>
-                <TooltipProvider>
-                    <Tooltip>
-                        <TooltipTrigger className='inline-flex size-6 items-center justify-center rounded text-muted-foreground hover:text-foreground'>
-                            <ScrollText className='size-3' />
-                        </TooltipTrigger>
-                        <TooltipContent>Logs</TooltipContent>
-                    </Tooltip>
-                </TooltipProvider>
+        <div className='mx-auto flex w-full max-w-7xl flex-col gap-5 p-6'>
+            <PageHeader title='CONTAINERS' subtitle={`Node ${nodeId} · read-only inventory`}>
+                <Button variant='outline' size='sm' onClick={() => void inventory.refetch()} disabled={inventory.isFetching}>
+                    <RefreshCw className='size-3.5' /> Refresh
+                </Button>
+            </PageHeader>
+            {inventory.isPending ? (
+                <LoadingRows />
+            ) : inventory.error ? (
+                <ErrorPanel error={inventory.error} retry={() => void inventory.refetch()} reset={() => setCursors([null])} />
+            ) : page?.items.length === 0 ? (
+                <div className='rounded-lg border border-border px-6 py-12 text-center text-sm text-muted-foreground'>No containers on this page.</div>
+            ) : (
+                <div className='rounded-lg border border-border'>
+                    <Table>
+                        <TableHeader>
+                            <TableRow>
+                                <TableHead>Name</TableHead>
+                                <TableHead>Image</TableHead>
+                                <TableHead>State</TableHead>
+                                <TableHead>Status</TableHead>
+                                <TableHead>Created</TableHead>
+                                <TableHead>Node</TableHead>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                            {page?.items.map((item) => (
+                                <TableRow key={`${item.nodeId}:${item.containerId}`}>
+                                    <TableCell className='font-medium'>{item.displayName}</TableCell>
+                                    <TableCell className='font-mono text-xs'>{item.imageReference}</TableCell>
+                                    <TableCell>
+                                        <Badge variant={stateVariant(item.state)}>{item.state}</Badge>
+                                    </TableCell>
+                                    <TableCell className='text-muted-foreground'>{item.status}</TableCell>
+                                    <TableCell className='font-mono text-xs text-muted-foreground'>{item.createdAt}</TableCell>
+                                    <TableCell className='font-mono text-xs text-muted-foreground'>{item.nodeId}</TableCell>
+                                </TableRow>
+                            ))}
+                        </TableBody>
+                    </Table>
+                </div>
+            )}
+            <div className='flex items-center justify-end gap-2'>
+                <span className='mr-2 text-xs text-muted-foreground'>Page {cursors.length}</span>
+                <Button
+                    variant='outline'
+                    size='sm'
+                    disabled={cursors.length === 1 || inventory.isFetching}
+                    onClick={() => setCursors((current) => current.slice(0, -1))}
+                >
+                    <ChevronLeft className='size-3.5' /> Previous
+                </Button>
+                <Button
+                    variant='outline'
+                    size='sm'
+                    disabled={!page?.nextCursor || inventory.isFetching}
+                    onClick={() => {
+                        if (page?.nextCursor) setCursors((current) => [...current, page.nextCursor]);
+                    }}
+                >
+                    Next <ChevronRight className='size-3.5' />
+                </Button>
             </div>
         </div>
     );
 }
 
-function LoadingSkeleton() {
-    return (
-        <div className='flex flex-col gap-6 p-6'>
-            <div className='flex items-center justify-between'>
-                <div className='flex flex-col gap-1'>
-                    <Skeleton className='h-7 w-32' />
-                    <Skeleton className='h-3 w-56' />
-                </div>
-            </div>
-            <div className='flex flex-col overflow-hidden border border-border'>
-                <div className='flex items-center justify-between border-b border-border px-4 py-3'>
-                    <Skeleton className='h-4 w-36' />
-                    <Skeleton className='h-7 w-48' />
-                </div>
-                <div className='space-y-0'>
-                    {[1, 2, 3, 4, 5].map((i) => (
-                        <div key={i} className='flex items-center gap-3 border-b border-border px-4 py-2.5 last:border-0'>
-                            <Skeleton className='size-1.5 rounded-full' />
-                            <Skeleton className='h-3 w-28' />
-                            <Skeleton className='h-3 w-40' />
-                            <Skeleton className='ml-auto h-3 w-12' />
-                            <Skeleton className='h-3 w-14' />
-                        </div>
-                    ))}
-                </div>
-            </div>
-        </div>
-    );
-}
-
-function TasksPage() {
-    const { data: tasks, isLoading, error } = useTasks();
-    const { data: nodes } = useNodes();
-    const { data: metricsData } = useClusterMetrics();
-    const [search, setSearch] = useState("");
-
-    const containerMetrics = useMemo(() => {
-        const map = new Map<string, ContainerMetrics>();
-        if (!metricsData?.agents) return map;
-        for (const agent of metricsData.agents) {
-            for (const c of agent.containers) {
-                if (c.containerId) {
-                    map.set(c.containerId, c);
-                }
-            }
-        }
-        return map;
-    }, [metricsData]);
-
-    const filtered = useMemo(() => {
-        const all = tasks ?? [];
-        if (!search) return all;
-        const q = search.toLowerCase();
-        return all.filter((task) => task.serviceName.toLowerCase().includes(q) || task.image.toLowerCase().includes(q) || task.state.toLowerCase().includes(q));
-    }, [tasks, search]);
-
-    if (isLoading) {
-        return <LoadingSkeleton />;
-    }
-
-    if (error) {
+function ContainersPage() {
+    const { session } = useAuth();
+    const profileId = session?.profileId ?? null;
+    const discovery = useConfiguredNode(profileId);
+    if (!profileId || discovery.isPending)
         return (
-            <div className='flex flex-col items-center justify-center gap-3 py-12'>
-                <AlertCircle className='size-5 text-destructive' />
-                <p className='text-sm text-destructive'>Failed to load tasks</p>
-                <RefreshButton queryKeys={QUERY_KEYS} />
+            <div className='p-6'>
+                <LoadingRows />
             </div>
         );
-    }
-
-    const runningCount = (tasks ?? []).filter((t) => t.state.toLowerCase() === "running").length;
-    const nodeCount = nodes?.length ?? 0;
-    const subtitle = `Running ${runningCount} containers across ${nodeCount} ${nodeCount === 1 ? "node" : "nodes"}`;
-
-    return (
-        <div className='flex h-full flex-col gap-6 p-6'>
-            <PageHeader title='CONTAINERS' subtitle={subtitle}>
-                <RefreshButton queryKeys={QUERY_KEYS} />
-            </PageHeader>
-
-            <TableToolbar searchValue={search} onSearchChange={setSearch} searchPlaceholder='Search containers...' />
-
-            <TableShell title='ALL CONTAINERS' count={filtered.length}>
-                <ColumnHeaders columns={CONTAINER_COLUMNS} />
-                {filtered.length === 0 ? (
-                    <div className='flex flex-col items-center justify-center gap-1.5 py-12 text-xs text-muted-foreground'>
-                        <Container className='size-4' />
-                        <p>{search ? "No containers match your filter" : "No containers found"}</p>
-                    </div>
-                ) : (
-                    <div>
-                        {filtered.map((task) => (
-                            <TaskRow key={task.id} task={task} metrics={task.containerId ? containerMetrics.get(task.containerId) : undefined} />
-                        ))}
-                    </div>
-                )}
-            </TableShell>
-        </div>
-    );
+    if (discovery.error)
+        return (
+            <div className='p-6'>
+                <ErrorPanel error={discovery.error} retry={() => void discovery.refetch()} />
+            </div>
+        );
+    if (!discovery.data)
+        return (
+            <div className='mx-auto max-w-7xl p-6'>
+                <PageHeader title='CONTAINERS' subtitle='Read-only inventory' />
+                <div className='mt-5 rounded-lg border border-border px-6 py-12 text-center text-sm text-muted-foreground'>
+                    No node is configured on this controller.
+                </div>
+            </div>
+        );
+    return <ContainerInventory key={`${profileId}:${discovery.data}`} profileId={profileId} nodeId={discovery.data} />;
 }
 
-export const Route = createFileRoute("/_authenticated/tasks/")({
-    component: TasksPage,
-});
+export const Route = createFileRoute("/_authenticated/tasks/")({ component: ContainersPage });

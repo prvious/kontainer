@@ -216,6 +216,37 @@
         ]
       }
     },
+    "/api/v1/nodes/configured": {
+      "get": {
+        "tags": [
+          "super::nodes"
+        ],
+        "operationId": "configured_node",
+        "responses": {
+          "200": {
+            "description": "The one configured node, without contacting the agent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfiguredNodeResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "503": {
+            "description": "Controller draining new work or session persistence unavailable"
+          }
+        },
+        "security": [
+          {
+            "access_session": []
+          }
+        ]
+      }
+    },
     "/api/v1/nodes/{nodeId}/containers": {
       "get": {
         "tags": [
@@ -514,6 +545,22 @@
         "properties": {
           "version": {
             "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ConfiguredNodeResponse": {
+        "type": "object",
+        "required": [
+          "nodeId"
+        ],
+        "properties": {
+          "nodeId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The configured node ID, or null when no agent client is configured."
           }
         },
         "additionalProperties": false
