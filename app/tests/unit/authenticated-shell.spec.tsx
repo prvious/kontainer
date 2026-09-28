@@ -32,7 +32,7 @@ function TestRouter({ auth, initialPath }: { auth: AuthContextValue; initialPath
 }
 
 describe("authenticated custody shell", () => {
-    it("shows the non-secret session without mounting direct-agent screens", async () => {
+    it("renders the outlet for every authenticated route, starting from the root redirect", async () => {
         vi.clearAllMocks();
         vi.mocked(invoke).mockImplementation(async (command: string) => {
             if (command === "session_restore") return session;
@@ -44,18 +44,17 @@ describe("authenticated custody shell", () => {
                 <TestApp />
             </AuthProvider>,
         );
-        await waitFor(() => expect(screen.getByText("Connected")).toBeInTheDocument());
-        expect(screen.getByText(/Signed in as jane to https:\/\/controller.example\//)).toBeInTheDocument();
-        expect(screen.getByText("Browse the configured node’s containers.")).toBeInTheDocument();
+        await waitFor(() => expect(screen.getByRole("heading", { name: /containers/i })).toBeInTheDocument());
+        expect(screen.queryByText("Connected")).not.toBeInTheDocument();
         expect(
             vi
                 .mocked(invoke)
                 .mock.calls.map(([command]) => command)
-                .every((command) => ["session_restore", "load_app_settings"].includes(command)),
+                .every((command) => ["session_restore", "load_app_settings", "get_configured_node"].includes(command)),
         ).toBe(true);
     });
 
-    it("keeps local settings available without mounting resource screens", async () => {
+    it("keeps local settings available from the shell", async () => {
         vi.clearAllMocks();
         vi.mocked(invoke).mockImplementation(async (command: string) => {
             if (command === "session_restore") return session;
@@ -74,11 +73,11 @@ describe("authenticated custody shell", () => {
             vi
                 .mocked(invoke)
                 .mock.calls.map(([command]) => command)
-                .every((command) => ["session_restore", "load_app_settings"].includes(command)),
+                .every((command) => ["session_restore", "load_app_settings", "get_configured_node"].includes(command)),
         ).toBe(true);
     });
 
-    it("opens Containers from a deep link while leaving other resource routes hidden", async () => {
+    it("opens Containers from a deep link", async () => {
         vi.clearAllMocks();
         vi.mocked(invoke).mockImplementation(async (command: string) => {
             if (command === "session_restore") return session;
@@ -151,7 +150,7 @@ describe("authenticated custody shell", () => {
             </AuthProvider>,
         );
         await userEvent.setup().click(await screen.findByRole("button", { name: "Connect with GitHub" }));
-        await waitFor(() => expect(screen.getByText("Connected")).toBeInTheDocument());
+        await waitFor(() => expect(screen.getByRole("heading", { name: /containers/i })).toBeInTheDocument());
         expect(invoke).toHaveBeenCalledWith("session_login", { origin: "http://127.0.0.1:5150", label: null });
     });
 });

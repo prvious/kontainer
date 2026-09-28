@@ -1,14 +1,11 @@
 import { createContext } from "react";
-import type { AuthState } from "@/types/auth";
-import type { ConnectionProfile } from "@/types/connection";
 import type { SessionErrorCode, SessionView } from "@/types/session";
 import type { InventoryErrorCode } from "@/types/inventory";
 
-export interface AuthContextValue extends AuthState {
+export interface AuthContextValue {
     session: SessionView | null;
+    isLoading: boolean;
     issue: SessionErrorCode | null;
-    profiles: ConnectionProfile[];
-    activeProfileId: string | null;
     login: (origin: string, label?: string) => Promise<void>;
     logout: () => Promise<void>;
     retryCommit: () => Promise<void>;

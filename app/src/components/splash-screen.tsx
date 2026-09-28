@@ -1,6 +1,8 @@
 import { Container } from "lucide-react";
+import { useAppVersion } from "@/hooks/use-app-version";
 
 export function SplashScreen() {
+    const version = useAppVersion();
     return (
         <div className='flex h-screen flex-col bg-background'>
             {/* Accent line */}
@@ -28,7 +30,7 @@ export function SplashScreen() {
                     </div>
 
                     {/* Version */}
-                    <span className='font-mono text-[10px] font-medium text-muted-foreground'>v1.0.0</span>
+                    <span className='font-mono text-[10px] font-medium text-muted-foreground'>{version ? `v${version}` : null}</span>
                 </div>
             </div>
         </div>

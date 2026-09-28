@@ -7,7 +7,3 @@ export interface AppSettings {
     font: string | null;
     scheme: string | null;
 }
-
-export interface AgentSettings {
-    settings: Record<string, string>;
-}

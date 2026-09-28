@@ -31,14 +31,16 @@ function TestConsumer() {
     const auth = useAuth();
     return (
         <div>
-            <span data-testid='user'>{auth.user?.name ?? "none"}</span>
+            <span data-testid='user'>{auth.session?.githubLogin ?? "none"}</span>
             <span data-testid='session'>{auth.session?.profileId ?? "none"}</span>
-            <span data-testid='token'>{auth.token ?? "none"}</span>
-            <span data-testid='origin'>{auth.agentUrl ?? "none"}</span>
+            <span data-testid='credential-keys'>
+                {Object.keys(auth)
+                    .filter((key) => /token|credential|secret/i.test(key))
+                    .join(",") || "none"}
+            </span>
+            <span data-testid='origin'>{auth.session?.origin ?? "none"}</span>
             <span data-testid='issue'>{auth.issue ?? "none"}</span>
             <span data-testid='loading'>{String(auth.isLoading)}</span>
-            <span data-testid='profiles'>{auth.profiles.length}</span>
-            <span data-testid='profile-id'>{auth.activeProfileId ?? "none"}</span>
             <button
                 onClick={() => {
                     void auth.login("https://controller.example", "Production").catch(() => {});
@@ -103,8 +105,8 @@ describe("AuthProvider custody", () => {
         renderAuth();
         await restored();
         expect(screen.getByTestId("user")).toHaveTextContent("none");
-        expect(screen.getByTestId("token")).toHaveTextContent("none");
-        expect(screen.getByTestId("profiles")).toHaveTextContent("0");
+        expect(screen.getByTestId("session")).toHaveTextContent("none");
+        expect(screen.getByTestId("credential-keys")).toHaveTextContent("none");
         expect(invoke).toHaveBeenCalledWith("session_restore", undefined);
     });
 
@@ -118,18 +120,17 @@ describe("AuthProvider custody", () => {
         await waitFor(() => expect(screen.getByTestId("session")).toHaveTextContent(session.profileId));
         expect(invoke).toHaveBeenCalledWith("session_login", { origin: "https://controller.example", label: "Production" });
         expect(vi.mocked(invoke).mock.calls.every(([command]) => !["auth_listen", "load_profiles", "save_profile"].includes(command))).toBe(true);
-        expect(screen.getByTestId("token")).toHaveTextContent("none");
+        expect(screen.getByTestId("credential-keys")).toHaveTextContent("none");
     });
 
-    it("derives one non-secret profile and display identity from SessionView", async () => {
+    it("exposes the restored non-secret SessionView and nothing credential-shaped", async () => {
         vi.mocked(invoke).mockResolvedValue(session);
         renderAuth();
         await restored();
         expect(screen.getByTestId("user")).toHaveTextContent("jane");
-        expect(screen.getByTestId("profiles")).toHaveTextContent("1");
-        expect(screen.getByTestId("profile-id")).toHaveTextContent(session.profileId);
+        expect(screen.getByTestId("session")).toHaveTextContent(session.profileId);
         expect(screen.getByTestId("origin")).toHaveTextContent(session.origin);
-        expect(screen.getByTestId("token")).toHaveTextContent("none");
+        expect(screen.getByTestId("credential-keys")).toHaveTextContent("none");
     });
 
     it("shows vault_write_failed as a distinct login state", async () => {

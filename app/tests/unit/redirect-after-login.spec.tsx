@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
-import { createMemoryHistory, createRootRouteWithContext, createRoute, createRouter, RouterProvider } from "@tanstack/react-router";
+import { createMemoryHistory, createRootRouteWithContext, createRoute, createRouter, RouterProvider, useNavigate } from "@tanstack/react-router";
 import { AuthProvider } from "@/contexts/auth-context";
 import { useAuth } from "@/hooks/use-auth";
 import type { AuthContextValue } from "@/contexts/auth-context-value";
@@ -28,7 +28,7 @@ const loginRoute = createRoute({
     validateSearch: (search: Record<string, unknown>) => ({ redirect: typeof search.redirect === "string" ? search.redirect : undefined }),
     component: function Login() {
         const { login } = useAuth();
-        const navigate = loginRoute.useNavigate();
+        const navigate = useNavigate();
         const { redirect } = loginRoute.useSearch();
         return (
             <button

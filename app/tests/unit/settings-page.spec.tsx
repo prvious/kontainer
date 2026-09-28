@@ -56,7 +56,6 @@ const mockSettings: SettingsContextValue = {
 };
 
 const defaultAuthReturn = {
-    user: { id: "u1", name: "Test User", email: "test@example.com", avatarUrl: "", provider: "github" },
     session: {
         profileId: "p1",
         origin: "https://controller.example",
@@ -67,18 +66,7 @@ const defaultAuthReturn = {
         accessExpiresAtUnixMs: 2_000_000_000_000,
     },
     issue: null,
-    token: null,
-    expiresAt: Math.floor(Date.now() / 1000) + 3600,
-    agentUrl: "https://controller.example",
     isLoading: false,
-    profiles: [
-        {
-            id: "p1",
-            label: "Production",
-            agentUrl: "https://controller.example",
-        },
-    ],
-    activeProfileId: "p1",
     login: vi.fn(),
     logout: vi.fn(),
     retryCommit: vi.fn(),
@@ -256,8 +244,6 @@ describe("SettingsPage - Connection section", () => {
         vi.mocked(useAuth).mockReturnValue({
             ...defaultAuthReturn,
             session: null,
-            profiles: [],
-            activeProfileId: null,
         });
 
         renderWithProviders();

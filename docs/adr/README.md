@@ -48,3 +48,4 @@ What becomes easier, what becomes harder, what must be revisited and when.
 | [0008](./0008-build-plan-replaces-issues.md) | The build plan in docs/build replaces GitHub issues for this phase | accepted |
 | [0009](./0009-in-process-operation-worker.md) | Durable operations run on an in-process controller worker | accepted |
 | [0010](./0010-deferred-features-and-placeholders.md) | Deferred features and how their placeholders render | accepted |
+| [0011](./0011-remove-codemirror.md) | Remove CodeMirror with the v1 editors | accepted |

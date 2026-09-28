@@ -12,21 +12,8 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
-import { Route as AuthenticatedVolumesIndexRouteImport } from './routes/_authenticated/volumes/index'
 import { Route as AuthenticatedTasksIndexRouteImport } from './routes/_authenticated/tasks/index'
-import { Route as AuthenticatedStacksIndexRouteImport } from './routes/_authenticated/stacks/index'
 import { Route as AuthenticatedSettingsIndexRouteImport } from './routes/_authenticated/settings/index'
-import { Route as AuthenticatedServicesIndexRouteImport } from './routes/_authenticated/services/index'
-import { Route as AuthenticatedSecretsIndexRouteImport } from './routes/_authenticated/secrets/index'
-import { Route as AuthenticatedNodesIndexRouteImport } from './routes/_authenticated/nodes/index'
-import { Route as AuthenticatedNetworksIndexRouteImport } from './routes/_authenticated/networks/index'
-import { Route as AuthenticatedLogsIndexRouteImport } from './routes/_authenticated/logs/index'
-import { Route as AuthenticatedImagesIndexRouteImport } from './routes/_authenticated/images/index'
-import { Route as AuthenticatedExecIndexRouteImport } from './routes/_authenticated/exec/index'
-import { Route as AuthenticatedConfigsIndexRouteImport } from './routes/_authenticated/configs/index'
-import { Route as AuthenticatedStacksStackNameRouteImport } from './routes/_authenticated/stacks/$stackName'
-import { Route as AuthenticatedServicesServiceIdRouteImport } from './routes/_authenticated/services/$serviceId'
-import { Route as AuthenticatedConfigsConfigIdRouteImport } from './routes/_authenticated/configs/$configId'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -42,211 +29,50 @@ const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
-const AuthenticatedVolumesIndexRoute =
-  AuthenticatedVolumesIndexRouteImport.update({
-    id: '/volumes/',
-    path: '/volumes/',
-    getParentRoute: () => AuthenticatedRoute,
-  } as any)
 const AuthenticatedTasksIndexRoute = AuthenticatedTasksIndexRouteImport.update({
   id: '/tasks/',
   path: '/tasks/',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
-const AuthenticatedStacksIndexRoute =
-  AuthenticatedStacksIndexRouteImport.update({
-    id: '/stacks/',
-    path: '/stacks/',
-    getParentRoute: () => AuthenticatedRoute,
-  } as any)
 const AuthenticatedSettingsIndexRoute =
   AuthenticatedSettingsIndexRouteImport.update({
     id: '/settings/',
     path: '/settings/',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
-const AuthenticatedServicesIndexRoute =
-  AuthenticatedServicesIndexRouteImport.update({
-    id: '/services/',
-    path: '/services/',
-    getParentRoute: () => AuthenticatedRoute,
-  } as any)
-const AuthenticatedSecretsIndexRoute =
-  AuthenticatedSecretsIndexRouteImport.update({
-    id: '/secrets/',
-    path: '/secrets/',
-    getParentRoute: () => AuthenticatedRoute,
-  } as any)
-const AuthenticatedNodesIndexRoute = AuthenticatedNodesIndexRouteImport.update({
-  id: '/nodes/',
-  path: '/nodes/',
-  getParentRoute: () => AuthenticatedRoute,
-} as any)
-const AuthenticatedNetworksIndexRoute =
-  AuthenticatedNetworksIndexRouteImport.update({
-    id: '/networks/',
-    path: '/networks/',
-    getParentRoute: () => AuthenticatedRoute,
-  } as any)
-const AuthenticatedLogsIndexRoute = AuthenticatedLogsIndexRouteImport.update({
-  id: '/logs/',
-  path: '/logs/',
-  getParentRoute: () => AuthenticatedRoute,
-} as any)
-const AuthenticatedImagesIndexRoute =
-  AuthenticatedImagesIndexRouteImport.update({
-    id: '/images/',
-    path: '/images/',
-    getParentRoute: () => AuthenticatedRoute,
-  } as any)
-const AuthenticatedExecIndexRoute = AuthenticatedExecIndexRouteImport.update({
-  id: '/exec/',
-  path: '/exec/',
-  getParentRoute: () => AuthenticatedRoute,
-} as any)
-const AuthenticatedConfigsIndexRoute =
-  AuthenticatedConfigsIndexRouteImport.update({
-    id: '/configs/',
-    path: '/configs/',
-    getParentRoute: () => AuthenticatedRoute,
-  } as any)
-const AuthenticatedStacksStackNameRoute =
-  AuthenticatedStacksStackNameRouteImport.update({
-    id: '/stacks/$stackName',
-    path: '/stacks/$stackName',
-    getParentRoute: () => AuthenticatedRoute,
-  } as any)
-const AuthenticatedServicesServiceIdRoute =
-  AuthenticatedServicesServiceIdRouteImport.update({
-    id: '/services/$serviceId',
-    path: '/services/$serviceId',
-    getParentRoute: () => AuthenticatedRoute,
-  } as any)
-const AuthenticatedConfigsConfigIdRoute =
-  AuthenticatedConfigsConfigIdRouteImport.update({
-    id: '/configs/$configId',
-    path: '/configs/$configId',
-    getParentRoute: () => AuthenticatedRoute,
-  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AuthenticatedIndexRoute
   '/login': typeof LoginRoute
-  '/configs/$configId': typeof AuthenticatedConfigsConfigIdRoute
-  '/services/$serviceId': typeof AuthenticatedServicesServiceIdRoute
-  '/stacks/$stackName': typeof AuthenticatedStacksStackNameRoute
-  '/configs/': typeof AuthenticatedConfigsIndexRoute
-  '/exec/': typeof AuthenticatedExecIndexRoute
-  '/images/': typeof AuthenticatedImagesIndexRoute
-  '/logs/': typeof AuthenticatedLogsIndexRoute
-  '/networks/': typeof AuthenticatedNetworksIndexRoute
-  '/nodes/': typeof AuthenticatedNodesIndexRoute
-  '/secrets/': typeof AuthenticatedSecretsIndexRoute
-  '/services/': typeof AuthenticatedServicesIndexRoute
   '/settings/': typeof AuthenticatedSettingsIndexRoute
-  '/stacks/': typeof AuthenticatedStacksIndexRoute
   '/tasks/': typeof AuthenticatedTasksIndexRoute
-  '/volumes/': typeof AuthenticatedVolumesIndexRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/': typeof AuthenticatedIndexRoute
-  '/configs/$configId': typeof AuthenticatedConfigsConfigIdRoute
-  '/services/$serviceId': typeof AuthenticatedServicesServiceIdRoute
-  '/stacks/$stackName': typeof AuthenticatedStacksStackNameRoute
-  '/configs': typeof AuthenticatedConfigsIndexRoute
-  '/exec': typeof AuthenticatedExecIndexRoute
-  '/images': typeof AuthenticatedImagesIndexRoute
-  '/logs': typeof AuthenticatedLogsIndexRoute
-  '/networks': typeof AuthenticatedNetworksIndexRoute
-  '/nodes': typeof AuthenticatedNodesIndexRoute
-  '/secrets': typeof AuthenticatedSecretsIndexRoute
-  '/services': typeof AuthenticatedServicesIndexRoute
   '/settings': typeof AuthenticatedSettingsIndexRoute
-  '/stacks': typeof AuthenticatedStacksIndexRoute
   '/tasks': typeof AuthenticatedTasksIndexRoute
-  '/volumes': typeof AuthenticatedVolumesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_authenticated': typeof AuthenticatedRouteWithChildren
   '/login': typeof LoginRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
-  '/_authenticated/configs/$configId': typeof AuthenticatedConfigsConfigIdRoute
-  '/_authenticated/services/$serviceId': typeof AuthenticatedServicesServiceIdRoute
-  '/_authenticated/stacks/$stackName': typeof AuthenticatedStacksStackNameRoute
-  '/_authenticated/configs/': typeof AuthenticatedConfigsIndexRoute
-  '/_authenticated/exec/': typeof AuthenticatedExecIndexRoute
-  '/_authenticated/images/': typeof AuthenticatedImagesIndexRoute
-  '/_authenticated/logs/': typeof AuthenticatedLogsIndexRoute
-  '/_authenticated/networks/': typeof AuthenticatedNetworksIndexRoute
-  '/_authenticated/nodes/': typeof AuthenticatedNodesIndexRoute
-  '/_authenticated/secrets/': typeof AuthenticatedSecretsIndexRoute
-  '/_authenticated/services/': typeof AuthenticatedServicesIndexRoute
   '/_authenticated/settings/': typeof AuthenticatedSettingsIndexRoute
-  '/_authenticated/stacks/': typeof AuthenticatedStacksIndexRoute
   '/_authenticated/tasks/': typeof AuthenticatedTasksIndexRoute
-  '/_authenticated/volumes/': typeof AuthenticatedVolumesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths:
-    | '/'
-    | '/login'
-    | '/configs/$configId'
-    | '/services/$serviceId'
-    | '/stacks/$stackName'
-    | '/configs/'
-    | '/exec/'
-    | '/images/'
-    | '/logs/'
-    | '/networks/'
-    | '/nodes/'
-    | '/secrets/'
-    | '/services/'
-    | '/settings/'
-    | '/stacks/'
-    | '/tasks/'
-    | '/volumes/'
+  fullPaths: '/' | '/login' | '/settings/' | '/tasks/'
   fileRoutesByTo: FileRoutesByTo
-  to:
-    | '/login'
-    | '/'
-    | '/configs/$configId'
-    | '/services/$serviceId'
-    | '/stacks/$stackName'
-    | '/configs'
-    | '/exec'
-    | '/images'
-    | '/logs'
-    | '/networks'
-    | '/nodes'
-    | '/secrets'
-    | '/services'
-    | '/settings'
-    | '/stacks'
-    | '/tasks'
-    | '/volumes'
+  to: '/login' | '/' | '/settings' | '/tasks'
   id:
     | '__root__'
     | '/_authenticated'
     | '/login'
     | '/_authenticated/'
-    | '/_authenticated/configs/$configId'
-    | '/_authenticated/services/$serviceId'
-    | '/_authenticated/stacks/$stackName'
-    | '/_authenticated/configs/'
-    | '/_authenticated/exec/'
-    | '/_authenticated/images/'
-    | '/_authenticated/logs/'
-    | '/_authenticated/networks/'
-    | '/_authenticated/nodes/'
-    | '/_authenticated/secrets/'
-    | '/_authenticated/services/'
     | '/_authenticated/settings/'
-    | '/_authenticated/stacks/'
     | '/_authenticated/tasks/'
-    | '/_authenticated/volumes/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -277,25 +103,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedIndexRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
-    '/_authenticated/volumes/': {
-      id: '/_authenticated/volumes/'
-      path: '/volumes'
-      fullPath: '/volumes/'
-      preLoaderRoute: typeof AuthenticatedVolumesIndexRouteImport
-      parentRoute: typeof AuthenticatedRoute
-    }
     '/_authenticated/tasks/': {
       id: '/_authenticated/tasks/'
       path: '/tasks'
       fullPath: '/tasks/'
       preLoaderRoute: typeof AuthenticatedTasksIndexRouteImport
-      parentRoute: typeof AuthenticatedRoute
-    }
-    '/_authenticated/stacks/': {
-      id: '/_authenticated/stacks/'
-      path: '/stacks'
-      fullPath: '/stacks/'
-      preLoaderRoute: typeof AuthenticatedStacksIndexRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/settings/': {
@@ -305,122 +117,19 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSettingsIndexRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
-    '/_authenticated/services/': {
-      id: '/_authenticated/services/'
-      path: '/services'
-      fullPath: '/services/'
-      preLoaderRoute: typeof AuthenticatedServicesIndexRouteImport
-      parentRoute: typeof AuthenticatedRoute
-    }
-    '/_authenticated/secrets/': {
-      id: '/_authenticated/secrets/'
-      path: '/secrets'
-      fullPath: '/secrets/'
-      preLoaderRoute: typeof AuthenticatedSecretsIndexRouteImport
-      parentRoute: typeof AuthenticatedRoute
-    }
-    '/_authenticated/nodes/': {
-      id: '/_authenticated/nodes/'
-      path: '/nodes'
-      fullPath: '/nodes/'
-      preLoaderRoute: typeof AuthenticatedNodesIndexRouteImport
-      parentRoute: typeof AuthenticatedRoute
-    }
-    '/_authenticated/networks/': {
-      id: '/_authenticated/networks/'
-      path: '/networks'
-      fullPath: '/networks/'
-      preLoaderRoute: typeof AuthenticatedNetworksIndexRouteImport
-      parentRoute: typeof AuthenticatedRoute
-    }
-    '/_authenticated/logs/': {
-      id: '/_authenticated/logs/'
-      path: '/logs'
-      fullPath: '/logs/'
-      preLoaderRoute: typeof AuthenticatedLogsIndexRouteImport
-      parentRoute: typeof AuthenticatedRoute
-    }
-    '/_authenticated/images/': {
-      id: '/_authenticated/images/'
-      path: '/images'
-      fullPath: '/images/'
-      preLoaderRoute: typeof AuthenticatedImagesIndexRouteImport
-      parentRoute: typeof AuthenticatedRoute
-    }
-    '/_authenticated/exec/': {
-      id: '/_authenticated/exec/'
-      path: '/exec'
-      fullPath: '/exec/'
-      preLoaderRoute: typeof AuthenticatedExecIndexRouteImport
-      parentRoute: typeof AuthenticatedRoute
-    }
-    '/_authenticated/configs/': {
-      id: '/_authenticated/configs/'
-      path: '/configs'
-      fullPath: '/configs/'
-      preLoaderRoute: typeof AuthenticatedConfigsIndexRouteImport
-      parentRoute: typeof AuthenticatedRoute
-    }
-    '/_authenticated/stacks/$stackName': {
-      id: '/_authenticated/stacks/$stackName'
-      path: '/stacks/$stackName'
-      fullPath: '/stacks/$stackName'
-      preLoaderRoute: typeof AuthenticatedStacksStackNameRouteImport
-      parentRoute: typeof AuthenticatedRoute
-    }
-    '/_authenticated/services/$serviceId': {
-      id: '/_authenticated/services/$serviceId'
-      path: '/services/$serviceId'
-      fullPath: '/services/$serviceId'
-      preLoaderRoute: typeof AuthenticatedServicesServiceIdRouteImport
-      parentRoute: typeof AuthenticatedRoute
-    }
-    '/_authenticated/configs/$configId': {
-      id: '/_authenticated/configs/$configId'
-      path: '/configs/$configId'
-      fullPath: '/configs/$configId'
-      preLoaderRoute: typeof AuthenticatedConfigsConfigIdRouteImport
-      parentRoute: typeof AuthenticatedRoute
-    }
   }
 }
 
 interface AuthenticatedRouteChildren {
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
-  AuthenticatedConfigsConfigIdRoute: typeof AuthenticatedConfigsConfigIdRoute
-  AuthenticatedServicesServiceIdRoute: typeof AuthenticatedServicesServiceIdRoute
-  AuthenticatedStacksStackNameRoute: typeof AuthenticatedStacksStackNameRoute
-  AuthenticatedConfigsIndexRoute: typeof AuthenticatedConfigsIndexRoute
-  AuthenticatedExecIndexRoute: typeof AuthenticatedExecIndexRoute
-  AuthenticatedImagesIndexRoute: typeof AuthenticatedImagesIndexRoute
-  AuthenticatedLogsIndexRoute: typeof AuthenticatedLogsIndexRoute
-  AuthenticatedNetworksIndexRoute: typeof AuthenticatedNetworksIndexRoute
-  AuthenticatedNodesIndexRoute: typeof AuthenticatedNodesIndexRoute
-  AuthenticatedSecretsIndexRoute: typeof AuthenticatedSecretsIndexRoute
-  AuthenticatedServicesIndexRoute: typeof AuthenticatedServicesIndexRoute
   AuthenticatedSettingsIndexRoute: typeof AuthenticatedSettingsIndexRoute
-  AuthenticatedStacksIndexRoute: typeof AuthenticatedStacksIndexRoute
   AuthenticatedTasksIndexRoute: typeof AuthenticatedTasksIndexRoute
-  AuthenticatedVolumesIndexRoute: typeof AuthenticatedVolumesIndexRoute
 }
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
-  AuthenticatedConfigsConfigIdRoute: AuthenticatedConfigsConfigIdRoute,
-  AuthenticatedServicesServiceIdRoute: AuthenticatedServicesServiceIdRoute,
-  AuthenticatedStacksStackNameRoute: AuthenticatedStacksStackNameRoute,
-  AuthenticatedConfigsIndexRoute: AuthenticatedConfigsIndexRoute,
-  AuthenticatedExecIndexRoute: AuthenticatedExecIndexRoute,
-  AuthenticatedImagesIndexRoute: AuthenticatedImagesIndexRoute,
-  AuthenticatedLogsIndexRoute: AuthenticatedLogsIndexRoute,
-  AuthenticatedNetworksIndexRoute: AuthenticatedNetworksIndexRoute,
-  AuthenticatedNodesIndexRoute: AuthenticatedNodesIndexRoute,
-  AuthenticatedSecretsIndexRoute: AuthenticatedSecretsIndexRoute,
-  AuthenticatedServicesIndexRoute: AuthenticatedServicesIndexRoute,
   AuthenticatedSettingsIndexRoute: AuthenticatedSettingsIndexRoute,
-  AuthenticatedStacksIndexRoute: AuthenticatedStacksIndexRoute,
   AuthenticatedTasksIndexRoute: AuthenticatedTasksIndexRoute,
-  AuthenticatedVolumesIndexRoute: AuthenticatedVolumesIndexRoute,
 }
 
 const AuthenticatedRouteWithChildren = AuthenticatedRoute._addFileChildren(

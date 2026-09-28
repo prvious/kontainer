@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Link, Outlet, createFileRoute, redirect, useLocation, useRouter } from "@tanstack/react-router";
+import { Link, Outlet, createFileRoute, redirect, useRouter } from "@tanstack/react-router";
 import { AccentLine } from "@/components/accent-line";
 import { ClusterSwitcher } from "@/components/cluster-switcher";
 import { Logo } from "@/components/logo";
@@ -35,9 +35,6 @@ export const Route = createFileRoute("/_authenticated")({
 function AuthenticatedLayout() {
     const { session, issue, retryCommit, retryRestore, logout } = useAuth();
     const router = useRouter();
-    const pathname = useLocation({ select: (location) => location.pathname });
-    const settingsOpen = pathname === "/settings" || pathname === "/settings/";
-    const containersOpen = pathname === "/tasks" || pathname === "/tasks/";
 
     useEffect(() => {
         if (session) return;
@@ -88,24 +85,9 @@ function AuthenticatedLayout() {
                     }}
                 />
             )}
-            {settingsOpen || containersOpen ? (
-                <main className='flex-1 overflow-y-auto'>
-                    <Outlet />
-                </main>
-            ) : (
-                <main className='flex flex-1 items-center justify-center p-6'>
-                    <div className='w-full max-w-md space-y-4 border border-border bg-card p-6'>
-                        <h1 className='text-xl font-semibold'>Connected</h1>
-                        <p className='text-sm text-muted-foreground'>
-                            Signed in as {session.githubLogin} to {session.origin}
-                        </p>
-                        <p className='text-sm text-muted-foreground'>Browse the configured node’s containers.</p>
-                        <Link to='/tasks' className='inline-block text-sm text-primary underline-offset-4 hover:underline'>
-                            Open Containers
-                        </Link>
-                    </div>
-                </main>
-            )}
+            <main className='flex-1 overflow-y-auto'>
+                <Outlet />
+            </main>
         </div>
     );
 }

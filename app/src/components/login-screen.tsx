@@ -7,6 +7,7 @@ import { SessionIssue } from "@/components/session-issue";
 import { AuthenticatingScreen } from "@/components/authenticating-screen";
 import { useAuth } from "@/hooks/use-auth";
 import { useSessionLoginHint } from "@/hooks/session/use-session-login-hint";
+import { useAppVersion } from "@/hooks/use-app-version";
 
 const routeApi = getRouteApi("/login");
 
@@ -21,6 +22,7 @@ function GitHubIcon({ className }: { className?: string }) {
 export function LoginScreen() {
     const { session, login, issue, retryCommit, retryRestore, logout, cancelLogin } = useAuth();
     const { data: hint } = useSessionLoginHint();
+    const version = useAppVersion();
     const navigate = useNavigate();
     const router = useRouter();
     const { redirect: redirectTo } = routeApi.useSearch();
@@ -119,7 +121,7 @@ export function LoginScreen() {
                         Connect with GitHub
                     </Button>
                 </div>
-                <p className='text-center font-mono text-[10px] text-muted-foreground'>kontainer desktop v1.0.0</p>
+                <p className='text-center font-mono text-[10px] text-muted-foreground'>kontainer desktop{version ? ` v${version}` : null}</p>
             </div>
         </div>
     );

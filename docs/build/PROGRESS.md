@@ -6,7 +6,7 @@ finished it and the checks that passed.
 
 | Spec | Status | Note | Commit |
 |------|--------|------|--------|
-| 01 Cleanup | todo | | |
+| 01 Cleanup | in-progress | v1 client deleted, scaffold renamed, tests type-checked, dead-code guard added | |
 | 02 Dev environment | todo | | |
 | 03 Shell and foundations | todo | | |
 | 04 Auth and connect | todo | | |

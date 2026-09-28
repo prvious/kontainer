@@ -6,6 +6,11 @@ vi.mock("@tauri-apps/api/core", () => ({
     invoke: vi.fn(),
 }));
 
+// Mock @tauri-apps/api/app
+vi.mock("@tauri-apps/api/app", () => ({
+    getVersion: vi.fn(() => Promise.resolve("0.1.0")),
+}));
+
 // Mock @tauri-apps/api/window
 vi.mock("@tauri-apps/api/window", () => ({
     getCurrentWindow: () => ({
