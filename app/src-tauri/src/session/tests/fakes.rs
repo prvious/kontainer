@@ -14,6 +14,7 @@ use kontainer_native_client::{
 use kontainer_native_client::{
     AttachedContainer, NetworkId, NetworkList, NetworkPlacement, NetworkSpec,
 };
+use kontainer_native_client::{ServiceAction, ServiceDetail, ServiceId, ServiceList};
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -384,6 +385,8 @@ pub(crate) struct Script {
     pub(crate) volumes: VecDeque<Result<VolumeList, NativeClientError>>,
     pub(crate) networks: VecDeque<Result<NetworkList, NativeClientError>>,
     pub(crate) attached: VecDeque<Result<Vec<AttachedContainer>, NativeClientError>>,
+    pub(crate) services: VecDeque<Result<ServiceList, NativeClientError>>,
+    pub(crate) service_details: VecDeque<Result<ServiceDetail, NativeClientError>>,
 }
 
 pub(crate) struct FakeControllerFactory {
@@ -871,6 +874,87 @@ impl Controller for FakeController {
                 public_tag(access.expose()),
                 network_id.as_str(),
                 node.map_or("swarm", NodeId::as_str),
+                key.as_str()
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .admissions
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn list_services<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        stack: Option<&'a str>,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ServiceList, NativeClientError>> {
+        record(
+            &self.log,
+            format!(
+                "services:{}:{}",
+                public_tag(access.expose()),
+                stack.unwrap_or("all")
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .services
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn get_service<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        service_id: &'a ServiceId,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ServiceDetail, NativeClientError>> {
+        record(
+            &self.log,
+            format!(
+                "service:{}:{}",
+                public_tag(access.expose()),
+                service_id.as_str()
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .service_details
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn service_action<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        service_id: &'a ServiceId,
+        action: ServiceAction,
+        version: u64,
+        key: &'a IdempotencyKey,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
+        let action = match action {
+            ServiceAction::Scale { replicas } => format!("scale={replicas}"),
+            ServiceAction::Restart => "restart".to_owned(),
+            ServiceAction::Rollback => "rollback".to_owned(),
+        };
+        record(
+            &self.log,
+            format!(
+                "service_action:{}:{}:{action}:{version}:{}",
+                public_tag(access.expose()),
+                service_id.as_str(),
                 key.as_str()
             ),
         );

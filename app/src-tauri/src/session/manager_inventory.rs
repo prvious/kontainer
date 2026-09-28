@@ -34,6 +34,9 @@ pub(crate) enum InventoryError {
     ControllerUnavailable,
     AgentUnavailable,
     AgentTimeout,
+    QuorumUnavailable,
+    NotAManager,
+    VersionConflict,
     InvalidResponse,
 }
 
@@ -57,6 +60,9 @@ impl InventoryError {
         Self::ControllerUnavailable,
         Self::AgentUnavailable,
         Self::AgentTimeout,
+        Self::QuorumUnavailable,
+        Self::NotAManager,
+        Self::VersionConflict,
         Self::InvalidResponse,
     ];
 }
@@ -91,6 +97,9 @@ impl From<NativeClientError> for InventoryError {
             NativeClientError::TooManyContainers => Self::TooManyContainers,
             NativeClientError::AgentUnavailable => Self::AgentUnavailable,
             NativeClientError::AgentTimeout => Self::AgentTimeout,
+            NativeClientError::QuorumUnavailable { .. } => Self::QuorumUnavailable,
+            NativeClientError::NotAManager => Self::NotAManager,
+            NativeClientError::VersionConflict => Self::VersionConflict,
             NativeClientError::Unavailable
             | NativeClientError::DeadlineExceeded
             | NativeClientError::ServiceUnavailable

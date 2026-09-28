@@ -34,6 +34,14 @@ pub(crate) fn manager_failure(error: ManagerError) -> ExecutionFailure {
         ManagerError::Rejected => {
             ExecutionFailure::new("engine_error", "Docker on the manager refused the change.")
         }
+        ManagerError::VersionConflict => ExecutionFailure::new(
+            "version_conflict",
+            "It changed since it was read; refresh and try again.",
+        ),
+        ManagerError::QuorumUnavailable => ExecutionFailure::new(
+            "quorum_unavailable",
+            "The swarm has no quorum, so the manager can't make changes.",
+        ),
         ManagerError::Unavailable | ManagerError::Cancelled => {
             ExecutionFailure::new("manager_unavailable", "The Swarm manager did not answer.")
         }

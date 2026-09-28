@@ -4,7 +4,7 @@
 //!
 //! This crate implements the controller contracts: password sign-in and owner
 //! registration, GitHub bootstrap login attempt/redemption, refresh and logout, node membership
-//! and samples, controller settings, the cluster container list and container actions, the image list, removal, and pulls, volumes, networks, and
+//! and samples, controller settings, the cluster container list and container actions, the image list, removal, and pulls, volumes, networks, services, and
 //! owner-scoped operation polling and admission. It is the native
 //! networking boundary that Tauri (and any future native caller) reuses
 //! instead of the WebView.
@@ -37,6 +37,7 @@ mod networks;
 mod nodes;
 mod operations;
 mod probe;
+mod services;
 mod settings;
 mod volumes;
 
@@ -71,6 +72,10 @@ pub use operations::{
     OperationState,
 };
 pub use probe::ProbeFailure;
+pub use services::{
+    MAX_REPLICAS, MAX_SERVICES, ServiceAction, ServiceDetail, ServiceId, ServiceItem, ServiceList,
+    ServiceMode, TaskItem,
+};
 pub use settings::{ControllerSettings, RETENTION_DAYS};
 pub use volumes::{
     LOCAL_VOLUME_DRIVER, MAX_VOLUME_LABELS, MAX_VOLUMES, VolumeItem, VolumeList, VolumeName,

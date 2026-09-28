@@ -30,6 +30,7 @@ use crate::{
     is_valid_cidr, is_valid_network_id, is_valid_network_name, is_valid_volume_name,
     volume::bounded_labels,
 };
+use crate::{ServiceMode, ServiceSummary, SwarmStatus, TaskSummary, is_valid_swarm_id};
 
 const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_CONTAINER_NETWORKS: usize = 16;
@@ -100,6 +101,61 @@ impl LocalDockerEngine {
             client,
             operation_timeout: options.operation_timeout,
         })
+    }
+
+    /// Read the service, refuse a stale `version`, apply `change`, and send the update based on
+    /// that same version. `change` may ask for Docker's rollback instead of a new spec.
+    async fn update_service_spec<F>(
+        &self,
+        service_id: &str,
+        version: u64,
+        cancellation: &CancellationToken,
+        change: F,
+    ) -> Result<(), EngineError>
+    where
+        F: FnOnce(&mut bollard::models::ServiceSpec) -> Result<Option<String>, EngineError> + Send,
+    {
+        use bollard::query_parameters::{InspectServiceOptions, UpdateServiceOptions};
+
+        let operation = EngineOperation::UpdateService;
+        if !is_valid_swarm_id(service_id) {
+            return Err(EngineError::new(EngineErrorKind::InvalidInput, operation));
+        }
+        let client = self.negotiate(cancellation).await?;
+        let service = self
+            .execute(
+                operation,
+                cancellation,
+                client.inspect_service(service_id, None::<InspectServiceOptions>),
+            )
+            .await?;
+        let current = service
+            .version
+            .and_then(|version| version.index)
+            .ok_or_else(|| EngineError::new(EngineErrorKind::InvalidResponse, operation))?;
+        if current != version {
+            return Err(EngineError::new(
+                EngineErrorKind::VersionConflict,
+                operation,
+            ));
+        }
+        let mut spec = service
+            .spec
+            .ok_or_else(|| EngineError::new(EngineErrorKind::InvalidResponse, operation))?;
+        let rollback = change(&mut spec)?;
+        let options = UpdateServiceOptions {
+            version: i32::try_from(version)
+                .map_err(|_| EngineError::new(EngineErrorKind::VersionConflict, operation))?,
+            rollback,
+            ..Default::default()
+        };
+        self.execute(
+            operation,
+            cancellation,
+            client.update_service(service_id, spec, options, None),
+        )
+        .await
+        .map(|_| ())
     }
 
     async fn negotiate(&self, cancellation: &CancellationToken) -> Result<Docker, EngineError> {
@@ -614,6 +670,133 @@ impl ContainerEngine for LocalDockerEngine {
         Ok(map_disk_usage(&usage))
     }
 
+    async fn list_services(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> Result<Vec<ServiceSummary>, EngineError> {
+        use bollard::query_parameters::ListServicesOptions;
+
+        let client = self.negotiate(cancellation).await?;
+        let services = self
+            .execute(
+                EngineOperation::ListServices,
+                cancellation,
+                client.list_services(None::<ListServicesOptions>),
+            )
+            .await?;
+        Ok(services.into_iter().filter_map(map_service).collect())
+    }
+
+    async fn list_tasks(
+        &self,
+        service_ids: &[String],
+        current_only: bool,
+        cancellation: &CancellationToken,
+    ) -> Result<Vec<TaskSummary>, EngineError> {
+        use bollard::query_parameters::ListTasksOptions;
+
+        if service_ids.iter().any(|id| !is_valid_swarm_id(id)) {
+            return Err(EngineError::new(
+                EngineErrorKind::InvalidInput,
+                EngineOperation::ListTasks,
+            ));
+        }
+        let mut filters = HashMap::new();
+        if !service_ids.is_empty() {
+            filters.insert("service".to_owned(), service_ids.to_vec());
+        }
+        if current_only {
+            filters.insert("desired-state".to_owned(), vec!["running".to_owned()]);
+        }
+        let client = self.negotiate(cancellation).await?;
+        let tasks = self
+            .execute(
+                EngineOperation::ListTasks,
+                cancellation,
+                client.list_tasks(Some(ListTasksOptions {
+                    filters: Some(filters),
+                })),
+            )
+            .await?;
+        Ok(tasks.into_iter().filter_map(map_task).collect())
+    }
+
+    async fn scale_service(
+        &self,
+        service_id: &str,
+        replicas: u64,
+        version: u64,
+        cancellation: &CancellationToken,
+    ) -> Result<(), EngineError> {
+        self.update_service_spec(service_id, version, cancellation, |spec| {
+            let replicated = spec
+                .mode
+                .as_mut()
+                .and_then(|mode| mode.replicated.as_mut())
+                .ok_or_else(|| {
+                    EngineError::new(
+                        EngineErrorKind::InvalidInput,
+                        EngineOperation::UpdateService,
+                    )
+                })?;
+            replicated.replicas = Some(i64::try_from(replicas).map_err(|_| {
+                EngineError::new(
+                    EngineErrorKind::InvalidInput,
+                    EngineOperation::UpdateService,
+                )
+            })?);
+            Ok(None)
+        })
+        .await
+    }
+
+    async fn force_update_service(
+        &self,
+        service_id: &str,
+        version: u64,
+        cancellation: &CancellationToken,
+    ) -> Result<(), EngineError> {
+        self.update_service_spec(service_id, version, cancellation, |spec| {
+            let template = spec.task_template.get_or_insert_with(Default::default);
+            template.force_update = Some(template.force_update.unwrap_or(0).wrapping_add(1));
+            Ok(None)
+        })
+        .await
+    }
+
+    async fn rollback_service(
+        &self,
+        service_id: &str,
+        version: u64,
+        cancellation: &CancellationToken,
+    ) -> Result<(), EngineError> {
+        self.update_service_spec(service_id, version, cancellation, |_| {
+            Ok(Some("previous".to_owned()))
+        })
+        .await
+    }
+
+    async fn swarm_status(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> Result<SwarmStatus, EngineError> {
+        let client = self.negotiate(cancellation).await?;
+        let info = self
+            .execute(EngineOperation::ReadSwarm, cancellation, client.info())
+            .await?;
+        let swarm = info.swarm.unwrap_or_default();
+        let count = |value: Option<i64>| {
+            value
+                .and_then(|value| u32::try_from(value).ok())
+                .unwrap_or(0)
+        };
+        Ok(SwarmStatus {
+            control_available: swarm.control_available.unwrap_or(false),
+            managers: count(swarm.managers),
+            nodes: count(swarm.nodes),
+        })
+    }
+
     async fn list_networks(
         &self,
         cancellation: &CancellationToken,
@@ -1043,6 +1226,104 @@ fn map_container_stats(response: ContainerStatsResponse) -> ContainerStats {
         net_rx_bytes,
         net_tx_bytes,
     }
+}
+
+fn map_service(service: bollard::models::Service) -> Option<ServiceSummary> {
+    let id = service.id.filter(|id| is_valid_swarm_id(id))?;
+    let spec = service.spec.unwrap_or_default();
+    let mode = match spec.mode.as_ref() {
+        Some(mode) if mode.global.is_some() => ServiceMode::Global,
+        Some(mode) => ServiceMode::Replicated {
+            replicas: mode
+                .replicated
+                .as_ref()
+                .and_then(|replicated| replicated.replicas)
+                .and_then(|replicas| u64::try_from(replicas).ok())
+                .unwrap_or(0),
+        },
+        None => ServiceMode::Replicated { replicas: 1 },
+    };
+    let image = spec
+        .task_template
+        .as_ref()
+        .and_then(|template| template.container_spec.as_ref())
+        .and_then(|container| container.image.clone())
+        .unwrap_or_default();
+    let mut ports: Vec<String> = service
+        .endpoint
+        .and_then(|endpoint| endpoint.ports)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|port| {
+            let published = port.published_port?;
+            let target = port.target_port?;
+            let protocol = port
+                .protocol
+                .map_or_else(|| "tcp".to_owned(), |protocol| protocol.to_string());
+            Some(format!("{published}:{target}/{protocol}"))
+        })
+        .collect();
+    ports.sort();
+    ports.dedup();
+    let labels = spec.labels.unwrap_or_default();
+    let update = service.update_status.unwrap_or_default();
+    Some(ServiceSummary {
+        id,
+        name: bounded_message(&spec.name.unwrap_or_default()),
+        image: bounded_message(&image),
+        mode,
+        ports,
+        created_at_seconds: service.created_at.as_deref().and_then(parse_docker_time),
+        updated_at_seconds: service.updated_at.as_deref().and_then(parse_docker_time),
+        version: service
+            .version
+            .and_then(|version| version.index)
+            .unwrap_or(0),
+        stack: bounded_label(labels.get(STACK_NAMESPACE_LABEL)),
+        update_state: update
+            .state
+            .map(|state| state.to_string())
+            .filter(|state| !state.is_empty()),
+        update_message: update
+            .message
+            .map(|message| bounded_message(&message))
+            .filter(|message| !message.is_empty()),
+    })
+}
+
+fn map_task(task: bollard::models::Task) -> Option<TaskSummary> {
+    let id = task.id.filter(|id| is_valid_swarm_id(id))?;
+    let status = task.status.unwrap_or_default();
+    let nonempty = |value: Option<String>| {
+        value
+            .map(|value| bounded_message(&value))
+            .filter(|value| !value.is_empty())
+    };
+    Some(TaskSummary {
+        id,
+        service_id: task.service_id.unwrap_or_default(),
+        slot: task.slot.and_then(|slot| u64::try_from(slot).ok()),
+        node_id: task.node_id.filter(|node| !node.is_empty()),
+        state: status
+            .state
+            .map(|state| state.to_string())
+            .unwrap_or_default(),
+        desired_state: task
+            .desired_state
+            .map(|state| state.to_string())
+            .unwrap_or_default(),
+        error: nonempty(status.err),
+        message: nonempty(status.message),
+        updated_at_seconds: task
+            .updated_at
+            .as_deref()
+            .or(status.timestamp.as_deref())
+            .and_then(parse_docker_time),
+        container_id: status
+            .container_status
+            .and_then(|container| container.container_id)
+            .filter(|id| is_valid_container_id(id)),
+    })
 }
 
 #[allow(clippy::too_many_arguments)]

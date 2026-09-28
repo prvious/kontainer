@@ -8,7 +8,8 @@ use std::{sync::Arc, time::Duration};
 use async_trait::async_trait;
 use kontainer_engine::{
     CapabilityStatus, ContainerEngine, DockerHost, EngineErrorKind, LocalDockerEngine,
-    LocalEngineOptions, NetworkCreate, NetworkDetail, NetworkSummary,
+    LocalEngineOptions, NetworkCreate, NetworkDetail, NetworkSummary, ServiceSummary, SwarmStatus,
+    TaskSummary,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -23,6 +24,10 @@ pub enum ManagerError {
     /// Docker refused the change (e.g. endpoints are still attached).
     Rejected,
     Cancelled,
+    /// The Swarm has no leader: the manager can't read or change cluster state.
+    QuorumUnavailable,
+    /// The object changed since the version the request was based on.
+    VersionConflict,
 }
 
 impl std::fmt::Display for ManagerError {
@@ -33,6 +38,8 @@ impl std::fmt::Display for ManagerError {
             Self::InvalidInput => "request refused",
             Self::Rejected => "the manager refused the change",
             Self::Cancelled => "manager call was cancelled",
+            Self::QuorumUnavailable => "the swarm has no quorum",
+            Self::VersionConflict => "the object changed since it was read",
         })
     }
 }
@@ -43,6 +50,8 @@ impl From<kontainer_engine::EngineError> for ManagerError {
             EngineErrorKind::NotFound => Self::NotFound,
             EngineErrorKind::InvalidInput => Self::InvalidInput,
             EngineErrorKind::Cancelled => Self::Cancelled,
+            EngineErrorKind::QuorumUnavailable => Self::QuorumUnavailable,
+            EngineErrorKind::VersionConflict => Self::VersionConflict,
             EngineErrorKind::Conflict
             | EngineErrorKind::DaemonRejected
             | EngineErrorKind::NotModified => Self::Rejected,
@@ -78,6 +87,58 @@ pub trait ManagerEngine: Send + Sync {
         id: &str,
         cancellation: &CancellationToken,
     ) -> Result<(), ManagerError>;
+
+    async fn list_services(
+        &self,
+        _cancellation: &CancellationToken,
+    ) -> Result<Vec<ServiceSummary>, ManagerError> {
+        Err(ManagerError::Unavailable)
+    }
+
+    /// The tasks of these services in one call; `current_only` keeps the ones meant to run.
+    async fn list_tasks(
+        &self,
+        _service_ids: &[String],
+        _current_only: bool,
+        _cancellation: &CancellationToken,
+    ) -> Result<Vec<TaskSummary>, ManagerError> {
+        Err(ManagerError::Unavailable)
+    }
+
+    async fn scale_service(
+        &self,
+        _service_id: &str,
+        _replicas: u64,
+        _version: u64,
+        _cancellation: &CancellationToken,
+    ) -> Result<(), ManagerError> {
+        Err(ManagerError::Unavailable)
+    }
+
+    async fn force_update_service(
+        &self,
+        _service_id: &str,
+        _version: u64,
+        _cancellation: &CancellationToken,
+    ) -> Result<(), ManagerError> {
+        Err(ManagerError::Unavailable)
+    }
+
+    async fn rollback_service(
+        &self,
+        _service_id: &str,
+        _version: u64,
+        _cancellation: &CancellationToken,
+    ) -> Result<(), ManagerError> {
+        Err(ManagerError::Unavailable)
+    }
+
+    async fn swarm_status(
+        &self,
+        _cancellation: &CancellationToken,
+    ) -> Result<SwarmStatus, ManagerError> {
+        Err(ManagerError::Unavailable)
+    }
 }
 
 /// The manager engine routes and executors use, when the configured host is a manager.
@@ -118,6 +179,69 @@ impl ManagerEngine for DockerManagerEngine {
         cancellation: &CancellationToken,
     ) -> Result<(), ManagerError> {
         Ok(self.0.remove_network(id, cancellation).await?)
+    }
+
+    async fn list_services(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> Result<Vec<ServiceSummary>, ManagerError> {
+        Ok(self.0.list_services(cancellation).await?)
+    }
+
+    async fn list_tasks(
+        &self,
+        service_ids: &[String],
+        current_only: bool,
+        cancellation: &CancellationToken,
+    ) -> Result<Vec<TaskSummary>, ManagerError> {
+        Ok(self
+            .0
+            .list_tasks(service_ids, current_only, cancellation)
+            .await?)
+    }
+
+    async fn scale_service(
+        &self,
+        service_id: &str,
+        replicas: u64,
+        version: u64,
+        cancellation: &CancellationToken,
+    ) -> Result<(), ManagerError> {
+        Ok(self
+            .0
+            .scale_service(service_id, replicas, version, cancellation)
+            .await?)
+    }
+
+    async fn force_update_service(
+        &self,
+        service_id: &str,
+        version: u64,
+        cancellation: &CancellationToken,
+    ) -> Result<(), ManagerError> {
+        Ok(self
+            .0
+            .force_update_service(service_id, version, cancellation)
+            .await?)
+    }
+
+    async fn rollback_service(
+        &self,
+        service_id: &str,
+        version: u64,
+        cancellation: &CancellationToken,
+    ) -> Result<(), ManagerError> {
+        Ok(self
+            .0
+            .rollback_service(service_id, version, cancellation)
+            .await?)
+    }
+
+    async fn swarm_status(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> Result<SwarmStatus, ManagerError> {
+        Ok(self.0.swarm_status(cancellation).await?)
     }
 }
 

@@ -18,7 +18,8 @@ function elapsedSeconds(view: OperationView, now: number): number | null {
 function countsText(view: OperationView): string | null {
     const counts = progressCounts(view.progress);
     if (!counts) return null;
-    return counts.failed > 0 ? `${counts.done} of ${counts.total} · ${counts.failed} failed` : `${counts.done} of ${counts.total}`;
+    const of = `${counts.done} of ${counts.total}${counts.unit ? ` ${counts.unit}` : ""}`;
+    return counts.failed > 0 ? `${of} · ${counts.failed} failed` : of;
 }
 
 /** The design's status line: `RUNNING · 4 of 5 · 12s`, `FAILED · code — message · req id`. */

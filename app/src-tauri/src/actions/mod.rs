@@ -4,6 +4,7 @@ pub mod images;
 pub mod networks;
 pub mod nodes;
 pub mod operations;
+pub mod services;
 pub mod session;
 pub mod settings;
 pub mod volumes;

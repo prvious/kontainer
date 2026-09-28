@@ -17,6 +17,7 @@ use kontainer_native_client::{
     SampleSeries, Traced, VolumeList, VolumeName, VolumeQuery, VolumeSpec,
 };
 use kontainer_native_client::{AttachedContainer, NetworkId, NetworkList, NetworkSpec};
+use kontainer_native_client::{ServiceAction, ServiceDetail, ServiceId, ServiceList};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -220,6 +221,30 @@ pub(crate) trait Controller: Send + Sync + 'static {
         access: &'a AccessCredential,
         network_id: &'a NetworkId,
         node: Option<&'a NodeId>,
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>>;
+
+    fn list_services<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        stack: Option<&'a str>,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ServiceList, NativeClientError>>;
+
+    fn get_service<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        service_id: &'a ServiceId,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ServiceDetail, NativeClientError>>;
+
+    fn service_action<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        service_id: &'a ServiceId,
+        action: ServiceAction,
+        version: u64,
         key: &'a IdempotencyKey,
         cancellation: &'a CancellationToken,
     ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>>;
@@ -595,6 +620,39 @@ impl Controller for NativeController {
         Box::pin(
             self.client
                 .remove_network(access, network_id, node, key, cancellation),
+        )
+    }
+
+    fn list_services<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        stack: Option<&'a str>,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ServiceList, NativeClientError>> {
+        Box::pin(self.client.list_services(access, stack, cancellation))
+    }
+
+    fn get_service<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        service_id: &'a ServiceId,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ServiceDetail, NativeClientError>> {
+        Box::pin(self.client.get_service(access, service_id, cancellation))
+    }
+
+    fn service_action<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        service_id: &'a ServiceId,
+        action: ServiceAction,
+        version: u64,
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
+        Box::pin(
+            self.client
+                .service_action(access, service_id, action, version, key, cancellation),
         )
     }
 

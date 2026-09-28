@@ -1,0 +1,481 @@
+{
+  "paths": {
+    "/api/v1/services": {
+      "get": {
+        "operationId": "list_services",
+        "parameters": [
+          {
+            "description": "Only this stack's services",
+            "in": "query",
+            "name": "stack",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceListResponse"
+                }
+              }
+            },
+            "description": "Every service with running replicas counted from one tasks call"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FieldErrorResponse"
+                }
+              }
+            },
+            "description": "`invalid_request` naming the query field"
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuorumUnavailableResponse"
+                }
+              }
+            },
+            "description": "`quorum_unavailable` (retry after `retryAfterSeconds`) or `not_a_manager`"
+          }
+        },
+        "security": [
+          {
+            "access_session": []
+          }
+        ],
+        "tags": [
+          "super::services"
+        ]
+      }
+    },
+    "/api/v1/services/{serviceId}": {
+      "get": {
+        "operationId": "get_service",
+        "parameters": [
+          {
+            "description": "Swarm service id",
+            "in": "path",
+            "name": "serviceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceDetailResponse"
+                }
+              }
+            },
+            "description": "The service, its newest tasks, and the newest task error"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FieldErrorResponse"
+                }
+              }
+            },
+            "description": "`invalid_request`"
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "No such service"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuorumUnavailableResponse"
+                }
+              }
+            },
+            "description": "`quorum_unavailable` or `not_a_manager`"
+          }
+        },
+        "security": [
+          {
+            "access_session": []
+          }
+        ],
+        "tags": [
+          "super::services"
+        ]
+      }
+    },
+    "/api/v1/services/{serviceId}/actions/{action}": {
+      "post": {
+        "operationId": "service_action",
+        "parameters": [
+          {
+            "description": "Swarm service id",
+            "in": "path",
+            "name": "serviceId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "`scale`, `restart`, or `rollback`",
+            "in": "path",
+            "name": "action",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "16–64 printable ASCII characters, one per user gesture",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmittedResponse"
+                }
+              }
+            },
+            "description": "Admitted as one `service.scale`, `service.restart`, or `service.rollback` operation that waits for convergence"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FieldErrorResponse"
+                }
+              }
+            },
+            "description": "`idempotency_key_required`, or `invalid_request` naming the field"
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "No such service or action"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "`version_conflict` or `idempotency_conflict`"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuorumUnavailableResponse"
+                }
+              }
+            },
+            "description": "`quorum_unavailable` (nothing admitted) or `not_a_manager`"
+          }
+        },
+        "security": [
+          {
+            "access_session": []
+          }
+        ],
+        "tags": [
+          "super::services"
+        ]
+      }
+    }
+  },
+  "schemas": {
+    "QuorumUnavailableResponse": {
+      "description": "503 while the manager can't answer; the desktop retries after `retryAfterSeconds`.",
+      "properties": {
+        "error": {
+          "type": "string"
+        },
+        "retryAfterSeconds": {
+          "format": "int32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "error",
+        "retryAfterSeconds"
+      ],
+      "type": "object"
+    },
+    "ServiceActionRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "replicas": {
+          "description": "Scale only: 0–1000.",
+          "format": "int64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "version": {
+          "description": "The service version the change is based on; a newer one is 409 `version_conflict`.",
+          "format": "int64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version"
+      ],
+      "type": "object"
+    },
+    "ServiceDetailResponse": {
+      "properties": {
+        "latestError": {
+          "description": "The newest task error, for the replica tooltip and the scaling status line.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "service": {
+          "$ref": "#/components/schemas/ServiceResponse"
+        },
+        "tasks": {
+          "description": "Newest first, at most 50.",
+          "items": {
+            "$ref": "#/components/schemas/TaskResponse"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "service",
+        "tasks"
+      ],
+      "type": "object"
+    },
+    "ServiceListResponse": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/components/schemas/ServiceResponse"
+          },
+          "type": "array"
+        },
+        "snapshotAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "items",
+        "snapshotAt"
+      ],
+      "type": "object"
+    },
+    "ServiceResponse": {
+      "properties": {
+        "createdAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "desiredReplicas": {
+          "description": "Replicated: the replicas asked for. Global: one per eligible node.",
+          "format": "int64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "image": {
+          "description": "Shown without the digest.",
+          "type": "string"
+        },
+        "imageReference": {
+          "description": "The full reference the tasks run, digest included.",
+          "type": "string"
+        },
+        "mode": {
+          "description": "`replicated` or `global`.",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "ports": {
+          "description": "Published ports, `published:target/proto`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "runningReplicas": {
+          "format": "int64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "stack": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updateMessage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updateState": {
+          "description": "Swarm's update status, e.g. `updating`, `completed`, `rollback_completed`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "version": {
+          "description": "Swarm's object version; writes send it back.",
+          "format": "int64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "image",
+        "imageReference",
+        "mode",
+        "desiredReplicas",
+        "runningReplicas",
+        "ports",
+        "version"
+      ],
+      "type": "object"
+    },
+    "TaskResponse": {
+      "properties": {
+        "containerId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "desiredState": {
+          "type": "string"
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "message": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "slot": {
+          "format": "int64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "state": {
+          "type": "string"
+        },
+        "swarmNodeId": {
+          "description": "Swarm node id (not the Kontainer node id).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "updatedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "state",
+        "desiredState"
+      ],
+      "type": "object"
+    }
+  },
+  "securitySchemes": {
+    "access_session": {
+      "bearerFormat": "opaque",
+      "scheme": "bearer",
+      "type": "http"
+    }
+  }
+}

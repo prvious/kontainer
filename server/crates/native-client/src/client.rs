@@ -438,6 +438,8 @@ async fn classify_account_error(response: Response) -> NativeClientError {
 #[serde(deny_unknown_fields)]
 struct InventoryErrorBody {
     error: String,
+    #[serde(default, rename = "retryAfterSeconds")]
+    retry_after_seconds: Option<u32>,
 }
 
 async fn classify_inventory_error(response: Response) -> NativeClientError {
@@ -446,7 +448,7 @@ async fn classify_inventory_error(response: Response) -> NativeClientError {
     if status.as_u16() == 413 {
         return NativeClientError::TooManyContainers;
     }
-    if !matches!(status.as_u16(), 400 | 503 | 504) {
+    if !matches!(status.as_u16(), 400 | 409 | 503 | 504) {
         return fallback;
     }
     let Ok(body) = bounded_body(response, 128).await else {
@@ -458,6 +460,11 @@ async fn classify_inventory_error(response: Response) -> NativeClientError {
     match (status.as_u16(), body.error.as_str()) {
         (400, "invalid_pagination") => NativeClientError::InvalidPagination,
         (503, "agent_unavailable") => NativeClientError::AgentUnavailable,
+        (503, "quorum_unavailable") => NativeClientError::QuorumUnavailable {
+            retry_after_seconds: body.retry_after_seconds.unwrap_or(10).clamp(1, 300),
+        },
+        (503, "not_a_manager") => NativeClientError::NotAManager,
+        (409, "version_conflict") => NativeClientError::VersionConflict,
         (504, "agent_timeout") => NativeClientError::AgentTimeout,
         _ => fallback,
     }

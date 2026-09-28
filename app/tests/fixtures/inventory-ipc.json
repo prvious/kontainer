@@ -18,6 +18,9 @@
         "controller_unavailable",
         "agent_unavailable",
         "agent_timeout",
+        "quorum_unavailable",
+        "not_a_manager",
+        "version_conflict",
         "invalid_response"
     ]
 }

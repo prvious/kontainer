@@ -127,6 +127,18 @@ pub enum NativeClientError {
     /// The cluster list is over its cap (`413 too_many_containers`); list one node instead.
     #[error("too many containers to list at once")]
     TooManyContainers,
+    /// The Swarm manager can't answer (`503 quorum_unavailable`); workloads keep running.
+    #[error("the swarm has no quorum")]
+    QuorumUnavailable {
+        /// Seconds until asking again makes sense.
+        retry_after_seconds: u32,
+    },
+    /// The controller's Docker host is not a Swarm manager (`503 not_a_manager`).
+    #[error("the controller is not connected to a swarm manager")]
+    NotAManager,
+    /// The object changed since the version the request was based on (`409 version_conflict`).
+    #[error("the object changed since it was read")]
+    VersionConflict,
     /// Email or password is incorrect (`401 invalid_credentials`); unknown
     /// emails and wrong passwords are indistinguishable.
     #[error("email or password is incorrect")]

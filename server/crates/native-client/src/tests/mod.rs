@@ -13,6 +13,7 @@ mod operations;
 mod password_auth;
 mod reads;
 mod retry;
+mod services;
 mod support;
 mod transport;
 mod volumes;

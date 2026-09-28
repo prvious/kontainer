@@ -157,7 +157,22 @@ pub fn production_registry() -> ExecutorRegistry {
             .with(crate::volumes::operations::create::CreateVolumeExecutor)
             .with(crate::volumes::operations::remove::RemoveVolumeExecutor)
             .with(crate::networks::operations::create::CreateNetworkExecutor)
-            .with(crate::networks::operations::remove::RemoveNetworkExecutor),
+            .with(crate::networks::operations::remove::RemoveNetworkExecutor)
+            .with(
+                crate::services::operations::converge::ServiceConvergeExecutor::new(
+                    crate::services::domain::ServiceAction::Scale,
+                ),
+            )
+            .with(
+                crate::services::operations::converge::ServiceConvergeExecutor::new(
+                    crate::services::domain::ServiceAction::Restart,
+                ),
+            )
+            .with(
+                crate::services::operations::converge::ServiceConvergeExecutor::new(
+                    crate::services::domain::ServiceAction::Rollback,
+                ),
+            ),
         ExecutorRegistry::with,
     )
 }

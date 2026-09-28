@@ -107,9 +107,16 @@ export function admittedFromIpc(value: unknown): AdmittedOperation {
 }
 
 /** `{ total, done, failed? }` when the progress document carries counts. */
-export function progressCounts(progress: Record<string, unknown> | null): { total: number; done: number; failed: number } | null {
+/**
+ * `{ total, done, failed }` from a bulk operation, or `{ desired, running }` from a service one
+ * (read as tasks running out of desired).
+ */
+export function progressCounts(progress: Record<string, unknown> | null): { total: number; done: number; failed: number; unit?: string } | null {
     if (!progress) return null;
-    const { total, done, failed } = progress;
+    const { total, done, failed, desired, running } = progress;
+    if (typeof desired === "number" && typeof running === "number" && desired > 0) {
+        return { total: desired, done: Math.min(running, desired), failed: 0, unit: "tasks running" };
+    }
     if (typeof total !== "number" || typeof done !== "number" || total <= 0) return null;
     return { total, done, failed: typeof failed === "number" ? failed : 0 };
 }

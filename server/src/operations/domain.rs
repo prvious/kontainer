@@ -150,6 +150,10 @@ impl OperationKind {
     pub const fn timeout(self) -> Duration {
         match self {
             Self::ImagePull => Duration::from_secs(10 * 60),
+            // The 60 s convergence wait plus the write and a last poll.
+            Self::ServiceScale | Self::ServiceRestart | Self::ServiceRollback => {
+                Duration::from_secs(90)
+            }
             _ => Duration::from_secs(60),
         }
     }

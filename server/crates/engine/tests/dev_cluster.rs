@@ -259,3 +259,78 @@ async fn dev_cluster_network_lifecycle_on_the_manager_and_a_worker() {
         .unwrap();
     assert!(!seed_detail.endpoints.is_empty());
 }
+
+/// Services and tasks on the manager: list with modes and ports, versioned scaling (a stale
+/// version is refused), force update, and Swarm status. Scales a seed service up and back.
+#[tokio::test]
+async fn dev_cluster_services_scale_with_versions_on_the_manager() {
+    use kontainer_engine::{EngineErrorKind, ServiceMode};
+
+    let manager = engine(dev_host(
+        "KONTAINER_TEST_DEV_MANAGER_HOST",
+        "tcp://localhost:2375",
+    ));
+    let cancellation = CancellationToken::new();
+    let status = manager.swarm_status(&cancellation).await.unwrap();
+    assert!(status.control_available);
+    assert_eq!(status.nodes, 3);
+
+    let services = manager.list_services(&cancellation).await.unwrap();
+    let collector = services
+        .iter()
+        .find(|service| service.name == "monitoring_collector")
+        .unwrap();
+    assert_eq!(collector.mode, ServiceMode::Global);
+    assert_eq!(collector.stack.as_deref(), Some("monitoring"));
+    let alpine = services
+        .iter()
+        .find(|service| service.name == "toolbox_alpine")
+        .unwrap()
+        .clone();
+    let ServiceMode::Replicated { replicas } = alpine.mode else {
+        panic!("toolbox_alpine is replicated");
+    };
+    assert!(alpine.image.starts_with("alpine:latest"));
+
+    let tasks = manager
+        .list_tasks(std::slice::from_ref(&alpine.id), true, &cancellation)
+        .await
+        .unwrap();
+    assert_eq!(
+        tasks.iter().filter(|task| task.is_running()).count() as u64,
+        replicas
+    );
+    assert!(tasks.iter().all(|task| task.service_id == alpine.id));
+
+    manager
+        .scale_service(&alpine.id, replicas + 1, alpine.version, &cancellation)
+        .await
+        .unwrap();
+    assert_eq!(
+        manager
+            .scale_service(&alpine.id, replicas, alpine.version, &cancellation)
+            .await
+            .unwrap_err()
+            .kind(),
+        EngineErrorKind::VersionConflict,
+        "the version moved on"
+    );
+    let scaled = manager
+        .list_services(&cancellation)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|service| service.id == alpine.id)
+        .unwrap();
+    assert_eq!(
+        scaled.mode,
+        ServiceMode::Replicated {
+            replicas: replicas + 1
+        }
+    );
+    assert!(scaled.version > alpine.version);
+    manager
+        .scale_service(&alpine.id, replicas, scaled.version, &cancellation)
+        .await
+        .unwrap();
+}

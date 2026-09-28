@@ -17,6 +17,9 @@ export const INVENTORY_ERROR_CODES = [
     "controller_unavailable",
     "agent_unavailable",
     "agent_timeout",
+    "quorum_unavailable",
+    "not_a_manager",
+    "version_conflict",
     "invalid_response",
 ] as const;
 export type InventoryErrorCode = (typeof INVENTORY_ERROR_CODES)[number];

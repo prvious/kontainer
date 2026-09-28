@@ -12,6 +12,7 @@ pub mod nodes;
 pub mod operations;
 pub mod rpc;
 pub mod server;
+pub mod services;
 pub mod settings;
 pub mod swarm;
 pub mod tasks;

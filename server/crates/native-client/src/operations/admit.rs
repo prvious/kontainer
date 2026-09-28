@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::client::{NativeClient, RetryPolicy, decode_json, parse_uuid};
+use crate::client::{ErrorBodyPolicy, NativeClient, RetryPolicy, decode_json, parse_uuid};
 use crate::credentials::AccessCredential;
 use crate::error::NativeClientError;
 
@@ -87,12 +87,15 @@ impl NativeClient {
             header::HeaderValue::from_static("application/json"),
         );
         *request.body_mut() = Some(payload.into());
+        // Admission errors carry a stable code: agent, quorum, manager, and version refusals
+        // come back as their own variants.
         let response = self
-            .execute(
+            .execute_with_error_policy(
                 request,
                 RetryPolicy::Once,
                 self.limits.json_body_limit,
                 cancellation,
+                ErrorBodyPolicy::Inventory,
             )
             .await?;
         let admitted = decode_json::<AdmittedBody>(&response)?;

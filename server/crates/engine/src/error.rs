@@ -20,6 +20,10 @@ pub enum EngineErrorKind {
     NotModified,
     /// The object's state forbids the request, e.g. removing a running container (409).
     Conflict,
+    /// The Swarm has no leader: too few managers are reachable to change or read cluster state.
+    QuorumUnavailable,
+    /// The object changed since the version the request was based on.
+    VersionConflict,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,6 +49,10 @@ pub enum EngineOperation {
     InspectNetwork,
     CreateNetwork,
     RemoveNetwork,
+    ListServices,
+    ListTasks,
+    UpdateService,
+    ReadSwarm,
 }
 
 impl fmt::Display for EngineOperation {
@@ -71,6 +79,10 @@ impl fmt::Display for EngineOperation {
             Self::InspectNetwork => "inspect network",
             Self::CreateNetwork => "create network",
             Self::RemoveNetwork => "remove network",
+            Self::ListServices => "list services",
+            Self::ListTasks => "list tasks",
+            Self::UpdateService => "update service",
+            Self::ReadSwarm => "read swarm state",
         };
         formatter.write_str(name)
     }
@@ -141,6 +153,14 @@ fn classify_bollard_error(error: &BollardError) -> EngineErrorKind {
         BollardError::DockerResponseServerError {
             status_code: 304, ..
         } => EngineErrorKind::NotModified,
+        BollardError::DockerResponseServerError { message, .. } if is_quorum_message(message) => {
+            EngineErrorKind::QuorumUnavailable
+        }
+        BollardError::DockerResponseServerError { message, .. }
+            if message.contains("update out of sequence") =>
+        {
+            EngineErrorKind::VersionConflict
+        }
         BollardError::DockerResponseServerError {
             status_code: 409, ..
         } => EngineErrorKind::Conflict,
@@ -151,6 +171,15 @@ fn classify_bollard_error(error: &BollardError) -> EngineErrorKind {
         }
         _ => EngineErrorKind::DependencyFailure,
     }
+}
+
+/// Swarm's own wording when a manager can't reach a majority. The text only classifies the error;
+/// it never leaves the engine.
+fn is_quorum_message(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("does not have a leader")
+        || lower.contains("quorum")
+        || lower.contains("no leader")
 }
 
 fn classify_io_error(error: &io::Error) -> EngineErrorKind {
@@ -185,6 +214,32 @@ mod tests {
         assert_eq!(
             EngineError::from_bollard(EngineOperation::Ping, &error).kind(),
             EngineErrorKind::ConnectionUnavailable
+        );
+    }
+
+    #[test]
+    fn swarm_quorum_and_version_messages_map_to_their_own_kinds() {
+        for message in [
+            "rpc error: code = Unknown desc = The swarm does not have a leader. It's possible that too few managers are online.",
+            "context deadline exceeded: raft quorum lost",
+        ] {
+            let error = BollardError::DockerResponseServerError {
+                status_code: 503,
+                message: message.to_owned(),
+            };
+            assert_eq!(
+                EngineError::from_bollard(EngineOperation::ListServices, &error).kind(),
+                EngineErrorKind::QuorumUnavailable,
+                "{message}"
+            );
+        }
+        let out_of_sequence = BollardError::DockerResponseServerError {
+            status_code: 500,
+            message: "rpc error: code = Unknown desc = update out of sequence".to_owned(),
+        };
+        assert_eq!(
+            EngineError::from_bollard(EngineOperation::UpdateService, &out_of_sequence).kind(),
+            EngineErrorKind::VersionConflict
         );
     }
 

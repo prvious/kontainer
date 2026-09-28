@@ -11,6 +11,7 @@ mod image;
 mod local;
 mod network;
 mod node;
+mod service;
 mod volume;
 
 pub use capability::{
@@ -38,6 +39,9 @@ pub use network::{
     is_valid_network_name,
 };
 pub use node::{ContainerStats, CpuCounters, DiskUsage, NodeInfo, cpu_percent, memory_used};
+pub use service::{
+    ServiceMode, ServiceSummary, SwarmStatus, TaskSummary, image_without_digest, is_valid_swarm_id,
+};
 pub use volume::{
     MAX_VOLUME_LABELS, MAX_VOLUME_NAME_LEN, MAX_VOLUME_USERS, VolumeCreate, VolumeSummary,
     are_valid_volume_labels, is_valid_volume_name,
@@ -244,6 +248,81 @@ pub trait ContainerEngine: Send + Sync {
         Err(EngineError::new(
             EngineErrorKind::UnsupportedCapability,
             EngineOperation::RemoveNetwork,
+        ))
+    }
+
+    /// Every Swarm service (manager only).
+    async fn list_services(
+        &self,
+        _cancellation: &CancellationToken,
+    ) -> Result<Vec<ServiceSummary>, EngineError> {
+        Err(EngineError::new(
+            EngineErrorKind::UnsupportedCapability,
+            EngineOperation::ListServices,
+        ))
+    }
+
+    /// The tasks of these services in one call; `current_only` keeps the ones meant to run.
+    async fn list_tasks(
+        &self,
+        _service_ids: &[String],
+        _current_only: bool,
+        _cancellation: &CancellationToken,
+    ) -> Result<Vec<TaskSummary>, EngineError> {
+        Err(EngineError::new(
+            EngineErrorKind::UnsupportedCapability,
+            EngineOperation::ListTasks,
+        ))
+    }
+
+    /// Set a replicated service's replicas. `version` must match the service's current one.
+    async fn scale_service(
+        &self,
+        _service_id: &str,
+        _replicas: u64,
+        _version: u64,
+        _cancellation: &CancellationToken,
+    ) -> Result<(), EngineError> {
+        Err(EngineError::new(
+            EngineErrorKind::UnsupportedCapability,
+            EngineOperation::UpdateService,
+        ))
+    }
+
+    /// Restart every task by bumping `ForceUpdate`. `version` must match.
+    async fn force_update_service(
+        &self,
+        _service_id: &str,
+        _version: u64,
+        _cancellation: &CancellationToken,
+    ) -> Result<(), EngineError> {
+        Err(EngineError::new(
+            EngineErrorKind::UnsupportedCapability,
+            EngineOperation::UpdateService,
+        ))
+    }
+
+    /// Roll back to the previous spec. `version` must match.
+    async fn rollback_service(
+        &self,
+        _service_id: &str,
+        _version: u64,
+        _cancellation: &CancellationToken,
+    ) -> Result<(), EngineError> {
+        Err(EngineError::new(
+            EngineErrorKind::UnsupportedCapability,
+            EngineOperation::UpdateService,
+        ))
+    }
+
+    /// Whether this daemon is a manager that can reach the Swarm's majority.
+    async fn swarm_status(
+        &self,
+        _cancellation: &CancellationToken,
+    ) -> Result<SwarmStatus, EngineError> {
+        Err(EngineError::new(
+            EngineErrorKind::UnsupportedCapability,
+            EngineOperation::ReadSwarm,
         ))
     }
 

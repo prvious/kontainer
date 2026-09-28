@@ -10,5 +10,6 @@ mod logout;
 mod networks;
 mod operations;
 mod restore;
+mod services;
 mod storage;
 mod volumes;

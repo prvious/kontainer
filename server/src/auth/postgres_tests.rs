@@ -1233,6 +1233,7 @@ async fn postgres_session_openapi_registers_auth_routes_without_secrets()
                             || (path == "/api/v1/containers" && name == "node")
                             || (path == "/api/v1/volumes" && ["node", "name"].contains(&name))
                             || (path == "/api/v1/networks/{networkId}" && name == "node")
+                            || (path == "/api/v1/services" && name == "stack")
                             || (["/api/v1/nodes/{nodeId}/samples", "/api/v1/cluster/samples"]
                                 .contains(&path.as_str())
                                 && ["window", "bucket"].contains(&name))

@@ -639,9 +639,11 @@ fn engine_error_to_status(error: &EngineError) -> Status {
         EngineErrorKind::InvalidResponse | EngineErrorKind::InvalidConfiguration => {
             Status::internal("engine response was invalid")
         }
-        EngineErrorKind::NotFound | EngineErrorKind::NotModified | EngineErrorKind::Conflict => {
-            Status::unavailable("engine is unavailable")
-        }
+        EngineErrorKind::NotFound
+        | EngineErrorKind::NotModified
+        | EngineErrorKind::Conflict
+        | EngineErrorKind::QuorumUnavailable
+        | EngineErrorKind::VersionConflict => Status::unavailable("engine is unavailable"),
     }
 }
 
