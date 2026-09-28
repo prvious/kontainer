@@ -140,6 +140,7 @@ fn summary(node_id: &str, fill: char, index: usize) -> AgentContainerSummary {
         cpu_percent: Some(12.5),
         memory_used_bytes: Some(1 << 20),
         memory_limit_bytes: Some(1 << 30),
+        networks: vec!["shop_default".to_owned()],
     }
 }
 
@@ -274,6 +275,7 @@ async fn run_until_terminal(
         database: fixture.context.db.clone(),
         registry: Arc::new(production_registry()),
         agents: Some(fixture.directory.clone() as Arc<dyn AgentDirectory>),
+        manager: None,
         settings: WorkerSettings {
             idle_min: Duration::from_millis(10),
             idle_max: Duration::from_millis(20),

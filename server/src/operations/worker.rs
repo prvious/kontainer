@@ -46,6 +46,7 @@ pub struct Worker {
     pub database: DatabaseConnection,
     pub registry: Arc<ExecutorRegistry>,
     pub agents: Option<Arc<dyn AgentDirectory>>,
+    pub manager: Option<Arc<dyn crate::swarm::engine::ManagerEngine>>,
     pub settings: WorkerSettings,
 }
 
@@ -80,6 +81,7 @@ impl Worker {
                         database: self.database.clone(),
                         registry: Arc::clone(&self.registry),
                         agents: self.agents.clone(),
+                        manager: self.manager.clone(),
                         forced: forced.clone(),
                     };
                     executions.spawn(async move {
@@ -161,6 +163,7 @@ struct Execution {
     database: DatabaseConnection,
     registry: Arc<ExecutorRegistry>,
     agents: Option<Arc<dyn AgentDirectory>>,
+    manager: Option<Arc<dyn crate::swarm::engine::ManagerEngine>>,
     forced: CancellationToken,
 }
 
@@ -190,7 +193,8 @@ impl Execution {
             self.agents.clone(),
             cancellation.clone(),
             operation.id,
-        );
+        )
+        .with_manager(self.manager.clone());
         let run = AssertUnwindSafe(executor.execute(operation, &context)).catch_unwind();
         let result = tokio::time::timeout(timeout, run).await;
         if self.forced.is_cancelled() {

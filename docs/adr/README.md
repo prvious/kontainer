@@ -57,3 +57,4 @@ What becomes easier, what becomes harder, what must be revisited and when.
 | [0017](./0017-cluster-containers.md) | Cluster container list, container actions, and the container DTO | accepted |
 | [0018](./0018-cluster-images.md) | Cluster images, removal, and pulls | accepted |
 | [0019](./0019-node-volumes.md) | Node-scoped volumes, create, and remove | accepted |
+| [0020](./0020-networks-and-manager-engine.md) | Networks, the manager engine, and container networks | accepted |

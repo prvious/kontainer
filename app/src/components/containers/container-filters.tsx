@@ -6,10 +6,12 @@ import type { NodeOutcomeView } from "@/types/containers";
 export function ContainerFilters({
     search,
     nodes,
+    networks,
     onChange,
 }: {
     search: ContainerSearch;
     nodes: NodeOutcomeView[];
+    networks: string[];
     onChange: (next: ContainerSearch) => void;
 }) {
     function toggleState(state: StateFilter, checked: boolean) {
@@ -42,6 +44,20 @@ export function ContainerFilters({
                     </label>
                 ))}
             </fieldset>
+            {networks.length > 0 && (
+                <fieldset className='flex flex-col gap-1.5'>
+                    <legend className='mb-1 text-3xs font-bold tracking-[1px] text-muted-foreground uppercase'>Network</legend>
+                    {networks.map((network) => (
+                        <label key={network} className='flex items-center gap-2 text-secondary-foreground'>
+                            <Checkbox
+                                checked={search.network === network}
+                                onCheckedChange={(checked) => onChange({ ...search, network: checked === true ? network : undefined })}
+                            />
+                            {network}
+                        </label>
+                    ))}
+                </fieldset>
+            )}
             <label className='flex items-center gap-2 text-secondary-foreground'>
                 <Checkbox
                     checked={search.ports === "published"}

@@ -11,13 +11,18 @@
       "createdAt": "2026-09-19T06:00:00.000Z",
       "startedAt": "2026-09-19T06:00:02.000Z",
       "finishedAt": null,
-      "ports": ["8080:80/tcp"],
+      "ports": [
+        "8080:80/tcp"
+      ],
       "serviceName": "shop_web",
       "stackNamespace": "shop",
       "taskId": "x7kq",
       "cpuPercent": 12.5,
       "memoryUsedBytes": 52428800,
-      "memoryLimitBytes": 1073741824
+      "memoryLimitBytes": 1073741824,
+      "networks": [
+        "shop_default"
+      ]
     },
     {
       "nodeId": "node-1",
@@ -36,13 +41,24 @@
       "taskId": null,
       "cpuPercent": null,
       "memoryUsedBytes": null,
-      "memoryLimitBytes": null
+      "memoryLimitBytes": null,
+      "networks": []
     }
   ],
   "nodes": [
-    { "nodeId": "node-1", "status": "ok" },
-    { "nodeId": "worker-1", "status": "timeout" },
-    { "nodeId": "worker-2", "status": "error", "message": "invalid_response" }
+    {
+      "nodeId": "node-1",
+      "status": "ok"
+    },
+    {
+      "nodeId": "worker-1",
+      "status": "timeout"
+    },
+    {
+      "nodeId": "worker-2",
+      "status": "error",
+      "message": "invalid_response"
+    }
   ],
   "snapshotAt": "2026-09-19T06:05:00.000Z"
 }

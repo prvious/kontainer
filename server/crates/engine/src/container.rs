@@ -50,6 +50,8 @@ pub struct ContainerSummary {
     pub stack_namespace: Option<String>,
     /// `com.docker.swarm.task.id`.
     pub task_id: Option<String>,
+    /// Names of the networks it has endpoints on, sorted, at most 16.
+    pub networks: Vec<String>,
 }
 
 /// Labels that cross the boundary; every other label is dropped in the adapter.

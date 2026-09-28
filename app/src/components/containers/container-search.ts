@@ -19,6 +19,8 @@ export interface ContainerSearch {
     q?: string;
     state?: StateFilter[];
     node?: string;
+    /** A network name: only containers with an endpoint on it. */
+    network?: string;
     ports?: "published";
     sort?: ContainerSort;
 }
@@ -32,6 +34,7 @@ export function parseContainerSearch(raw: Record<string, unknown>): ContainerSea
     );
     if (states.length > 0) search.state = [...new Set(states)];
     if (typeof raw.node === "string" && /^(?!\.{1,2}$)[A-Za-z0-9._-]{1,128}$/.test(raw.node)) search.node = raw.node;
+    if (typeof raw.network === "string" && /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(raw.network)) search.network = raw.network;
     if (raw.ports === "published") search.ports = "published";
     if (CONTAINER_SORTS.some((sort) => sort === raw.sort) && raw.sort !== "recent") search.sort = raw.sort as ContainerSort;
     return search;
@@ -43,12 +46,13 @@ export function applyFilters(rows: ContainerRow[], search: ContainerSearch): Con
         (row) =>
             (!search.state?.length || search.state.some((state) => state === row.state)) &&
             (!search.node || row.nodeId === search.node) &&
+            (!search.network || row.networks.includes(search.network)) &&
             (!search.ports || row.ports.length > 0),
     );
 }
 
 export function activeFilterCount(search: ContainerSearch): number {
-    return (search.state?.length ?? 0) + (search.node ? 1 : 0) + (search.ports ? 1 : 0);
+    return (search.state?.length ?? 0) + (search.node ? 1 : 0) + (search.network ? 1 : 0) + (search.ports ? 1 : 0);
 }
 
 /** The table sorting the sort param stands for. */

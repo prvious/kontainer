@@ -11,6 +11,9 @@ use kontainer_native_client::{
     NodeId, NodeList, OperationEvent, OperationSnapshot, ProbeFailure, RefreshCredential,
     SampleSeries, VolumeList, VolumeName, VolumeQuery, VolumeSpec,
 };
+use kontainer_native_client::{
+    AttachedContainer, NetworkId, NetworkList, NetworkPlacement, NetworkSpec,
+};
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -379,6 +382,8 @@ pub(crate) struct Script {
     pub(crate) containers: VecDeque<Result<ContainerList, NativeClientError>>,
     pub(crate) images: VecDeque<Result<ImageList, NativeClientError>>,
     pub(crate) volumes: VecDeque<Result<VolumeList, NativeClientError>>,
+    pub(crate) networks: VecDeque<Result<NetworkList, NativeClientError>>,
+    pub(crate) attached: VecDeque<Result<Vec<AttachedContainer>, NativeClientError>>,
 }
 
 pub(crate) struct FakeControllerFactory {
@@ -762,6 +767,110 @@ impl Controller for FakeController {
                 "remove_volume:{}:{node_id}:{}:{}",
                 public_tag(access.expose()),
                 name.as_str(),
+                key.as_str()
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .admissions
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn list_networks<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<NetworkList, NativeClientError>> {
+        record(
+            &self.log,
+            format!("networks:{}", public_tag(access.expose())),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .networks
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn inspect_network<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        network_id: &'a NetworkId,
+        node: Option<&'a NodeId>,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<Vec<AttachedContainer>, NativeClientError>> {
+        record(
+            &self.log,
+            format!(
+                "inspect_network:{}:{}:{}",
+                public_tag(access.expose()),
+                network_id.as_str(),
+                node.map_or("swarm", NodeId::as_str)
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .attached
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn create_network<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        spec: &'a NetworkSpec,
+        key: &'a IdempotencyKey,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
+        let placement = match &spec.placement {
+            NetworkPlacement::Overlay { attachable } => format!("overlay:{attachable}"),
+            NetworkPlacement::Bridge { node_id } => format!("bridge:{node_id}"),
+        };
+        record(
+            &self.log,
+            format!(
+                "create_network:{}:{}:{placement}:{}:{}",
+                public_tag(access.expose()),
+                spec.name,
+                spec.subnet.as_deref().unwrap_or("none"),
+                key.as_str()
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .admissions
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn remove_network<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        network_id: &'a NetworkId,
+        node: Option<&'a NodeId>,
+        key: &'a IdempotencyKey,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
+        record(
+            &self.log,
+            format!(
+                "remove_network:{}:{}:{}:{}",
+                public_tag(access.expose()),
+                network_id.as_str(),
+                node.map_or("swarm", NodeId::as_str),
                 key.as_str()
             ),
         );

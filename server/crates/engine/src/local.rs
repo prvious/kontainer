@@ -25,11 +25,14 @@ use crate::{
     parse_docker_time, truncate_status_text,
 };
 use crate::{
-    MAX_VOLUME_USERS, VolumeCreate, VolumeSummary, are_valid_volume_labels, is_valid_volume_name,
+    MAX_NETWORK_ENDPOINTS, MAX_VOLUME_USERS, NetworkCreate, NetworkDetail, NetworkEndpoint,
+    NetworkSummary, VolumeCreate, VolumeSummary, are_valid_volume_labels, is_builtin_network,
+    is_valid_cidr, is_valid_network_id, is_valid_network_name, is_valid_volume_name,
     volume::bounded_labels,
 };
 
 const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(10);
+const MAX_CONTAINER_NETWORKS: usize = 16;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalEngineOptions {
@@ -611,6 +614,196 @@ impl ContainerEngine for LocalDockerEngine {
         Ok(map_disk_usage(&usage))
     }
 
+    async fn list_networks(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> Result<Vec<NetworkSummary>, EngineError> {
+        use bollard::query_parameters::{ListContainersOptionsBuilder, ListNetworksOptions};
+
+        let client = self.negotiate(cancellation).await?;
+        let networks = self
+            .execute(
+                EngineOperation::ListNetworks,
+                cancellation,
+                client.list_networks(None::<ListNetworksOptions>),
+            )
+            .await?;
+        // Running containers only: a stopped container keeps no endpoint.
+        let containers = self
+            .execute(
+                EngineOperation::ListNetworks,
+                cancellation,
+                client
+                    .list_containers(Some(ListContainersOptionsBuilder::new().all(false).build())),
+            )
+            .await?;
+        let mut endpoints: HashMap<String, u32> = HashMap::new();
+        for container in containers {
+            let networks = container
+                .network_settings
+                .and_then(|settings| settings.networks)
+                .unwrap_or_default();
+            for settings in networks.into_values() {
+                if let Some(id) = settings.network_id {
+                    *endpoints.entry(id).or_default() += 1;
+                }
+            }
+        }
+        Ok(networks
+            .into_iter()
+            .filter_map(|network| {
+                let id = network.id.clone().filter(|id| is_valid_network_id(id))?;
+                let containers = endpoints.get(&id).copied().unwrap_or(0);
+                Some(map_network(
+                    id,
+                    network.name,
+                    network.driver,
+                    network.scope,
+                    network.ipam,
+                    network.created,
+                    network.labels,
+                    [network.attachable, network.ingress, network.internal],
+                    containers,
+                ))
+            })
+            .collect())
+    }
+
+    async fn inspect_network(
+        &self,
+        id: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<NetworkDetail, EngineError> {
+        if !is_valid_network_id(id) {
+            return Err(EngineError::new(
+                EngineErrorKind::InvalidInput,
+                EngineOperation::InspectNetwork,
+            ));
+        }
+        let client = self.negotiate(cancellation).await?;
+        let network = self
+            .execute(
+                EngineOperation::InspectNetwork,
+                cancellation,
+                client.inspect_network(id, None),
+            )
+            .await?;
+        let mut endpoints: Vec<NetworkEndpoint> = network
+            .containers
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|(container_id, _)| is_valid_container_id(container_id))
+            .map(|(container_id, endpoint)| NetworkEndpoint {
+                name: endpoint
+                    .name
+                    .map(|name| bounded_message(&name))
+                    .unwrap_or_else(|| container_id.chars().take(12).collect()),
+                container_id,
+            })
+            .collect();
+        endpoints.sort_by(|left, right| left.name.cmp(&right.name));
+        endpoints.truncate(MAX_NETWORK_ENDPOINTS);
+        let count = u32::try_from(endpoints.len()).unwrap_or(u32::MAX);
+        let summary = map_network(
+            network.id.unwrap_or_else(|| id.to_owned()),
+            network.name,
+            network.driver,
+            network.scope,
+            network.ipam,
+            network.created,
+            network.labels,
+            [network.attachable, network.ingress, network.internal],
+            count,
+        );
+        Ok(NetworkDetail {
+            network: summary,
+            endpoints,
+        })
+    }
+
+    async fn create_network(
+        &self,
+        network: &NetworkCreate,
+        cancellation: &CancellationToken,
+    ) -> Result<String, EngineError> {
+        use bollard::models::{Ipam, IpamConfig, NetworkCreateRequest};
+
+        let driver_ok = matches!(network.driver.as_str(), "overlay" | "bridge");
+        if !is_valid_network_name(&network.name)
+            || is_builtin_network(&network.name)
+            || !driver_ok
+            || network
+                .subnet
+                .as_deref()
+                .is_some_and(|subnet| !is_valid_cidr(subnet))
+            || !are_valid_volume_labels(&network.labels)
+        {
+            return Err(EngineError::new(
+                EngineErrorKind::InvalidInput,
+                EngineOperation::CreateNetwork,
+            ));
+        }
+        let client = self.negotiate(cancellation).await?;
+        let request = NetworkCreateRequest {
+            name: network.name.clone(),
+            driver: Some(network.driver.clone()),
+            attachable: Some(network.attachable),
+            // Docker allows duplicate names; the controller checks the list first.
+            ipam: network.subnet.clone().map(|subnet| Ipam {
+                config: Some(vec![IpamConfig {
+                    subnet: Some(subnet),
+                    ..Default::default()
+                }]),
+                ..Default::default()
+            }),
+            labels: Some(network.labels.clone().into_iter().collect()),
+            ..Default::default()
+        };
+        let created = self
+            .execute(
+                EngineOperation::CreateNetwork,
+                cancellation,
+                client.create_network(request),
+            )
+            .await?;
+        if is_valid_network_id(&created.id) {
+            Ok(created.id)
+        } else {
+            Err(EngineError::new(
+                EngineErrorKind::InvalidResponse,
+                EngineOperation::CreateNetwork,
+            ))
+        }
+    }
+
+    async fn remove_network(
+        &self,
+        id: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<(), EngineError> {
+        if !is_valid_network_id(id) {
+            return Err(EngineError::new(
+                EngineErrorKind::InvalidInput,
+                EngineOperation::RemoveNetwork,
+            ));
+        }
+        let detail = self.inspect_network(id, cancellation).await?;
+        if detail.network.builtin() {
+            return Err(EngineError::new(
+                EngineErrorKind::InvalidInput,
+                EngineOperation::RemoveNetwork,
+            ));
+        }
+        let client = self.negotiate(cancellation).await?;
+        self.execute(
+            EngineOperation::RemoveNetwork,
+            cancellation,
+            client.remove_network(id),
+        )
+        .await
+    }
+
     async fn list_volumes(
         &self,
         cancellation: &CancellationToken,
@@ -852,6 +1045,40 @@ fn map_container_stats(response: ContainerStatsResponse) -> ContainerStats {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn map_network(
+    id: String,
+    name: Option<String>,
+    driver: Option<String>,
+    scope: Option<String>,
+    ipam: Option<bollard::models::Ipam>,
+    created: Option<String>,
+    labels: Option<HashMap<String, String>>,
+    [attachable, ingress, internal]: [Option<bool>; 3],
+    containers: u32,
+) -> NetworkSummary {
+    let subnets = ipam
+        .and_then(|ipam| ipam.config)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|config| config.subnet)
+        .filter(|subnet| subnet.len() <= 64)
+        .collect();
+    NetworkSummary {
+        id,
+        name: bounded_message(&name.unwrap_or_default()),
+        driver: bounded_message(&driver.unwrap_or_default()),
+        scope: bounded_message(&scope.unwrap_or_default()),
+        subnets,
+        containers,
+        created_at_seconds: created.as_deref().and_then(parse_docker_time),
+        labels: bounded_labels(labels.unwrap_or_default()),
+        attachable: attachable.unwrap_or(false),
+        ingress: ingress.unwrap_or(false),
+        internal: internal.unwrap_or(false),
+    }
+}
+
 fn map_volume(volume: bollard::models::Volume, users: &[String]) -> VolumeSummary {
     VolumeSummary {
         created_at_seconds: volume.created_at.as_deref().and_then(parse_docker_time),
@@ -969,7 +1196,27 @@ fn map_container_summary(
         service_name: bounded_label(labels.get(SERVICE_NAME_LABEL)),
         stack_namespace: bounded_label(labels.get(STACK_NAMESPACE_LABEL)),
         task_id: bounded_label(labels.get(TASK_ID_LABEL)),
+        networks: container_networks(summary),
     })
+}
+
+/// The networks a container has endpoints on, by name.
+fn container_networks(summary: &bollard::models::ContainerSummary) -> Vec<String> {
+    let mut names: Vec<String> = summary
+        .network_settings
+        .as_ref()
+        .and_then(|settings| settings.networks.as_ref())
+        .map(|networks| {
+            networks
+                .keys()
+                .filter(|name| is_valid_network_name(name))
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
+    names.sort();
+    names.truncate(MAX_CONTAINER_NETWORKS);
+    names
 }
 
 /// `host:container/proto` for each published port, once each (IPv4 and IPv6 bindings of one port

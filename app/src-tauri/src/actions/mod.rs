@@ -1,6 +1,7 @@
 pub mod app;
 pub mod containers;
 pub mod images;
+pub mod networks;
 pub mod nodes;
 pub mod operations;
 pub mod session;

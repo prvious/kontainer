@@ -34,6 +34,8 @@ export interface ContainerView {
     cpuPercent: number | null;
     memoryUsedBytes: number | null;
     memoryLimitBytes: number | null;
+    /** Networks it has endpoints on, by name. */
+    networks: string[];
 }
 
 export interface NodeOutcomeView {
@@ -75,6 +77,7 @@ function containerFromIpc(value: unknown): ContainerView {
         "cpuPercent",
         "memoryUsedBytes",
         "memoryLimitBytes",
+        "networks",
     ]);
     if (
         typeof data.nodeId !== "string" ||
@@ -96,7 +99,10 @@ function containerFromIpc(value: unknown): ContainerView {
         !isOptionalText(data.taskId) ||
         !isOptionalFigure(data.cpuPercent) ||
         !isOptionalFigure(data.memoryUsedBytes) ||
-        !isOptionalFigure(data.memoryLimitBytes)
+        !isOptionalFigure(data.memoryLimitBytes) ||
+        !Array.isArray(data.networks) ||
+        data.networks.length > 16 ||
+        !data.networks.every((network) => typeof network === "string")
     )
         throw "invalid_response";
     return data as unknown as ContainerView;

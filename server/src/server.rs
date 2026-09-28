@@ -274,6 +274,14 @@ pub async fn serve(router: Router, ctx: &AppContext, params: &ServeParams) -> Re
         shutdown.clone(),
     );
     tokio::pin!(servers);
+    // Swarm-wide objects go through the configured manager; without one, manager-scoped routes
+    // answer 503 `not_a_manager` and the rest keeps working.
+    if let Some(host) = ctx.shared_store.get::<ManagerDockerHost>()
+        && let Some(manager) = crate::swarm::engine::connect_manager(&host.0).await
+    {
+        ctx.shared_store
+            .insert(crate::swarm::engine::SharedManagerEngine(manager));
+    }
     // Hourly sample pruning stops with the drain and is joined before serve returns.
     let pruner = tokio::spawn(crate::tasks::prune_samples::run_hourly(
         ctx.db.clone(),
@@ -289,6 +297,10 @@ pub async fn serve(router: Router, ctx: &AppContext, params: &ServeParams) -> Re
                 .shared_store
                 .get::<crate::nodes::agents::SharedAgentDirectory>()
                 .map(|directory| directory.0),
+            manager: ctx
+                .shared_store
+                .get::<crate::swarm::engine::SharedManagerEngine>()
+                .map(|manager| manager.0),
             settings: crate::operations::worker::WorkerSettings::new(
                 settings.shutdown_grace.duration(),
             ),

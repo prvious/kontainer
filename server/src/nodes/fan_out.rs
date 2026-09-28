@@ -38,6 +38,7 @@ impl From<AgentClientError> for NodeFailure {
             AgentClientError::EngineError => Self::Error("engine_error"),
             AgentClientError::ImageInUse => Self::Error("image_in_use"),
             AgentClientError::VolumeExists => Self::Error("volume_exists"),
+            AgentClientError::BuiltinNetwork => Self::Error("builtin_network"),
         }
     }
 }

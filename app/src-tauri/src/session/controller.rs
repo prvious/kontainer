@@ -16,6 +16,7 @@ use kontainer_native_client::{
     OperationEvent, OperationSnapshot, PasswordSession, ProbeFailure, RefreshCredential,
     SampleSeries, Traced, VolumeList, VolumeName, VolumeQuery, VolumeSpec,
 };
+use kontainer_native_client::{AttachedContainer, NetworkId, NetworkList, NetworkSpec};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -188,6 +189,37 @@ pub(crate) trait Controller: Send + Sync + 'static {
         access: &'a AccessCredential,
         node_id: &'a NodeId,
         name: &'a VolumeName,
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>>;
+
+    fn list_networks<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<NetworkList, NativeClientError>>;
+
+    fn inspect_network<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        network_id: &'a NetworkId,
+        node: Option<&'a NodeId>,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<Vec<AttachedContainer>, NativeClientError>>;
+
+    fn create_network<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        spec: &'a NetworkSpec,
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>>;
+
+    fn remove_network<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        network_id: &'a NetworkId,
+        node: Option<&'a NodeId>,
         key: &'a IdempotencyKey,
         cancellation: &'a CancellationToken,
     ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>>;
@@ -518,6 +550,51 @@ impl Controller for NativeController {
         Box::pin(
             self.client
                 .remove_volume(access, node_id, name, key, cancellation),
+        )
+    }
+
+    fn list_networks<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<NetworkList, NativeClientError>> {
+        Box::pin(self.client.list_networks(access, cancellation))
+    }
+
+    fn inspect_network<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        network_id: &'a NetworkId,
+        node: Option<&'a NodeId>,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<Vec<AttachedContainer>, NativeClientError>> {
+        Box::pin(
+            self.client
+                .inspect_network(access, network_id, node, cancellation),
+        )
+    }
+
+    fn create_network<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        spec: &'a NetworkSpec,
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
+        Box::pin(self.client.create_network(access, spec, key, cancellation))
+    }
+
+    fn remove_network<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        network_id: &'a NetworkId,
+        node: Option<&'a NodeId>,
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
+        Box::pin(
+            self.client
+                .remove_network(access, network_id, node, key, cancellation),
         )
     }
 

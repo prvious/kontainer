@@ -49,11 +49,13 @@ impl ExecutionFailure {
     }
 }
 
-/// What an executor may use: the database, per-node agent clients, a cancellation token that
-/// fires on timeout or forced shutdown, and progress reporting.
+/// What an executor may use: the database, per-node agent clients, the manager engine for
+/// swarm-wide objects, a cancellation token that fires on timeout or forced shutdown, and
+/// progress reporting.
 pub struct ExecutionContext {
     pub database: DatabaseConnection,
     pub agents: Option<Arc<dyn AgentDirectory>>,
+    pub manager: Option<Arc<dyn crate::swarm::engine::ManagerEngine>>,
     pub cancellation: CancellationToken,
     operation_id: Uuid,
 }
@@ -69,9 +71,20 @@ impl ExecutionContext {
         Self {
             database,
             agents,
+            manager: None,
             cancellation,
             operation_id,
         }
+    }
+
+    /// Give executors the manager engine, when the controller has one.
+    #[must_use]
+    pub fn with_manager(
+        mut self,
+        manager: Option<Arc<dyn crate::swarm::engine::ManagerEngine>>,
+    ) -> Self {
+        self.manager = manager;
+        self
     }
 
     /// Record the kind's progress document. A failed write is logged, not fatal: progress is
@@ -142,7 +155,9 @@ pub fn production_registry() -> ExecutorRegistry {
             .with(crate::images::operations::remove::RemoveImageExecutor)
             .with(crate::images::operations::pull::PullImageExecutor)
             .with(crate::volumes::operations::create::CreateVolumeExecutor)
-            .with(crate::volumes::operations::remove::RemoveVolumeExecutor),
+            .with(crate::volumes::operations::remove::RemoveVolumeExecutor)
+            .with(crate::networks::operations::create::CreateNetworkExecutor)
+            .with(crate::networks::operations::remove::RemoveNetworkExecutor),
         ExecutorRegistry::with,
     )
 }

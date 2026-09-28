@@ -23,7 +23,8 @@
                 "taskId": "x7kq",
                 "cpuPercent": 12.5,
                 "memoryUsedBytes": 52428800,
-                "memoryLimitBytes": 1073741824
+                "memoryLimitBytes": 1073741824,
+                "networks": ["shop_default"]
             },
             {
                 "nodeId": "worker-1",
@@ -42,7 +43,8 @@
                 "taskId": null,
                 "cpuPercent": null,
                 "memoryUsedBytes": null,
-                "memoryLimitBytes": null
+                "memoryLimitBytes": null,
+                "networks": []
             }
         ],
         "nodes": [

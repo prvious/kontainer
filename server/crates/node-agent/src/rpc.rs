@@ -8,6 +8,11 @@ use kontainer_agent_proto::v1::{
     PullImageRequest, RemoveImageRequest, RemoveImageResponse, node_agent_server::NodeAgent,
 };
 use kontainer_agent_proto::v1::{
+    CreateNetworkRequest, CreateNetworkResponse, InspectNetworkRequest, InspectNetworkResponse,
+    ListNetworksRequest, ListNetworksResponse, NetworkEndpoint as ProtoNetworkEndpoint,
+    NetworkSummary as ProtoNetworkSummary, RemoveNetworkRequest, RemoveNetworkResponse,
+};
+use kontainer_agent_proto::v1::{
     CreateVolumeRequest, CreateVolumeResponse, ListVolumesRequest, ListVolumesResponse,
     RemoveVolumeRequest, RemoveVolumeResponse, VolumeSummary as ProtoVolumeSummary,
 };
@@ -17,7 +22,9 @@ use kontainer_engine::{
     is_valid_container_id, is_valid_image_id,
 };
 use kontainer_engine::{
-    VolumeCreate, VolumeSummary, are_valid_volume_labels, is_valid_volume_name,
+    NetworkCreate, NetworkSummary, VolumeCreate, VolumeSummary, are_valid_volume_labels,
+    is_builtin_network, is_valid_cidr, is_valid_network_id, is_valid_network_name,
+    is_valid_volume_name,
 };
 use kontainer_rpc_auth::AuthenticatedPeerIdentity;
 use tokio_util::sync::CancellationToken;
@@ -156,6 +163,142 @@ impl NodeAgent for NodeAgentService {
             }
         })?;
         Ok(Response::new(RemoveImageResponse {}))
+    }
+
+    async fn list_networks(
+        &self,
+        request: Request<ListNetworksRequest>,
+    ) -> Result<Response<ListNetworksResponse>, Status> {
+        require_controller(&request)?;
+        let networks = tokio::select! {
+            biased;
+            _ = self.cancellation.cancelled() => {
+                return Err(Status::cancelled("node agent is shutting down"));
+            }
+            networks = self.engine.list_networks(&self.cancellation) => networks.map_err(|error| {
+                warn!(%error, "network listing failed");
+                engine_error_to_status(&error)
+            })?,
+        };
+        Ok(Response::new(ListNetworksResponse {
+            networks: networks.into_iter().map(network_to_proto).collect(),
+        }))
+    }
+
+    async fn inspect_network(
+        &self,
+        request: Request<InspectNetworkRequest>,
+    ) -> Result<Response<InspectNetworkResponse>, Status> {
+        require_controller(&request)?;
+        let id = request.into_inner().id;
+        if !is_valid_network_id(&id) {
+            return Err(Status::invalid_argument("invalid_network"));
+        }
+        let detail = tokio::select! {
+            biased;
+            _ = self.cancellation.cancelled() => {
+                return Err(Status::cancelled("node agent is shutting down"));
+            }
+            detail = self.engine.inspect_network(&id, &self.cancellation) => detail.map_err(|error| {
+                warn!(%error, "network inspect failed");
+                action_error_to_status(&error)
+            })?,
+        };
+        Ok(Response::new(InspectNetworkResponse {
+            network: Some(network_to_proto(detail.network)),
+            endpoints: detail
+                .endpoints
+                .into_iter()
+                .map(|endpoint| ProtoNetworkEndpoint {
+                    container_id: endpoint.container_id,
+                    name: endpoint.name,
+                })
+                .collect(),
+        }))
+    }
+
+    async fn create_network(
+        &self,
+        request: Request<CreateNetworkRequest>,
+    ) -> Result<Response<CreateNetworkResponse>, Status> {
+        require_controller(&request)?;
+        let inner = request.into_inner();
+        let network = NetworkCreate {
+            name: inner.name,
+            driver: "bridge".to_owned(),
+            attachable: false,
+            subnet: inner.subnet,
+            labels: inner.labels.into_iter().collect(),
+        };
+        if !is_valid_network_name(&network.name)
+            || is_builtin_network(&network.name)
+            || network
+                .subnet
+                .as_deref()
+                .is_some_and(|subnet| !is_valid_cidr(subnet))
+            || !are_valid_volume_labels(&network.labels)
+        {
+            return Err(Status::invalid_argument("invalid_network"));
+        }
+        let result = tokio::select! {
+            biased;
+            _ = self.cancellation.cancelled() => {
+                return Err(Status::cancelled("node agent is shutting down"));
+            }
+            result = self.engine.create_network(&network, &self.cancellation) => result,
+        };
+        let id = result.map_err(|error| {
+            warn!(%error, "network creation failed");
+            action_error_to_status(&error)
+        })?;
+        Ok(Response::new(CreateNetworkResponse { id }))
+    }
+
+    async fn remove_network(
+        &self,
+        request: Request<RemoveNetworkRequest>,
+    ) -> Result<Response<RemoveNetworkResponse>, Status> {
+        require_controller(&request)?;
+        let id = request.into_inner().id;
+        if !is_valid_network_id(&id) {
+            return Err(Status::invalid_argument("invalid_network"));
+        }
+        let detail = tokio::select! {
+            biased;
+            _ = self.cancellation.cancelled() => {
+                return Err(Status::cancelled("node agent is shutting down"));
+            }
+            detail = self.engine.inspect_network(&id, &self.cancellation) => detail.map_err(|error| {
+                warn!(%error, "network inspect before removal failed");
+                action_error_to_status(&error)
+            })?,
+        };
+        if detail.network.builtin() {
+            return Err(Status::invalid_argument("builtin_network"));
+        }
+        if !detail.endpoints.is_empty() {
+            return Ok(Response::new(RemoveNetworkResponse {
+                in_use_by: detail
+                    .endpoints
+                    .into_iter()
+                    .map(|endpoint| endpoint.name)
+                    .collect(),
+            }));
+        }
+        let result = tokio::select! {
+            biased;
+            _ = self.cancellation.cancelled() => {
+                return Err(Status::cancelled("node agent is shutting down"));
+            }
+            result = self.engine.remove_network(&id, &self.cancellation) => result,
+        };
+        result.map_err(|error| {
+            warn!(%error, "network removal failed");
+            action_error_to_status(&error)
+        })?;
+        Ok(Response::new(RemoveNetworkResponse {
+            in_use_by: Vec::new(),
+        }))
     }
 
     async fn list_volumes(
@@ -393,6 +536,7 @@ impl NodeAgent for NodeAgentService {
                         service_name: container.service_name,
                         stack_namespace: container.stack_namespace,
                         task_id: container.task_id,
+                        networks: container.networks,
                     }
                 })
                 .collect(),
@@ -452,6 +596,23 @@ impl NodeAgent for NodeAgentService {
 }
 
 /// Stable codes in the status message; daemon detail stays in the log.
+fn network_to_proto(network: NetworkSummary) -> ProtoNetworkSummary {
+    ProtoNetworkSummary {
+        builtin: network.builtin(),
+        id: network.id,
+        name: network.name,
+        driver: network.driver,
+        scope: network.scope,
+        subnets: network.subnets,
+        containers: network.containers,
+        created_at_unix_seconds: network.created_at_seconds,
+        labels: network.labels.into_iter().collect(),
+        attachable: network.attachable,
+        ingress: network.ingress,
+        internal: network.internal,
+    }
+}
+
 fn action_error_to_status(error: &EngineError) -> Status {
     match error.kind() {
         EngineErrorKind::NotFound => Status::not_found("not_found"),
@@ -1045,6 +1206,175 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(anonymous.code(), tonic::Code::Unauthenticated);
+    }
+
+    /// `bridge` (built-in), `app` with one endpoint, and `empty` with none.
+    struct NetworkEngine {
+        removed: std::sync::Mutex<Vec<String>>,
+    }
+
+    fn network(fill: char, name: &str, containers: u32) -> kontainer_engine::NetworkSummary {
+        kontainer_engine::NetworkSummary {
+            id: fill.to_string().repeat(64),
+            name: name.to_owned(),
+            driver: "bridge".to_owned(),
+            scope: "local".to_owned(),
+            subnets: vec!["172.30.0.0/16".to_owned()],
+            containers,
+            ..Default::default()
+        }
+    }
+
+    #[async_trait]
+    impl ContainerEngine for NetworkEngine {
+        async fn is_available(&self) -> Result<bool, EngineError> {
+            Ok(true)
+        }
+
+        async fn list_networks(
+            &self,
+            _: &CancellationToken,
+        ) -> Result<Vec<kontainer_engine::NetworkSummary>, EngineError> {
+            Ok(vec![
+                network('a', "bridge", 0),
+                network('b', "app", 1),
+                network('c', "empty", 0),
+            ])
+        }
+
+        async fn inspect_network(
+            &self,
+            id: &str,
+            _: &CancellationToken,
+        ) -> Result<kontainer_engine::NetworkDetail, EngineError> {
+            let listed = [
+                network('a', "bridge", 0),
+                network('b', "app", 1),
+                network('c', "empty", 0),
+            ];
+            let Some(found) = listed.into_iter().find(|network| network.id == id) else {
+                return Err(EngineError::new(
+                    EngineErrorKind::NotFound,
+                    EngineOperation::InspectNetwork,
+                ));
+            };
+            let endpoints = if found.name == "app" {
+                vec![kontainer_engine::NetworkEndpoint {
+                    container_id: "d".repeat(64),
+                    name: "web.1".to_owned(),
+                }]
+            } else {
+                Vec::new()
+            };
+            Ok(kontainer_engine::NetworkDetail {
+                network: found,
+                endpoints,
+            })
+        }
+
+        async fn create_network(
+            &self,
+            network: &kontainer_engine::NetworkCreate,
+            _: &CancellationToken,
+        ) -> Result<String, EngineError> {
+            assert_eq!(network.driver, "bridge", "agents only make bridges");
+            Ok("e".repeat(64))
+        }
+
+        async fn remove_network(&self, id: &str, _: &CancellationToken) -> Result<(), EngineError> {
+            self.removed.lock().unwrap().push(id.to_owned());
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn networks_list_inspect_create_and_refuse_removal_with_endpoints() {
+        use kontainer_agent_proto::v1::{
+            CreateNetworkRequest, InspectNetworkRequest, ListNetworksRequest, RemoveNetworkRequest,
+        };
+
+        let engine = Arc::new(NetworkEngine {
+            removed: std::sync::Mutex::new(Vec::new()),
+        });
+        let service = NodeAgentService::new("node-1", engine.clone(), CancellationToken::new());
+        let listed = service
+            .list_networks(authenticated(ListNetworksRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+        let flags: Vec<_> = listed
+            .networks
+            .iter()
+            .map(|network| (network.name.as_str(), network.builtin, network.containers))
+            .collect();
+        assert_eq!(
+            flags,
+            vec![("bridge", true, 0), ("app", false, 1), ("empty", false, 0)]
+        );
+
+        let detail = service
+            .inspect_network(authenticated(InspectNetworkRequest { id: "b".repeat(64) }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(detail.endpoints[0].name, "web.1");
+        let missing = service
+            .inspect_network(authenticated(InspectNetworkRequest { id: "f".repeat(64) }))
+            .await
+            .unwrap_err();
+        assert_eq!(missing.code(), tonic::Code::NotFound);
+
+        let in_use = service
+            .remove_network(authenticated(RemoveNetworkRequest { id: "b".repeat(64) }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(in_use.in_use_by, vec!["web.1"]);
+        let builtin = service
+            .remove_network(authenticated(RemoveNetworkRequest { id: "a".repeat(64) }))
+            .await
+            .unwrap_err();
+        assert_eq!(
+            (builtin.code(), builtin.message()),
+            (tonic::Code::InvalidArgument, "builtin_network")
+        );
+        let removed = service
+            .remove_network(authenticated(RemoveNetworkRequest { id: "c".repeat(64) }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(removed.in_use_by.is_empty());
+        assert_eq!(
+            *engine.removed.lock().unwrap(),
+            vec!["c".repeat(64)],
+            "only the empty one"
+        );
+
+        let created = service
+            .create_network(authenticated(CreateNetworkRequest {
+                name: "local-net".to_owned(),
+                subnet: Some("10.9.0.0/24".to_owned()),
+                labels: std::collections::HashMap::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(created.id, "e".repeat(64));
+        for (name, subnet) in [
+            ("bridge", None),
+            ("-bad", None),
+            ("ok", Some("10.9.0.1/24")),
+        ] {
+            let invalid = service
+                .create_network(authenticated(CreateNetworkRequest {
+                    name: name.to_owned(),
+                    subnet: subnet.map(str::to_owned),
+                    labels: std::collections::HashMap::new(),
+                }))
+                .await
+                .unwrap_err();
+            assert_eq!(invalid.code(), tonic::Code::InvalidArgument, "{name}");
+        }
     }
 
     #[tokio::test]

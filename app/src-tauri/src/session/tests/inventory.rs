@@ -76,6 +76,11 @@ fn container_list() -> ContainerList {
         cpu_percent: running.then_some(12.5),
         memory_used_bytes: running.then_some(52_428_800),
         memory_limit_bytes: running.then_some(1 << 30),
+        networks: if running {
+            vec!["shop_default".to_owned()]
+        } else {
+            Vec::new()
+        },
     };
     let outcome = |node: &str, status| NodeOutcome {
         node_id: NodeId::parse(node).unwrap(),

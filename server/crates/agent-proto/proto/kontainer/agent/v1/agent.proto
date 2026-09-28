@@ -30,6 +30,16 @@ service NodeAgent {
   // A volume that containers mount is refused by Docker with or without force. That refusal is a
   // result, not an error: `in_use_by` names the containers and nothing is removed.
   rpc RemoveVolume(RemoveVolumeRequest) returns (RemoveVolumeResponse);
+  // Every network on the node (local and the swarm-scope ones present here) with its running
+  // endpoints on this node.
+  rpc ListNetworks(ListNetworksRequest) returns (ListNetworksResponse);
+  // One network's endpoints on this node. NOT_FOUND `not_found` when the node doesn't have it.
+  rpc InspectNetwork(InspectNetworkRequest) returns (InspectNetworkResponse);
+  // A local `bridge` network on this node.
+  rpc CreateNetwork(CreateNetworkRequest) returns (CreateNetworkResponse);
+  // A local network with endpoints is refused as a result: `in_use_by` names the containers.
+  // Built-ins are INVALID_ARGUMENT `builtin_network`.
+  rpc RemoveNetwork(RemoveNetworkRequest) returns (RemoveNetworkResponse);
 }
 
 message CheckInRequest {
@@ -129,6 +139,8 @@ message ContainerSummary {
   optional string service_name = 14;
   optional string stack_namespace = 15;
   optional string task_id = 16;
+  // Names of the networks it has endpoints on, at most 16.
+  repeated string networks = 17;
 }
 
 enum ContainerAction {
@@ -233,5 +245,60 @@ message RemoveVolumeRequest {
 
 message RemoveVolumeResponse {
   // Non-empty when Docker refused because these containers mount the volume.
+  repeated string in_use_by = 1;
+}
+
+message ListNetworksRequest {}
+
+message NetworkSummary {
+  string id = 1;
+  string name = 2;
+  string driver = 3;
+  // `local`, `swarm`, or `global`.
+  string scope = 4;
+  repeated string subnets = 5;
+  // Running containers on this node with an endpoint on it.
+  uint32 containers = 6;
+  optional int64 created_at_unix_seconds = 7;
+  map<string, string> labels = 8;
+  bool attachable = 9;
+  bool ingress = 10;
+  bool internal = 11;
+  bool builtin = 12;
+}
+
+message ListNetworksResponse {
+  repeated NetworkSummary networks = 1;
+}
+
+message InspectNetworkRequest {
+  string id = 1;
+}
+
+message NetworkEndpoint {
+  string container_id = 1;
+  string name = 2;
+}
+
+message InspectNetworkResponse {
+  NetworkSummary network = 1;
+  repeated NetworkEndpoint endpoints = 2;
+}
+
+message CreateNetworkRequest {
+  string name = 1;
+  optional string subnet = 2;
+  map<string, string> labels = 3;
+}
+
+message CreateNetworkResponse {
+  string id = 1;
+}
+
+message RemoveNetworkRequest {
+  string id = 1;
+}
+
+message RemoveNetworkResponse {
   repeated string in_use_by = 1;
 }

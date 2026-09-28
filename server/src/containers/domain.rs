@@ -32,6 +32,7 @@ pub struct ContainerItem {
     pub cpu_percent: Option<f64>,
     pub memory_used_bytes: Option<u64>,
     pub memory_limit_bytes: Option<u64>,
+    pub networks: Vec<String>,
 }
 
 /// The operation kind for one lifecycle action.

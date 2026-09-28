@@ -20,7 +20,7 @@ Node ids refer to `docs/design.pen`. Open the file with the Pencil MCP using its
 
 | # | Gap | Referenced from | Interim behaviour | Status |
 |---|-----|-----------------|-------------------|--------|
-| G1 | Create network dialog | Networks page `isFfK`, header button CREATE NETWORK | Minimal dialog modelled on Create Volume `iPOa2`: name, driver (overlay / bridge), attachable toggle, node picker for bridge. | Missing |
+| G1 | Create network dialog | Networks page `isFfK`, header button CREATE NETWORK | Minimal dialog modelled on Create Volume `iPOa2`: name, driver (overlay / bridge), attachable toggle, node picker for bridge, optional subnet (spec 10, ADR 0020). | Built (interim) |
 | G2 | Create service dialog | Services page `LMjiS`, header button CREATE SERVICE | Button disabled with tooltip "Coming soon". Feature deferred. | Missing, deferred |
 | G3 | Deploy stack flow (compose editor, validation, plan preview) | Stacks page `twXyi`, Overview `WCBzg` DEPLOY button, empty state `Y1Nv0` | Buttons disabled with tooltip "Coming soon". Feature deferred by the reset doc. | Missing, deferred |
 | G4 | Service detail (tasks per service, task state, placement, last error) | Services rows; state `Y3UuOQ` hover text mentions "why the last task can't be placed" | No detail page. Task-level reasons surface only in the row tooltip. | Missing |

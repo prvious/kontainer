@@ -104,6 +104,8 @@ pub struct ContainerResponse {
     pub memory_used_bytes: Option<u64>,
     #[schema(required = true)]
     pub memory_limit_bytes: Option<u64>,
+    /// Networks it has endpoints on, by name (at most 16).
+    pub networks: Vec<String>,
 }
 
 /// `{ items, nodes, snapshotAt }`: merged containers and one outcome per member node.
@@ -145,6 +147,7 @@ fn container_response(item: ContainerItem) -> ContainerResponse {
         cpu_percent: item.cpu_percent,
         memory_used_bytes: item.memory_used_bytes,
         memory_limit_bytes: item.memory_limit_bytes,
+        networks: item.networks,
     }
 }
 

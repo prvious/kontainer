@@ -48,6 +48,7 @@ fn start_worker(
         database: database.clone(),
         registry: Arc::new(registry),
         agents: None,
+        manager: None,
         settings: fast_settings(),
     };
     let task = tokio::spawn(worker.run(draining.clone()));

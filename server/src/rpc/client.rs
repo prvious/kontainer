@@ -17,6 +17,10 @@ use kontainer_agent_proto::v1::{
     ListImagesRequest, PullImageRequest, RemoveImageRequest, node_agent_client::NodeAgentClient,
 };
 use kontainer_agent_proto::v1::{
+    CreateNetworkRequest, InspectNetworkRequest, ListNetworksRequest,
+    NetworkSummary as ProtoNetworkSummary, RemoveNetworkRequest,
+};
+use kontainer_agent_proto::v1::{
     CreateVolumeRequest, ListVolumesRequest, RemoveVolumeRequest,
     VolumeSummary as ProtoVolumeSummary,
 };
@@ -295,6 +299,7 @@ impl NodeAgentClientConfig {
                 cpu_percent: item.cpu_percent,
                 memory_used_bytes: item.memory_used_bytes,
                 memory_limit_bytes: item.memory_limit_bytes,
+                networks: item.networks,
             });
         }
 
@@ -566,6 +571,141 @@ impl NodeAgentClientConfig {
         })
     }
 
+    /// Every network on the node, with its running endpoints here.
+    pub async fn list_networks(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> Result<Vec<AgentNetwork>, AgentClientError> {
+        let channel = self.channel(cancellation).await?;
+        let mut client = NodeAgentClient::new(channel);
+        let mut request = tonic::Request::new(ListNetworksRequest {});
+        request.set_timeout(self.rpc_timeout);
+        let response = tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => return Err(AgentClientError::Cancelled),
+            result = tokio::time::timeout(self.rpc_timeout, client.list_networks(request)) => match result {
+                Ok(Ok(response)) => response.into_inner(),
+                Ok(Err(status)) => return Err(map_rpc_status(status)),
+                Err(_) => return Err(AgentClientError::TimedOut),
+            }
+        };
+        if response.networks.len() > MAX_NETWORKS_PER_NODE {
+            return Err(AgentClientError::InvalidResponse);
+        }
+        response.networks.into_iter().map(agent_network).collect()
+    }
+
+    /// One network's endpoints on this node.
+    pub async fn inspect_network(
+        &self,
+        id: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<AgentNetworkDetail, AgentClientError> {
+        if !kontainer_engine::is_valid_network_id(id) {
+            return Err(AgentClientError::InvalidResponse);
+        }
+        let channel = self.channel(cancellation).await?;
+        let mut client = NodeAgentClient::new(channel);
+        let mut request = tonic::Request::new(InspectNetworkRequest { id: id.to_owned() });
+        request.set_timeout(self.rpc_timeout);
+        let response = tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => return Err(AgentClientError::Cancelled),
+            result = tokio::time::timeout(self.rpc_timeout, client.inspect_network(request)) => match result {
+                Ok(Ok(response)) => response.into_inner(),
+                Ok(Err(status)) => return Err(map_action_status(&status)),
+                Err(_) => return Err(AgentClientError::TimedOut),
+            }
+        };
+        if response.endpoints.len() > MAX_NETWORK_ENDPOINTS {
+            return Err(AgentClientError::InvalidResponse);
+        }
+        let network = response
+            .network
+            .ok_or(AgentClientError::InvalidResponse)
+            .and_then(agent_network)?;
+        let endpoints = response
+            .endpoints
+            .into_iter()
+            .map(|endpoint| {
+                if !is_valid_container_id(&endpoint.container_id) || endpoint.name.len() > 512 {
+                    return Err(AgentClientError::InvalidResponse);
+                }
+                Ok(AgentNetworkEndpoint {
+                    container_id: endpoint.container_id,
+                    name: endpoint.name,
+                })
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(AgentNetworkDetail { network, endpoints })
+    }
+
+    /// Create a local bridge network on this node and return its id.
+    pub async fn create_network(
+        &self,
+        network: &AgentNetworkCreate,
+        cancellation: &CancellationToken,
+    ) -> Result<String, AgentClientError> {
+        let deadline = self.rpc_timeout + ACTION_ALLOWANCE;
+        let channel = self.channel_with_timeout(cancellation, deadline).await?;
+        let mut client = NodeAgentClient::new(channel);
+        let mut request = tonic::Request::new(CreateNetworkRequest {
+            name: network.name.clone(),
+            subnet: network.subnet.clone(),
+            labels: network.labels.clone().into_iter().collect(),
+        });
+        request.set_timeout(deadline);
+        let response = tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => return Err(AgentClientError::Cancelled),
+            result = tokio::time::timeout(deadline, client.create_network(request)) => match result {
+                Ok(Ok(response)) => response.into_inner(),
+                Ok(Err(status)) => return Err(map_action_status(&status)),
+                Err(_) => return Err(AgentClientError::TimedOut),
+            }
+        };
+        if kontainer_engine::is_valid_network_id(&response.id) {
+            Ok(response.id)
+        } else {
+            Err(AgentClientError::InvalidResponse)
+        }
+    }
+
+    /// Remove a local network from this node; endpoints come back as [`NetworkRemoval::InUse`].
+    pub async fn remove_network(
+        &self,
+        id: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<NetworkRemoval, AgentClientError> {
+        if !kontainer_engine::is_valid_network_id(id) {
+            return Err(AgentClientError::InvalidResponse);
+        }
+        let deadline = self.rpc_timeout + ACTION_ALLOWANCE;
+        let channel = self.channel_with_timeout(cancellation, deadline).await?;
+        let mut client = NodeAgentClient::new(channel);
+        let mut request = tonic::Request::new(RemoveNetworkRequest { id: id.to_owned() });
+        request.set_timeout(deadline);
+        let response = tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => return Err(AgentClientError::Cancelled),
+            result = tokio::time::timeout(deadline, client.remove_network(request)) => match result {
+                Ok(Ok(response)) => response.into_inner(),
+                Ok(Err(status)) => return Err(map_action_status(&status)),
+                Err(_) => return Err(AgentClientError::TimedOut),
+            }
+        };
+        if response.in_use_by.len() > MAX_NETWORK_ENDPOINTS
+            || response.in_use_by.iter().any(|name| name.len() > 512)
+        {
+            return Err(AgentClientError::InvalidResponse);
+        }
+        Ok(if response.in_use_by.is_empty() {
+            NetworkRemoval::Removed
+        } else {
+            NetworkRemoval::InUse(response.in_use_by)
+        })
+    }
+
     /// Expected node ID, for shared-store diagnostics without exposing TLS.
     #[must_use]
     pub fn node_id(&self) -> &str {
@@ -617,6 +757,8 @@ pub struct AgentContainerSummary {
     pub cpu_percent: Option<f64>,
     pub memory_used_bytes: Option<u64>,
     pub memory_limit_bytes: Option<u64>,
+    /// Networks it has endpoints on, by name.
+    pub networks: Vec<String>,
 }
 
 /// One image on one node, controller-owned.
@@ -646,6 +788,88 @@ pub enum AgentPullEvent {
 
 pub type AgentPullStream =
     std::pin::Pin<Box<dyn futures_util::Stream<Item = AgentPullEvent> + Send>>;
+
+/// One network as one node sees it, controller-owned.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct AgentNetwork {
+    pub id: String,
+    pub name: String,
+    pub driver: String,
+    /// `local`, `swarm`, or `global`.
+    pub scope: String,
+    pub subnets: Vec<String>,
+    /// Running containers on this node with an endpoint on it.
+    pub containers: u32,
+    pub created_at_seconds: Option<i64>,
+    pub labels: std::collections::BTreeMap<String, String>,
+    pub attachable: bool,
+    pub ingress: bool,
+    pub internal: bool,
+    pub builtin: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentNetworkEndpoint {
+    pub container_id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentNetworkDetail {
+    pub network: AgentNetwork,
+    pub endpoints: Vec<AgentNetworkEndpoint>,
+}
+
+/// A local bridge a create asks an agent for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentNetworkCreate {
+    pub name: String,
+    pub subnet: Option<String>,
+    pub labels: std::collections::BTreeMap<String, String>,
+}
+
+/// How a local network removal ended when the agent answered.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NetworkRemoval {
+    Removed,
+    /// Containers have endpoints on it: nothing was removed.
+    InUse(Vec<String>),
+}
+
+fn agent_network(network: ProtoNetworkSummary) -> Result<AgentNetwork, AgentClientError> {
+    let bounded = |value: &str| value.len() <= 512;
+    if !kontainer_engine::is_valid_network_id(&network.id)
+        || network.name.is_empty()
+        || !bounded(&network.name)
+        || !bounded(&network.driver)
+        || !matches!(network.scope.as_str(), "local" | "swarm" | "global")
+        || network.subnets.len() > 16
+        || !network.subnets.iter().all(|subnet| subnet.len() <= 64)
+        || network.labels.len() > 64
+        || !network
+            .labels
+            .iter()
+            .all(|(key, value)| bounded(key) && bounded(value))
+    {
+        return Err(AgentClientError::InvalidResponse);
+    }
+    Ok(AgentNetwork {
+        id: network.id,
+        name: network.name,
+        driver: network.driver,
+        scope: network.scope,
+        subnets: network.subnets,
+        containers: network.containers,
+        created_at_seconds: network
+            .created_at_unix_seconds
+            .filter(|seconds| *seconds >= 0),
+        labels: network.labels.into_iter().collect(),
+        attachable: network.attachable,
+        ingress: network.ingress,
+        internal: network.internal,
+        builtin: network.builtin,
+    })
+}
 
 /// One volume on one node, controller-owned.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -825,6 +1049,37 @@ pub trait AgentClient: std::fmt::Debug + Send + Sync {
         Err(AgentClientError::Unavailable)
     }
 
+    async fn list_networks(
+        &self,
+        _cancellation: &CancellationToken,
+    ) -> Result<Vec<AgentNetwork>, AgentClientError> {
+        Err(AgentClientError::Unavailable)
+    }
+
+    async fn inspect_network(
+        &self,
+        _id: &str,
+        _cancellation: &CancellationToken,
+    ) -> Result<AgentNetworkDetail, AgentClientError> {
+        Err(AgentClientError::Unavailable)
+    }
+
+    async fn create_network(
+        &self,
+        _network: &AgentNetworkCreate,
+        _cancellation: &CancellationToken,
+    ) -> Result<String, AgentClientError> {
+        Err(AgentClientError::Unavailable)
+    }
+
+    async fn remove_network(
+        &self,
+        _id: &str,
+        _cancellation: &CancellationToken,
+    ) -> Result<NetworkRemoval, AgentClientError> {
+        Err(AgentClientError::Unavailable)
+    }
+
     async fn create_volume(
         &self,
         _volume: &AgentVolumeCreate,
@@ -912,6 +1167,37 @@ impl AgentClient for NodeAgentClientConfig {
         NodeAgentClientConfig::list_volumes(self, cancellation).await
     }
 
+    async fn list_networks(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> Result<Vec<AgentNetwork>, AgentClientError> {
+        NodeAgentClientConfig::list_networks(self, cancellation).await
+    }
+
+    async fn inspect_network(
+        &self,
+        id: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<AgentNetworkDetail, AgentClientError> {
+        NodeAgentClientConfig::inspect_network(self, id, cancellation).await
+    }
+
+    async fn create_network(
+        &self,
+        network: &AgentNetworkCreate,
+        cancellation: &CancellationToken,
+    ) -> Result<String, AgentClientError> {
+        NodeAgentClientConfig::create_network(self, network, cancellation).await
+    }
+
+    async fn remove_network(
+        &self,
+        id: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<NetworkRemoval, AgentClientError> {
+        NodeAgentClientConfig::remove_network(self, id, cancellation).await
+    }
+
     async fn create_volume(
         &self,
         volume: &AgentVolumeCreate,
@@ -962,6 +1248,8 @@ pub enum AgentClientError {
     ImageInUse,
     /// A volume with that name already exists on the node.
     VolumeExists,
+    /// Docker's own networks can't be removed.
+    BuiltinNetwork,
 }
 
 impl std::fmt::Display for AgentClientError {
@@ -979,6 +1267,7 @@ impl std::fmt::Display for AgentClientError {
             Self::EngineError => formatter.write_str("engine failed the action"),
             Self::ImageInUse => formatter.write_str("image is in use"),
             Self::VolumeExists => formatter.write_str("volume already exists"),
+            Self::BuiltinNetwork => formatter.write_str("built-in network"),
         }
     }
 }
@@ -1084,6 +1373,7 @@ fn map_action_status(status: &tonic::Status) -> AgentClientError {
         (Code::FailedPrecondition, "container_running") => AgentClientError::ContainerRunning,
         (Code::FailedPrecondition, "image_in_use") => AgentClientError::ImageInUse,
         (Code::AlreadyExists, "volume_exists") => AgentClientError::VolumeExists,
+        (Code::InvalidArgument, "builtin_network") => AgentClientError::BuiltinNetwork,
         (Code::DeadlineExceeded, _) => AgentClientError::TimedOut,
         (Code::Cancelled, _) => AgentClientError::Cancelled,
         (Code::Unauthenticated | Code::PermissionDenied, _) => AgentClientError::IdentityMismatch,
@@ -1099,6 +1389,9 @@ const ACTION_ALLOWANCE: Duration = Duration::from_secs(20);
 const PULL_DEADLINE: Duration = Duration::from_secs(10 * 60);
 const MAX_IMAGES_PER_NODE: usize = 2_000;
 const MAX_VOLUMES_PER_NODE: usize = 2_000;
+const MAX_CONTAINER_NETWORKS: usize = 16;
+const MAX_NETWORKS_PER_NODE: usize = 1_000;
+const MAX_NETWORK_ENDPOINTS: usize = 256;
 const MAX_VOLUME_USERS: usize = 16;
 
 fn is_valid_image_id(value: &str) -> bool {
@@ -1171,6 +1464,11 @@ fn validate_summary(
         || !label_ok(&item.stack_namespace)
         || !label_ok(&item.task_id)
         || !figure_ok(item.cpu_percent)
+        || item.networks.len() > MAX_CONTAINER_NETWORKS
+        || !item
+            .networks
+            .iter()
+            .all(|network| kontainer_engine::is_valid_network_name(network))
     {
         return Err(AgentClientError::InvalidResponse);
     }

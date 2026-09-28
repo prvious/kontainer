@@ -24,6 +24,7 @@ pub const MAX_BULK_TARGETS: usize = 200;
 const CONTAINER_ID_HEX_LEN: usize = 64;
 const MAX_NODE_ID_LEN: usize = 128;
 const MAX_PORTS: usize = 64;
+const MAX_NETWORKS: usize = 16;
 
 /// A canonical controller node identifier.
 ///
@@ -92,6 +93,8 @@ pub struct ContainerItem {
     pub cpu_percent: Option<f64>,
     pub memory_used_bytes: Option<u64>,
     pub memory_limit_bytes: Option<u64>,
+    /// Networks it has endpoints on, by name.
+    pub networks: Vec<String>,
 }
 
 /// How one member node answered a fan-out read.
@@ -217,6 +220,7 @@ pub(crate) struct ContainerItemBody {
     cpu_percent: Option<f64>,
     memory_used_bytes: Option<u64>,
     memory_limit_bytes: Option<u64>,
+    networks: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -267,6 +271,11 @@ impl ContainerListBody {
             if !valid_container_id(&item.container_id)
                 || !answered.contains(&item.node_id)
                 || item.ports.len() > MAX_PORTS
+                || item.networks.len() > MAX_NETWORKS
+                || item
+                    .networks
+                    .iter()
+                    .any(|network| network.is_empty() || network.len() > 128)
                 || !figure_ok
             {
                 return Err(NativeClientError::InvalidResponse);
@@ -290,6 +299,7 @@ impl ContainerListBody {
                 cpu_percent: item.cpu_percent,
                 memory_used_bytes: item.memory_used_bytes,
                 memory_limit_bytes: item.memory_limit_bytes,
+                networks: item.networks,
             });
         }
         Ok(ContainerList {

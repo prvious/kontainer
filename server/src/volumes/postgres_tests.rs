@@ -243,6 +243,7 @@ async fn run(fixture: &Fixture, operation_id: &str) -> Result<OperationSnapshot,
         database: fixture.context.db.clone(),
         registry: Arc::new(production_registry()),
         agents: Some(fixture.directory.clone() as Arc<dyn AgentDirectory>),
+        manager: None,
         settings: WorkerSettings {
             idle_min: Duration::from_millis(10),
             idle_max: Duration::from_millis(20),

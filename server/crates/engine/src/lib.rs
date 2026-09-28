@@ -9,6 +9,7 @@ mod error;
 mod host;
 mod image;
 mod local;
+mod network;
 mod node;
 mod volume;
 
@@ -31,6 +32,11 @@ pub use image::{
     is_valid_image_id,
 };
 pub use local::{LocalDockerEngine, LocalEngineOptions};
+pub use network::{
+    BUILTIN_NETWORKS, MAX_NETWORK_ENDPOINTS, MAX_NETWORK_NAME_LEN, NetworkCreate, NetworkDetail,
+    NetworkEndpoint, NetworkSummary, is_builtin_network, is_valid_cidr, is_valid_network_id,
+    is_valid_network_name,
+};
 pub use node::{ContainerStats, CpuCounters, DiskUsage, NodeInfo, cpu_percent, memory_used};
 pub use volume::{
     MAX_VOLUME_LABELS, MAX_VOLUME_NAME_LEN, MAX_VOLUME_USERS, VolumeCreate, VolumeSummary,
@@ -190,6 +196,54 @@ pub trait ContainerEngine: Send + Sync {
         Err(EngineError::new(
             EngineErrorKind::UnsupportedCapability,
             EngineOperation::RemoveVolume,
+        ))
+    }
+
+    /// Every network this daemon knows, with its running endpoints here. On a manager that
+    /// includes every swarm-scope network.
+    async fn list_networks(
+        &self,
+        _cancellation: &CancellationToken,
+    ) -> Result<Vec<NetworkSummary>, EngineError> {
+        Err(EngineError::new(
+            EngineErrorKind::UnsupportedCapability,
+            EngineOperation::ListNetworks,
+        ))
+    }
+
+    /// One network with the container endpoints this daemon has on it.
+    async fn inspect_network(
+        &self,
+        _id: &str,
+        _cancellation: &CancellationToken,
+    ) -> Result<NetworkDetail, EngineError> {
+        Err(EngineError::new(
+            EngineErrorKind::UnsupportedCapability,
+            EngineOperation::InspectNetwork,
+        ))
+    }
+
+    /// Create one network and return its id.
+    async fn create_network(
+        &self,
+        _network: &NetworkCreate,
+        _cancellation: &CancellationToken,
+    ) -> Result<String, EngineError> {
+        Err(EngineError::new(
+            EngineErrorKind::UnsupportedCapability,
+            EngineOperation::CreateNetwork,
+        ))
+    }
+
+    /// Remove one network. Built-ins are refused before Docker is asked.
+    async fn remove_network(
+        &self,
+        _id: &str,
+        _cancellation: &CancellationToken,
+    ) -> Result<(), EngineError> {
+        Err(EngineError::new(
+            EngineErrorKind::UnsupportedCapability,
+            EngineOperation::RemoveNetwork,
         ))
     }
 

@@ -158,3 +158,104 @@ async fn dev_cluster_volume_lifecycle_with_sizes_and_in_use_refusal() {
         EngineErrorKind::NotFound
     );
 }
+
+/// Overlay networks are created on the manager with swarm scope; bridges stay on their node;
+/// built-ins are refused before Docker is asked.
+#[tokio::test]
+async fn dev_cluster_network_lifecycle_on_the_manager_and_a_worker() {
+    use kontainer_engine::{EngineErrorKind, NetworkCreate};
+
+    let manager = engine(dev_host(
+        "KONTAINER_TEST_DEV_MANAGER_HOST",
+        "tcp://localhost:2375",
+    ));
+    let worker = engine(dev_host(
+        "KONTAINER_TEST_DEV_WORKER_2_HOST",
+        "tcp://localhost:2378",
+    ));
+    let cancellation = CancellationToken::new();
+    let suffix = std::process::id();
+
+    let overlay = NetworkCreate {
+        name: format!("kontainer-test-overlay-{suffix}"),
+        driver: "overlay".to_owned(),
+        attachable: true,
+        subnet: Some("10.231.0.0/24".to_owned()),
+        ..Default::default()
+    };
+    let overlay_id = manager
+        .create_network(&overlay, &cancellation)
+        .await
+        .unwrap();
+    let listed = manager.list_networks(&cancellation).await.unwrap();
+    let found = listed
+        .iter()
+        .find(|network| network.id == overlay_id)
+        .unwrap();
+    assert_eq!(
+        (
+            found.scope.as_str(),
+            found.driver.as_str(),
+            found.attachable
+        ),
+        ("swarm", "overlay", true)
+    );
+    assert_eq!(found.subnets, vec!["10.231.0.0/24"]);
+    let ingress = listed
+        .iter()
+        .find(|network| network.name == "ingress")
+        .unwrap();
+    assert!(ingress.builtin() && ingress.ingress);
+    assert_eq!(
+        manager
+            .remove_network(&ingress.id, &cancellation)
+            .await
+            .unwrap_err()
+            .kind(),
+        EngineErrorKind::InvalidInput
+    );
+    manager
+        .remove_network(&overlay_id, &cancellation)
+        .await
+        .unwrap();
+
+    let bridge = NetworkCreate {
+        name: format!("kontainer-test-bridge-{suffix}"),
+        driver: "bridge".to_owned(),
+        ..Default::default()
+    };
+    let bridge_id = worker.create_network(&bridge, &cancellation).await.unwrap();
+    let detail = worker
+        .inspect_network(&bridge_id, &cancellation)
+        .await
+        .unwrap();
+    assert_eq!(
+        (detail.network.scope.as_str(), detail.endpoints.len()),
+        ("local", 0)
+    );
+    worker
+        .remove_network(&bridge_id, &cancellation)
+        .await
+        .unwrap();
+    assert_eq!(
+        worker
+            .inspect_network(&bridge_id, &cancellation)
+            .await
+            .unwrap_err()
+            .kind(),
+        EngineErrorKind::NotFound
+    );
+
+    // A seed stack network with running tasks lists its endpoints on the node that runs them.
+    let networks = worker.list_networks(&cancellation).await.unwrap();
+    let seed = networks
+        .iter()
+        .find(|network| network.name == "toolbox_kontainer")
+        .unwrap();
+    assert!(seed.containers > 0);
+    let seed_detail = worker
+        .inspect_network(&seed.id, &cancellation)
+        .await
+        .unwrap();
+    assert!(!seed_detail.endpoints.is_empty());
+}

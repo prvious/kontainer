@@ -151,5 +151,6 @@ fn item(node_id: &str, node_name: &str, container: AgentContainerSummary) -> Con
         cpu_percent: container.cpu_percent,
         memory_used_bytes: container.memory_used_bytes,
         memory_limit_bytes: container.memory_limit_bytes,
+        networks: container.networks,
     }
 }

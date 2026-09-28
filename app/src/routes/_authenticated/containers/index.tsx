@@ -113,6 +113,7 @@ function ContainersPage() {
             },
         })),
         ...(search.node ? [{ key: "node", label: `node: ${search.node}`, onRemove: () => setSearch({ ...search, node: undefined }) }] : []),
+        ...(search.network ? [{ key: "network", label: `network: ${search.network}`, onRemove: () => setSearch({ ...search, network: undefined }) }] : []),
         ...(search.ports ? [{ key: "ports", label: "ports: published", onRemove: () => setSearch({ ...search, ports: undefined }) }] : []),
     ];
     const clearChips = () => setSearch({ q: search.q, sort: search.sort });
@@ -205,7 +206,14 @@ function ContainersPage() {
                         search={search.q ?? ""}
                         onSearchChange={(q) => setSearch({ ...search, q: q || undefined })}
                         searchPlaceholder='Search containers'
-                        filters={<ContainerFilters search={search} nodes={nodes} onChange={setSearch} />}
+                        filters={
+                            <ContainerFilters
+                                search={search}
+                                nodes={nodes}
+                                networks={[...new Set(rows.flatMap((row) => row.networks))].sort()}
+                                onChange={setSearch}
+                            />
+                        }
                         chips={chips}
                         onClearFilters={clearChips}
                         sortOptions={CONTAINER_SORTS.map((value) => ({ value, label: SORT_LABELS[value] }))}

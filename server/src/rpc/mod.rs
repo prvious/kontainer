@@ -3,7 +3,8 @@ pub mod client;
 pub use client::{
     AgentClient, AgentClientConfigError, AgentClientError, AgentContainerAction,
     AgentContainerPage, AgentContainerState, AgentContainerSummary, AgentDescription, AgentImage,
-    AgentPullEvent, AgentPullStream, AgentVolume, AgentVolumeCreate, NodeAgentClientConfig,
+    AgentNetwork, AgentNetworkCreate, AgentNetworkDetail, AgentNetworkEndpoint, AgentPullEvent,
+    AgentPullStream, AgentVolume, AgentVolumeCreate, NetworkRemoval, NodeAgentClientConfig,
     VolumeRemoval,
 };
 use kontainer_agent_proto::{

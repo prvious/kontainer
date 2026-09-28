@@ -41,6 +41,10 @@ pub enum EngineOperation {
     ListVolumes,
     CreateVolume,
     RemoveVolume,
+    ListNetworks,
+    InspectNetwork,
+    CreateNetwork,
+    RemoveNetwork,
 }
 
 impl fmt::Display for EngineOperation {
@@ -63,6 +67,10 @@ impl fmt::Display for EngineOperation {
             Self::ListVolumes => "list volumes",
             Self::CreateVolume => "create volume",
             Self::RemoveVolume => "remove volume",
+            Self::ListNetworks => "list networks",
+            Self::InspectNetwork => "inspect network",
+            Self::CreateNetwork => "create network",
+            Self::RemoveNetwork => "remove network",
         };
         formatter.write_str(name)
     }

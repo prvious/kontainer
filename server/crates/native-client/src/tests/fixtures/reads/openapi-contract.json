@@ -937,6 +937,13 @@
         "name": {
           "type": "string"
         },
+        "networks": {
+          "description": "Networks it has endpoints on, by name (at most 16).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "nodeId": {
           "type": "string"
         },
@@ -1000,7 +1007,8 @@
         "taskId",
         "cpuPercent",
         "memoryUsedBytes",
-        "memoryLimitBytes"
+        "memoryLimitBytes",
+        "networks"
       ],
       "type": "object"
     },

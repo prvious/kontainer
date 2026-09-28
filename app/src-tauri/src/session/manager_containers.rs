@@ -47,6 +47,7 @@ struct ContainerView {
     cpu_percent: Option<f64>,
     memory_used_bytes: Option<u64>,
     memory_limit_bytes: Option<u64>,
+    networks: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -77,6 +78,7 @@ impl From<ContainerItem> for ContainerView {
             cpu_percent: item.cpu_percent,
             memory_used_bytes: item.memory_used_bytes,
             memory_limit_bytes: item.memory_limit_bytes,
+            networks: item.networks,
         }
     }
 }
