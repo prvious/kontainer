@@ -12,7 +12,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use super::support::{TestServer, plain_client, respond, wait};
-use crate::containers::{ContainerPageRequest, NodeId};
+use crate::containers::NodeId;
 use crate::credentials::{AccessCredential, LoginVerifier, RefreshCredential};
 use crate::error::NativeClientError;
 
@@ -20,7 +20,7 @@ const ACCESS_CANARY: &str = "kta_11111111111111111111111111111111.22222222222222
 const REFRESH_CANARY: &str = "ktr_33333333333333333333333333333333.4444444444444444444444444444444444444444444444444444444444444444";
 /// The verifier value used by the RFC 7636 Appendix B fixture.
 const VERIFIER_CANARY: &str = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
-const CONTAINER_PAGE: &str = include_str!("fixtures/reads/container-page-last.json");
+const CONTAINER_PAGE: &str = include_str!("fixtures/reads/container-list.json");
 const OPERATION_ID: &str = "018f2e34-0000-7000-8000-0000000000cc";
 
 /// Render every diagnostic surface a value has.
@@ -129,12 +129,7 @@ async fn no_credential_reaches_a_request_target_across_the_surface() {
         .await;
     let _ = client.logout(&access, &CancellationToken::new()).await;
     let _ = client
-        .list_containers(
-            &access,
-            &node,
-            &ContainerPageRequest::default(),
-            &CancellationToken::new(),
-        )
+        .list_containers(&access, Some(&node), &CancellationToken::new())
         .await;
     let _ = client
         .get_operation(
@@ -200,12 +195,7 @@ async fn transport_and_decode_failures_stay_credential_free() {
         errors[0],
         errors[1],
         client
-            .list_containers(
-                &access,
-                &node,
-                &ContainerPageRequest::default(),
-                &CancellationToken::new(),
-            )
+            .list_containers(&access, Some(&node), &CancellationToken::new())
             .await
             .unwrap_err(),
         client
@@ -233,14 +223,9 @@ async fn a_redirect_response_never_carries_a_credential_forward() {
     let access = AccessCredential::parse(ACCESS_CANARY).unwrap();
     let node = NodeId::parse("node-1").unwrap();
 
-    let error = wait(client.list_containers(
-        &access,
-        &node,
-        &ContainerPageRequest::default(),
-        &CancellationToken::new(),
-    ))
-    .await
-    .unwrap_err();
+    let error = wait(client.list_containers(&access, Some(&node), &CancellationToken::new()))
+        .await
+        .unwrap_err();
 
     assert_eq!(error, NativeClientError::UnexpectedStatus { status: 307 });
     assert_eq!(origin.request_count(), 1);

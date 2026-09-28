@@ -1,8 +1,9 @@
 pub mod client;
 
 pub use client::{
-    AgentClient, AgentClientConfigError, AgentClientError, AgentContainerPage, AgentContainerState,
-    AgentContainerSummary, AgentDescription, NodeAgentClientConfig,
+    AgentClient, AgentClientConfigError, AgentClientError, AgentContainerAction,
+    AgentContainerPage, AgentContainerState, AgentContainerSummary, AgentDescription,
+    NodeAgentClientConfig,
 };
 use kontainer_agent_proto::{
     PROTOCOL_PACKAGE,

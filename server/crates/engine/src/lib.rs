@@ -15,10 +15,12 @@ pub use capability::{
     EngineCapabilities, EngineDescription, UnsupportedCapabilityReason,
 };
 pub use container::{
-    ContainerPage, ContainerPageRequest, ContainerState, ContainerSummary,
-    DEFAULT_CONTAINER_PAGE_SIZE, MAX_CONTAINER_PAGE_SIZE, MAX_CONTAINER_PAGE_TOKEN_LEN,
-    MAX_CONTAINER_STATUS_LEN, canonical_display_name, format_page_token, is_valid_container_id,
-    parse_page_token, truncate_status_text,
+    ContainerAction, ContainerActionOptions, ContainerPage, ContainerPageRequest, ContainerState,
+    ContainerSummary, ContainerTimes, DEFAULT_CONTAINER_PAGE_SIZE, DEFAULT_STOP_TIMEOUT_SECONDS,
+    MAX_CONTAINER_PAGE_SIZE, MAX_CONTAINER_PAGE_TOKEN_LEN, MAX_CONTAINER_STATUS_LEN,
+    MAX_STOP_TIMEOUT_SECONDS, SERVICE_NAME_LABEL, STACK_NAMESPACE_LABEL, TASK_ID_LABEL,
+    bounded_label, canonical_display_name, format_page_token, is_valid_container_id,
+    parse_docker_time, parse_page_token, truncate_status_text,
 };
 pub use error::{EngineError, EngineErrorKind, EngineOperation};
 pub use host::{DEFAULT_DOCKER_SOCKET, DockerHost, DockerHostParseError};
@@ -78,6 +80,32 @@ pub trait ContainerEngine: Send + Sync {
         Err(EngineError::new(
             EngineErrorKind::UnsupportedCapability,
             EngineOperation::ReadContainerStats,
+        ))
+    }
+
+    /// When the container last started and stopped (inspect).
+    async fn container_times(
+        &self,
+        _container_id: &str,
+        _cancellation: &CancellationToken,
+    ) -> Result<ContainerTimes, EngineError> {
+        Err(EngineError::new(
+            EngineErrorKind::UnsupportedCapability,
+            EngineOperation::InspectContainer,
+        ))
+    }
+
+    /// Start, stop, restart, pause, unpause, or remove one container.
+    async fn container_action(
+        &self,
+        _container_id: &str,
+        _action: ContainerAction,
+        _options: ContainerActionOptions,
+        _cancellation: &CancellationToken,
+    ) -> Result<(), EngineError> {
+        Err(EngineError::new(
+            EngineErrorKind::UnsupportedCapability,
+            EngineOperation::ContainerAction,
         ))
     }
 

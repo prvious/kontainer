@@ -32,6 +32,10 @@ impl From<AgentClientError> for NodeFailure {
             AgentClientError::IdentityMismatch => Self::Error("identity_mismatch"),
             AgentClientError::InvalidResponse => Self::Error("invalid_response"),
             AgentClientError::InvalidPagination => Self::Error("invalid_pagination"),
+            AgentClientError::NotFound => Self::Error("not_found"),
+            AgentClientError::AlreadyInState => Self::Error("already_in_state"),
+            AgentClientError::ContainerRunning => Self::Error("container_running"),
+            AgentClientError::EngineError => Self::Error("engine_error"),
         }
     }
 }

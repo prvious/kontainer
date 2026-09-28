@@ -44,7 +44,9 @@ export function OperationsProvider({ children }: { children: ReactNode }) {
                 for (const queryKey of operation.invalidate) void queryClient.invalidateQueries({ queryKey });
                 switch (view.state) {
                     case "succeeded":
-                        notify.success(operation.title, { description: operationSummary(view) });
+                        notify.success(operation.success?.title ?? operation.title, {
+                            description: operation.success?.description ?? operationSummary(view),
+                        });
                         remove(view.id);
                         return;
                     case "cancelled":

@@ -6,8 +6,9 @@ use std::{
 };
 
 use kontainer_native_client::{
-    ContainerItem, ContainerPage, ContainerState, ControllerSettings, NativeClientError, NodeId,
-    NodeList, NodeSample, NodeStatus, NodeSummary, SamplePoint, SampleSeries,
+    AdmittedOperation, ContainerItem, ContainerList, ContainerState, ControllerSettings,
+    NativeClientError, NodeId, NodeList, NodeOutcome, NodeOutcomeStatus, NodeSample, NodeStatus,
+    NodeSummary, SamplePoint, SampleSeries,
 };
 use tokio::sync::Notify;
 
@@ -20,21 +21,75 @@ use crate::session::{
 use super::fakes::{future_ms, issued, Harness, PROFILE_ID};
 
 const FIXTURE: &str = include_str!("../../../../tests/fixtures/inventory-ipc.json");
+const CONTAINERS_FIXTURE: &str = include_str!("../../../../tests/fixtures/containers-ipc.json");
 const NODES_FIXTURE: &str = include_str!("../../../../tests/fixtures/nodes-ipc.json");
 const LIB_SOURCE: &str = include_str!("../../lib.rs");
 
-fn page() -> ContainerPage {
-    ContainerPage {
-        items: vec![ContainerItem {
-            container_id: "a".repeat(64),
-            display_name: "web".to_owned(),
-            image_reference: "nginx:latest".to_owned(),
-            state: ContainerState::Running,
-            status: "Up 3 minutes".to_owned(),
-            created_at: "2026-09-19T06:00:00.000Z".parse().unwrap(),
-            node_id: "node-1".to_owned(),
-        }],
-        next_cursor: Some(format!("v1:{}", "a".repeat(64))),
+fn container_list() -> ContainerList {
+    let item = |node: &str, fill: char, running: bool| ContainerItem {
+        node_id: NodeId::parse(node).unwrap(),
+        node_name: node.to_owned(),
+        container_id: fill.to_string().repeat(64),
+        name: if running {
+            "shop_web.1.x7kq"
+        } else {
+            "scratch"
+        }
+        .to_owned(),
+        image: if running { "nginx:1.27" } else { "alpine:3.20" }.to_owned(),
+        state: if running {
+            ContainerState::Running
+        } else {
+            ContainerState::Exited
+        },
+        status: if running {
+            "Up 3 minutes"
+        } else {
+            "Exited (0) 2 minutes ago"
+        }
+        .to_owned(),
+        created_at: if running {
+            "2026-09-28T12:00:00.000Z"
+        } else {
+            "2026-09-28T11:00:00.000Z"
+        }
+        .parse()
+        .unwrap(),
+        started_at: Some(
+            if running {
+                "2026-09-28T12:00:02.000Z"
+            } else {
+                "2026-09-28T11:00:01.000Z"
+            }
+            .parse()
+            .unwrap(),
+        ),
+        finished_at: (!running).then(|| "2026-09-28T12:01:00.000Z".parse().unwrap()),
+        ports: if running {
+            vec!["8080:80/tcp".to_owned()]
+        } else {
+            Vec::new()
+        },
+        service_name: running.then(|| "shop_web".to_owned()),
+        stack_namespace: running.then(|| "shop".to_owned()),
+        task_id: running.then(|| "x7kq".to_owned()),
+        cpu_percent: running.then_some(12.5),
+        memory_used_bytes: running.then_some(52_428_800),
+        memory_limit_bytes: running.then_some(1 << 30),
+    };
+    let outcome = |node: &str, status| NodeOutcome {
+        node_id: NodeId::parse(node).unwrap(),
+        status,
+        message: None,
+    };
+    ContainerList {
+        items: vec![item("manager", 'a', true), item("worker-1", 'b', false)],
+        nodes: vec![
+            outcome("manager", NodeOutcomeStatus::Ok),
+            outcome("worker-1", NodeOutcomeStatus::Ok),
+            outcome("worker-2", NodeOutcomeStatus::Timeout),
+        ],
+        snapshot_at: "2026-09-28T12:05:00.000Z".parse().unwrap(),
     }
 }
 
@@ -138,22 +193,29 @@ fn node_ids(view: NodeListView) -> Vec<String> {
 }
 
 #[test]
-fn inventory_ipc_fields_codes_and_commands_match_shared_fixture() {
+fn error_codes_and_container_views_match_the_shared_fixtures() {
     let fixture: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
-    assert_eq!(
-        serde_json::to_value(super::super::manager::ContainerPageView::from(page())).unwrap(),
-        fixture["containerPage"]
-    );
     let codes: Vec<_> = InventoryError::ALL
         .iter()
         .map(|code| serde_json::to_value(code).unwrap())
         .collect();
     assert_eq!(serde_json::to_value(codes).unwrap(), fixture["errorCodes"]);
-    for command in fixture["commands"].as_array().unwrap() {
-        let name = command.as_str().unwrap();
-        assert!(LIB_SOURCE.contains(&format!("actions::inventory::{name}::{name}")));
-    }
     assert!(!LIB_SOURCE.contains("get_configured_node"));
+    assert!(!LIB_SOURCE.contains("list_container_inventory"));
+
+    let containers: serde_json::Value = serde_json::from_str(CONTAINERS_FIXTURE).unwrap();
+    assert_eq!(
+        serde_json::to_value(super::super::manager::ContainerListView::from(
+            container_list()
+        ))
+        .unwrap(),
+        containers["containerList"]
+    );
+    for command in containers["commands"].as_array().unwrap() {
+        let domain = command[0].as_str().unwrap();
+        let name = command[1].as_str().unwrap();
+        assert!(LIB_SOURCE.contains(&format!("actions::{domain}::{name}::{name}")));
+    }
 }
 
 #[test]
@@ -240,7 +302,7 @@ async fn reads_use_only_the_active_profile_and_serialize_their_views() {
         .controllers
         .script()
         .containers
-        .push_back(Ok(page()));
+        .push_back(Ok(container_list()));
     harness.controllers.script().samples.push_back(Ok(series()));
     harness.controllers.script().samples.push_back(Ok(series()));
     harness
@@ -264,13 +326,13 @@ async fn reads_use_only_the_active_profile_and_serialize_their_views() {
     );
     let result = harness
         .manager
-        .container_inventory(view.profile_id, "node-1", None, 50)
+        .containers(view.profile_id, None)
         .await
         .unwrap();
-    let fixture: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
+    let fixture: serde_json::Value = serde_json::from_str(CONTAINERS_FIXTURE).unwrap();
     assert_eq!(
         serde_json::to_value(result).unwrap(),
-        fixture["containerPage"]
+        fixture["containerList"]
     );
     harness
         .manager
@@ -325,7 +387,7 @@ async fn reads_use_only_the_active_profile_and_serialize_their_views() {
     assert_eq!(
         harness
             .manager
-            .container_inventory(view.profile_id, "bad/node", None, 50)
+            .containers(view.profile_id, Some("bad/node"))
             .await
             .err(),
         Some(InventoryError::InvalidNodeId)
@@ -395,45 +457,99 @@ async fn one_401_rotates_in_order_then_retries_the_same_read_once() {
 }
 
 #[tokio::test]
-async fn inventory_page_401_retries_once_with_the_same_node_and_cursor() {
+async fn container_action_401_retries_once_with_the_same_target_and_key() {
+    use crate::session::manager::{ContainerActionOptionsInput, ContainerTargetInput};
+
     let harness = Harness::new();
     let view = harness.login_ok().await;
-    harness
-        .controllers
-        .script()
-        .containers
-        .push_back(Err(NativeClientError::Unauthorized));
-    harness
-        .controllers
-        .script()
-        .refresh
-        .push_back(Ok(issued(2, future_ms(), future_ms())));
-    harness
-        .controllers
-        .script()
-        .containers
-        .push_back(Ok(page()));
-    let cursor = format!("v1:{}", "b".repeat(64));
-
-    let result = harness
+    {
+        let mut script = harness.controllers.script();
+        script
+            .admissions
+            .push_back(Err(NativeClientError::Unauthorized));
+        script
+            .refresh
+            .push_back(Ok(issued(2, future_ms(), future_ms())));
+        script.admissions.push_back(Ok(AdmittedOperation {
+            operation_id: uuid::Uuid::from_u128(0xcc),
+            replayed: false,
+        }));
+        script.admissions.push_back(Ok(AdmittedOperation {
+            operation_id: uuid::Uuid::from_u128(0xdd),
+            replayed: false,
+        }));
+    }
+    let key = "018f2e34-0000-7000-8000-0000000000aa";
+    let target = ContainerTargetInput {
+        node_id: "manager".to_owned(),
+        container_id: "a".repeat(64),
+    };
+    let admitted = harness
         .manager
-        .container_inventory(view.profile_id, "node-1", Some(cursor.clone()), 25)
+        .container_action(
+            view.profile_id,
+            &target,
+            "remove",
+            ContainerActionOptionsInput {
+                force: true,
+                timeout_seconds: None,
+            },
+            key,
+        )
         .await
         .unwrap();
     assert_eq!(
-        serde_json::to_value(result).unwrap()["items"][0]["displayName"],
-        "web"
+        serde_json::to_value(admitted).unwrap()["operationId"],
+        uuid::Uuid::from_u128(0xcc).to_string()
     );
-    let requests: Vec<_> = harness
+    let calls: Vec<_> = harness
         .entries()
         .into_iter()
-        .filter(|entry| entry.starts_with("containers:"))
+        .filter(|entry| entry.starts_with("container_action:"))
         .collect();
-    assert_eq!(requests.len(), 2);
-    assert!(requests
-        .iter()
-        .all(|entry| entry.ends_with(&format!(":node-1:25:{cursor}"))));
+    assert_eq!(calls.len(), 2);
+    let expected = format!(":manager:{}:remove:true:None:{key}", "a".repeat(64));
+    assert!(calls.iter().all(|entry| entry.ends_with(&expected)));
     assert_eq!(harness.count("refresh:"), 1);
+
+    harness
+        .manager
+        .containers_bulk_action(
+            view.profile_id,
+            "pause",
+            std::slice::from_ref(&target),
+            false,
+            key,
+        )
+        .await
+        .unwrap();
+    assert!(harness
+        .entries()
+        .iter()
+        .any(|entry| entry.starts_with("containers_bulk:")
+            && entry.ends_with(&format!(":pause:1:false:{key}"))));
+    for (action, container_id) in [("explode", "a".repeat(64)), ("stop", "a".repeat(64))] {
+        let bad_target = ContainerTargetInput {
+            node_id: "bad/node".to_owned(),
+            container_id,
+        };
+        assert!(harness
+            .manager
+            .container_action(
+                view.profile_id,
+                &bad_target,
+                action,
+                ContainerActionOptionsInput::default(),
+                key
+            )
+            .await
+            .is_err());
+    }
+    assert_eq!(
+        harness.count("container_action:"),
+        2,
+        "invalid input never leaves the app"
+    );
 }
 
 #[tokio::test]

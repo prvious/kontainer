@@ -4,8 +4,8 @@
 //!
 //! This crate implements the controller contracts: password sign-in and owner
 //! registration, GitHub bootstrap login attempt/redemption, refresh and logout, node membership
-//! and samples, controller settings, the bounded node-container collection, and owner-scoped
-//! operation polling. It is the native
+//! and samples, controller settings, the cluster container list and container actions, and
+//! owner-scoped operation polling and admission. It is the native
 //! networking boundary that Tauri (and any future native caller) reuses
 //! instead of the WebView.
 //!
@@ -46,8 +46,9 @@ pub use client::{
     DEFAULT_REQUEST_DEADLINE, NativeClient, NativeClientConfig, TrustPolicy,
 };
 pub use containers::{
-    ContainerItem, ContainerPage, ContainerPageRequest, ContainerState, DEFAULT_CONTAINER_LIMIT,
-    MAX_CONTAINER_CURSOR_LEN, MAX_CONTAINER_LIMIT, NodeId,
+    ContainerAction, ContainerActionOptions, ContainerItem, ContainerList, ContainerState,
+    ContainerTarget, MAX_BULK_TARGETS, MAX_CONTAINERS, MAX_STOP_TIMEOUT_SECONDS, NodeId,
+    NodeOutcome, NodeOutcomeStatus,
 };
 pub use credentials::{AccessCredential, CredentialError, LoginVerifier, RefreshCredential};
 pub use error::{AccountFieldErrors, FieldProblem, NativeClientError, Traced};

@@ -11,6 +11,10 @@ export interface TrackedOperation {
     title: string;
     /** Queries to refresh once it settles. */
     invalidate: QueryKey[];
+    /** Success toast text when it differs from the title. */
+    success?: { title: string; description?: string };
+    /** Row ids the operation acts on, so tables can mark them while it runs. */
+    targets?: string[];
 }
 
 export interface OperationsContextValue {

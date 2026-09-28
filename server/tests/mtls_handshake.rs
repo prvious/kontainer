@@ -99,6 +99,7 @@ fn inventory_summary(id: &str, name: &str) -> ContainerSummary {
         state: ContainerState::Running,
         status: "Up 3s".to_owned(),
         created_at_seconds: 1_700_000_000,
+        ..ContainerSummary::default()
     }
 }
 
@@ -256,6 +257,72 @@ async fn dev_pki_files_complete_a_verified_describe() {
 
     cancellation.cancel();
     let _ = timeout(Duration::from_secs(2), task).await;
+}
+
+/// Stops that wait out their grace take longer than a read's RPC timeout.
+struct SlowStopEngine;
+
+#[async_trait]
+impl ContainerEngine for SlowStopEngine {
+    async fn is_available(&self) -> Result<bool, EngineError> {
+        Ok(true)
+    }
+
+    async fn container_action(
+        &self,
+        container_id: &str,
+        _action: kontainer_engine::ContainerAction,
+        _options: kontainer_engine::ContainerActionOptions,
+        _cancellation: &CancellationToken,
+    ) -> Result<(), EngineError> {
+        if container_id.starts_with('b') {
+            return Err(EngineError::new(
+                EngineErrorKind::NotModified,
+                EngineOperation::ContainerAction,
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(2_500)).await;
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn production_client_actions_outlast_the_read_timeout_and_keep_their_codes() {
+    use kontainer_controller::rpc::AgentContainerAction;
+
+    let pki = TestPki::generate();
+    let node_agent = start_node_agent(&pki, Arc::new(SlowStopEngine)).await;
+    let client = production_client(
+        node_agent.address,
+        pki.trusted_files(&pki.controller),
+        NODE_AGENT_NAME,
+        CLUSTER_ID,
+        NODE_ID,
+    );
+    client
+        .container_action(
+            &"a".repeat(64),
+            AgentContainerAction::Stop,
+            false,
+            Some(1),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect("a stop that takes longer than two seconds still succeeds");
+    assert_eq!(
+        client
+            .container_action(
+                &"b".repeat(64),
+                AgentContainerAction::Start,
+                false,
+                None,
+                &CancellationToken::new()
+            )
+            .await
+            .unwrap_err(),
+        AgentClientError::AlreadyInState
+    );
+    node_agent.stop().await;
 }
 
 #[tokio::test]
@@ -625,7 +692,7 @@ async fn production_client_maps_pagination_and_daemon_failures_without_internals
     // rejects them as invalid input, which the client preserves as a typed
     // pagination failure.
     for (size, token) in [
-        (101, String::new()),
+        (501, String::new()),
         (10, "not-a-cursor".to_owned()),
         (10, "v1:short".to_owned()),
     ] {
@@ -793,7 +860,7 @@ async fn list_containers_rejects_invalid_pagination_and_agent_identity() {
     }
     let oversized = agent
         .list_containers(ListContainersRequest {
-            page_size: 101,
+            page_size: 501,
             page_token: String::new(),
         })
         .await

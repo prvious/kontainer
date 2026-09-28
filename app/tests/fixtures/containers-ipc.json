@@ -1,0 +1,67 @@
+{
+    "commands": [
+        ["containers", "list_containers"],
+        ["containers", "container_action"],
+        ["containers", "containers_bulk_action"]
+    ],
+    "containerList": {
+        "items": [
+            {
+                "nodeId": "manager",
+                "nodeName": "manager",
+                "containerId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "name": "shop_web.1.x7kq",
+                "image": "nginx:1.27",
+                "state": "running",
+                "status": "Up 3 minutes",
+                "createdAt": "2026-09-28T12:00:00.000Z",
+                "startedAt": "2026-09-28T12:00:02.000Z",
+                "finishedAt": null,
+                "ports": ["8080:80/tcp"],
+                "serviceName": "shop_web",
+                "stackNamespace": "shop",
+                "taskId": "x7kq",
+                "cpuPercent": 12.5,
+                "memoryUsedBytes": 52428800,
+                "memoryLimitBytes": 1073741824
+            },
+            {
+                "nodeId": "worker-1",
+                "nodeName": "worker-1",
+                "containerId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "name": "scratch",
+                "image": "alpine:3.20",
+                "state": "exited",
+                "status": "Exited (0) 2 minutes ago",
+                "createdAt": "2026-09-28T11:00:00.000Z",
+                "startedAt": "2026-09-28T11:00:01.000Z",
+                "finishedAt": "2026-09-28T12:01:00.000Z",
+                "ports": [],
+                "serviceName": null,
+                "stackNamespace": null,
+                "taskId": null,
+                "cpuPercent": null,
+                "memoryUsedBytes": null,
+                "memoryLimitBytes": null
+            }
+        ],
+        "nodes": [
+            {
+                "nodeId": "manager",
+                "status": "ok",
+                "message": null
+            },
+            {
+                "nodeId": "worker-1",
+                "status": "ok",
+                "message": null
+            },
+            {
+                "nodeId": "worker-2",
+                "status": "timeout",
+                "message": null
+            }
+        ],
+        "snapshotAt": "2026-09-28T12:05:00.000Z"
+    }
+}

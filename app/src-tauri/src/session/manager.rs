@@ -37,7 +37,11 @@ use super::vault::CredentialVault;
 
 #[path = "manager_inventory.rs"]
 mod inventory;
-pub(crate) use inventory::{ContainerPageView, InventoryError};
+pub(crate) use inventory::InventoryError;
+
+#[path = "manager_containers.rs"]
+mod containers;
+pub(crate) use containers::{ContainerActionOptionsInput, ContainerListView, ContainerTargetInput};
 
 #[path = "manager_nodes.rs"]
 mod nodes;
@@ -45,7 +49,7 @@ pub(crate) use nodes::{ControllerSettingsView, NodeListView, SampleSeriesView};
 
 #[path = "manager_operations.rs"]
 mod operations;
-pub(crate) use operations::{OperationEventView, OperationView};
+pub(crate) use operations::{AdmittedView, OperationEventView, OperationView};
 
 /// The one published session plus whatever work is in flight.
 struct SessionSlots {

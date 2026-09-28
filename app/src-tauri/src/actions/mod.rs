@@ -1,5 +1,5 @@
 pub mod app;
-pub mod inventory;
+pub mod containers;
 pub mod nodes;
 pub mod operations;
 pub mod session;

@@ -9,23 +9,20 @@ use uuid::Uuid;
 
 use super::support::{
     TestServer, assert_openapi_snapshot, assert_schema_fields, covered_contract, openapi_artifact,
-    plain_client, respond, response_statuses, round_trip_keys, serialized_keys, wait,
+    plain_client, respond, response_statuses, round_trip_keys, wait,
 };
 use crate::client::{NativeClientConfig, TrustPolicy};
 use crate::containers::{
-    ContainerItemBody, ContainerPageBody, ContainerPageRequest, ContainerState, NodeId,
+    ContainerAction, ContainerActionOptions, ContainerListBody, ContainerState, ContainerTarget,
+    NodeId, NodeOutcomeStatus,
 };
 use crate::credentials::AccessCredential;
 use crate::error::NativeClientError;
 use crate::nodes::{NodeListBody, NodeStatus, SampleSeriesBody};
+use crate::operations::IdempotencyKey;
 use crate::operations::{OperationBody, OperationState};
 
-const CONTAINER_PAGE: &str = include_str!("fixtures/reads/container-page.json");
-const CONTAINER_PAGE_LAST: &str = include_str!("fixtures/reads/container-page-last.json");
-const CONTAINER_PAGE_FOREIGN_NODE: &str =
-    include_str!("fixtures/reads/container-page-foreign-node.json");
-const CONTAINER_PAGE_BAD_CURSOR: &str =
-    include_str!("fixtures/reads/container-page-bad-cursor.json");
+const CONTAINER_LIST: &str = include_str!("fixtures/reads/container-list.json");
 const NODES: &str = include_str!("fixtures/reads/nodes.json");
 const CLUSTER_SAMPLES: &str = include_str!("fixtures/reads/cluster-samples.json");
 const OPERATION: &str = include_str!("fixtures/reads/operation.json");
@@ -35,7 +32,6 @@ const OPERATION_UNKNOWN_STATE: &str = include_str!("fixtures/reads/operation-unk
 
 const ACCESS_CANARY: &str = "kta_11111111111111111111111111111111.2222222222222222222222222222222222222222222222222222222222222222";
 const FIRST_CONTAINER_ID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-const CURSOR: &str = "v1:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
 const OPERATION_ID: &str = "018f2e34-0000-7000-8000-0000000000cc";
 
 fn access() -> AccessCredential {
@@ -246,56 +242,6 @@ async fn settings_read_and_patch_retention_with_bounds() {
     assert_eq!(requests[1].body, r#"{"metricsRetentionDays":30}"#);
 }
 
-#[tokio::test]
-async fn inventory_error_envelopes_distinguish_agent_from_controller_without_leaking_body() {
-    for (status, body, expected) in [
-        (
-            400,
-            r#"{"error":"invalid_pagination"}"#,
-            NativeClientError::InvalidPagination,
-        ),
-        (
-            503,
-            r#"{"error":"agent_unavailable"}"#,
-            NativeClientError::AgentUnavailable,
-        ),
-        (
-            503,
-            r#"{"error":"unavailable"}"#,
-            NativeClientError::ServiceUnavailable,
-        ),
-        (
-            504,
-            r#"{"error":"agent_timeout"}"#,
-            NativeClientError::AgentTimeout,
-        ),
-        (
-            504,
-            r#"{"error":"proxy_canary"}"#,
-            NativeClientError::GatewayTimeout,
-        ),
-        (
-            503,
-            r#"{"error":"agent_unavailable","identity":"secret-canary"}"#,
-            NativeClientError::ServiceUnavailable,
-        ),
-    ] {
-        let server = TestServer::plain(vec![respond(status, body)]).await;
-        let error = plain_client(&server)
-            .list_containers(
-                &access(),
-                &node(),
-                &ContainerPageRequest::default(),
-                &CancellationToken::new(),
-            )
-            .await
-            .unwrap_err();
-        assert_eq!(error, expected);
-        assert!(!format!("{error:?} {error}").contains("canary"));
-        assert_eq!(server.request_count(), 1);
-    }
-}
-
 #[test]
 fn node_ids_mirror_the_controller_identity_rules() {
     for valid in ["node-1", "node_1", "a.b-c", "NODE", &"a".repeat(128)] {
@@ -321,189 +267,301 @@ fn node_ids_mirror_the_controller_identity_rules() {
 }
 
 #[tokio::test]
-async fn list_containers_sends_bounded_pagination_and_parses_the_page() {
+async fn inventory_error_envelopes_distinguish_agent_from_controller_without_leaking_body() {
+    for (status, body, expected) in [
+        (
+            503,
+            r#"{"error":"agent_unavailable"}"#,
+            NativeClientError::AgentUnavailable,
+        ),
+        (
+            503,
+            r#"{"error":"unavailable"}"#,
+            NativeClientError::ServiceUnavailable,
+        ),
+        (
+            413,
+            r#"{"error":"too_many_containers","hint":"list one node"}"#,
+            NativeClientError::TooManyContainers,
+        ),
+        (404, r#"{"error":"not_found"}"#, NativeClientError::NotFound),
+        (
+            504,
+            r#"{"error":"proxy_canary"}"#,
+            NativeClientError::GatewayTimeout,
+        ),
+        (
+            503,
+            r#"{"error":"agent_unavailable","identity":"secret-canary"}"#,
+            NativeClientError::ServiceUnavailable,
+        ),
+    ] {
+        let server = TestServer::plain(vec![respond(status, body)]).await;
+        let error = plain_client(&server)
+            .list_containers(&access(), None, &CancellationToken::new())
+            .await
+            .unwrap_err();
+        assert_eq!(error, expected);
+        assert!(!format!("{error:?} {error}").contains("canary"));
+        assert_eq!(server.request_count(), 1);
+    }
+}
+
+#[tokio::test]
+async fn list_containers_parses_the_cluster_list_with_node_outcomes() {
     let server = TestServer::plain(vec![
-        respond(200, CONTAINER_PAGE),
-        respond(200, CONTAINER_PAGE),
+        respond(200, CONTAINER_LIST),
+        respond(200, CONTAINER_LIST),
     ])
     .await;
     let client = plain_client(&server);
-    let page_request = ContainerPageRequest {
-        limit: 2,
-        cursor: Some(CURSOR.to_owned()),
-    };
-
-    let page =
-        wait(client.list_containers(&access(), &node(), &page_request, &CancellationToken::new()))
-            .await
-            .expect("page reads");
-
-    assert_eq!(page.items.len(), 2);
-    assert_eq!(page.items[0].container_id, FIRST_CONTAINER_ID);
-    assert_eq!(page.items[0].display_name, "web.1");
-    assert_eq!(page.items[0].image_reference, "nginx:1.27");
-    assert_eq!(page.items[0].state, ContainerState::Running);
-    assert_eq!(page.items[0].status, "Up 3 minutes");
+    let list = client
+        .list_containers(&access(), None, &CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(list.items.len(), 2);
+    let web = &list.items[0];
+    assert_eq!(web.container_id, FIRST_CONTAINER_ID);
+    assert_eq!(web.node_id, node());
+    assert_eq!(web.node_name, "manager");
+    assert_eq!(web.state, ContainerState::Running);
+    assert_eq!(web.ports, vec!["8080:80/tcp"]);
+    assert_eq!(web.service_name.as_deref(), Some("shop_web"));
+    assert_eq!(web.cpu_percent, Some(12.5));
+    assert!(web.started_at.is_some() && web.finished_at.is_none());
+    assert_eq!(list.items[1].cpu_percent, None);
+    assert!(list.items[1].finished_at.is_some());
     assert_eq!(
-        page.items[0]
-            .created_at
-            .to_rfc3339_opts(SecondsFormat::Millis, true),
-        "2026-09-19T06:00:00.000Z"
+        list.nodes
+            .iter()
+            .map(|node| (node.node_id.as_str(), node.status, node.message.as_deref()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("node-1", NodeOutcomeStatus::Ok, None),
+            ("worker-1", NodeOutcomeStatus::Timeout, None),
+            (
+                "worker-2",
+                NodeOutcomeStatus::Error,
+                Some("invalid_response")
+            ),
+        ]
     );
-    assert_eq!(page.items[1].state, ContainerState::Exited);
-    assert_eq!(page.next_cursor.as_deref(), Some(CURSOR));
-
-    let request = &server.requests()[0];
-    assert_eq!(request.method, "GET");
+    client
+        .list_containers(&access(), Some(&node()), &CancellationToken::new())
+        .await
+        .unwrap();
+    let targets: Vec<_> = server
+        .requests()
+        .into_iter()
+        .map(|request| request.target)
+        .collect();
     assert_eq!(
-        request.target,
-        format!(
-            "/api/v1/nodes/node-1/containers?limit=2&cursor=v1%3A{}",
-            "c".repeat(64)
-        )
+        targets,
+        vec!["/api/v1/containers", "/api/v1/containers?node=node-1"]
     );
-    let expected = format!("Bearer {ACCESS_CANARY}");
-    assert_eq!(request.header("authorization"), Some(expected.as_str()));
-    assert!(!request.target.contains(ACCESS_CANARY));
-
-    // The default request asks for the documented first page.
-    let page = wait(client.list_containers(
-        &access(),
-        &node(),
-        &ContainerPageRequest::default(),
-        &CancellationToken::new(),
-    ))
-    .await
-    .expect("default page reads");
-    assert_eq!(page.next_cursor.as_deref(), Some(CURSOR));
-    assert_eq!(
-        server.requests()[1].target,
-        "/api/v1/nodes/node-1/containers?limit=50"
-    );
+    for request in server.requests() {
+        assert!(
+            request
+                .header("authorization")
+                .unwrap()
+                .starts_with("Bearer ")
+        );
+        assert!(!request.target.contains(ACCESS_CANARY));
+    }
 }
 
 #[tokio::test]
-async fn list_containers_reads_a_final_page_with_no_cursor() {
-    let server = TestServer::plain(vec![respond(200, CONTAINER_PAGE_LAST)]).await;
-    let client = plain_client(&server);
-
-    let page = wait(client.list_containers(
-        &access(),
-        &node(),
-        &ContainerPageRequest::default(),
-        &CancellationToken::new(),
-    ))
-    .await
-    .expect("final page reads");
-
-    assert_eq!(page.items.len(), 1);
-    assert_eq!(page.next_cursor, None);
-}
-
-#[tokio::test]
-async fn invalid_pagination_makes_no_request() {
-    let server = TestServer::plain(vec![respond(200, CONTAINER_PAGE)]).await;
-    let client = plain_client(&server);
-    let cases = [
-        ContainerPageRequest {
-            limit: 0,
-            cursor: None,
-        },
-        ContainerPageRequest {
-            limit: 101,
-            cursor: None,
-        },
-        ContainerPageRequest {
-            limit: 50,
-            cursor: Some("bogus".to_owned()),
-        },
-        ContainerPageRequest {
-            limit: 50,
-            cursor: Some(format!("v1:{}", "c".repeat(63))),
-        },
-        ContainerPageRequest {
-            limit: 50,
-            cursor: Some(format!("v2:{}", "c".repeat(64))),
-        },
-        ContainerPageRequest {
-            limit: 50,
-            cursor: Some("c".repeat(68)),
-        },
-    ];
-    for case in cases {
+async fn container_lists_that_break_the_contract_are_rejected() {
+    let valid: serde_json::Value = serde_json::from_str(CONTAINER_LIST).unwrap();
+    let mut foreign = valid.clone();
+    foreign["items"][0]["nodeId"] = json!("worker-1");
+    let mut extra = valid.clone();
+    extra["items"][0]["command"] = json!("secret-canary");
+    let mut bad_time = valid.clone();
+    bad_time["items"][0]["startedAt"] = json!("2026-09-19T06:00:02Z");
+    let mut bad_state = valid.clone();
+    bad_state["items"][0]["state"] = json!("secret-canary");
+    let mut negative_cpu = valid.clone();
+    negative_cpu["items"][0]["cpuPercent"] = json!(-1.0);
+    let mut oversized = valid.clone();
+    oversized["items"] = json!(vec![valid["items"][0].clone(); 2_001]);
+    for bad_id in [
+        "A".repeat(64),
+        "a".repeat(63),
+        format!("{}z", "a".repeat(63)),
+        String::new(),
+    ] {
+        let mut candidate = valid.clone();
+        candidate["items"][0]["containerId"] = json!(bad_id);
+        let decoded: ContainerListBody = serde_json::from_value(candidate).unwrap();
         assert_eq!(
-            client
-                .list_containers(&access(), &node(), &case, &CancellationToken::new())
-                .await
-                .err(),
-            Some(NativeClientError::InvalidPagination),
-            "{case:?} must be rejected locally"
+            decoded.into_list().err(),
+            Some(NativeClientError::InvalidResponse),
+            "container id {bad_id:?} must be rejected"
         );
     }
-    assert_eq!(server.connection_count(), 0);
-    assert_eq!(server.request_count(), 0);
-}
-
-#[tokio::test]
-async fn foreign_node_provenance_is_rejected() {
-    let server = TestServer::plain(vec![respond(200, CONTAINER_PAGE_FOREIGN_NODE)]).await;
-    let client = plain_client(&server);
-
-    assert_eq!(
-        client
-            .list_containers(
-                &access(),
-                &node(),
-                &ContainerPageRequest::default(),
-                &CancellationToken::new(),
-            )
-            .await
-            .err(),
-        Some(NativeClientError::InvalidResponse)
-    );
-}
-
-#[tokio::test]
-async fn invalid_next_cursor_is_rejected() {
-    let server = TestServer::plain(vec![respond(200, CONTAINER_PAGE_BAD_CURSOR)]).await;
-    let client = plain_client(&server);
-
-    assert_eq!(
-        client
-            .list_containers(
-                &access(),
-                &node(),
-                &ContainerPageRequest::default(),
-                &CancellationToken::new(),
-            )
-            .await
-            .err(),
-        Some(NativeClientError::InvalidResponse)
-    );
+    for (label, body) in [
+        ("an item from a node that did not answer", foreign),
+        ("an unknown field", extra),
+        ("a non-canonical time", bad_time),
+        ("an unknown state", bad_state),
+        ("a negative figure", negative_cpu),
+        ("more items than the cap", oversized),
+    ] {
+        let server = TestServer::plain(vec![respond(200, &body.to_string())]).await;
+        assert_eq!(
+            plain_client(&server)
+                .list_containers(&access(), None, &CancellationToken::new())
+                .await
+                .err(),
+            Some(NativeClientError::InvalidResponse),
+            "{label}"
+        );
+    }
 }
 
 #[tokio::test]
 async fn the_collection_body_limit_is_enforced() {
-    let server = TestServer::plain(vec![respond(200, CONTAINER_PAGE)]).await;
+    let server = TestServer::plain(vec![respond(200, CONTAINER_LIST)]).await;
     let mut config = NativeClientConfig::new(server.origin());
     config.trust = TrustPolicy::WebPki;
     config.collection_body_limit = 10;
     let client = crate::client::NativeClient::new(config).expect("client builds");
-
     assert_eq!(
         client
-            .list_containers(
-                &access(),
-                &node(),
-                &ContainerPageRequest::default(),
-                &CancellationToken::new(),
-            )
+            .list_containers(&access(), None, &CancellationToken::new())
             .await
             .err(),
         Some(NativeClientError::InvalidResponse),
-        "a page above the configured ceiling is rejected"
+        "a list above the configured ceiling is rejected"
     );
     assert_eq!(server.request_count(), 1);
+}
+
+#[tokio::test]
+async fn container_actions_validate_locally_and_post_the_documented_routes() {
+    let admitted = json!({"operationId": OPERATION_ID, "replayed": false}).to_string();
+    let server = TestServer::plain(vec![respond(202, &admitted), respond(202, &admitted)]).await;
+    let client = plain_client(&server);
+    let key = IdempotencyKey::parse("018f2e34-0000-7000-8000-0000000000aa").unwrap();
+    let operation = client
+        .container_action(
+            &access(),
+            &ContainerTarget {
+                node_id: node(),
+                container_id: FIRST_CONTAINER_ID.to_owned(),
+            },
+            ContainerAction::Remove,
+            ContainerActionOptions {
+                force: true,
+                timeout_seconds: None,
+            },
+            &key,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        operation.operation_id,
+        Uuid::parse_str(OPERATION_ID).unwrap()
+    );
+    let targets = [
+        ContainerTarget {
+            node_id: node(),
+            container_id: FIRST_CONTAINER_ID.to_owned(),
+        },
+        ContainerTarget {
+            node_id: NodeId::parse("worker-1").unwrap(),
+            container_id: "b".repeat(64),
+        },
+    ];
+    client
+        .containers_bulk_action(
+            &access(),
+            ContainerAction::Pause,
+            &targets,
+            false,
+            &key,
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    let requests = server.requests();
+    assert_eq!(
+        requests[0].target,
+        format!("/api/v1/containers/node-1/{FIRST_CONTAINER_ID}/actions/remove")
+    );
+    assert_eq!(requests[0].body, r#"{"force":true}"#);
+    assert_eq!(requests[1].target, "/api/v1/containers/actions/bulk");
+    let bulk: serde_json::Value = serde_json::from_str(&requests[1].body).unwrap();
+    assert_eq!(bulk["action"], "pause");
+    assert_eq!(
+        bulk["targets"][1],
+        json!({"nodeId": "worker-1", "containerId": "b".repeat(64)})
+    );
+    assert!(bulk.get("force").is_none());
+
+    // Nothing leaves the client for these.
+    let options = ContainerActionOptions {
+        force: false,
+        timeout_seconds: Some(601),
+    };
+    assert_eq!(
+        client
+            .container_action(
+                &access(),
+                &ContainerTarget {
+                    node_id: node(),
+                    container_id: FIRST_CONTAINER_ID.to_owned()
+                },
+                ContainerAction::Stop,
+                options,
+                &key,
+                &CancellationToken::new()
+            )
+            .await
+            .err(),
+        Some(NativeClientError::InvalidRequest)
+    );
+    assert_eq!(
+        client
+            .container_action(
+                &access(),
+                &ContainerTarget {
+                    node_id: node(),
+                    container_id: "short".to_owned()
+                },
+                ContainerAction::Stop,
+                ContainerActionOptions::default(),
+                &key,
+                &CancellationToken::new()
+            )
+            .await
+            .err(),
+        Some(NativeClientError::InvalidRequest)
+    );
+    let duplicate = [targets[0].clone(), targets[0].clone()];
+    for bad in [&[][..], &duplicate[..]] {
+        assert_eq!(
+            client
+                .containers_bulk_action(
+                    &access(),
+                    ContainerAction::Stop,
+                    bad,
+                    false,
+                    &key,
+                    &CancellationToken::new()
+                )
+                .await
+                .err(),
+            Some(NativeClientError::InvalidRequest)
+        );
+    }
+    assert_eq!(
+        ContainerAction::parse("explode").err(),
+        Some(NativeClientError::InvalidRequest)
+    );
+    assert_eq!(server.request_count(), 2);
 }
 
 #[tokio::test]
@@ -590,36 +648,6 @@ async fn operation_statuses_map_to_closed_variants() {
 }
 
 #[test]
-fn non_canonical_container_ids_are_rejected() {
-    let page: serde_json::Value = serde_json::from_str(CONTAINER_PAGE).unwrap();
-    for bad_id in [
-        "A".repeat(64),
-        "a".repeat(63),
-        "a".repeat(65),
-        format!("{}z", "a".repeat(63)),
-        String::new(),
-    ] {
-        let mut candidate = page.clone();
-        candidate["items"] = serde_json::json!([{
-            "containerId": bad_id,
-            "displayName": "web.1",
-            "imageReference": "nginx:1.27",
-            "state": "running",
-            "status": "Up",
-            "createdAt": "2026-09-19T06:00:00.000Z",
-            "nodeId": "node-1",
-        }]);
-        candidate["nextCursor"] = serde_json::Value::Null;
-        let decoded: ContainerPageBody = serde_json::from_value(candidate).unwrap();
-        assert_eq!(
-            decoded.into_page(&node()).err(),
-            Some(NativeClientError::InvalidResponse),
-            "container id {bad_id:?} must be rejected"
-        );
-    }
-}
-
-#[test]
 fn non_canonical_timestamps_are_rejected() {
     for timestamp in [
         "2026-09-19T06:00:00Z",
@@ -663,12 +691,7 @@ async fn container_and_operation_reads_require_no_anonymous_access() {
     let access = AccessCredential::parse(ACCESS_CANARY).unwrap();
     assert_eq!(
         client
-            .list_containers(
-                &access,
-                &node(),
-                &ContainerPageRequest::default(),
-                &CancellationToken::new(),
-            )
+            .list_containers(&access, None, &CancellationToken::new())
             .await
             .err(),
         Some(NativeClientError::Unauthorized)
@@ -698,26 +721,34 @@ fn default_limits_are_the_documented_bounds() {
     assert_eq!(crate::client::DEFAULT_CONNECT_TIMEOUT.as_secs(), 5);
     assert_eq!(crate::client::DEFAULT_REQUEST_DEADLINE.as_secs(), 10);
     assert_eq!(crate::client::DEFAULT_JSON_BODY_LIMIT, 64 * 1024);
-    assert_eq!(crate::client::DEFAULT_COLLECTION_BODY_LIMIT, 1024 * 1024);
-    assert_eq!(crate::containers::DEFAULT_CONTAINER_LIMIT, 50);
-    assert_eq!(crate::containers::MAX_CONTAINER_LIMIT, 100);
-    assert_eq!(crate::containers::MAX_CONTAINER_CURSOR_LEN, 67);
+    assert_eq!(
+        crate::client::DEFAULT_COLLECTION_BODY_LIMIT,
+        4 * 1024 * 1024
+    );
+    assert_eq!(crate::containers::MAX_CONTAINERS, 2_000);
+    assert_eq!(crate::containers::MAX_BULK_TARGETS, 200);
+    assert_eq!(crate::containers::MAX_STOP_TIMEOUT_SECONDS, 600);
 }
 
 /// Paths covered by the client's read surface, with their documented method.
-const READ_OPENAPI_PATHS: [(&str, &str); 10] = [
+const READ_OPENAPI_PATHS: [(&str, &str); 12] = [
     ("/api/v1/nodes", "get"),
     ("/api/v1/nodes/{nodeId}/samples", "get"),
     ("/api/v1/cluster/samples", "get"),
     ("/api/v1/settings", "get"),
     ("/api/v1/settings", "patch"),
-    ("/api/v1/nodes/{nodeId}/containers", "get"),
+    ("/api/v1/containers", "get"),
+    (
+        "/api/v1/containers/{nodeId}/{containerId}/actions/{action}",
+        "post",
+    ),
+    ("/api/v1/containers/actions/bulk", "post"),
     ("/api/v1/operations/{operation_id}", "get"),
     ("/api/v1/operations/{operation_id}/events", "get"),
     ("/api/v1/operations/{operation_id}/cancel", "post"),
     ("/api/v1/operations/noop", "post"),
 ];
-const READ_OPENAPI_SCHEMAS: [&str; 19] = [
+const READ_OPENAPI_SCHEMAS: [&str; 23] = [
     "NodeListResponse",
     "NodeResponse",
     "NodeStatusResponse",
@@ -726,10 +757,14 @@ const READ_OPENAPI_SCHEMAS: [&str; 19] = [
     "SamplePointResponse",
     "SettingsResponse",
     "SettingsPatchRequest",
-    "ContainerErrorResponse",
-    "ContainerItemResponse",
-    "ContainerPageResponse",
+    "ContainerListResponse",
+    "ContainerResponse",
     "ContainerStateResponse",
+    "TooManyContainersResponse",
+    "ContainerActionRequest",
+    "BulkActionRequest",
+    "NodeOutcomeResponse",
+    "NodeOutcomeStatus",
     "OperationResponse",
     "OperationStateResponse",
     "NodeErrorResponse",
@@ -767,23 +802,18 @@ fn openapi_reads_contract_matches_the_checked_artifact() {
     );
 
     assert_eq!(
-        response_statuses(&document, "/api/v1/nodes/{nodeId}/containers", "get"),
-        BTreeSet::from(["200", "400", "401", "404", "503", "504"].map(str::to_owned))
+        response_statuses(&document, "/api/v1/containers", "get"),
+        BTreeSet::from(["200", "400", "401", "404", "413", "503"].map(str::to_owned))
     );
-    let parameters = document["paths"]["/api/v1/nodes/{nodeId}/containers"]["get"]["parameters"]
-        .as_array()
-        .expect("containers documents parameters");
-    let limit = parameters
-        .iter()
-        .find(|parameter| parameter["name"] == "limit")
-        .expect("limit is documented");
-    assert_eq!(limit["schema"]["minimum"], 1);
-    assert_eq!(limit["schema"]["maximum"], 100);
-    let cursor = parameters
-        .iter()
-        .find(|parameter| parameter["name"] == "cursor")
-        .expect("cursor is documented");
-    assert_eq!(cursor["schema"]["maxLength"], 67);
+    for path in [
+        "/api/v1/containers/{nodeId}/{containerId}/actions/{action}",
+        "/api/v1/containers/actions/bulk",
+    ] {
+        assert!(
+            response_statuses(&document, path, "post").contains("202"),
+            "{path}"
+        );
+    }
 
     assert_eq!(
         response_statuses(&document, "/api/v1/operations/{operation_id}", "get"),
@@ -797,15 +827,22 @@ fn openapi_reads_contract_matches_the_checked_artifact() {
         "polling documents the anti-oracle 404"
     );
 
-    let page: serde_json::Value =
-        serde_json::from_str(CONTAINER_PAGE).expect("page fixture is JSON");
-    let item: ContainerItemBody = serde_json::from_value(page["items"][0].clone())
-        .expect("item fixture decodes into the wire DTO");
-    assert_schema_fields(&document, "ContainerItemResponse", serialized_keys(&item));
+    let list: serde_json::Value =
+        serde_json::from_str(CONTAINER_LIST).expect("list fixture is JSON");
     assert_schema_fields(
         &document,
-        "ContainerPageResponse",
-        round_trip_keys::<ContainerPageBody>(CONTAINER_PAGE),
+        "ContainerResponse",
+        list["items"][0]
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect(),
+    );
+    assert_schema_fields(
+        &document,
+        "ContainerListResponse",
+        round_trip_keys::<ContainerListBody>(CONTAINER_LIST),
     );
     assert_schema_fields(
         &document,

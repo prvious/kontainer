@@ -1230,8 +1230,7 @@ async fn postgres_session_openapi_registers_auth_routes_without_secrets()
                         let name = name.as_str().unwrap_or_default();
                         let allowed = (path == "/api/v1/auth/github/callback"
                             && ["code", "state", "error"].contains(&name))
-                            || (path == "/api/v1/nodes/{nodeId}/containers"
-                                && ["limit", "cursor"].contains(&name))
+                            || (path == "/api/v1/containers" && name == "node")
                             || (["/api/v1/nodes/{nodeId}/samples", "/api/v1/cluster/samples"]
                                 .contains(&path.as_str())
                                 && ["window", "bucket"].contains(&name))

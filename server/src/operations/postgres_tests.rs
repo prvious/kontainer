@@ -590,7 +590,15 @@ async fn postgres_application_routes_deny_anonymous_requests() -> Result<(), Box
             Request::get("/api/v1/status").body(Body::empty())?,
             Request::get("/api/v1/openapi.json").body(Body::empty())?,
             Request::get(format!("/api/v1/operations/{}", Uuid::now_v7())).body(Body::empty())?,
-            Request::get("/api/v1/nodes/node-1/containers").body(Body::empty())?,
+            Request::get("/api/v1/containers").body(Body::empty())?,
+            Request::get("/api/v1/nodes").body(Body::empty())?,
+            Request::post(format!(
+                "/api/v1/containers/node-1/{}/actions/stop",
+                "a".repeat(64)
+            ))
+            .body(Body::empty())?,
+            Request::post("/api/v1/containers/actions/bulk").body(Body::empty())?,
+            Request::post("/api/v1/operations/noop").body(Body::empty())?,
         ] {
             let response = router.clone().oneshot(request).await?;
             let challenge = response.headers().get(header::WWW_AUTHENTICATE).cloned();

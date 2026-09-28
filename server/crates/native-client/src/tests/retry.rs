@@ -13,12 +13,12 @@ use super::support::{
     wait,
 };
 use crate::client::TrustPolicy;
-use crate::containers::{ContainerPageRequest, NodeId};
+use crate::containers::NodeId;
 use crate::credentials::AccessCredential;
 use crate::error::{NativeClientError, retryable_cause_chain};
 use crate::operations::OperationState;
 
-const CONTAINER_PAGE: &str = include_str!("fixtures/reads/container-page-last.json");
+const CONTAINER_PAGE: &str = include_str!("fixtures/reads/container-list.json");
 const OPERATION: &str = include_str!("fixtures/reads/operation-uncertain.json");
 const ACCESS_CANARY: &str = "kta_11111111111111111111111111111111.2222222222222222222222222222222222222222222222222222222222222222";
 const OPERATION_ID: &str = "018f2e34-0000-7000-8000-0000000000cc";
@@ -109,16 +109,11 @@ async fn list_containers_retries_once_after_a_connection_reset() {
     let server = TestServer::plain(vec![Behavior::Reset, respond(200, CONTAINER_PAGE)]).await;
     let client = plain_client(&server);
 
-    let page = wait(client.list_containers(
-        &access(),
-        &node(),
-        &ContainerPageRequest::default(),
-        &CancellationToken::new(),
-    ))
-    .await
-    .expect("the retry succeeds");
+    let page = wait(client.list_containers(&access(), Some(&node()), &CancellationToken::new()))
+        .await
+        .expect("the retry succeeds");
 
-    assert_eq!(page.items.len(), 1);
+    assert_eq!(page.items.len(), 2);
     assert_eq!(server.connection_count(), 2);
     let requests = server.requests();
     assert_eq!(requests.len(), 2, "both attempts carried the same request");
@@ -150,12 +145,7 @@ async fn a_second_transient_failure_stops_after_one_retry() {
 
     assert_eq!(
         client
-            .list_containers(
-                &access(),
-                &node(),
-                &ContainerPageRequest::default(),
-                &CancellationToken::new(),
-            )
+            .list_containers(&access(), Some(&node()), &CancellationToken::new())
             .await
             .err(),
         Some(NativeClientError::Unavailable)
@@ -213,12 +203,7 @@ async fn tls_identity_failures_are_never_retried() {
 
     assert_eq!(
         client
-            .list_containers(
-                &access(),
-                &node(),
-                &ContainerPageRequest::default(),
-                &CancellationToken::new(),
-            )
+            .list_containers(&access(), Some(&node()), &CancellationToken::new())
             .await
             .err(),
         Some(NativeClientError::Unavailable)
@@ -237,14 +222,9 @@ async fn tls_identity_failures_are_never_retried() {
     )
     .await;
     let client = tls_client(&server, &pki.ca_pem);
-    wait(client.list_containers(
-        &access(),
-        &node(),
-        &ContainerPageRequest::default(),
-        &CancellationToken::new(),
-    ))
-    .await
-    .expect("trusted CA reads the page");
+    wait(client.list_containers(&access(), Some(&node()), &CancellationToken::new()))
+        .await
+        .expect("trusted CA reads the page");
     assert_eq!(server.connection_count(), 1);
 }
 
@@ -259,12 +239,7 @@ async fn a_truncated_response_body_is_never_retried() {
 
     assert_eq!(
         client
-            .list_containers(
-                &access(),
-                &node(),
-                &ContainerPageRequest::default(),
-                &CancellationToken::new(),
-            )
+            .list_containers(&access(), Some(&node()), &CancellationToken::new())
             .await
             .err(),
         Some(NativeClientError::Unavailable)
@@ -292,12 +267,7 @@ async fn the_retry_shares_the_original_deadline() {
 
     let started = Instant::now();
     let error = client
-        .list_containers(
-            &access(),
-            &node(),
-            &ContainerPageRequest::default(),
-            &CancellationToken::new(),
-        )
+        .list_containers(&access(), Some(&node()), &CancellationToken::new())
         .await
         .expect_err("the stalled retry expires");
     let elapsed = started.elapsed();

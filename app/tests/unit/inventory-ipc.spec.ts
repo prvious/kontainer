@@ -1,27 +1,19 @@
 import { describe, expect, it } from "vitest";
 import fixture from "../fixtures/inventory-ipc.json";
-import { INVENTORY_ERROR_CODES, containerPageFromIpc, inventoryErrorCode } from "@/types/inventory";
+import { INVENTORY_ERROR_CODES, exactRecord, inventoryErrorCode } from "@/types/inventory";
 
-describe("inventory IPC contract", () => {
-    it("matches the Rust fixture and projects exactly the page fields", () => {
-        expect(containerPageFromIpc(fixture.containerPage)).toEqual(fixture.containerPage);
-        expect(Object.keys(containerPageFromIpc(fixture.containerPage))).toEqual(["items", "nextCursor"]);
-        expect(Object.keys(containerPageFromIpc(fixture.containerPage).items[0])).toEqual([
-            "containerId",
-            "displayName",
-            "imageReference",
-            "state",
-            "status",
-            "createdAt",
-            "nodeId",
-        ]);
+describe("authenticated call error codes", () => {
+    it("match the Rust fixture and close over unknown values", () => {
         expect(INVENTORY_ERROR_CODES).toEqual(fixture.errorCodes);
-        expect(fixture.commands).toEqual(["list_container_inventory"]);
+        expect(inventoryErrorCode("too_many_containers")).toBe("too_many_containers");
+        expect(inventoryErrorCode(new Error("secret-canary"))).toBe("invalid_response");
+        expect(inventoryErrorCode(undefined)).toBe("invalid_response");
     });
 
-    it("rejects extra fields and unknown states without caching canaries", () => {
-        expect(() => containerPageFromIpc({ ...fixture.containerPage, credential: "secret-canary" })).toThrow();
-        expect(() => containerPageFromIpc({ ...fixture.containerPage, items: [{ ...fixture.containerPage.items[0], state: "secret-canary" }] })).toThrow();
-        expect(inventoryErrorCode(new Error("secret-canary"))).toBe("invalid_response");
+    it("exact records reject missing and extra keys", () => {
+        expect(exactRecord({ a: 1, b: 2 }, ["b", "a"])).toEqual({ a: 1, b: 2 });
+        expect(() => exactRecord({ a: 1 }, ["a", "b"])).toThrow();
+        expect(() => exactRecord({ a: 1, secret: "canary" }, ["a"])).toThrow();
+        expect(() => exactRecord([1], ["0"])).toThrow();
     });
 });

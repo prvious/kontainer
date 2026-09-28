@@ -68,6 +68,273 @@
         ]
       }
     },
+    "/api/v1/containers": {
+      "get": {
+        "operationId": "list_containers",
+        "parameters": [
+          {
+            "description": "Only this member node",
+            "in": "query",
+            "name": "node",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContainerListResponse"
+                }
+              }
+            },
+            "description": "Containers on every answering node, and one outcome per member node"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "Invalid query"
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "No such member node"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TooManyContainersResponse"
+                }
+              }
+            },
+            "description": "`too_many_containers`: more than 2,000; filter by node"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "Agent RPC not configured, persistence unavailable, or controller draining"
+          }
+        },
+        "security": [
+          {
+            "access_session": []
+          }
+        ],
+        "tags": [
+          "super::containers"
+        ]
+      }
+    },
+    "/api/v1/containers/actions/bulk": {
+      "post": {
+        "operationId": "containers_bulk_action",
+        "parameters": [
+          {
+            "description": "16–64 printable ASCII characters, one per user gesture",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BulkActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmittedResponse"
+                }
+              }
+            },
+            "description": "Admitted as one `containers.bulk` operation"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "`idempotency_key_required` or `invalid_request`"
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "`idempotency_conflict`"
+          },
+          "503": {
+            "description": "Persistence unavailable or controller draining"
+          }
+        },
+        "security": [
+          {
+            "access_session": []
+          }
+        ],
+        "tags": [
+          "super::containers"
+        ]
+      }
+    },
+    "/api/v1/containers/{nodeId}/{containerId}/actions/{action}": {
+      "post": {
+        "operationId": "container_action",
+        "parameters": [
+          {
+            "description": "Member node id",
+            "in": "path",
+            "name": "nodeId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Full container id",
+            "in": "path",
+            "name": "containerId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "start, stop, restart, pause, unpause, or remove",
+            "in": "path",
+            "name": "action",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "16–64 printable ASCII characters, one per user gesture",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ContainerActionRequest"
+                  }
+                ]
+              }
+            }
+          },
+          "description": "Optional; empty means defaults"
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmittedResponse"
+                }
+              }
+            },
+            "description": "Admitted; poll the operation"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "`idempotency_key_required` or `invalid_request`"
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "No such member node"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "`idempotency_conflict`"
+          },
+          "503": {
+            "description": "Persistence unavailable or controller draining"
+          }
+        },
+        "security": [
+          {
+            "access_session": []
+          }
+        ],
+        "tags": [
+          "super::containers"
+        ]
+      }
+    },
     "/api/v1/nodes": {
       "get": {
         "operationId": "list_nodes",
@@ -103,102 +370,6 @@
         ],
         "tags": [
           "super::nodes"
-        ]
-      }
-    },
-    "/api/v1/nodes/{nodeId}/containers": {
-      "get": {
-        "operationId": "index",
-        "parameters": [
-          {
-            "description": "Configured node ID; only the statically configured node is served",
-            "in": "path",
-            "name": "nodeId",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Page size; defaults to 50, range 1-100",
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "format": "int32",
-              "maximum": 100,
-              "minimum": 1,
-              "type": "integer"
-            }
-          },
-          {
-            "description": "Opaque cursor from a previous page; empty means the first page",
-            "in": "query",
-            "name": "cursor",
-            "required": false,
-            "schema": {
-              "maxLength": 67,
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ContainerPageResponse"
-                }
-              }
-            },
-            "description": "One bounded page preserving agent order; live collections are best-effort"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ContainerErrorResponse"
-                }
-              }
-            },
-            "description": "Invalid pagination; no agent call was made"
-          },
-          "401": {
-            "description": "Missing, malformed, expired, or revoked access credential"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ContainerErrorResponse"
-                }
-              }
-            },
-            "description": "Unknown node; only nodes that have checked in exist"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ContainerErrorResponse"
-                }
-              }
-            },
-            "description": "Agent unavailable or response invalid; no transport or daemon detail"
-          },
-          "504": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ContainerErrorResponse"
-                }
-              }
-            },
-            "description": "Agent deadline expired"
-          }
-        },
-        "tags": [
-          "super::containers"
         ]
       }
     },
@@ -649,71 +820,163 @@
       ],
       "type": "object"
     },
-    "ContainerErrorResponse": {
+    "BulkActionRequest": {
+      "additionalProperties": false,
       "properties": {
-        "error": {
+        "action": {
+          "description": "start, stop, restart, pause, unpause, or remove.",
+          "type": "string"
+        },
+        "force": {
+          "description": "Remove only: kill running containers first.",
+          "type": "boolean"
+        },
+        "targets": {
+          "description": "1–200 containers on any member nodes.",
+          "items": {
+            "type": "object"
+          },
+          "maxItems": 200,
+          "type": "array"
+        }
+      },
+      "required": [
+        "action",
+        "targets"
+      ],
+      "type": "object"
+    },
+    "ContainerActionRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "force": {
+          "description": "Remove only: kill a running container first.",
+          "type": "boolean"
+        },
+        "timeoutSeconds": {
+          "description": "Stop and restart only: grace before kill, 0–600 (default 10).",
+          "format": "int32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ContainerListResponse": {
+      "description": "`{ items, nodes, snapshotAt }`: merged containers and one outcome per member node.",
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/components/schemas/ContainerResponse"
+          },
+          "maxItems": 2000,
+          "type": "array"
+        },
+        "nodes": {
+          "items": {
+            "$ref": "#/components/schemas/NodeOutcomeResponse"
+          },
+          "type": "array"
+        },
+        "snapshotAt": {
           "type": "string"
         }
       },
       "required": [
-        "error"
+        "items",
+        "nodes",
+        "snapshotAt"
       ],
       "type": "object"
     },
-    "ContainerItemResponse": {
+    "ContainerResponse": {
       "properties": {
         "containerId": {
           "description": "Full lowercase-hex daemon container ID.",
           "type": "string"
         },
+        "cpuPercent": {
+          "description": "From the node's last sample; null when not running.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "createdAt": {
-          "description": "RFC 3339 UTC creation time with millisecond precision.",
           "type": "string"
         },
-        "displayName": {
-          "description": "Canonical display name without Docker linkage.",
+        "finishedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "image": {
           "type": "string"
         },
-        "imageReference": {
-          "description": "Image reference as reported by the daemon.",
+        "memoryLimitBytes": {
+          "format": "int64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "memoryUsedBytes": {
+          "format": "int64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "name": {
           "type": "string"
         },
         "nodeId": {
-          "description": "Serving node ID from agent configuration, never request input.",
           "type": "string"
         },
-        "state": {
-          "$ref": "#/components/schemas/ContainerStateResponse",
-          "description": "Typed lifecycle state."
-        },
-        "status": {
-          "description": "Bounded daemon status text.",
+        "nodeName": {
+          "description": "The node's hostname.",
           "type": "string"
-        }
-      },
-      "required": [
-        "containerId",
-        "displayName",
-        "imageReference",
-        "state",
-        "status",
-        "createdAt",
-        "nodeId"
-      ],
-      "type": "object"
-    },
-    "ContainerPageResponse": {
-      "properties": {
-        "items": {
-          "description": "One bounded page preserving the agent's deterministic newest-first\norder. Live collections are best-effort: containers created or removed\nbetween calls can shift pages. A cursor whose target was removed is\nrejected as invalid pagination; restart traversal from the first page.",
+        },
+        "ports": {
+          "description": "Published ports as `host:container/proto`.",
           "items": {
-            "$ref": "#/components/schemas/ContainerItemResponse"
+            "type": "string"
           },
-          "maxItems": 100,
           "type": "array"
         },
-        "nextCursor": {
-          "description": "Opaque cursor for the next page, or null when this page is last.\nPass back unchanged; clients never decode or synthesize it.",
+        "serviceName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stackNamespace": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "startedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "$ref": "#/components/schemas/ContainerStateResponse"
+        },
+        "status": {
+          "description": "Bounded daemon status text, e.g. `Up 3 minutes`.",
+          "type": "string"
+        },
+        "taskId": {
           "type": [
             "string",
             "null"
@@ -721,8 +984,23 @@
         }
       },
       "required": [
-        "items",
-        "nextCursor"
+        "nodeId",
+        "nodeName",
+        "containerId",
+        "name",
+        "image",
+        "state",
+        "status",
+        "createdAt",
+        "startedAt",
+        "finishedAt",
+        "ports",
+        "serviceName",
+        "stackNamespace",
+        "taskId",
+        "cpuPercent",
+        "memoryUsedBytes",
+        "memoryLimitBytes"
       ],
       "type": "object"
     },
@@ -768,6 +1046,37 @@
         "snapshotAt"
       ],
       "type": "object"
+    },
+    "NodeOutcomeResponse": {
+      "description": "Per-node result shared by every fan-out route.",
+      "properties": {
+        "message": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "nodeId": {
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/components/schemas/NodeOutcomeStatus"
+        }
+      },
+      "required": [
+        "nodeId",
+        "status"
+      ],
+      "type": "object"
+    },
+    "NodeOutcomeStatus": {
+      "enum": [
+        "ok",
+        "timeout",
+        "unavailable",
+        "error"
+      ],
+      "type": "string"
     },
     "NodeResponse": {
       "properties": {
@@ -1190,6 +1499,21 @@
       },
       "required": [
         "metricsRetentionDays"
+      ],
+      "type": "object"
+    },
+    "TooManyContainersResponse": {
+      "properties": {
+        "error": {
+          "type": "string"
+        },
+        "hint": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "error",
+        "hint"
       ],
       "type": "object"
     }

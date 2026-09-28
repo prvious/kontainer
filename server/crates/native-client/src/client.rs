@@ -28,7 +28,7 @@ pub const DEFAULT_REQUEST_DEADLINE: Duration = Duration::from_secs(10);
 /// Default ceiling for auth/session and operation response bodies.
 pub const DEFAULT_JSON_BODY_LIMIT: usize = 64 * 1024;
 /// Default ceiling for a container page response body.
-pub const DEFAULT_COLLECTION_BODY_LIMIT: usize = 1024 * 1024;
+pub const DEFAULT_COLLECTION_BODY_LIMIT: usize = 4 * 1024 * 1024;
 
 /// Trust anchors used to validate the controller's TLS identity.
 #[derive(Debug, Clone, Default)]
@@ -443,6 +443,9 @@ struct InventoryErrorBody {
 async fn classify_inventory_error(response: Response) -> NativeClientError {
     let status = response.status();
     let fallback = NativeClientError::from_status(status);
+    if status.as_u16() == 413 {
+        return NativeClientError::TooManyContainers;
+    }
     if !matches!(status.as_u16(), 400 | 503 | 504) {
         return fallback;
     }

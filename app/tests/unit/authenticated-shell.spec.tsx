@@ -71,7 +71,7 @@ describe("authenticated shell", () => {
     it("renders the outlet for every authenticated route, starting from the root redirect", async () => {
         mockCommands();
         renderApp();
-        await waitFor(() => expect(screen.getByRole("heading", { name: /containers/i })).toBeInTheDocument());
+        await waitFor(() => expect(screen.getByRole("heading", { name: "CONTAINERS", level: 1 })).toBeInTheDocument());
         expect(screen.getByRole("link", { name: /Containers/ })).toHaveAttribute("data-status", "active");
     });
 
@@ -103,29 +103,29 @@ describe("authenticated shell", () => {
     });
 
     it("keeps the page mounted under the session-expired dialog when a refresh is rejected", async () => {
-        mockCommands({ list_container_inventory: () => Promise.reject("relogin_required") });
-        renderApp("/tasks");
+        mockCommands({ list_containers: () => Promise.reject("relogin_required") });
+        renderApp("/containers");
         const dialog = await screen.findByRole("dialog");
         expect(within(dialog).getByText("Your session ended")).toBeInTheDocument();
         expect(within(dialog).getByText(session.email)).toBeInTheDocument();
         // The page is still there, behind the scrim.
-        expect(screen.getByRole("heading", { name: /containers/i, hidden: true })).toBeInTheDocument();
-        expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "list_container_inventory")).toHaveLength(1);
+        expect(screen.getByRole("heading", { name: "CONTAINERS", level: 1, hidden: true })).toBeInTheDocument();
+        expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "list_containers")).toHaveLength(1);
     });
 
     it("signs back in from the expired dialog and resumes the same page", async () => {
         let rejected = false;
         mockCommands({
-            list_container_inventory: () => {
+            list_containers: () => {
                 if (!rejected) {
                     rejected = true;
                     return Promise.reject("relogin_required");
                 }
-                return { items: [], nextCursor: null };
+                return { items: [], nodes: [], snapshotAt: "2026-09-28T12:00:00.000Z" };
             },
             session_login: () => session,
         });
-        renderApp("/tasks");
+        renderApp("/containers");
         const user = userEvent.setup();
         const dialog = await screen.findByRole("dialog");
         await user.type(within(dialog).getByLabelText("Password"), "correct horse battery");
@@ -137,7 +137,7 @@ describe("authenticated shell", () => {
             password: "correct horse battery",
             label: "Production",
         });
-        expect(screen.getByRole("heading", { name: /containers/i })).toBeInTheDocument();
+        expect(screen.getByRole("heading", { name: "CONTAINERS", level: 1 })).toBeInTheDocument();
     });
 
     it("signs out through the switcher and returns to Connect", async () => {
@@ -157,7 +157,7 @@ describe("authenticated shell", () => {
         await user.type(await screen.findByLabelText("Email"), "jane@example.com");
         await user.type(screen.getByLabelText("Password"), "correct horse battery");
         await user.click(screen.getByRole("button", { name: /Sign in/ }));
-        await waitFor(() => expect(screen.getByRole("heading", { name: /containers/i })).toBeInTheDocument());
+        await waitFor(() => expect(screen.getByRole("heading", { name: "CONTAINERS", level: 1 })).toBeInTheDocument());
         expect(invoke).toHaveBeenCalledWith("session_login", {
             origin: "http://127.0.0.1:5150",
             email: "jane@example.com",

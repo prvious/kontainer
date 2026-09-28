@@ -1,0 +1,48 @@
+{
+  "items": [
+    {
+      "nodeId": "node-1",
+      "nodeName": "manager",
+      "containerId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "name": "shop_web.1.x7kq",
+      "image": "nginx:1.27",
+      "state": "running",
+      "status": "Up 3 minutes",
+      "createdAt": "2026-09-19T06:00:00.000Z",
+      "startedAt": "2026-09-19T06:00:02.000Z",
+      "finishedAt": null,
+      "ports": ["8080:80/tcp"],
+      "serviceName": "shop_web",
+      "stackNamespace": "shop",
+      "taskId": "x7kq",
+      "cpuPercent": 12.5,
+      "memoryUsedBytes": 52428800,
+      "memoryLimitBytes": 1073741824
+    },
+    {
+      "nodeId": "node-1",
+      "nodeName": "manager",
+      "containerId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "name": "scratch",
+      "image": "alpine:3.20",
+      "state": "exited",
+      "status": "Exited (0) 2 minutes ago",
+      "createdAt": "2026-09-19T05:00:00.000Z",
+      "startedAt": "2026-09-19T05:00:01.000Z",
+      "finishedAt": "2026-09-19T06:01:00.000Z",
+      "ports": [],
+      "serviceName": null,
+      "stackNamespace": null,
+      "taskId": null,
+      "cpuPercent": null,
+      "memoryUsedBytes": null,
+      "memoryLimitBytes": null
+    }
+  ],
+  "nodes": [
+    { "nodeId": "node-1", "status": "ok" },
+    { "nodeId": "worker-1", "status": "timeout" },
+    { "nodeId": "worker-2", "status": "error", "message": "invalid_response" }
+  ],
+  "snapshotAt": "2026-09-19T06:05:00.000Z"
+}

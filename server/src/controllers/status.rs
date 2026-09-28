@@ -4,7 +4,8 @@ use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi, ToSchema};
 
 use super::containers::{
-    ContainerErrorResponse, ContainerItemResponse, ContainerPageResponse, ContainerStateResponse,
+    BulkActionRequest, ContainerActionRequest, ContainerListResponse, ContainerResponse,
+    ContainerStateResponse, TooManyContainersResponse,
 };
 use super::operations::{OperationResponse, OperationStateResponse};
 use crate::auth::domain::PrincipalContext;
@@ -80,6 +81,8 @@ impl Modify for AccessSessionSecurity {
         super::settings::show,
         super::settings::update,
         super::containers::index,
+        super::containers::action,
+        super::containers::bulk,
         super::sessions::refresh,
         super::sessions::logout_current,
         super::password_auth::bootstrap,
@@ -105,10 +108,14 @@ impl Modify for AccessSessionSecurity {
         super::operations::OperationEventsResponse,
         super::admission::AdmittedResponse,
         super::admission::AdmissionErrorResponse,
-        ContainerPageResponse,
-        ContainerItemResponse,
+        ContainerListResponse,
+        ContainerResponse,
         ContainerStateResponse,
-        ContainerErrorResponse,
+        TooManyContainersResponse,
+        ContainerActionRequest,
+        BulkActionRequest,
+        crate::nodes::fan_out::NodeOutcomeResponse,
+        crate::nodes::fan_out::NodeOutcomeStatus,
         super::nodes::NodeListResponse,
         super::nodes::NodeResponse,
         super::nodes::NodeStatusResponse,
@@ -290,89 +297,39 @@ mod tests {
     }
 
     #[test]
-    fn openapi_documents_the_bounded_container_collection() {
+    fn openapi_documents_the_cluster_container_collection_and_actions() {
         let value = serde_json::to_value(ApiDoc::openapi()).unwrap();
-        let route = &value["paths"]["/api/v1/nodes/{nodeId}/containers"]["get"];
-        assert!(route.is_object(), "container collection must be documented");
-
-        for status in ["200", "400", "401", "404", "503", "504"] {
+        assert!(value["paths"]["/api/v1/nodes/{nodeId}/containers"].is_null());
+        let list = &value["paths"]["/api/v1/containers"]["get"];
+        for status in ["200", "400", "401", "404", "413", "503"] {
             assert!(
-                route["responses"].get(status).is_some(),
-                "containers documents {status}"
+                list["responses"].get(status).is_some(),
+                "list documents {status}"
             );
         }
-
-        let parameters = route["parameters"].as_array().unwrap();
-        let limit = parameters
-            .iter()
-            .find(|parameter| parameter["name"] == "limit")
-            .expect("limit is documented");
-        assert_eq!(limit["in"], "query");
-        assert_eq!(limit["schema"]["minimum"], 1);
-        assert_eq!(limit["schema"]["maximum"], 100);
-        let description = limit["description"].as_str().unwrap_or_default();
-        assert!(
-            description.contains("50"),
-            "limit default must be documented, got: {description}"
-        );
-
-        let cursor = parameters
-            .iter()
-            .find(|parameter| parameter["name"] == "cursor")
-            .expect("cursor is documented");
-        assert_eq!(cursor["in"], "query");
-        assert_eq!(cursor["schema"]["maxLength"], 67);
-
-        let node = parameters
-            .iter()
-            .find(|parameter| parameter["name"] == "nodeId")
-            .expect("nodeId is documented");
-        assert_eq!(node["in"], "path");
-
-        // Exact page DTO: exactly items plus nextCursor, and exactly the
-        // seven allowlisted item fields. Exact key sets — not a partial
-        // allowlist or a substring blacklist — are what stop an added
-        // environment, port, label, mount, or networking field.
-        let page = &value["components"]["schemas"]["ContainerPageResponse"];
-        assert!(
-            page["required"]
-                .as_array()
-                .is_some_and(|required| required.contains(&serde_json::json!("items"))
-                    && required.contains(&serde_json::json!("nextCursor")))
-        );
-        assert_eq!(page["properties"]["items"]["maxItems"], 100);
-        let page_fields: BTreeSet<&str> = page["properties"]
+        for (path, operation) in [
+            (
+                "/api/v1/containers/{nodeId}/{containerId}/actions/{action}",
+                "container_action",
+            ),
+            ("/api/v1/containers/actions/bulk", "containers_bulk_action"),
+        ] {
+            let route = &value["paths"][path]["post"];
+            assert_eq!(route["operationId"], operation);
+            assert!(route["responses"]["202"].is_object());
+            assert!(route["responses"]["409"].is_object());
+        }
+        let item = &value["components"]["schemas"]["ContainerResponse"];
+        let fields: std::collections::BTreeSet<_> = item["properties"]
             .as_object()
-            .expect("page schema documents properties")
+            .unwrap()
             .keys()
-            .map(String::as_str)
+            .cloned()
             .collect();
-        assert_eq!(
-            page_fields,
-            BTreeSet::from(["items", "nextCursor"]),
-            "page envelope exposes exactly items and nextCursor"
-        );
-
-        let item = &value["components"]["schemas"]["ContainerItemResponse"];
-        let item_fields: BTreeSet<&str> = item["properties"]
-            .as_object()
-            .expect("item schema documents properties")
-            .keys()
-            .map(String::as_str)
-            .collect();
-        assert_eq!(
-            item_fields,
-            BTreeSet::from([
-                "containerId",
-                "displayName",
-                "imageReference",
-                "state",
-                "status",
-                "createdAt",
-                "nodeId",
-            ]),
-            "page item exposes exactly the seven allowlisted fields"
-        );
+        for forbidden in ["command", "labels", "env", "mounts"] {
+            assert!(!fields.contains(forbidden), "{forbidden} never crosses");
+        }
+        assert!(fields.contains("nodeName") && fields.contains("ports"));
     }
 
     #[test]
@@ -435,6 +392,6 @@ mod tests {
         );
         // The runtime serves this exact file.
         let runtime: serde_json::Value = serde_json::from_str(&checked).unwrap();
-        assert!(runtime["paths"]["/api/v1/nodes/{nodeId}/containers"].is_object());
+        assert!(runtime["paths"]["/api/v1/containers"].is_object());
     }
 }

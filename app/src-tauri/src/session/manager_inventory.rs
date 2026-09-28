@@ -3,9 +3,7 @@
 //! Every call runs through [`SessionManager::authenticated`]: one attempt, and on a 401 one
 //! refresh-then-retry of the same call before the session is invalidated.
 
-use kontainer_native_client::{
-    AccessCredential, ContainerPage, ContainerPageRequest, NativeClientError, NodeId,
-};
+use kontainer_native_client::{AccessCredential, NativeClientError};
 use serde::Serialize;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -31,6 +29,7 @@ pub(crate) enum InventoryError {
     NodeNotFound,
     NotFound,
     Conflict,
+    TooManyContainers,
     Forbidden,
     ControllerUnavailable,
     AgentUnavailable,
@@ -53,6 +52,7 @@ impl InventoryError {
         Self::NodeNotFound,
         Self::NotFound,
         Self::Conflict,
+        Self::TooManyContainers,
         Self::Forbidden,
         Self::ControllerUnavailable,
         Self::AgentUnavailable,
@@ -88,6 +88,7 @@ impl From<NativeClientError> for InventoryError {
             NativeClientError::Forbidden => Self::Forbidden,
             NativeClientError::NotFound => Self::NodeNotFound,
             NativeClientError::Conflict => Self::Conflict,
+            NativeClientError::TooManyContainers => Self::TooManyContainers,
             NativeClientError::AgentUnavailable => Self::AgentUnavailable,
             NativeClientError::AgentTimeout => Self::AgentTimeout,
             NativeClientError::Unavailable
@@ -96,46 +97,6 @@ impl From<NativeClientError> for InventoryError {
             | NativeClientError::GatewayTimeout
             | NativeClientError::Cancelled => Self::ControllerUnavailable,
             _ => Self::InvalidResponse,
-        }
-    }
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct ContainerPageView {
-    items: Vec<ContainerItemView>,
-    next_cursor: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ContainerItemView {
-    container_id: String,
-    display_name: String,
-    image_reference: String,
-    state: kontainer_native_client::ContainerState,
-    status: String,
-    created_at: String,
-    node_id: String,
-}
-
-impl From<ContainerPage> for ContainerPageView {
-    fn from(page: ContainerPage) -> Self {
-        Self {
-            items: page
-                .items
-                .into_iter()
-                .map(|item| ContainerItemView {
-                    container_id: item.container_id,
-                    display_name: item.display_name,
-                    image_reference: item.image_reference,
-                    state: item.state,
-                    status: item.status,
-                    created_at: item.created_at.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string(),
-                    node_id: item.node_id,
-                })
-                .collect(),
-            next_cursor: page.next_cursor,
         }
     }
 }
@@ -159,27 +120,6 @@ impl Drop for ReadCustody<'_> {
 }
 
 impl SessionManager {
-    pub(crate) async fn container_inventory(
-        &self,
-        profile_id: Uuid,
-        node_id: &str,
-        cursor: Option<String>,
-        limit: u32,
-    ) -> Result<ContainerPageView, InventoryError> {
-        let node = NodeId::parse(node_id)?;
-        let page = ContainerPageRequest { limit, cursor };
-        let page: ContainerPage = self
-            .authenticated(
-                profile_id,
-                &(node, page),
-                |controller, access, cancellation, (node, page)| {
-                    controller.list_containers(access, node, page, cancellation)
-                },
-            )
-            .await?;
-        Ok(page.into())
-    }
-
     /// Run `call` with the active profile's access credential, rotating once on a 401. The call
     /// borrows its inputs from `arguments` so the same call can repeat with the successor.
     pub(crate) async fn authenticated<A, T, F>(

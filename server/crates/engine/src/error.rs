@@ -14,6 +14,12 @@ pub enum EngineErrorKind {
     UnsupportedApiVersion,
     UnsupportedCapability,
     DependencyFailure,
+    /// The daemon has no such object (404).
+    NotFound,
+    /// Already in the requested state (304).
+    NotModified,
+    /// The object's state forbids the request, e.g. removing a running container (409).
+    Conflict,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,6 +33,8 @@ pub enum EngineOperation {
     ListContainers,
     ReadContainerStats,
     ReadDiskUsage,
+    InspectContainer,
+    ContainerAction,
 }
 
 impl fmt::Display for EngineOperation {
@@ -41,6 +49,8 @@ impl fmt::Display for EngineOperation {
             Self::ListContainers => "list containers",
             Self::ReadContainerStats => "read container stats",
             Self::ReadDiskUsage => "read disk usage",
+            Self::InspectContainer => "inspect container",
+            Self::ContainerAction => "container action",
         };
         formatter.write_str(name)
     }
@@ -105,6 +115,15 @@ fn classify_bollard_error(error: &BollardError) -> EngineErrorKind {
         BollardError::APIVersionParseError {} | BollardError::JsonDataError { .. } => {
             EngineErrorKind::InvalidResponse
         }
+        BollardError::DockerResponseServerError {
+            status_code: 404, ..
+        } => EngineErrorKind::NotFound,
+        BollardError::DockerResponseServerError {
+            status_code: 304, ..
+        } => EngineErrorKind::NotModified,
+        BollardError::DockerResponseServerError {
+            status_code: 409, ..
+        } => EngineErrorKind::Conflict,
         BollardError::DockerResponseServerError { .. } => EngineErrorKind::DaemonRejected,
         BollardError::IOError { err } => classify_io_error(err),
         BollardError::HyperResponseError { .. } | BollardError::HyperLegacyError { .. } => {
@@ -191,9 +210,9 @@ mod tests {
         let error = EngineError::from_bollard(EngineOperation::ListContainers, &not_found);
         assert_eq!(error.kind(), EngineErrorKind::InvalidInput);
 
-        // Other operations keep the daemon-rejected mapping.
+        // Elsewhere a 404 means the object is gone.
         let error = EngineError::from_bollard(EngineOperation::ReadVersion, &not_found);
-        assert_eq!(error.kind(), EngineErrorKind::DaemonRejected);
+        assert_eq!(error.kind(), EngineErrorKind::NotFound);
     }
 
     #[test]

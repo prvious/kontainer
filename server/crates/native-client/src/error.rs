@@ -124,6 +124,9 @@ pub enum NativeClientError {
     /// A controller dependency exceeded its deadline (`504`).
     #[error("controller dependency timed out")]
     GatewayTimeout,
+    /// The cluster list is over its cap (`413 too_many_containers`); list one node instead.
+    #[error("too many containers to list at once")]
+    TooManyContainers,
     /// Email or password is incorrect (`401 invalid_credentials`); unknown
     /// emails and wrong passwords are indistinguishable.
     #[error("email or password is incorrect")]

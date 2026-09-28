@@ -1,22 +1,4 @@
-/** Credential-free container inventory crossing the Tauri boundary. */
-export const CONTAINER_STATES = ["unknown", "created", "running", "paused", "restarting", "removing", "exited", "dead", "stopping"] as const;
-export type ContainerState = (typeof CONTAINER_STATES)[number];
-
-export interface ContainerItem {
-    containerId: string;
-    displayName: string;
-    imageReference: string;
-    state: ContainerState;
-    status: string;
-    createdAt: string;
-    nodeId: string;
-}
-
-export interface ContainerPage {
-    items: ContainerItem[];
-    nextCursor: string | null;
-}
-
+/** Closed error codes for Rust-authenticated controller calls; mirrors `InventoryError` in Rust. */
 export const INVENTORY_ERROR_CODES = [
     "unauthenticated",
     "relogin_required",
@@ -30,6 +12,7 @@ export const INVENTORY_ERROR_CODES = [
     "node_not_found",
     "not_found",
     "conflict",
+    "too_many_containers",
     "forbidden",
     "controller_unavailable",
     "agent_unavailable",
@@ -49,34 +32,4 @@ export function exactRecord(value: unknown, fields: string[]): Record<string, un
     const data = value as Record<string, unknown>;
     if (Object.keys(data).sort().join("|") !== fields.slice().sort().join("|")) throw "invalid_response";
     return data;
-}
-
-export function containerPageFromIpc(value: unknown): ContainerPage {
-    const page = exactRecord(value, ["items", "nextCursor"]);
-    if (!Array.isArray(page.items) || page.items.length > 100 || (page.nextCursor !== null && typeof page.nextCursor !== "string")) {
-        throw "invalid_response";
-    }
-    const items = page.items.map((value): ContainerItem => {
-        const item = exactRecord(value, ["containerId", "displayName", "imageReference", "state", "status", "createdAt", "nodeId"]);
-        if (
-            typeof item.containerId !== "string" ||
-            typeof item.displayName !== "string" ||
-            typeof item.imageReference !== "string" ||
-            !CONTAINER_STATES.some((state) => state === item.state) ||
-            typeof item.status !== "string" ||
-            typeof item.createdAt !== "string" ||
-            typeof item.nodeId !== "string"
-        )
-            throw "invalid_response";
-        return {
-            containerId: item.containerId,
-            displayName: item.displayName,
-            imageReference: item.imageReference,
-            state: item.state as ContainerState,
-            status: item.status,
-            createdAt: item.createdAt,
-            nodeId: item.nodeId,
-        };
-    });
-    return { items, nextCursor: page.nextCursor as string | null };
 }

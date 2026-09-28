@@ -31,19 +31,35 @@ export function useStartOperation<V extends WithIdempotencyKey>({
     scope,
     title,
     invalidate,
+    success,
+    targets,
+    args = (variables) => ({ ...variables }) as Record<string, unknown>,
 }: {
     command: string;
     scope: string;
     title: (variables: V) => string;
     invalidate: QueryKey[];
+    /** Success toast text when it should differ from the title. */
+    success?: (variables: V) => { title: string; description?: string } | undefined;
+    /** Row ids the operation acts on. */
+    targets?: (variables: V) => string[];
+    /** The command's arguments; defaults to the variables themselves. */
+    args?: (variables: V) => Record<string, unknown>;
 }) {
     const { session, reportInventoryCustodyError } = useAuth();
     const { track } = useOperations();
     const profileId = session?.profileId ?? "";
     return useMutation({
-        mutationFn: (variables: V) =>
-            authenticatedInvoke(command, profileId, { ...variables } as Record<string, unknown>, admittedFromIpc, reportInventoryCustodyError),
+        mutationFn: (variables: V) => authenticatedInvoke(command, profileId, args(variables), admittedFromIpc, reportInventoryCustodyError),
         retry: (failures, error: unknown) => failures < 1 && error === "controller_unavailable",
-        onSuccess: (admitted, variables) => track({ id: admitted.operationId, scope, title: title(variables), invalidate }),
+        onSuccess: (admitted, variables) =>
+            track({
+                id: admitted.operationId,
+                scope,
+                title: title(variables),
+                invalidate,
+                success: success?.(variables),
+                targets: targets?.(variables),
+            }),
     });
 }

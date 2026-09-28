@@ -14,11 +14,13 @@ use tokio::time;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    CapabilityStatus, ContainerEngine, ContainerPage, ContainerPageRequest, ContainerState,
-    ContainerStats, ContainerSummary, CpuCounters, DiskUsage, DockerHost, EngineAccessScope,
+    CapabilityStatus, ContainerAction, ContainerActionOptions, ContainerEngine, ContainerPage,
+    ContainerPageRequest, ContainerState, ContainerStats, ContainerSummary, ContainerTimes,
+    CpuCounters, DEFAULT_STOP_TIMEOUT_SECONDS, DiskUsage, DockerHost, EngineAccessScope,
     EngineApiVersion, EngineCapabilities, EngineDescription, EngineError, EngineErrorKind,
-    EngineOperation, NodeInfo, UnsupportedCapabilityReason, canonical_display_name, cpu_percent,
-    format_page_token, is_valid_container_id, memory_used, truncate_status_text,
+    EngineOperation, NodeInfo, SERVICE_NAME_LABEL, STACK_NAMESPACE_LABEL, TASK_ID_LABEL,
+    UnsupportedCapabilityReason, bounded_label, canonical_display_name, cpu_percent,
+    format_page_token, is_valid_container_id, memory_used, parse_docker_time, truncate_status_text,
 };
 
 const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(10);
@@ -98,6 +100,30 @@ impl LocalDockerEngine {
             self.client.clone().negotiate_version(),
         )
         .await
+    }
+
+    /// [`Self::execute`] for calls that wait out a stop grace: the deadline extends by it.
+    async fn execute_with_grace<T, F>(
+        &self,
+        operation: EngineOperation,
+        cancellation: &CancellationToken,
+        grace_seconds: i32,
+        future: F,
+    ) -> Result<T, EngineError>
+    where
+        F: Future<Output = Result<T, BollardError>>,
+    {
+        let deadline =
+            self.operation_timeout + Duration::from_secs(u64::try_from(grace_seconds).unwrap_or(0));
+        tokio::select! {
+            biased;
+            () = cancellation.cancelled() => Err(EngineError::new(EngineErrorKind::Cancelled, operation)),
+            result = time::timeout(deadline, future) => match result {
+                Ok(Ok(value)) => Ok(value),
+                Ok(Err(error)) => Err(EngineError::from_bollard(operation, &error)),
+                Err(_) => Err(EngineError::new(EngineErrorKind::DeadlineExceeded, operation)),
+            },
+        }
     }
 
     async fn execute<T, F>(
@@ -334,6 +360,124 @@ impl ContainerEngine for LocalDockerEngine {
         Ok(map_container_stats(response))
     }
 
+    async fn container_times(
+        &self,
+        container_id: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<ContainerTimes, EngineError> {
+        if !is_valid_container_id(container_id) {
+            return Err(EngineError::new(
+                EngineErrorKind::InvalidInput,
+                EngineOperation::InspectContainer,
+            ));
+        }
+        let client = self.negotiate(cancellation).await?;
+        let inspect = self
+            .execute(
+                EngineOperation::InspectContainer,
+                cancellation,
+                client.inspect_container(
+                    container_id,
+                    None::<bollard::query_parameters::InspectContainerOptions>,
+                ),
+            )
+            .await?;
+        let state = inspect.state.unwrap_or_default();
+        Ok(ContainerTimes {
+            started_at_seconds: state.started_at.as_deref().and_then(parse_docker_time),
+            finished_at_seconds: state.finished_at.as_deref().and_then(parse_docker_time),
+        })
+    }
+
+    async fn container_action(
+        &self,
+        container_id: &str,
+        action: ContainerAction,
+        options: ContainerActionOptions,
+        cancellation: &CancellationToken,
+    ) -> Result<(), EngineError> {
+        use bollard::query_parameters::{
+            RemoveContainerOptionsBuilder, RestartContainerOptionsBuilder,
+            StopContainerOptionsBuilder,
+        };
+
+        if !is_valid_container_id(container_id) {
+            return Err(EngineError::new(
+                EngineErrorKind::InvalidInput,
+                EngineOperation::ContainerAction,
+            ));
+        }
+        let client = self.negotiate(cancellation).await?;
+        let grace = i32::try_from(
+            options
+                .timeout_seconds
+                .unwrap_or(DEFAULT_STOP_TIMEOUT_SECONDS),
+        )
+        .unwrap_or(i32::MAX);
+        let operation = EngineOperation::ContainerAction;
+        match action {
+            ContainerAction::Start => {
+                self.execute(
+                    operation,
+                    cancellation,
+                    client.start_container(
+                        container_id,
+                        None::<bollard::query_parameters::StartContainerOptions>,
+                    ),
+                )
+                .await
+            }
+            ContainerAction::Stop => {
+                let options = StopContainerOptionsBuilder::default().t(grace).build();
+                self.execute_with_grace(
+                    operation,
+                    cancellation,
+                    grace,
+                    client.stop_container(container_id, Some(options)),
+                )
+                .await
+            }
+            ContainerAction::Restart => {
+                let options = RestartContainerOptionsBuilder::default().t(grace).build();
+                self.execute_with_grace(
+                    operation,
+                    cancellation,
+                    grace,
+                    client.restart_container(container_id, Some(options)),
+                )
+                .await
+            }
+            ContainerAction::Pause => {
+                self.execute(
+                    operation,
+                    cancellation,
+                    client.pause_container(container_id),
+                )
+                .await
+            }
+            ContainerAction::Unpause => {
+                self.execute(
+                    operation,
+                    cancellation,
+                    client.unpause_container(container_id),
+                )
+                .await
+            }
+            ContainerAction::Remove => {
+                let options = RemoveContainerOptionsBuilder::default()
+                    .force(options.force)
+                    .v(false)
+                    .build();
+                self.execute(
+                    operation,
+                    cancellation,
+                    client.remove_container(container_id, Some(options)),
+                )
+                .await
+            }
+        }
+    }
+
     async fn disk_usage(&self, cancellation: &CancellationToken) -> Result<DiskUsage, EngineError> {
         let client = self.negotiate(cancellation).await?;
         let usage = self
@@ -487,6 +631,7 @@ fn map_container_summary(
         .filter(|created| *created >= 0)
         .ok_or_else(invalid_containers)?;
 
+    let labels = summary.labels.clone().unwrap_or_default();
     Ok(ContainerSummary {
         container_id,
         display_name,
@@ -494,7 +639,31 @@ fn map_container_summary(
         state: map_container_state(summary.state),
         status: truncate_status_text(summary.status.as_deref().unwrap_or_default()),
         created_at_seconds,
+        published_ports: published_ports(summary.ports.as_deref().unwrap_or_default()),
+        service_name: bounded_label(labels.get(SERVICE_NAME_LABEL)),
+        stack_namespace: bounded_label(labels.get(STACK_NAMESPACE_LABEL)),
+        task_id: bounded_label(labels.get(TASK_ID_LABEL)),
     })
+}
+
+/// `host:container/proto` for each published port, once each (IPv4 and IPv6 bindings of one port
+/// collapse), sorted.
+fn published_ports(ports: &[bollard::models::PortSummary]) -> Vec<String> {
+    let mut published: Vec<String> = ports
+        .iter()
+        .filter_map(|port| {
+            let public = port.public_port?;
+            let protocol = port.typ.map_or("tcp", |typ| match typ {
+                bollard::models::PortSummaryTypeEnum::UDP => "udp",
+                bollard::models::PortSummaryTypeEnum::SCTP => "sctp",
+                _ => "tcp",
+            });
+            Some(format!("{public}:{}/{protocol}", port.private_port))
+        })
+        .collect();
+    published.sort();
+    published.dedup();
+    published
 }
 
 fn map_container_state(state: Option<ContainerSummaryStateEnum>) -> ContainerState {
@@ -1064,6 +1233,87 @@ mod tests {
             .unwrap()
             .unwrap();
         std::fs::remove_file(socket_path).unwrap();
+    }
+
+    #[test]
+    fn summaries_carry_published_ports_and_the_allowlisted_labels_only() {
+        use bollard::models::{PortSummary, PortSummaryTypeEnum};
+        let summary = bollard::models::ContainerSummary {
+            id: Some("a".repeat(64)),
+            names: Some(vec!["/web.1.abc".to_owned()]),
+            image: Some("nginx:latest".to_owned()),
+            created: Some(1_700_000_000),
+            state: Some(ContainerSummaryStateEnum::RUNNING),
+            status: Some("Up".to_owned()),
+            ports: Some(vec![
+                PortSummary {
+                    private_port: 80,
+                    public_port: Some(8080),
+                    typ: Some(PortSummaryTypeEnum::TCP),
+                    ip: Some("0.0.0.0".to_owned()),
+                },
+                PortSummary {
+                    private_port: 80,
+                    public_port: Some(8080),
+                    typ: Some(PortSummaryTypeEnum::TCP),
+                    ip: Some("::".to_owned()),
+                },
+                PortSummary {
+                    private_port: 53,
+                    public_port: Some(5353),
+                    typ: Some(PortSummaryTypeEnum::UDP),
+                    ip: None,
+                },
+                PortSummary {
+                    private_port: 9000,
+                    public_port: None,
+                    typ: Some(PortSummaryTypeEnum::TCP),
+                    ip: None,
+                },
+            ]),
+            labels: Some(
+                [
+                    ("com.docker.swarm.service.name", "shop_web"),
+                    ("com.docker.stack.namespace", "shop"),
+                    ("com.docker.swarm.task.id", "t1"),
+                    ("secret-canary-label", "value"),
+                ]
+                .into_iter()
+                .map(|(key, value)| (key.to_owned(), value.to_owned()))
+                .collect(),
+            ),
+            ..Default::default()
+        };
+        let mapped = map_container_summary(&summary).unwrap();
+        assert_eq!(mapped.published_ports, vec!["5353:53/udp", "8080:80/tcp"]);
+        assert_eq!(mapped.service_name.as_deref(), Some("shop_web"));
+        assert_eq!(mapped.stack_namespace.as_deref(), Some("shop"));
+        assert_eq!(mapped.task_id.as_deref(), Some("t1"));
+        assert!(!format!("{mapped:?}").contains("secret-canary"));
+    }
+
+    #[test]
+    fn daemon_statuses_map_to_lifecycle_kinds() {
+        use crate::EngineError;
+        let status = |status_code| bollard::errors::Error::DockerResponseServerError {
+            status_code,
+            message: "secret-canary".to_owned(),
+        };
+        for (code, kind) in [
+            (404, EngineErrorKind::NotFound),
+            (304, EngineErrorKind::NotModified),
+            (409, EngineErrorKind::Conflict),
+            (500, EngineErrorKind::DaemonRejected),
+        ] {
+            let error = EngineError::from_bollard(EngineOperation::ContainerAction, &status(code));
+            assert_eq!(error.kind(), kind, "{code}");
+            assert!(!error.to_string().contains("secret-canary"));
+        }
+        assert_eq!(
+            EngineError::from_bollard(EngineOperation::ListContainers, &status(404)).kind(),
+            EngineErrorKind::InvalidInput,
+            "a stale cursor stays invalid pagination"
+        );
     }
 
     #[test]

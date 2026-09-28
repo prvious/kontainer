@@ -12,6 +12,7 @@
 use std::time::Duration;
 
 use kontainer_agent_proto::v1::{
+    ContainerAction as ProtoContainerAction, ContainerActionRequest,
     ContainerState as ProtoContainerState, DescribeRequest, ListContainersRequest,
     node_agent_client::NodeAgentClient,
 };
@@ -114,7 +115,7 @@ impl NodeAgentClientConfig {
         })
     }
 
-    fn endpoint_prototype(&self) -> Result<Endpoint, AgentClientError> {
+    fn endpoint_prototype(&self, rpc_timeout: Duration) -> Result<Endpoint, AgentClientError> {
         let tls_config = self
             .tls_files
             .client_config_for_custom_verifier(self.server_name.clone())
@@ -129,7 +130,7 @@ impl NodeAgentClientConfig {
         // The outer deadline in `channel` is the single connect deadline.
         Endpoint::from_shared(self.endpoint.clone())
             .map_err(|_| AgentClientError::Unavailable)?
-            .timeout(self.rpc_timeout)
+            .timeout(rpc_timeout)
             .tls_config_with_verifier(tls_config, verifier)
             .map_err(|_| AgentClientError::Unavailable)
     }
@@ -215,7 +216,18 @@ impl NodeAgentClientConfig {
     /// Open the single static channel, observing connect deadlines and
     /// caller/shutdown cancellation without spawning detached work.
     async fn channel(&self, cancellation: &CancellationToken) -> Result<Channel, AgentClientError> {
-        let endpoint = self.endpoint_prototype()?;
+        self.channel_with_timeout(cancellation, self.rpc_timeout)
+            .await
+    }
+
+    /// A channel whose per-request timeout is `rpc_timeout` (actions that wait out a stop grace
+    /// need longer than reads).
+    async fn channel_with_timeout(
+        &self,
+        cancellation: &CancellationToken,
+        rpc_timeout: Duration,
+    ) -> Result<Channel, AgentClientError> {
+        let endpoint = self.endpoint_prototype(rpc_timeout)?;
 
         tokio::select! {
             biased;
@@ -270,6 +282,15 @@ impl NodeAgentClientConfig {
                 status: item.status,
                 created_at_seconds: item.created_at_unix_seconds,
                 node_id: item.node_id,
+                started_at_seconds: item.started_at_unix_seconds.filter(|at| *at > 0),
+                finished_at_seconds: item.finished_at_unix_seconds.filter(|at| *at > 0),
+                published_ports: item.published_ports,
+                service_name: item.service_name,
+                stack_namespace: item.stack_namespace,
+                task_id: item.task_id,
+                cpu_percent: item.cpu_percent,
+                memory_used_bytes: item.memory_used_bytes,
+                memory_limit_bytes: item.memory_limit_bytes,
             });
         }
 
@@ -281,6 +302,42 @@ impl NodeAgentClientConfig {
                 Some(response.next_page_token)
             },
         })
+    }
+
+    /// Run one lifecycle action on a container of this node.
+    pub async fn container_action(
+        &self,
+        container_id: &str,
+        action: AgentContainerAction,
+        force: bool,
+        timeout_seconds: Option<u32>,
+        cancellation: &CancellationToken,
+    ) -> Result<(), AgentClientError> {
+        if !is_valid_container_id(container_id) {
+            return Err(AgentClientError::InvalidResponse);
+        }
+        // Stop and restart wait out their grace on the node; the deadline covers it.
+        let deadline = self.rpc_timeout
+            + Duration::from_secs(u64::from(timeout_seconds.unwrap_or(10)))
+            + ACTION_ALLOWANCE;
+        let channel = self.channel_with_timeout(cancellation, deadline).await?;
+        let mut client = NodeAgentClient::new(channel);
+        let mut request = tonic::Request::new(ContainerActionRequest {
+            container_id: container_id.to_owned(),
+            action: action.to_proto() as i32,
+            force,
+            timeout_seconds,
+        });
+        request.set_timeout(deadline);
+        tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => Err(AgentClientError::Cancelled),
+            result = tokio::time::timeout(deadline, client.container_action(request)) => match result {
+                Ok(Ok(_)) => Ok(()),
+                Ok(Err(status)) => Err(map_action_status(&status)),
+                Err(_) => Err(AgentClientError::TimedOut),
+            }
+        }
     }
 
     /// Expected node ID, for shared-store diagnostics without exposing TLS.
@@ -314,8 +371,9 @@ pub enum AgentContainerState {
 }
 
 /// Controller-owned container summary, distinct from protobuf types. Only the
-/// seven allowlisted fields cross the RPC boundary.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// allowlisted fields cross the RPC boundary: no environment, command, mounts,
+/// or labels beyond the three Swarm ones.
+#[derive(Debug, Clone, PartialEq)]
 pub struct AgentContainerSummary {
     pub container_id: String,
     pub display_name: String,
@@ -324,10 +382,71 @@ pub struct AgentContainerSummary {
     pub status: String,
     pub created_at_seconds: i64,
     pub node_id: String,
+    pub started_at_seconds: Option<i64>,
+    pub finished_at_seconds: Option<i64>,
+    pub published_ports: Vec<String>,
+    pub service_name: Option<String>,
+    pub stack_namespace: Option<String>,
+    pub task_id: Option<String>,
+    pub cpu_percent: Option<f64>,
+    pub memory_used_bytes: Option<u64>,
+    pub memory_limit_bytes: Option<u64>,
+}
+
+/// Lifecycle actions the controller asks an agent for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AgentContainerAction {
+    Start,
+    Stop,
+    Restart,
+    Pause,
+    Unpause,
+    Remove,
+}
+
+impl AgentContainerAction {
+    pub const ALL: [Self; 6] = [
+        Self::Start,
+        Self::Stop,
+        Self::Restart,
+        Self::Pause,
+        Self::Unpause,
+        Self::Remove,
+    ];
+
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Start => "start",
+            Self::Stop => "stop",
+            Self::Restart => "restart",
+            Self::Pause => "pause",
+            Self::Unpause => "unpause",
+            Self::Remove => "remove",
+        }
+    }
+
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|action| action.as_str() == value)
+    }
+
+    const fn to_proto(self) -> ProtoContainerAction {
+        match self {
+            Self::Start => ProtoContainerAction::Start,
+            Self::Stop => ProtoContainerAction::Stop,
+            Self::Restart => ProtoContainerAction::Restart,
+            Self::Pause => ProtoContainerAction::Pause,
+            Self::Unpause => ProtoContainerAction::Unpause,
+            Self::Remove => ProtoContainerAction::Remove,
+        }
+    }
 }
 
 /// Controller-owned container page preserving agent order and cursor.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AgentContainerPage {
     pub containers: Vec<AgentContainerSummary>,
     pub next_page_token: Option<String>,
@@ -351,6 +470,17 @@ pub trait AgentClient: std::fmt::Debug + Send + Sync {
         cancellation: &CancellationToken,
     ) -> Result<AgentContainerPage, AgentClientError>;
 
+    async fn container_action(
+        &self,
+        _container_id: &str,
+        _action: AgentContainerAction,
+        _force: bool,
+        _timeout_seconds: Option<u32>,
+        _cancellation: &CancellationToken,
+    ) -> Result<(), AgentClientError> {
+        Err(AgentClientError::Unavailable)
+    }
+
     fn node_id(&self) -> &str;
 }
 
@@ -370,6 +500,25 @@ impl AgentClient for NodeAgentClientConfig {
         cancellation: &CancellationToken,
     ) -> Result<AgentContainerPage, AgentClientError> {
         NodeAgentClientConfig::list_containers(self, page_size, page_token, cancellation).await
+    }
+
+    async fn container_action(
+        &self,
+        container_id: &str,
+        action: AgentContainerAction,
+        force: bool,
+        timeout_seconds: Option<u32>,
+        cancellation: &CancellationToken,
+    ) -> Result<(), AgentClientError> {
+        NodeAgentClientConfig::container_action(
+            self,
+            container_id,
+            action,
+            force,
+            timeout_seconds,
+            cancellation,
+        )
+        .await
     }
 
     fn node_id(&self) -> &str {
@@ -394,6 +543,14 @@ pub enum AgentClientError {
     /// Pagination was rejected locally or by the agent (including a stale
     /// cursor whose live target disappeared).
     InvalidPagination,
+    /// The container does not exist on that node.
+    NotFound,
+    /// The container is already in the requested state.
+    AlreadyInState,
+    /// Removing a running container needs `force`.
+    ContainerRunning,
+    /// The node's Docker Engine refused or failed.
+    EngineError,
 }
 
 impl std::fmt::Display for AgentClientError {
@@ -405,6 +562,10 @@ impl std::fmt::Display for AgentClientError {
             Self::IdentityMismatch => formatter.write_str("agent identity did not match"),
             Self::InvalidResponse => formatter.write_str("agent response was invalid"),
             Self::InvalidPagination => formatter.write_str("pagination is invalid"),
+            Self::NotFound => formatter.write_str("container not found"),
+            Self::AlreadyInState => formatter.write_str("container is already in that state"),
+            Self::ContainerRunning => formatter.write_str("container is running"),
+            Self::EngineError => formatter.write_str("engine failed the action"),
         }
     }
 }
@@ -501,9 +662,30 @@ fn map_rpc_status(status: tonic::Status) -> AgentClientError {
     }
 }
 
+/// Status codes from `ContainerAction`, read from the stable message the agent sets.
+fn map_action_status(status: &tonic::Status) -> AgentClientError {
+    use tonic::Code;
+    match (status.code(), status.message()) {
+        (Code::NotFound, _) => AgentClientError::NotFound,
+        (Code::FailedPrecondition, "already_in_state") => AgentClientError::AlreadyInState,
+        (Code::FailedPrecondition, "container_running") => AgentClientError::ContainerRunning,
+        (Code::DeadlineExceeded, _) => AgentClientError::TimedOut,
+        (Code::Cancelled, _) => AgentClientError::Cancelled,
+        (Code::Unauthenticated | Code::PermissionDenied, _) => AgentClientError::IdentityMismatch,
+        (Code::Unavailable, "engine_error") => AgentClientError::EngineError,
+        (Code::Unavailable, _) => AgentClientError::Unavailable,
+        _ => AgentClientError::InvalidResponse,
+    }
+}
+
+/// Extra time an action gets beyond the RPC timeout and the stop grace.
+const ACTION_ALLOWANCE: Duration = Duration::from_secs(20);
+
 /// #82 pagination bounds mirrored without an Engine dependency so the
 /// controller never forwards an unbounded page or cursor shape.
-pub(crate) const MAX_CONTAINER_PAGE_SIZE: usize = 100;
+pub(crate) const MAX_CONTAINER_PAGE_SIZE: usize = 500;
+const MAX_PUBLISHED_PORTS: usize = 64;
+const MAX_LABEL_LEN: usize = 255;
 pub(crate) const MAX_CONTAINER_PAGE_TOKEN_LEN: usize = 67;
 const MAX_CONTAINER_STATUS_LEN: usize = 256;
 const CONTAINER_ID_LEN: usize = 64;
@@ -541,6 +723,28 @@ fn validate_summary(
     if item.created_at_unix_seconds < 0
         || item.display_name.is_empty()
         || item.image_reference.trim().is_empty()
+    {
+        return Err(AgentClientError::InvalidResponse);
+    }
+    let port_ok = |port: &String| {
+        port.len() <= 24
+            && port
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b':' || byte == b'/')
+    };
+    let label_ok = |label: &Option<String>| {
+        label
+            .as_ref()
+            .is_none_or(|label| !label.is_empty() && label.len() <= MAX_LABEL_LEN)
+    };
+    let figure_ok =
+        |value: Option<f64>| value.is_none_or(|value| value.is_finite() && value >= 0.0);
+    if item.published_ports.len() > MAX_PUBLISHED_PORTS
+        || !item.published_ports.iter().all(port_ok)
+        || !label_ok(&item.service_name)
+        || !label_ok(&item.stack_namespace)
+        || !label_ok(&item.task_id)
+        || !figure_ok(item.cpu_percent)
     {
         return Err(AgentClientError::InvalidResponse);
     }

@@ -1,19 +1,21 @@
 use std::sync::Arc;
 
 use kontainer_agent_proto::v1::{
+    ContainerAction as ProtoContainerAction, ContainerActionRequest, ContainerActionResponse,
     ContainerState as ProtoContainerState, ContainerSummary as ProtoContainerSummary,
     DescribeRequest, DescribeResponse, ListContainersRequest, ListContainersResponse,
     node_agent_server::NodeAgent,
 };
 use kontainer_engine::{
-    ContainerEngine, ContainerPageRequest, ContainerState, EngineError, EngineErrorKind,
+    ContainerAction, ContainerActionOptions, ContainerEngine, ContainerPageRequest, ContainerState,
+    EngineError, EngineErrorKind, MAX_STOP_TIMEOUT_SECONDS, is_valid_container_id,
 };
 use kontainer_rpc_auth::AuthenticatedPeerIdentity;
 use tokio_util::sync::CancellationToken;
 use tonic::{Request, Response, Status};
 use tracing::warn;
 
-use crate::sampling::ContainerStatsCache;
+use crate::{container_times::ContainerTimesCache, sampling::ContainerStatsCache};
 
 #[derive(Clone)]
 pub struct NodeAgentService {
@@ -21,6 +23,7 @@ pub struct NodeAgentService {
     engine: Arc<dyn ContainerEngine>,
     cancellation: CancellationToken,
     stats: ContainerStatsCache,
+    times: ContainerTimesCache,
 }
 
 impl NodeAgentService {
@@ -35,6 +38,7 @@ impl NodeAgentService {
             engine,
             cancellation,
             stats: ContainerStatsCache::default(),
+            times: ContainerTimesCache::default(),
         }
     }
 
@@ -110,6 +114,10 @@ impl NodeAgent for NodeAgentService {
             }
         };
 
+        let times = self
+            .times
+            .times_for(self.engine.as_ref(), &page.containers, &self.cancellation)
+            .await;
         let node_id = self.node_id.clone();
         Ok(Response::new(ListContainersResponse {
             containers: page
@@ -117,6 +125,10 @@ impl NodeAgent for NodeAgentService {
                 .into_iter()
                 .map(|container| {
                     let stats = self.stats.get(&container.container_id).unwrap_or_default();
+                    let times = times
+                        .get(&container.container_id)
+                        .copied()
+                        .unwrap_or_default();
                     ProtoContainerSummary {
                         state: domain_state_to_proto(container.state) as i32,
                         container_id: container.container_id,
@@ -128,11 +140,80 @@ impl NodeAgent for NodeAgentService {
                         cpu_percent: stats.cpu_percent,
                         memory_used_bytes: stats.memory_used_bytes,
                         memory_limit_bytes: stats.memory_limit_bytes,
+                        started_at_unix_seconds: times.started_at_seconds,
+                        finished_at_unix_seconds: times.finished_at_seconds,
+                        published_ports: container.published_ports,
+                        service_name: container.service_name,
+                        stack_namespace: container.stack_namespace,
+                        task_id: container.task_id,
                     }
                 })
                 .collect(),
             next_page_token: page.next_page_token.unwrap_or_default(),
         }))
+    }
+
+    async fn container_action(
+        &self,
+        request: Request<ContainerActionRequest>,
+    ) -> Result<Response<ContainerActionResponse>, Status> {
+        request
+            .extensions()
+            .get::<AuthenticatedPeerIdentity>()
+            .ok_or_else(|| {
+                Status::unauthenticated("authenticated controller identity is required")
+            })?;
+        let inner = request.into_inner();
+        if !is_valid_container_id(&inner.container_id) {
+            return Err(Status::invalid_argument("invalid_container"));
+        }
+        let action = match ProtoContainerAction::try_from(inner.action) {
+            Ok(ProtoContainerAction::Start) => ContainerAction::Start,
+            Ok(ProtoContainerAction::Stop) => ContainerAction::Stop,
+            Ok(ProtoContainerAction::Restart) => ContainerAction::Restart,
+            Ok(ProtoContainerAction::Pause) => ContainerAction::Pause,
+            Ok(ProtoContainerAction::Unpause) => ContainerAction::Unpause,
+            Ok(ProtoContainerAction::Remove) => ContainerAction::Remove,
+            Ok(ProtoContainerAction::Unspecified) | Err(_) => {
+                return Err(Status::invalid_argument("invalid_action"));
+            }
+        };
+        if inner
+            .timeout_seconds
+            .is_some_and(|seconds| seconds > MAX_STOP_TIMEOUT_SECONDS)
+        {
+            return Err(Status::invalid_argument("invalid_timeout"));
+        }
+        let options = ContainerActionOptions {
+            force: inner.force,
+            timeout_seconds: inner.timeout_seconds,
+        };
+        let result = tokio::select! {
+            biased;
+            _ = self.cancellation.cancelled() => {
+                return Err(Status::cancelled("node agent is shutting down"));
+            }
+            result = self.engine.container_action(&inner.container_id, action, options, &self.cancellation) => result,
+        };
+        self.times.forget(&inner.container_id);
+        result.map_err(|error| {
+            warn!(%error, action = action.as_str(), "container action failed");
+            action_error_to_status(&error)
+        })?;
+        Ok(Response::new(ContainerActionResponse {}))
+    }
+}
+
+/// Stable codes in the status message; daemon detail stays in the log.
+fn action_error_to_status(error: &EngineError) -> Status {
+    match error.kind() {
+        EngineErrorKind::NotFound => Status::not_found("not_found"),
+        EngineErrorKind::NotModified => Status::failed_precondition("already_in_state"),
+        EngineErrorKind::Conflict => Status::failed_precondition("container_running"),
+        EngineErrorKind::InvalidInput => Status::invalid_argument("invalid_container"),
+        EngineErrorKind::DeadlineExceeded => Status::deadline_exceeded("engine_timeout"),
+        EngineErrorKind::Cancelled => Status::cancelled("cancelled"),
+        _ => Status::unavailable("engine_error"),
     }
 }
 
@@ -149,6 +230,9 @@ fn engine_error_to_status(error: &EngineError) -> Status {
         }
         EngineErrorKind::InvalidResponse | EngineErrorKind::InvalidConfiguration => {
             Status::internal("engine response was invalid")
+        }
+        EngineErrorKind::NotFound | EngineErrorKind::NotModified | EngineErrorKind::Conflict => {
+            Status::unavailable("engine is unavailable")
         }
     }
 }
@@ -249,6 +333,7 @@ mod tests {
             state: ContainerState::Running,
             status: "Up 3s".to_owned(),
             created_at_seconds: 1_700_000_000,
+            ..ContainerSummary::default()
         }
     }
 
@@ -258,6 +343,139 @@ mod tests {
             .extensions_mut()
             .insert(kontainer_rpc_auth::AuthenticatedPeerIdentity::new_for_tests());
         request
+    }
+
+    type SeenAction = (String, kontainer_engine::ContainerAction, bool, Option<u32>);
+
+    /// Running containers refuse start (304) and plain remove (409); unknown ids are 404.
+    struct LifecycleEngine {
+        running: String,
+        seen: std::sync::Mutex<Vec<SeenAction>>,
+    }
+
+    #[async_trait]
+    impl ContainerEngine for LifecycleEngine {
+        async fn is_available(&self) -> Result<bool, EngineError> {
+            Ok(true)
+        }
+
+        async fn container_action(
+            &self,
+            container_id: &str,
+            action: kontainer_engine::ContainerAction,
+            options: kontainer_engine::ContainerActionOptions,
+            _cancellation: &CancellationToken,
+        ) -> Result<(), EngineError> {
+            use kontainer_engine::ContainerAction;
+            self.seen.lock().unwrap().push((
+                container_id.to_owned(),
+                action,
+                options.force,
+                options.timeout_seconds,
+            ));
+            let error = |kind| Err(EngineError::new(kind, EngineOperation::ContainerAction));
+            if container_id != self.running {
+                return error(EngineErrorKind::NotFound);
+            }
+            match action {
+                ContainerAction::Start => error(EngineErrorKind::NotModified),
+                ContainerAction::Remove if !options.force => error(EngineErrorKind::Conflict),
+                _ => Ok(()),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn container_actions_map_to_the_engine_and_stable_codes() {
+        use kontainer_agent_proto::v1::{ContainerAction as Proto, ContainerActionRequest};
+
+        let running = "a".repeat(64);
+        let engine = Arc::new(LifecycleEngine {
+            running: running.clone(),
+            seen: std::sync::Mutex::new(Vec::new()),
+        });
+        let service = NodeAgentService::new("node-1", engine.clone(), CancellationToken::new());
+        let request =
+            |id: &str, action: Proto, force: bool, timeout: Option<u32>| ContainerActionRequest {
+                container_id: id.to_owned(),
+                action: action as i32,
+                force,
+                timeout_seconds: timeout,
+            };
+
+        assert!(
+            service
+                .container_action(authenticated(request(
+                    &running,
+                    Proto::Restart,
+                    false,
+                    Some(5)
+                )))
+                .await
+                .is_ok()
+        );
+        assert!(
+            service
+                .container_action(authenticated(request(&running, Proto::Pause, false, None)))
+                .await
+                .is_ok()
+        );
+        assert!(
+            service
+                .container_action(authenticated(request(&running, Proto::Remove, true, None)))
+                .await
+                .is_ok()
+        );
+        for (req, code, message) in [
+            (
+                request(&running, Proto::Start, false, None),
+                tonic::Code::FailedPrecondition,
+                "already_in_state",
+            ),
+            (
+                request(&running, Proto::Remove, false, None),
+                tonic::Code::FailedPrecondition,
+                "container_running",
+            ),
+            (
+                request(&"b".repeat(64), Proto::Stop, false, None),
+                tonic::Code::NotFound,
+                "not_found",
+            ),
+            (
+                request("short", Proto::Stop, false, None),
+                tonic::Code::InvalidArgument,
+                "invalid_container",
+            ),
+            (
+                request(&running, Proto::Unspecified, false, None),
+                tonic::Code::InvalidArgument,
+                "invalid_action",
+            ),
+            (
+                request(&running, Proto::Stop, false, Some(601)),
+                tonic::Code::InvalidArgument,
+                "invalid_timeout",
+            ),
+        ] {
+            let error = service
+                .container_action(authenticated(req))
+                .await
+                .unwrap_err();
+            assert_eq!((error.code(), error.message()), (code, message));
+        }
+        let unauthenticated = service
+            .container_action(Request::new(request(&running, Proto::Stop, false, None)))
+            .await
+            .unwrap_err();
+        assert_eq!(unauthenticated.code(), tonic::Code::Unauthenticated);
+
+        let seen = engine.seen.lock().unwrap();
+        assert_eq!(seen.len(), 6, "invalid requests never reach the engine");
+        assert_eq!(seen[0].1, kontainer_engine::ContainerAction::Restart);
+        assert_eq!(seen[0].3, Some(5));
+        assert!(seen[2].2, "force reaches the engine only when asked");
+        assert!(!seen[4].2);
     }
 
     #[tokio::test]
@@ -322,7 +540,7 @@ mod tests {
 
         for request in [
             ListContainersRequest {
-                page_size: 101,
+                page_size: 501,
                 page_token: String::new(),
             },
             ListContainersRequest {

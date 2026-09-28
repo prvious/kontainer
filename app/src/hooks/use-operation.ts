@@ -1,10 +1,10 @@
 import { useContext } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { skipToken, useQueries, useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { useQueriesPaused } from "@/hooks/use-queries-paused";
 import { authenticatedInvoke } from "@/hooks/authenticated-invoke";
-import { OperationsContext } from "@/contexts/operations-context-value";
-import { isTerminal, operationFromIpc, type OperationState } from "@/types/operations";
+import { OperationsContext, type TrackedOperation } from "@/contexts/operations-context-value";
+import { isTerminal, operationFromIpc, type OperationState, type OperationView } from "@/types/operations";
 
 export const POLL_INTERVAL_MS = 1000;
 
@@ -33,4 +33,22 @@ export function useOperation(operationId: string) {
         refetchInterval: (query) => (query.state.data && isSettled(query.state.data.state) ? false : POLL_INTERVAL_MS),
         retry: false,
     });
+}
+
+/**
+ * The tracked operations of one scope with their latest snapshots, read from the cache the
+ * watchers keep fresh (these observers never fetch themselves).
+ */
+export function useTrackedOperations(scope: string): { operation: TrackedOperation; view: OperationView | undefined }[] {
+    const { session } = useAuth();
+    const operations = useContext(OperationsContext);
+    const profileId = session?.profileId ?? "";
+    const tracked = (operations?.tracked ?? []).filter((operation) => operation.scope === scope);
+    const views = useQueries({
+        queries: tracked.map((operation) => ({
+            queryKey: operationKey(profileId, operation.id),
+            queryFn: skipToken,
+        })),
+    });
+    return tracked.map((operation, index) => ({ operation, view: views[index]?.data as OperationView | undefined }));
 }

@@ -160,7 +160,7 @@ impl SessionManager {
 
     /// Admit one mutation. The key comes from the user gesture in React, so a retried command
     /// replays instead of mutating twice; a rotated credential retries with the same key.
-    // Specs 07 to 12 call this from their mutation commands.
+    // Specs 08 to 12 call this from their mutation commands.
     #[allow(dead_code)]
     pub(crate) async fn admit(
         &self,

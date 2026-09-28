@@ -2,6 +2,7 @@
 
 pub mod app;
 pub mod auth;
+pub mod containers;
 pub mod controllers;
 pub mod health;
 pub mod metrics;

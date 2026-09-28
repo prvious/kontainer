@@ -13,6 +13,10 @@ service ControllerIntake {
 service NodeAgent {
   rpc Describe(DescribeRequest) returns (DescribeResponse);
   rpc ListContainers(ListContainersRequest) returns (ListContainersResponse);
+  // Lifecycle action on one local container. Failures are statuses whose
+  // message is a stable code: NOT_FOUND `not_found`, FAILED_PRECONDITION
+  // `already_in_state` or `container_running`, UNAVAILABLE `engine_error`.
+  rpc ContainerAction(ContainerActionRequest) returns (ContainerActionResponse);
 }
 
 message CheckInRequest {
@@ -103,7 +107,37 @@ message ContainerSummary {
   optional double cpu_percent = 8;
   optional uint64 memory_used_bytes = 9;
   optional uint64 memory_limit_bytes = 10;
+  // From inspect; absent when the container never started or stopped.
+  optional int64 started_at_unix_seconds = 11;
+  optional int64 finished_at_unix_seconds = 12;
+  // Published ports only, `host:container/proto`.
+  repeated string published_ports = 13;
+  // The allowlisted Swarm labels; every other label stays on the node.
+  optional string service_name = 14;
+  optional string stack_namespace = 15;
+  optional string task_id = 16;
 }
+
+enum ContainerAction {
+  CONTAINER_ACTION_UNSPECIFIED = 0;
+  CONTAINER_ACTION_START = 1;
+  CONTAINER_ACTION_STOP = 2;
+  CONTAINER_ACTION_RESTART = 3;
+  CONTAINER_ACTION_PAUSE = 4;
+  CONTAINER_ACTION_UNPAUSE = 5;
+  CONTAINER_ACTION_REMOVE = 6;
+}
+
+message ContainerActionRequest {
+  string container_id = 1;
+  ContainerAction action = 2;
+  // Remove only: kill a running container first.
+  bool force = 3;
+  // Stop and restart only: grace before kill; absent means 10.
+  optional uint32 timeout_seconds = 4;
+}
+
+message ContainerActionResponse {}
 
 message ListContainersResponse {
   repeated ContainerSummary containers = 1;

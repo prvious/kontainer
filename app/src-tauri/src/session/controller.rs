@@ -10,10 +10,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use kontainer_native_client::{
-    AccessCredential, AccountFieldErrors, AdmittedOperation, ContainerPage, ContainerPageRequest,
-    ControllerSettings, IdempotencyKey, NativeClient, NativeClientConfig, NativeClientError,
-    NodeId, NodeList, OperationEvent, OperationSnapshot, PasswordSession, ProbeFailure,
-    RefreshCredential, SampleSeries, Traced,
+    AccessCredential, AccountFieldErrors, AdmittedOperation, ContainerAction,
+    ContainerActionOptions, ContainerList, ContainerTarget, ControllerSettings, IdempotencyKey,
+    NativeClient, NativeClientConfig, NativeClientError, NodeId, NodeList, OperationEvent,
+    OperationSnapshot, PasswordSession, ProbeFailure, RefreshCredential, SampleSeries, Traced,
 };
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -118,10 +118,29 @@ pub(crate) trait Controller: Send + Sync + 'static {
     fn list_containers<'a>(
         &'a self,
         access: &'a AccessCredential,
-        node_id: &'a NodeId,
-        page: &'a ContainerPageRequest,
+        node: Option<&'a NodeId>,
         cancellation: &'a CancellationToken,
-    ) -> ControllerFuture<'a, Result<ContainerPage, NativeClientError>>;
+    ) -> ControllerFuture<'a, Result<ContainerList, NativeClientError>>;
+
+    fn container_action<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        target: &'a ContainerTarget,
+        action: ContainerAction,
+        options: ContainerActionOptions,
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>>;
+
+    fn containers_bulk_action<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        action: ContainerAction,
+        targets: &'a [ContainerTarget],
+        force: bool,
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>>;
 
     fn get_operation<'a>(
         &'a self,
@@ -342,14 +361,44 @@ impl Controller for NativeController {
     fn list_containers<'a>(
         &'a self,
         access: &'a AccessCredential,
-        node_id: &'a NodeId,
-        page: &'a ContainerPageRequest,
+        node: Option<&'a NodeId>,
         cancellation: &'a CancellationToken,
-    ) -> ControllerFuture<'a, Result<ContainerPage, NativeClientError>> {
+    ) -> ControllerFuture<'a, Result<ContainerList, NativeClientError>> {
+        Box::pin(self.client.list_containers(access, node, cancellation))
+    }
+
+    fn container_action<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        target: &'a ContainerTarget,
+        action: ContainerAction,
+        options: ContainerActionOptions,
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
         Box::pin(
             self.client
-                .list_containers(access, node_id, page, cancellation),
+                .container_action(access, target, action, options, key, cancellation),
         )
+    }
+
+    fn containers_bulk_action<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        action: ContainerAction,
+        targets: &'a [ContainerTarget],
+        force: bool,
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
+        Box::pin(self.client.containers_bulk_action(
+            access,
+            action,
+            targets,
+            force,
+            key,
+            cancellation,
+        ))
     }
 
     fn get_operation<'a>(

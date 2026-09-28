@@ -1,41 +1,39 @@
-//! Bounded node-container collection.
+//! Containers across the cluster and their lifecycle actions.
 //!
-//! The collection is read-only, node-scoped, and bounded on both ends: the
-//! client validates the page request before any network access and rejects a
-//! response that exceeds the hard page size, carries a malformed cursor, or
-//! claims container provenance from a different node.
+//! The list is one bounded response with an outcome per member node; the client rejects a body
+//! with unknown fields, non-canonical ids or times, or more items than the controller's cap.
+//! Actions are admitted operations (see [`crate::operations`]).
 
+mod actions;
 mod list;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use url::Url;
 
-use crate::client::NativeClient;
 use crate::client::parse_timestamp;
 use crate::credentials::is_canonical_hex;
 use crate::error::NativeClientError;
 
-/// Default page size when the caller requests no explicit limit.
-pub const DEFAULT_CONTAINER_LIMIT: u32 = 50;
-/// Hard maximum page size the controller documents.
-pub const MAX_CONTAINER_LIMIT: u32 = 100;
-/// Maximum length of the opaque pagination cursor.
-pub const MAX_CONTAINER_CURSOR_LEN: usize = 67;
+/// The controller refuses to list more than this at once.
+pub const MAX_CONTAINERS: usize = 2_000;
+/// Stop and restart grace the controller accepts, in seconds.
+pub const MAX_STOP_TIMEOUT_SECONDS: u32 = 600;
+/// Targets one bulk action may name.
+pub const MAX_BULK_TARGETS: usize = 200;
 
-const CURSOR_PREFIX: &str = "v1:";
 const CONTAINER_ID_HEX_LEN: usize = 64;
 const MAX_NODE_ID_LEN: usize = 128;
+const MAX_PORTS: usize = 64;
 
 /// A canonical controller node identifier.
 ///
 /// Mirrors the controller's identity-segment rules: 1-128 ASCII letters,
 /// digits, dots, underscores, or hyphens, excluding `.` and `..`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct NodeId(String);
 
 impl NodeId {
-    /// Validate a configured node identifier.
+    /// Validate a node identifier.
     pub fn parse(value: &str) -> Result<Self, NativeClientError> {
         if !valid_node_id(value) {
             return Err(NativeClientError::InvalidNodeId);
@@ -43,7 +41,7 @@ impl NodeId {
         Ok(Self(value.to_owned()))
     }
 
-    /// The canonical identifier as configured on the controller.
+    /// The canonical identifier as the controller knows it.
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
@@ -56,107 +54,126 @@ impl std::fmt::Display for NodeId {
     }
 }
 
-/// One page request against a node's container collection.
-///
-/// [`Default`] requests the first page at the documented default size.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ContainerPageRequest {
-    /// Requested page size, `1..=100`.
-    pub limit: u32,
-    /// Opaque cursor from a previous page; `None` starts at the first page.
-    pub cursor: Option<String>,
-}
-
-impl Default for ContainerPageRequest {
-    fn default() -> Self {
-        Self {
-            limit: DEFAULT_CONTAINER_LIMIT,
-            cursor: None,
-        }
-    }
-}
-
 /// Typed lifecycle state of one container.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ContainerState {
     /// The daemon reported a state the controller does not classify.
     Unknown,
-    /// Created but never started.
     Created,
-    /// Running.
     Running,
-    /// Paused.
     Paused,
-    /// Restarting.
     Restarting,
-    /// Being removed.
     Removing,
-    /// Exited.
     Exited,
-    /// Dead.
     Dead,
-    /// Shutting down.
     Stopping,
 }
 
-/// One container summary. The controller never exposes environment,
-/// commands, labels, mounts, ports, networking, or raw inspect data.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// One container on one node. No environment, command, mounts, or labels beyond the three
+/// Swarm ones ever reach this type.
+#[derive(Debug, Clone, PartialEq)]
 pub struct ContainerItem {
-    /// Full lowercase-hex daemon container ID.
+    pub node_id: NodeId,
+    pub node_name: String,
     pub container_id: String,
-    /// Canonical display name without Docker linkage.
-    pub display_name: String,
-    /// Image reference as reported by the daemon.
-    pub image_reference: String,
-    /// Typed lifecycle state.
+    pub name: String,
+    pub image: String,
     pub state: ContainerState,
-    /// Bounded daemon status text.
     pub status: String,
-    /// Creation time reported by the controller.
     pub created_at: DateTime<Utc>,
-    /// Serving node ID from agent configuration, never request input.
-    pub node_id: String,
+    pub started_at: Option<DateTime<Utc>>,
+    pub finished_at: Option<DateTime<Utc>>,
+    /// Published ports, `host:container/proto`.
+    pub ports: Vec<String>,
+    pub service_name: Option<String>,
+    pub stack_namespace: Option<String>,
+    pub task_id: Option<String>,
+    pub cpu_percent: Option<f64>,
+    pub memory_used_bytes: Option<u64>,
+    pub memory_limit_bytes: Option<u64>,
 }
 
-/// One bounded page preserving the controller's deterministic order.
+/// How one member node answered a fan-out read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeOutcomeStatus {
+    Ok,
+    Timeout,
+    Unavailable,
+    Error,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ContainerPage {
-    /// At most [`MAX_CONTAINER_LIMIT`] items.
+pub struct NodeOutcome {
+    pub node_id: NodeId,
+    pub status: NodeOutcomeStatus,
+    /// A stable code when `status` is `error`.
+    pub message: Option<String>,
+}
+
+/// The merged list: containers from every answering node, one outcome per member.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ContainerList {
     pub items: Vec<ContainerItem>,
-    /// Opaque cursor for the next page, or `None` when this page is last.
-    pub next_cursor: Option<String>,
+    pub nodes: Vec<NodeOutcome>,
+    pub snapshot_at: DateTime<Utc>,
 }
 
-impl ContainerPageRequest {
-    /// Validate the page request locally; no network access follows an error.
-    pub(crate) fn validated(&self) -> Result<(u32, Option<&str>), NativeClientError> {
-        if !(1..=MAX_CONTAINER_LIMIT).contains(&self.limit) {
-            return Err(NativeClientError::InvalidPagination);
+/// Lifecycle actions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ContainerAction {
+    Start,
+    Stop,
+    Restart,
+    Pause,
+    Unpause,
+    Remove,
+}
+
+impl ContainerAction {
+    pub const ALL: [Self; 6] = [
+        Self::Start,
+        Self::Stop,
+        Self::Restart,
+        Self::Pause,
+        Self::Unpause,
+        Self::Remove,
+    ];
+
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Start => "start",
+            Self::Stop => "stop",
+            Self::Restart => "restart",
+            Self::Pause => "pause",
+            Self::Unpause => "unpause",
+            Self::Remove => "remove",
         }
-        match self.cursor.as_deref() {
-            None | Some("") => Ok((self.limit, None)),
-            Some(cursor) if valid_cursor_token(cursor) => Ok((self.limit, Some(cursor))),
-            Some(_) => Err(NativeClientError::InvalidPagination),
-        }
+    }
+
+    pub fn parse(value: &str) -> Result<Self, NativeClientError> {
+        Self::ALL
+            .into_iter()
+            .find(|action| action.as_str() == value)
+            .ok_or(NativeClientError::InvalidRequest)
     }
 }
 
-impl NativeClient {
-    /// Node collection endpoint; the node segment is validated and encoded by
-    /// the URL parser, never interpolated blindly.
-    pub(crate) fn containers_endpoint(&self, node_id: &NodeId) -> Result<Url, NativeClientError> {
-        let mut url = self.endpoint("/api/v1/nodes")?;
-        {
-            let mut segments = url
-                .path_segments_mut()
-                .map_err(|_| NativeClientError::InvalidConfiguration)?;
-            segments.push(node_id.as_str());
-            segments.push("containers");
-        }
-        Ok(url)
-    }
+/// Options for one action; the controller ignores `force` except on remove and the timeout
+/// except on stop and restart.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ContainerActionOptions {
+    pub force: bool,
+    pub timeout_seconds: Option<u32>,
+}
+
+/// One container on one node: what an action names.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ContainerTarget {
+    pub node_id: NodeId,
+    pub container_id: String,
 }
 
 fn valid_node_id(value: &str) -> bool {
@@ -168,59 +185,113 @@ fn valid_node_id(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
 }
 
-pub(crate) fn valid_cursor_token(token: &str) -> bool {
-    token.len() <= MAX_CONTAINER_CURSOR_LEN
-        && token
-            .strip_prefix(CURSOR_PREFIX)
-            .is_some_and(|id| is_canonical_hex(id, CONTAINER_ID_HEX_LEN))
+pub(crate) fn valid_container_id(value: &str) -> bool {
+    is_canonical_hex(value, CONTAINER_ID_HEX_LEN)
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct ContainerPageBody {
+pub(crate) struct ContainerListBody {
     items: Vec<ContainerItemBody>,
-    next_cursor: Option<String>,
+    nodes: Vec<NodeOutcomeBody>,
+    snapshot_at: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ContainerItemBody {
+    node_id: String,
+    node_name: String,
     container_id: String,
-    display_name: String,
-    image_reference: String,
+    name: String,
+    image: String,
     state: ContainerState,
     status: String,
     created_at: String,
-    node_id: String,
+    started_at: Option<String>,
+    finished_at: Option<String>,
+    ports: Vec<String>,
+    service_name: Option<String>,
+    stack_namespace: Option<String>,
+    task_id: Option<String>,
+    cpu_percent: Option<f64>,
+    memory_used_bytes: Option<u64>,
+    memory_limit_bytes: Option<u64>,
 }
 
-impl ContainerPageBody {
-    pub(crate) fn into_page(self, requested: &NodeId) -> Result<ContainerPage, NativeClientError> {
-        if self.items.len() > MAX_CONTAINER_LIMIT as usize {
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct NodeOutcomeBody {
+    node_id: String,
+    status: NodeOutcomeStatus,
+    #[serde(default)]
+    message: Option<String>,
+}
+
+fn optional_time(value: Option<&str>) -> Result<Option<DateTime<Utc>>, NativeClientError> {
+    value.map(parse_timestamp).transpose()
+}
+
+impl ContainerListBody {
+    pub(crate) fn into_list(self) -> Result<ContainerList, NativeClientError> {
+        if self.items.len() > MAX_CONTAINERS {
             return Err(NativeClientError::InvalidResponse);
         }
-        let next_cursor = match self.next_cursor {
-            Some(cursor) if valid_cursor_token(&cursor) => Some(cursor),
-            Some(_) => return Err(NativeClientError::InvalidResponse),
-            None => None,
-        };
+        let nodes = self
+            .nodes
+            .into_iter()
+            .map(|node| {
+                Ok(NodeOutcome {
+                    node_id: NodeId::parse(&node.node_id)
+                        .map_err(|_| NativeClientError::InvalidResponse)?,
+                    status: node.status,
+                    message: node.message,
+                })
+            })
+            .collect::<Result<Vec<_>, NativeClientError>>()?;
+        // Items only come from nodes that answered.
+        let answered: std::collections::HashSet<_> = nodes
+            .iter()
+            .filter(|node| node.status == NodeOutcomeStatus::Ok)
+            .map(|node| node.node_id.as_str().to_owned())
+            .collect();
         let mut items = Vec::with_capacity(self.items.len());
         for item in self.items {
-            if item.node_id != requested.as_str()
-                || !is_canonical_hex(&item.container_id, CONTAINER_ID_HEX_LEN)
+            let figure_ok = item
+                .cpu_percent
+                .is_none_or(|cpu| cpu.is_finite() && cpu >= 0.0);
+            if !valid_container_id(&item.container_id)
+                || !answered.contains(&item.node_id)
+                || item.ports.len() > MAX_PORTS
+                || !figure_ok
             {
                 return Err(NativeClientError::InvalidResponse);
             }
             items.push(ContainerItem {
+                node_id: NodeId::parse(&item.node_id)
+                    .map_err(|_| NativeClientError::InvalidResponse)?,
+                node_name: item.node_name,
                 container_id: item.container_id,
-                display_name: item.display_name,
-                image_reference: item.image_reference,
+                name: item.name,
+                image: item.image,
                 state: item.state,
                 status: item.status,
                 created_at: parse_timestamp(&item.created_at)?,
-                node_id: item.node_id,
+                started_at: optional_time(item.started_at.as_deref())?,
+                finished_at: optional_time(item.finished_at.as_deref())?,
+                ports: item.ports,
+                service_name: item.service_name,
+                stack_namespace: item.stack_namespace,
+                task_id: item.task_id,
+                cpu_percent: item.cpu_percent,
+                memory_used_bytes: item.memory_used_bytes,
+                memory_limit_bytes: item.memory_limit_bytes,
             });
         }
-        Ok(ContainerPage { items, next_cursor })
+        Ok(ContainerList {
+            items,
+            nodes,
+            snapshot_at: parse_timestamp(&self.snapshot_at)?,
+        })
     }
 }

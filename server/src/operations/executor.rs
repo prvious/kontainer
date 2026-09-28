@@ -131,5 +131,14 @@ impl ExecutorRegistry {
 /// The registry every controller runs; later specs add their domains' executors here.
 #[must_use]
 pub fn production_registry() -> ExecutorRegistry {
-    ExecutorRegistry::default().with(super::executors::noop::NoopExecutor)
+    use crate::containers::operations::{
+        bulk::ContainersBulkExecutor, lifecycle::ContainerLifecycleExecutor,
+    };
+
+    ContainerLifecycleExecutor::all().fold(
+        ExecutorRegistry::default()
+            .with(super::executors::noop::NoopExecutor)
+            .with(ContainersBulkExecutor),
+        ExecutorRegistry::with,
+    )
 }

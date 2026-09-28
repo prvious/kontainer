@@ -12,6 +12,7 @@ import { ActionButton } from "@/components/kit/action-button";
 import { useAuth } from "@/hooks/use-auth";
 import { useControllerHealth } from "@/hooks/session/use-controller-health";
 import { useNodes } from "@/hooks/use-nodes";
+import { useContainers } from "@/hooks/use-containers";
 import { OperationsProvider } from "@/contexts/operations-context";
 import { clusterUsage, nodesDown } from "@/types/nodes";
 
@@ -43,6 +44,7 @@ function AuthenticatedLayout() {
     const router = useRouter();
     const health = useControllerHealth(Boolean(session) && !expired);
     const nodes = useNodes();
+    const containers = useContainers();
 
     useEffect(() => {
         if (session) return;
@@ -84,7 +86,7 @@ function AuthenticatedLayout() {
                 )}
                 {/* While the session-expired dialog is up the page stays mounted but inert (02.S5). */}
                 <SidebarProvider inert={expired || undefined} className='min-h-0 flex-1' style={{ "--sidebar-width": "220px" } as React.CSSProperties}>
-                    <AppSidebar badges={{ nodesDown: nodesDown(nodes.data?.items) }} />
+                    <AppSidebar badges={{ nodesDown: nodesDown(nodes.data?.items), containers: containers.data?.items.filter((row) => !row.stale).length }} />
                     <main className='min-w-0 flex-1 overflow-y-auto bg-background p-6'>
                         <Outlet />
                     </main>
