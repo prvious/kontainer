@@ -9,12 +9,12 @@ import fixture from "../fixtures/inventory-ipc.json";
 
 const profileId = "018f2e34-0000-7000-8000-0000000000bb";
 const reportInventoryCustodyError = vi.fn();
-const auth = { reportInventoryCustodyError } as unknown as AuthContextValue;
+const auth = { reportInventoryCustodyError, session: { profileId }, expired: false } as unknown as AuthContextValue;
 
-function createWrapper() {
+function createWrapper(value: AuthContextValue = auth) {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const wrapper = ({ children }: { children: React.ReactNode }) => (
-        <AuthContext value={auth}>
+        <AuthContext value={value}>
             <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
         </AuthContext>
     );
@@ -24,6 +24,15 @@ function createWrapper() {
 describe("native container inventory queries", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+    });
+
+    it("pauses while the session-expired dialog is up", async () => {
+        vi.mocked(invoke).mockResolvedValue("node-1");
+        const { wrapper } = createWrapper({ ...auth, expired: true });
+        const { result } = renderHook(() => useConfiguredNode(profileId), { wrapper });
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(result.current.fetchStatus).toBe("idle");
+        expect(invoke).not.toHaveBeenCalled();
     });
 
     it("discovers the node using only the local profile UUID", async () => {

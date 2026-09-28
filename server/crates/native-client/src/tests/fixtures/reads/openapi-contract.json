@@ -98,7 +98,7 @@
     },
     "/api/v1/operations/{operation_id}": {
       "get": {
-        "operationId": "show",
+        "operationId": "operation",
         "parameters": [
           {
             "description": "Durable operation UUID",

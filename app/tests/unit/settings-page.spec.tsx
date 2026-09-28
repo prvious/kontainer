@@ -60,7 +60,8 @@ const defaultAuthReturn = {
         origin: "https://controller.example",
         clusterId: "cluster-1",
         principalId: "u1",
-        githubLogin: "test",
+        email: "test@example.com",
+        displayName: "test",
         label: "Production",
         accessExpiresAtUnixMs: 2_000_000_000_000,
     },
@@ -71,7 +72,8 @@ const defaultAuthReturn = {
     logout: vi.fn(),
     retryCommit: vi.fn(),
     retryRestore: vi.fn(),
-    cancelLogin: vi.fn(),
+    register: vi.fn(),
+    expired: false,
     clearIssue: vi.fn(),
 };
 

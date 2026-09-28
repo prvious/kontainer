@@ -8,6 +8,63 @@
 use std::io::ErrorKind;
 
 use reqwest::StatusCode;
+use serde::{Deserialize, Serialize};
+
+/// Why the controller rejected one submitted account field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FieldProblem {
+    /// The value has the wrong shape (for example an email without a domain).
+    Invalid,
+    /// The value is blank.
+    Empty,
+    /// The value is shorter than the documented minimum.
+    TooShort,
+    /// The value is longer than the documented maximum.
+    TooLong,
+}
+
+/// Field-level rejections from `validation_failed`; `None` means the field passed.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AccountFieldErrors {
+    /// Problem with the email.
+    #[serde(default)]
+    pub email: Option<FieldProblem>,
+    /// Problem with the password.
+    #[serde(default)]
+    pub password: Option<FieldProblem>,
+    /// Problem with the display name.
+    #[serde(default)]
+    pub display_name: Option<FieldProblem>,
+}
+
+/// An error plus the controller's `x-request-id` for the failed exchange,
+/// when the controller answered at all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Traced<E> {
+    /// The closed error code.
+    pub error: E,
+    /// Sanitized request identifier the controller logged for this exchange.
+    pub request_id: Option<String>,
+}
+
+impl<E> Traced<E> {
+    pub(crate) fn untraced(error: E) -> Self {
+        Self {
+            error,
+            request_id: None,
+        }
+    }
+}
+
+impl<E: std::fmt::Display> std::fmt::Display for Traced<E> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.error.fmt(formatter)
+    }
+}
+
+impl<E: std::error::Error> std::error::Error for Traced<E> {}
 
 /// Every failure a native client call can report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -67,6 +124,28 @@ pub enum NativeClientError {
     /// A controller dependency exceeded its deadline (`504`).
     #[error("controller dependency timed out")]
     GatewayTimeout,
+    /// Email or password is incorrect (`401 invalid_credentials`); unknown
+    /// emails and wrong passwords are indistinguishable.
+    #[error("email or password is incorrect")]
+    InvalidCredentials {
+        /// Failures left before the email locks for fifteen minutes.
+        attempts_remaining: u32,
+    },
+    /// Too many failures locked sign-in for this email (`429 locked`).
+    #[error("sign-in is locked for this email")]
+    LoginLocked {
+        /// Seconds until the lock expires.
+        retry_after_seconds: u32,
+    },
+    /// Registration is closed because the owner exists (`409 owner_exists`).
+    #[error("an owner already exists")]
+    OwnerExists,
+    /// The controller rejected submitted account fields (`400 validation_failed`).
+    #[error("submitted fields are not valid")]
+    ValidationFailed {
+        /// Which fields were rejected and why.
+        fields: AccountFieldErrors,
+    },
     /// Any other non-success status, with no body attached.
     #[error("controller returned status {status}")]
     UnexpectedStatus {

@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { useAuth } from "@/hooks/use-auth";
+import { useQueriesPaused } from "@/hooks/use-queries-paused";
 import { configuredNodeFromIpc, containerPageFromIpc, inventoryErrorCode, type InventoryErrorCode } from "@/types/inventory";
 
 export const configuredNodeKey = (profileId: string | null) => ["configured-node", profileId] as const;
@@ -15,9 +16,10 @@ function reportError(profileId: string, error: unknown, report: ((profileId: str
 
 export function useConfiguredNode(profileId: string | null) {
     const { reportInventoryCustodyError } = useAuth();
+    const paused = useQueriesPaused();
     return useQuery({
         queryKey: configuredNodeKey(profileId),
-        enabled: profileId !== null,
+        enabled: profileId !== null && !paused,
         retry: false,
         queryFn: async () => {
             if (!profileId) throw "unauthenticated";
@@ -32,9 +34,11 @@ export function useConfiguredNode(profileId: string | null) {
 
 export function useContainerInventory(profileId: string, nodeId: string, cursor: string | null, limit: number) {
     const { reportInventoryCustodyError } = useAuth();
+    const paused = useQueriesPaused();
     const queryClient = useQueryClient();
     return useQuery({
         queryKey: containerInventoryKey(profileId, nodeId, cursor, limit),
+        enabled: !paused,
         retry: false,
         queryFn: async () => {
             try {

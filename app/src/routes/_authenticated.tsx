@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Outlet, createFileRoute, redirect, useRouter } from "@tanstack/react-router";
 import { AccentLine } from "@/components/accent-line";
 import { ClusterSwitcher } from "@/components/cluster-switcher";
+import { SessionExpiredDialog } from "@/components/connect/session-expired-dialog";
 import { SessionIssue } from "@/components/session-issue";
 import { AppSidebar } from "@/components/shell/app-sidebar";
 import { StatusBar } from "@/components/shell/status-bar";
@@ -9,6 +10,7 @@ import { Titlebar } from "@/components/shell/titlebar";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { ActionButton } from "@/components/kit/action-button";
 import { useAuth } from "@/hooks/use-auth";
+import { useControllerHealth } from "@/hooks/session/use-controller-health";
 
 function ShellError() {
     return (
@@ -34,8 +36,9 @@ export const Route = createFileRoute("/_authenticated")({
 });
 
 function AuthenticatedLayout() {
-    const { session, issue, retryCommit, retryRestore, logout } = useAuth();
+    const { session, expired, issue, retryCommit, retryRestore, logout } = useAuth();
     const router = useRouter();
+    const health = useControllerHealth(Boolean(session) && !expired);
 
     useEffect(() => {
         if (session) return;
@@ -59,8 +62,8 @@ function AuthenticatedLayout() {
     return (
         <div className='flex h-screen flex-col overflow-hidden bg-background'>
             <AccentLine />
-            <Titlebar center={<ClusterSwitcher variant='titlebar' />} />
-            {issue && (
+            <Titlebar center={<ClusterSwitcher health={health.data} />} />
+            {issue && issue !== "relogin_required" && (
                 <SessionIssue
                     code={issue}
                     onRetryCommit={() => {
@@ -74,13 +77,15 @@ function AuthenticatedLayout() {
                     }}
                 />
             )}
-            <SidebarProvider className='min-h-0 flex-1' style={{ "--sidebar-width": "220px" } as React.CSSProperties}>
+            {/* While the session-expired dialog is up the page stays mounted but inert (02.S5). */}
+            <SidebarProvider inert={expired || undefined} className='min-h-0 flex-1' style={{ "--sidebar-width": "220px" } as React.CSSProperties}>
                 <AppSidebar />
                 <main className='min-w-0 flex-1 overflow-y-auto bg-background p-6'>
                     <Outlet />
                 </main>
             </SidebarProvider>
-            <StatusBar data={{}} />
+            <StatusBar data={{ connection: health.data ? (health.data.status === "ready" ? "connected" : "reconnecting") : undefined }} />
+            <SessionExpiredDialog />
         </div>
     );
 }

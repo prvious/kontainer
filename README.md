@@ -93,6 +93,19 @@ To reset: `pnpm dev:agents:stop`, stop the controller, then `pnpm reset` (remove
 cluster and its volumes). `pnpm dev:cluster:seed` redeploys the seed stacks.
 PostgreSQL keeps its data; see below.
 
+### Owner account and password reset
+
+The first sign-in on a fresh controller creates the owner (email, display name,
+password of 12–128 characters); registration then closes for good. Ten failed
+sign-ins for one email within fifteen minutes lock that email for fifteen minutes.
+There is no self-service reset. On the controller host, set a new password (read
+from stdin; every session is signed out and the lock is cleared):
+
+```bash
+cd server
+printf '%s\n' 'the new passphrase' | cargo run --bin kontainer-controller -- task auth:reset-password email:owner@example.com
+```
+
 ### Common Commands
 
 ```bash

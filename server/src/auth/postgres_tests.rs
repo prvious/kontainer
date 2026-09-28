@@ -57,6 +57,8 @@ async fn test_principal(
     let id = Uuid::now_v7();
     principal::ActiveModel {
         id: Set(id),
+        email: Set(None),
+        display_name: Set(None),
         kind: Set("human".to_owned()),
         status: Set(status.to_owned()),
         authorization_epoch: Set(0),

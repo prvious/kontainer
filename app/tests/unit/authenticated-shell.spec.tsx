@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
@@ -15,7 +15,8 @@ const session: SessionView = {
     origin: "https://controller.example/",
     clusterId: "cluster-id",
     principalId: "principal-id",
-    githubLogin: "jane",
+    email: "jane@example.com",
+    displayName: "Jane",
     label: "Production",
     accessExpiresAtUnixMs: 2_000_000_000_000,
 };
@@ -31,126 +32,124 @@ function TestRouter({ auth, initialPath }: { auth: AuthContextValue; initialPath
     return <RouterProvider router={router} context={{ auth }} />;
 }
 
-describe("authenticated custody shell", () => {
+type Handler = (command: string, args?: unknown) => unknown;
+
+function mockCommands(overrides: Record<string, Handler> = {}, restored: SessionView | null = session) {
+    vi.mocked(invoke).mockImplementation(async (command: string, args?: unknown) => {
+        if (command in overrides) return overrides[command](command, args);
+        switch (command) {
+            case "session_restore":
+                return restored;
+            case "load_app_settings":
+                return { refreshInterval: 5000 };
+            case "session_connections":
+                return [];
+            case "session_bootstrap":
+                return { ownerExists: true };
+            case "controller_health":
+                return { status: "ready" };
+            default:
+                return null;
+        }
+    });
+}
+
+function renderApp(initialPath = "/") {
+    render(
+        <AuthProvider>
+            <TestApp initialPath={initialPath} />
+        </AuthProvider>,
+    );
+}
+
+describe("authenticated shell", () => {
+    beforeEach(() => vi.clearAllMocks());
+
     it("renders the outlet for every authenticated route, starting from the root redirect", async () => {
-        vi.clearAllMocks();
-        vi.mocked(invoke).mockImplementation(async (command: string) => {
-            if (command === "session_restore") return session;
-            if (command === "load_app_settings") return { refreshInterval: 5000 };
-            return null;
-        });
-        render(
-            <AuthProvider>
-                <TestApp />
-            </AuthProvider>,
-        );
+        mockCommands();
+        renderApp();
         await waitFor(() => expect(screen.getByRole("heading", { name: /containers/i })).toBeInTheDocument());
-        expect(screen.queryByText("Connected")).not.toBeInTheDocument();
-        expect(
-            vi
-                .mocked(invoke)
-                .mock.calls.map(([command]) => command)
-                .every((command) => ["session_restore", "load_app_settings", "get_configured_node"].includes(command)),
-        ).toBe(true);
+        expect(screen.getByRole("link", { name: /Containers/ })).toHaveAttribute("data-status", "active");
     });
 
     it("keeps local settings available from the shell", async () => {
-        vi.clearAllMocks();
-        vi.mocked(invoke).mockImplementation(async (command: string) => {
-            if (command === "session_restore") return session;
-            if (command === "load_app_settings") return { refreshInterval: 5000 };
-            return null;
-        });
-        render(
-            <AuthProvider>
-                <TestApp />
-            </AuthProvider>,
-        );
+        mockCommands();
+        renderApp();
         await userEvent.setup().click(await screen.findByRole("link", { name: "Settings" }));
         await waitFor(() => expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument());
         expect(screen.getByText(session.origin)).toBeInTheDocument();
-        expect(
-            vi
-                .mocked(invoke)
-                .mock.calls.map(([command]) => command)
-                .every((command) => ["session_restore", "load_app_settings", "get_configured_node"].includes(command)),
-        ).toBe(true);
+        expect(screen.getByText(session.email)).toBeInTheDocument();
     });
 
-    it("opens Containers from a deep link", async () => {
-        vi.clearAllMocks();
-        vi.mocked(invoke).mockImplementation(async (command: string) => {
-            if (command === "session_restore") return session;
-            if (command === "load_app_settings") return { refreshInterval: 5000 };
-            if (command === "get_configured_node") return null;
-            return null;
-        });
-        render(
-            <AuthProvider>
-                <TestApp initialPath='/tasks' />
-            </AuthProvider>,
-        );
-        await waitFor(() => expect(screen.getByRole("heading", { name: /containers/i })).toBeInTheDocument());
-        expect(screen.getByText("No node is configured on this controller.")).toBeInTheDocument();
-        expect(
-            vi
-                .mocked(invoke)
-                .mock.calls.map(([command]) => command)
-                .every((command) => ["session_restore", "load_app_settings", "get_configured_node"].includes(command)),
-        ).toBe(true);
+    it("shows the controller health in the titlebar dot and the status bar", async () => {
+        mockCommands({ controller_health: () => ({ status: "unreachable", diagnostic: "tcp" }) });
+        renderApp();
+        await waitFor(() => expect(screen.getByText("RECONNECTING")).toBeInTheDocument());
+        expect(screen.getByTestId("controller-health-dot")).toHaveAttribute("data-tone", "destructive");
     });
 
-    it("returns to login when inventory reports a session rejected after refresh", async () => {
-        vi.clearAllMocks();
-        vi.mocked(invoke).mockImplementation(async (command: string) => {
-            if (command === "session_restore") return session;
-            if (command === "get_configured_node") return "node-1";
-            if (command === "list_container_inventory") throw "relogin_required";
-            if (command === "load_app_settings") return { refreshInterval: 5000 };
-            return null;
-        });
-        render(
-            <AuthProvider>
-                <TestApp initialPath='/tasks' />
-            </AuthProvider>,
-        );
-        await waitFor(() => expect(screen.getByRole("button", { name: "Connect with GitHub" })).toBeInTheDocument());
-        expect(screen.getByText("Your session expired or was revoked. Sign in again.")).toBeInTheDocument();
+    it("keeps the page mounted under the session-expired dialog when a refresh is rejected", async () => {
+        mockCommands({ get_configured_node: () => "node-1", list_container_inventory: () => Promise.reject("relogin_required") });
+        renderApp("/tasks");
+        const dialog = await screen.findByRole("dialog");
+        expect(within(dialog).getByText("Your session ended")).toBeInTheDocument();
+        expect(within(dialog).getByText(session.email)).toBeInTheDocument();
+        // The page is still there, behind the scrim.
+        expect(screen.getByRole("heading", { name: /containers/i, hidden: true })).toBeInTheDocument();
         expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "list_container_inventory")).toHaveLength(1);
     });
 
-    it("signs out through Rust custody and returns to login", async () => {
-        vi.clearAllMocks();
-        vi.mocked(invoke).mockImplementation(async (command: string) => {
-            if (command === "session_restore") return session;
-            if (command === "load_app_settings") return { refreshInterval: 5000 };
-            return null;
+    it("signs back in from the expired dialog and resumes the same page", async () => {
+        let rejected = false;
+        mockCommands({
+            get_configured_node: () => "node-1",
+            list_container_inventory: () => {
+                if (!rejected) {
+                    rejected = true;
+                    return Promise.reject("relogin_required");
+                }
+                return { items: [], nextCursor: null };
+            },
+            session_login: () => session,
         });
-        render(
-            <AuthProvider>
-                <TestApp />
-            </AuthProvider>,
-        );
-        await userEvent.setup().click(await screen.findByRole("button", { name: /Production/ }));
-        await userEvent.setup().click(screen.getByRole("button", { name: "Sign out" }));
-        await waitFor(() => expect(screen.getByRole("button", { name: "Connect with GitHub" })).toBeInTheDocument());
-        expect(invoke).toHaveBeenCalledWith("session_logout", undefined);
+        renderApp("/tasks");
+        const user = userEvent.setup();
+        const dialog = await screen.findByRole("dialog");
+        await user.type(within(dialog).getByLabelText("Password"), "correct horse battery");
+        await user.click(within(dialog).getByRole("button", { name: /SIGN IN/ }));
+        await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+        expect(invoke).toHaveBeenCalledWith("session_login", {
+            origin: session.origin,
+            email: session.email,
+            password: "correct horse battery",
+            label: "Production",
+        });
+        expect(screen.getByRole("heading", { name: /containers/i })).toBeInTheDocument();
     });
 
-    it("opens the custody login from a fresh start", async () => {
-        vi.clearAllMocks();
-        vi.mocked(invoke).mockImplementation(async (command: string) => {
-            if (command === "session_login") return session;
-            if (command === "load_app_settings") return { refreshInterval: 5000 };
-            return null;
-        });
-        render(
-            <AuthProvider>
-                <TestApp initialPath='/login' />
-            </AuthProvider>,
-        );
-        await userEvent.setup().click(await screen.findByRole("button", { name: "Connect with GitHub" }));
+    it("signs out through the switcher and returns to Connect", async () => {
+        mockCommands();
+        renderApp();
+        const user = userEvent.setup();
+        await user.click(await screen.findByRole("button", { name: /Switch cluster/ }));
+        await user.click(await screen.findByRole("menuitem", { name: /Sign out/ }));
+        await waitFor(() => expect(screen.getByRole("button", { name: /Sign in/ })).toBeInTheDocument());
+        expect(invoke).toHaveBeenCalledWith("session_logout", { summary: null });
+    });
+
+    it("signs in with email and password from a fresh start", async () => {
+        mockCommands({ session_login: () => session }, null);
+        renderApp("/login");
+        const user = userEvent.setup();
+        await user.type(await screen.findByLabelText("Email"), "jane@example.com");
+        await user.type(screen.getByLabelText("Password"), "correct horse battery");
+        await user.click(screen.getByRole("button", { name: /Sign in/ }));
         await waitFor(() => expect(screen.getByRole("heading", { name: /containers/i })).toBeInTheDocument());
-        expect(invoke).toHaveBeenCalledWith("session_login", { origin: "http://127.0.0.1:5150", label: null });
+        expect(invoke).toHaveBeenCalledWith("session_login", {
+            origin: "http://127.0.0.1:5150",
+            email: "jane@example.com",
+            password: "correct horse battery",
+            label: null,
+        });
     });
 });

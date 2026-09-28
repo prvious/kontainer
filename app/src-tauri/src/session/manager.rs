@@ -17,34 +17,27 @@
 //!   while either is pending can never restore as authenticated.
 
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use kontainer_native_client::{AccessCredential, LoginVerifier, RefreshCredential};
-use tokio::sync::{watch, Mutex as AsyncMutex};
+use kontainer_native_client::{AccessCredential, ProbeFailure, RefreshCredential};
+use tokio::sync::Mutex as AsyncMutex;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use super::browser::BrowserOpener;
-use super::controller::{
-    Controller, ControllerFactory, IssuedCredentials, RedeemedSession, Redemption,
-};
-use super::errors::SessionError;
+use super::controller::{Controller, ControllerFactory, IssuedCredentials, RedeemedSession};
+use super::errors::{LoginFailure, SessionError};
 use super::metadata::{MetadataError, SessionMetadataStore};
 use super::models::{
     decode_anchor, decode_profile, encode_anchor, encode_profile, sanitize_label, AnchorRecord,
-    AnchorState, LoginHint, MetadataSession, ProfileRecord, SessionDocument, SessionLoginInput,
-    SessionView, ANCHOR_VERSION, PROFILE_VERSION,
+    AnchorState, BootstrapView, ConnectionSummary, LoginHint, MetadataSession, PasswordLoginInput,
+    ProbeDiagnostic, ProbeStatus, ProbeView, ProfileRecord, RegisterOwnerInput, SavedConnection,
+    SessionDocument, SessionView, ANCHOR_VERSION, PROFILE_VERSION,
 };
 use super::vault::CredentialVault;
 
 #[path = "manager_inventory.rs"]
 mod inventory;
 pub(crate) use inventory::{ContainerPageView, InventoryError};
-
-/// Poll interval between redemption attempts while the browser step is open.
-const REDEEM_POLL_INTERVAL: Duration = Duration::from_secs(1);
-/// Local ceiling for one login attempt, independent of the controller clock.
-const LOGIN_ATTEMPT_CEILING: Duration = Duration::from_secs(10 * 60);
 
 /// The one published session plus whatever work is in flight.
 struct SessionSlots {
@@ -57,7 +50,6 @@ struct SessionSlots {
     orphaned: Vec<OrphanedCredentials>,
     /// A logout owns the retained credentials; they are not authenticated state.
     cleanup_only: bool,
-    login: Option<Arc<LoginSlot>>,
 }
 
 struct ActiveSession {
@@ -78,35 +70,6 @@ struct HeldCommit {
 struct OrphanedCredentials {
     origin: String,
     credentials: IssuedCredentials,
-}
-
-/// Registration of one in-flight login attempt.
-struct LoginSlot {
-    cancel: CancellationToken,
-    done: watch::Sender<bool>,
-}
-
-/// Removes the login registration and signals joiners on every exit path,
-/// including a dropped command future.
-struct LoginGuard<'a> {
-    manager: &'a SessionManager,
-    slot: Arc<LoginSlot>,
-}
-
-impl Drop for LoginGuard<'_> {
-    fn drop(&mut self) {
-        {
-            let mut slots = self.manager.slots();
-            if slots
-                .login
-                .as_ref()
-                .is_some_and(|current| Arc::ptr_eq(current, &self.slot))
-            {
-                slots.login = None;
-            }
-        }
-        self.slot.done.send_replace(true);
-    }
 }
 
 /// Retains newly issued credentials if their command future exits before they
@@ -181,10 +144,9 @@ pub(crate) struct SessionManager {
     vault: Arc<dyn CredentialVault>,
     metadata: Arc<dyn SessionMetadataStore>,
     controllers: Arc<dyn ControllerFactory>,
-    browser: Arc<dyn BrowserOpener>,
     slots: Mutex<SessionSlots>,
     /// Serializes state-changing operations that touch the vault or publish a
-    /// session. Login polling deliberately stays outside this lock.
+    /// session. The sign-in request itself stays outside this lock.
     ops: AsyncMutex<()>,
 }
 
@@ -193,58 +155,136 @@ impl SessionManager {
         vault: Arc<dyn CredentialVault>,
         metadata: Arc<dyn SessionMetadataStore>,
         controllers: Arc<dyn ControllerFactory>,
-        browser: Arc<dyn BrowserOpener>,
     ) -> Self {
         Self {
             vault,
             metadata,
             controllers,
-            browser,
             slots: Mutex::new(SessionSlots {
                 active: None,
                 held: None,
                 orphaned: Vec::new(),
                 cleanup_only: false,
-                login: None,
             }),
             ops: AsyncMutex::new(()),
         }
     }
 
-    /// Run one browser login. Any earlier attempt is cancelled and joined
-    /// before a new verifier is generated.
+    /// Sign in with email and password, then commit the issued session
+    /// through the same ordered custody path as every other session.
     pub(crate) async fn login(
         &self,
-        input: SessionLoginInput,
-    ) -> Result<SessionView, SessionError> {
-        let slot = Arc::new(LoginSlot {
-            cancel: CancellationToken::new(),
-            done: watch::channel(false).0,
-        });
-        let previous = {
-            let mut slots = self.slots();
-            slots.login.replace(slot.clone())
-        };
-        let _guard = LoginGuard {
-            manager: self,
-            slot: slot.clone(),
-        };
-        if let Some(previous) = previous {
-            previous.cancel.cancel();
-            wait_for_done(&previous).await;
-        }
+        input: PasswordLoginInput,
+    ) -> Result<SessionView, LoginFailure> {
         let controller = self.controllers.for_origin(&input.origin)?;
         self.ensure_login_allowed().await?;
-        self.run_login(controller.as_ref(), input, &slot).await
+        let redeemed = controller
+            .password_login(&input.email, &input.password, &CancellationToken::new())
+            .await?;
+        drop(input.password);
+        Ok(self
+            .commit_login(controller.as_ref(), redeemed, input.label)
+            .await?)
     }
 
-    /// Cancel the active attempt and join its cleanup.
-    pub(crate) async fn cancel_login(&self) -> Result<(), SessionError> {
-        if let Some(slot) = self.take_login() {
-            slot.cancel.cancel();
-            wait_for_done(&slot).await;
-        }
-        Ok(())
+    /// Create the owner on a fresh controller and sign in.
+    pub(crate) async fn register(
+        &self,
+        input: RegisterOwnerInput,
+    ) -> Result<SessionView, LoginFailure> {
+        let controller = self.controllers.for_origin(&input.origin)?;
+        self.ensure_login_allowed().await?;
+        let redeemed = controller
+            .register_owner(
+                &input.display_name,
+                &input.email,
+                &input.password,
+                &CancellationToken::new(),
+            )
+            .await?;
+        drop(input.password);
+        Ok(self
+            .commit_login(controller.as_ref(), redeemed, input.label)
+            .await?)
+    }
+
+    /// Whether the controller at `origin` already has its owner.
+    pub(crate) async fn bootstrap(&self, origin: &str) -> Result<BootstrapView, LoginFailure> {
+        let controller = self.controllers.for_origin(origin)?;
+        let owner_exists = controller
+            .bootstrap_status(&CancellationToken::new())
+            .await?;
+        Ok(BootstrapView { owner_exists })
+    }
+
+    /// Two-second readiness probe of an arbitrary origin.
+    pub(crate) async fn probe(&self, origin: &str) -> Result<ProbeView, SessionError> {
+        let controller = self.controllers.for_origin(origin)?;
+        Ok(probe_view(
+            controller.probe(&CancellationToken::new()).await,
+        ))
+    }
+
+    /// The signed-in controller's origin, if any.
+    pub(crate) fn active_origin(&self) -> Option<String> {
+        self.active_view().map(|view| view.origin)
+    }
+
+    /// Readiness of the signed-in controller, or `None` when signed out.
+    pub(crate) async fn health(&self) -> Option<ProbeView> {
+        let origin = self.active_view()?.origin;
+        self.probe(&origin).await.ok()
+    }
+
+    /// Saved connections, most recent first.
+    pub(crate) fn connections(&self) -> Vec<SavedConnection> {
+        self.metadata
+            .read_document()
+            .ok()
+            .flatten()
+            .map(|document| document.connections)
+            .unwrap_or_default()
+    }
+
+    /// Drop one saved connection. Its origin stays usable; only the row goes.
+    pub(crate) fn forget_connection(&self, id: Uuid) -> Result<(), SessionError> {
+        self.update_connections(|connections| connections.retain(|connection| connection.id != id))
+    }
+
+    /// Cache the cluster size on a saved connection for the switcher subtitle.
+    pub(crate) fn record_summary(
+        &self,
+        origin: &str,
+        summary: ConnectionSummary,
+    ) -> Result<(), SessionError> {
+        self.update_connections(|connections| {
+            if let Some(connection) = connections
+                .iter_mut()
+                .find(|connection| connection.origin == origin)
+            {
+                connection.last_summary = Some(summary);
+            }
+        })
+    }
+
+    fn update_connections(
+        &self,
+        change: impl FnOnce(&mut Vec<SavedConnection>),
+    ) -> Result<(), SessionError> {
+        let mut document = match self.metadata.read_document() {
+            Ok(Some(document)) => document,
+            Ok(None) => return Ok(()),
+            Err(_) => return Err(SessionError::LocalStateFailed),
+        };
+        change(&mut document.connections);
+        self.metadata
+            .write_document(&document)
+            .map_err(|_| SessionError::LocalStateFailed)
+    }
+
+    /// Saved connections carried into every document this manager rewrites.
+    fn stored_connections(&self) -> Vec<SavedConnection> {
+        self.connections()
     }
 
     async fn ensure_login_allowed(&self) -> Result<(), SessionError> {
@@ -409,7 +449,9 @@ impl SessionManager {
             return Err(SessionError::VaultWriteFailed);
         }
         drop(payload);
-        let document = SessionDocument::new(None, Some(metadata_session_from(&view)));
+        let mut document = SessionDocument::new(None, Some(metadata_session_from(&view)))
+            .with_connections(self.stored_connections());
+        document.touch_connection(&view.origin, view.label.clone(), now_ms());
         if self.metadata.write_document(&document).is_err() {
             self.hold(held(issued.take(), SessionError::LocalStateFailed));
             return Err(SessionError::LocalStateFailed);
@@ -424,10 +466,6 @@ impl SessionManager {
 
     /// Revoke the server session before clearing local custody.
     pub(crate) async fn logout(&self) -> Result<(), SessionError> {
-        if let Some(slot) = self.take_login() {
-            slot.cancel.cancel();
-            wait_for_done(&slot).await;
-        }
         let _ops = self.ops.lock().await;
 
         // The anchor is read before any in-memory credential is taken so a
@@ -563,64 +601,17 @@ impl SessionManager {
         }
     }
 
-    /// The non-secret login hint for the login screen.
-    pub(crate) fn login_hint(&self) -> Option<LoginHint> {
-        self.metadata
-            .read_document()
-            .ok()
-            .flatten()
-            .and_then(|document| document.hint)
-    }
-
-    async fn run_login(
-        &self,
-        controller: &dyn Controller,
-        input: SessionLoginInput,
-        slot: &LoginSlot,
-    ) -> Result<SessionView, SessionError> {
-        if slot.cancel.is_cancelled() {
-            return Err(SessionError::LoginCancelled);
-        }
-        let verifier = LoginVerifier::generate();
-        let start = controller.start_login(&verifier, &slot.cancel).await?;
-        self.browser.open(&start.authorize_url)?;
-        let deadline = login_deadline(start.expires_at_unix_ms);
-        let redeemed = loop {
-            if slot.cancel.is_cancelled() {
-                return Err(SessionError::LoginCancelled);
-            }
-            if now_ms() >= deadline {
-                return Err(SessionError::LoginExpired);
-            }
-            match controller
-                .redeem_login(start.attempt_id, &verifier, &slot.cancel)
-                .await?
-            {
-                Redemption::Ready(redeemed) => break redeemed,
-                Redemption::Pending => {
-                    tokio::select! {
-                        () = slot.cancel.cancelled() => return Err(SessionError::LoginCancelled),
-                        () = tokio::time::sleep(REDEEM_POLL_INTERVAL) => {}
-                    }
-                }
-            }
-        };
-        // The verifier exists only for this loop and is dropped with it.
-        drop(verifier);
-        self.commit_login(controller, redeemed, input, slot).await
-    }
-
     async fn commit_login(
         &self,
         controller: &dyn Controller,
         redeemed: RedeemedSession,
-        input: SessionLoginInput,
-        slot: &LoginSlot,
+        label: Option<String>,
     ) -> Result<SessionView, SessionError> {
         let RedeemedSession {
             cluster_id,
             principal_id,
-            github_login,
+            email,
+            display_name,
             issued: credentials,
         } = redeemed;
         let mut issued = IssuedGuard {
@@ -631,11 +622,6 @@ impl SessionManager {
             }),
         };
         let _ops = self.ops.lock().await;
-        if slot.cancel.is_cancelled() {
-            return self
-                .reject_issued(controller, &mut issued, SessionError::LoginCancelled)
-                .await;
-        }
         if let Some(error) = self.login_error() {
             return self.reject_issued(controller, &mut issued, error).await;
         }
@@ -673,7 +659,7 @@ impl SessionManager {
         };
 
         let new_generation = old_generation + 1;
-        let label = sanitize_label(input.label.clone()).or_else(|| self.stored_label());
+        let label = sanitize_label(label).or_else(|| self.stored_label());
         let pending = AnchorRecord {
             version: ANCHOR_VERSION,
             profile_id,
@@ -693,7 +679,8 @@ impl SessionManager {
             origin: pending.origin.clone(),
             cluster_id: pending.cluster_id.clone(),
             principal_id: pending.principal_id,
-            github_login,
+            email,
+            display_name,
             label: label.clone(),
             access_expires_at_unix_ms: issued.credentials().access_expires_at_unix_ms,
         };
@@ -822,7 +809,8 @@ impl SessionManager {
             origin: anchor.origin.clone(),
             cluster_id: anchor.cluster_id.clone(),
             principal_id: anchor.principal_id,
-            github_login: session.github_login.clone(),
+            email: session.email.clone(),
+            display_name: session.display_name.clone(),
             label: sanitize_label(session.label.clone()),
             access_expires_at_unix_ms: issued.credentials().access_expires_at_unix_ms,
         };
@@ -948,7 +936,8 @@ impl SessionManager {
                 label,
             }),
             None,
-        );
+        )
+        .with_connections(self.stored_connections());
         match self.metadata.read_document() {
             Ok(Some(existing)) if existing == desired => Ok(()),
             _ => self
@@ -967,7 +956,8 @@ impl SessionManager {
         };
         match existing {
             Some(document) if document.session.is_some() => {
-                let cleared = SessionDocument::new(document.hint, None);
+                let cleared = SessionDocument::new(document.hint, None)
+                    .with_connections(document.connections);
                 self.metadata
                     .write_document(&cleared)
                     .map_err(|_| SessionError::LocalStateFailed)
@@ -1134,10 +1124,6 @@ impl SessionManager {
         Ok(())
     }
 
-    fn take_login(&self) -> Option<Arc<LoginSlot>> {
-        self.slots().login.take()
-    }
-
     /// The last stored display label: the active session's first, then whatever
     /// the previous logout left as a login hint.
     fn stored_label(&self) -> Option<String> {
@@ -1161,7 +1147,8 @@ fn metadata_session_from(view: &SessionView) -> MetadataSession {
         origin: view.origin.clone(),
         cluster_id: view.cluster_id.clone(),
         principal_id: view.principal_id,
-        github_login: view.github_login.clone(),
+        email: view.email.clone(),
+        display_name: view.display_name.clone(),
         label: view.label.clone(),
     }
 }
@@ -1189,13 +1176,24 @@ fn record_refresh(record: &ProfileRecord) -> Option<RefreshCredential> {
     RefreshCredential::parse(&record.refresh_credential).ok()
 }
 
-async fn wait_for_done(slot: &LoginSlot) {
-    let mut done = slot.done.subscribe();
-    let _ = done.wait_for(|value| *value).await;
-}
-
-fn login_deadline(controller_expires_at_unix_ms: i64) -> i64 {
-    controller_expires_at_unix_ms.min(now_ms() + LOGIN_ATTEMPT_CEILING.as_millis() as i64)
+/// The probe outcome as the connect card and titlebar dot read it.
+fn probe_view(outcome: Result<(), ProbeFailure>) -> ProbeView {
+    match outcome {
+        Ok(()) => ProbeView {
+            status: ProbeStatus::Ready,
+            diagnostic: None,
+        },
+        Err(failure) => ProbeView {
+            status: ProbeStatus::Unreachable,
+            diagnostic: Some(match failure {
+                ProbeFailure::Dns => ProbeDiagnostic::Dns,
+                ProbeFailure::Tcp => ProbeDiagnostic::Tcp,
+                ProbeFailure::Tls => ProbeDiagnostic::Tls,
+                ProbeFailure::Http => ProbeDiagnostic::Http,
+                ProbeFailure::Timeout => ProbeDiagnostic::Timeout,
+            }),
+        },
+    }
 }
 
 fn now_ms() -> i64 {
@@ -1206,60 +1204,26 @@ fn now_ms() -> i64 {
 }
 
 #[cfg(test)]
-mod completion_tests {
+mod probe_tests {
     use super::*;
-    use crate::session::tests::fakes::{login_input, redeemed, Harness, ORIGIN};
 
-    #[tokio::test]
-    async fn a_late_waiter_observes_login_completion() {
-        let harness = Harness::new();
-        let (done, receiver) = watch::channel(false);
-        drop(receiver);
-        let slot = Arc::new(LoginSlot {
-            cancel: CancellationToken::new(),
-            done,
-        });
-        harness.manager.slots().login = Some(slot.clone());
-
-        drop(LoginGuard {
-            manager: &harness.manager,
-            slot: slot.clone(),
-        });
-
-        tokio::time::timeout(Duration::from_millis(10), wait_for_done(&slot))
-            .await
-            .expect("completion remains observable");
-    }
-
-    #[tokio::test]
-    async fn cancellation_after_redemption_retains_failed_cleanup_for_logout() {
-        let harness = Harness::new();
-        harness
-            .controllers
-            .script()
-            .logout
-            .push_back(Err(SessionError::ControllerUnavailable));
-        let controller = harness.controllers.for_origin(ORIGIN).expect("controller");
-        let slot = LoginSlot {
-            cancel: CancellationToken::new(),
-            done: watch::channel(false).0,
-        };
-        slot.cancel.cancel();
-
+    #[test]
+    fn probe_failures_name_the_step_that_failed() {
+        assert_eq!(probe_view(Ok(())).status, ProbeStatus::Ready);
+        for (failure, diagnostic) in [
+            (ProbeFailure::Dns, ProbeDiagnostic::Dns),
+            (ProbeFailure::Tcp, ProbeDiagnostic::Tcp),
+            (ProbeFailure::Tls, ProbeDiagnostic::Tls),
+            (ProbeFailure::Http, ProbeDiagnostic::Http),
+            (ProbeFailure::Timeout, ProbeDiagnostic::Timeout),
+        ] {
+            let view = probe_view(Err(failure));
+            assert_eq!(view.status, ProbeStatus::Unreachable);
+            assert_eq!(view.diagnostic, Some(diagnostic));
+        }
         assert_eq!(
-            harness
-                .manager
-                .commit_login(controller.as_ref(), redeemed(1), login_input(ORIGIN), &slot,)
-                .await
-                .expect_err("cancelled"),
-            SessionError::CleanupUncertain
+            serde_json::to_value(probe_view(Err(ProbeFailure::Tls))).unwrap(),
+            serde_json::json!({ "status": "unreachable", "diagnostic": "tls" })
         );
-        assert_eq!(
-            harness.manager.restore().await.expect_err("orphaned"),
-            SessionError::CleanupUncertain
-        );
-        harness.controllers.script().logout.push_back(Ok(()));
-        harness.manager.logout().await.expect("cleanup retry");
-        assert_eq!(harness.count("logout"), 2);
     }
 }

@@ -6,25 +6,23 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use kontainer_native_client::{
-    AccessCredential, ContainerPage, ContainerPageRequest, LoginVerifier, NativeClientError,
-    NodeId, RefreshCredential,
+    AccessCredential, ContainerPage, ContainerPageRequest, NativeClientError, NodeId, ProbeFailure,
+    RefreshCredential,
 };
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
-use crate::session::browser::BrowserOpener;
 use crate::session::controller::{
-    Controller, ControllerFactory, ControllerFuture, IssuedCredentials, LoginStart,
-    RedeemedSession, Redemption,
+    Controller, ControllerFactory, ControllerFuture, IssuedCredentials, RedeemedSession,
 };
-use crate::session::errors::SessionError;
+use crate::session::errors::{LoginFailure, SessionError};
 use crate::session::manager::SessionManager;
 use crate::session::metadata::{MetadataError, SessionMetadataStore};
 use crate::session::models::{
     decode_anchor, decode_profile, encode_anchor, encode_profile, AnchorRecord, AnchorState,
-    LoginHint, MetadataSession, ProfileRecord, SessionDocument, SessionLoginInput, SessionView,
+    LoginHint, MetadataSession, PasswordLoginInput, ProfileRecord, SessionDocument, SessionView,
     ANCHOR_VERSION,
 };
 use crate::session::vault::{CredentialVault, VaultError, VaultFuture};
@@ -37,6 +35,9 @@ pub(crate) const CLUSTER: &str = "test";
 pub(crate) const PRINCIPAL_ID: Uuid = Uuid::from_u128(0xaa);
 pub(crate) const OTHER_PRINCIPAL_ID: Uuid = Uuid::from_u128(0xab);
 pub(crate) const PROFILE_ID: Uuid = Uuid::from_u128(0xbb);
+pub(crate) const EMAIL: &str = "owner@example.com";
+pub(crate) const DISPLAY_NAME: &str = "Ada Owner";
+pub(crate) const PASSWORD: &str = "correct horse battery staple";
 
 pub(crate) fn new_log() -> OpLog {
     Arc::new(Mutex::new(Vec::new()))
@@ -106,14 +107,17 @@ pub(crate) fn redeemed_for(seed: u8, principal_id: Uuid) -> RedeemedSession {
     RedeemedSession {
         cluster_id: CLUSTER.to_owned(),
         principal_id,
-        github_login: "owner".to_owned(),
+        email: EMAIL.to_owned(),
+        display_name: DISPLAY_NAME.to_owned(),
         issued: issued(seed, future_ms(), future_ms()),
     }
 }
 
-pub(crate) fn login_input(origin: &str) -> SessionLoginInput {
-    SessionLoginInput {
+pub(crate) fn login_input(origin: &str) -> PasswordLoginInput {
+    PasswordLoginInput {
         origin: origin.to_owned(),
+        email: EMAIL.to_owned(),
+        password: Zeroizing::new(PASSWORD.to_owned()),
         label: Some("Default".to_owned()),
     }
 }
@@ -355,41 +359,12 @@ impl SessionMetadataStore for FakeMetadata {
     }
 }
 
-pub(crate) struct FakeBrowser {
-    log: OpLog,
-    opened: Mutex<Vec<String>>,
-    pub(crate) fail: AtomicBool,
-}
-
-impl FakeBrowser {
-    fn new(log: OpLog) -> Self {
-        Self {
-            log,
-            opened: Mutex::new(Vec::new()),
-            fail: AtomicBool::new(false),
-        }
-    }
-
-    pub(crate) fn opened(&self) -> Vec<String> {
-        self.opened.lock().unwrap().clone()
-    }
-}
-
-impl BrowserOpener for FakeBrowser {
-    fn open(&self, url: &str) -> Result<(), SessionError> {
-        record(&self.log, "open_browser");
-        if self.fail.load(Ordering::SeqCst) {
-            return Err(SessionError::BrowserOpenFailed);
-        }
-        self.opened.lock().unwrap().push(url.to_owned());
-        Ok(())
-    }
-}
-
 #[derive(Default)]
 pub(crate) struct Script {
-    pub(crate) start: VecDeque<Result<LoginStart, SessionError>>,
-    pub(crate) redeem: VecDeque<Result<Redemption, SessionError>>,
+    pub(crate) login: VecDeque<Result<RedeemedSession, LoginFailure>>,
+    pub(crate) register: VecDeque<Result<RedeemedSession, LoginFailure>>,
+    pub(crate) bootstrap: VecDeque<Result<bool, LoginFailure>>,
+    pub(crate) probe: VecDeque<Result<(), ProbeFailure>>,
     pub(crate) refresh: VecDeque<Result<IssuedCredentials, SessionError>>,
     pub(crate) logout: VecDeque<Result<(), SessionError>>,
     pub(crate) discover: VecDeque<Result<Option<NodeId>, NativeClientError>>,
@@ -501,47 +476,73 @@ impl Controller for FakeController {
         Box::pin(async move { outcome })
     }
 
-    fn start_login<'a>(
+    fn bootstrap_status<'a>(
         &'a self,
-        _verifier: &'a LoginVerifier,
         _cancellation: &'a CancellationToken,
-    ) -> ControllerFuture<'a, Result<LoginStart, SessionError>> {
-        record(&self.log, "start_login");
+    ) -> ControllerFuture<'a, Result<bool, LoginFailure>> {
+        record(&self.log, "bootstrap");
         let outcome = self
             .script
             .lock()
             .unwrap()
-            .start
+            .bootstrap
             .pop_front()
-            .unwrap_or_else(|| {
-                Ok(LoginStart {
-                    attempt_id: Uuid::from_u128(0x11),
-                    authorize_url: "https://github.com/login/oauth/authorize".to_owned(),
-                    expires_at_unix_ms: future_ms() + 10 * 60 * 1000,
-                })
-            });
+            .unwrap_or(Ok(true));
         Box::pin(async move { outcome })
     }
 
-    fn redeem_login<'a>(
+    fn password_login<'a>(
         &'a self,
-        _attempt_id: Uuid,
-        _verifier: &'a LoginVerifier,
+        email: &'a str,
+        password: &'a str,
         _cancellation: &'a CancellationToken,
-    ) -> ControllerFuture<'a, Result<Redemption, SessionError>> {
-        record(&self.log, "redeem_begin");
-        let log = self.log.clone();
+    ) -> ControllerFuture<'a, Result<RedeemedSession, LoginFailure>> {
+        // The password never reaches the log; only its presence is recorded.
+        record(
+            &self.log,
+            format!("password_login:{email}:{}", !password.is_empty()),
+        );
         let outcome = self
             .script
             .lock()
             .unwrap()
-            .redeem
+            .login
             .pop_front()
-            .unwrap_or(Err(SessionError::InvalidResponse));
-        Box::pin(async move {
-            record(&log, "redeem_end");
-            outcome
-        })
+            .unwrap_or(Err(LoginFailure::from(SessionError::InvalidResponse)));
+        Box::pin(async move { outcome })
+    }
+
+    fn register_owner<'a>(
+        &'a self,
+        display_name: &'a str,
+        email: &'a str,
+        _password: &'a str,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<RedeemedSession, LoginFailure>> {
+        record(&self.log, format!("register_owner:{display_name}:{email}"));
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .register
+            .pop_front()
+            .unwrap_or(Err(LoginFailure::from(SessionError::InvalidResponse)));
+        Box::pin(async move { outcome })
+    }
+
+    fn probe<'a>(
+        &'a self,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<(), ProbeFailure>> {
+        record(&self.log, format!("probe:{}", origin_label(&self.origin)));
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .probe
+            .pop_front()
+            .unwrap_or(Ok(()));
+        Box::pin(async move { outcome })
     }
 
     fn refresh_session<'a>(
@@ -619,7 +620,6 @@ pub(crate) struct Harness {
     pub(crate) vault: Arc<FakeVault>,
     pub(crate) metadata: Arc<FakeMetadata>,
     pub(crate) controllers: Arc<FakeControllerFactory>,
-    pub(crate) browser: Arc<FakeBrowser>,
     pub(crate) log: OpLog,
 }
 
@@ -629,19 +629,12 @@ impl Harness {
         let vault = Arc::new(FakeVault::new(log.clone()));
         let metadata = Arc::new(FakeMetadata::new(log.clone()));
         let controllers = Arc::new(FakeControllerFactory::new(log.clone()));
-        let browser = Arc::new(FakeBrowser::new(log.clone()));
-        let manager = SessionManager::new(
-            vault.clone(),
-            metadata.clone(),
-            controllers.clone(),
-            browser.clone(),
-        );
+        let manager = SessionManager::new(vault.clone(), metadata.clone(), controllers.clone());
         Self {
             manager,
             vault,
             metadata,
             controllers,
-            browser,
             log,
         }
     }
@@ -662,16 +655,12 @@ impl Harness {
             self.vault.clone(),
             self.metadata.clone(),
             self.controllers.clone(),
-            self.browser.clone(),
         )
     }
 
     /// Complete one login against the default origin and pair.
     pub(crate) async fn login_ok(&self) -> SessionView {
-        self.controllers
-            .script()
-            .redeem
-            .push_back(Ok(Redemption::Ready(redeemed(1))));
+        self.controllers.script().login.push_back(Ok(redeemed(1)));
         self.manager
             .login(login_input(ORIGIN))
             .await
@@ -708,7 +697,8 @@ impl Harness {
                 origin: anchor.origin.clone(),
                 cluster_id: anchor.cluster_id.clone(),
                 principal_id: anchor.principal_id,
-                github_login: "owner".to_owned(),
+                email: EMAIL.to_owned(),
+                display_name: DISPLAY_NAME.to_owned(),
                 label: Some("Default".to_owned()),
             }),
         ));

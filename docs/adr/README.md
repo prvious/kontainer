@@ -51,3 +51,4 @@ What becomes easier, what becomes harder, what must be revisited and when.
 | [0011](./0011-remove-codemirror.md) | Remove CodeMirror with the v1 editors | accepted |
 | [0012](./0012-dev-environment-conventions.md) | Development environment conventions | accepted |
 | [0013](./0013-shell-and-component-kit.md) | Shell and component kit decisions | accepted |
+| [0014](./0014-password-auth-and-connections.md) | Password authentication, throttling, and saved connections | accepted |

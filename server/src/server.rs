@@ -688,6 +688,8 @@ pub fn init_shared_auth_state(ctx: &AppContext) -> Result<()> {
     let settings = controller_settings(ctx)?;
     ctx.shared_store
         .insert(ControllerClusterId(settings.agent_rpc.cluster_id.clone()));
+    ctx.shared_store
+        .insert(crate::auth::throttle::LoginThrottle::default());
 
     if let Some(client) = build_agent_client(&settings)? {
         ctx.shared_store

@@ -1,6 +1,17 @@
 import { createContext } from "react";
-import type { SessionErrorCode, SessionView } from "@/types/session";
+import type { ConnectionSummary, SessionErrorCode, SessionView } from "@/types/session";
 import type { InventoryErrorCode } from "@/types/inventory";
+
+export interface SignInInput {
+    origin: string;
+    email: string;
+    password: string;
+    label?: string | null;
+}
+
+export interface RegisterInput extends SignInInput {
+    displayName: string;
+}
 
 export interface AuthContextValue {
     session: SessionView | null;
@@ -8,11 +19,18 @@ export interface AuthContextValue {
     issue: SessionErrorCode | null;
     /** The code session restore failed with, if it did; the splash reports startup failures. */
     restoreError: SessionErrorCode | null;
-    login: (origin: string, label?: string) => Promise<void>;
-    logout: () => Promise<void>;
+    /**
+     * The controller rejected the session (state 02.S5). The last session view stays so the
+     * page remains mounted under the dialog; data hooks pause while this is true.
+     */
+    expired: boolean;
+    /** Rejects with a `LoginFailure`. */
+    login: (input: SignInInput) => Promise<void>;
+    /** Rejects with a `LoginFailure`. */
+    register: (input: RegisterInput) => Promise<void>;
+    logout: (summary?: ConnectionSummary) => Promise<void>;
     retryCommit: () => Promise<void>;
     retryRestore: () => Promise<void>;
-    cancelLogin: () => Promise<void>;
     clearIssue: () => void;
     reportInventoryCustodyError?: (profileId: string, code: InventoryErrorCode) => void;
 }

@@ -1,25 +1,46 @@
 {
-    "commands": ["session_login", "session_cancel_login", "session_restore", "session_retry_commit", "session_logout", "session_login_hint"],
+    "commands": [
+        "session_bootstrap",
+        "session_login",
+        "session_register",
+        "session_restore",
+        "session_retry_commit",
+        "session_logout",
+        "session_connections",
+        "session_forget_connection",
+        "connection_probe",
+        "controller_health"
+    ],
     "sessionView": {
         "profileId": "018f2e34-0000-7000-8000-0000000000bb",
         "origin": "https://controller.example/",
         "clusterId": "test",
         "principalId": "018f2e34-0000-7000-8000-0000000000aa",
-        "githubLogin": "owner",
+        "email": "owner@example.com",
+        "displayName": "Ada Owner",
         "label": "Default",
         "accessExpiresAtUnixMs": 1760000000000
     },
-    "loginHint": {
+    "savedConnection": {
+        "id": "018f2e34-0000-7000-8000-0000000000cc",
         "origin": "https://controller.example/",
-        "label": "Default"
+        "label": "Default",
+        "lastUsedAtUnixMs": 1760000000000,
+        "lastSummary": { "nodes": 3, "services": 12 }
+    },
+    "probeView": { "status": "unreachable", "diagnostic": "tcp" },
+    "loginFailure": {
+        "code": "invalid_credentials",
+        "attemptsRemaining": 7,
+        "fields": { "password": "too_short" },
+        "requestId": "01J9ZK4F3Q"
     },
     "errorCodes": [
         "invalid_origin",
-        "browser_open_failed",
-        "login_cancelled",
-        "login_expired",
-        "login_denied",
-        "provider_unavailable",
+        "invalid_credentials",
+        "login_locked",
+        "owner_exists",
+        "validation_failed",
         "controller_unavailable",
         "invalid_response",
         "profile_conflict",

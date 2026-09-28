@@ -1,15 +1,20 @@
-//! Login: one active attempt, pair binding, and the ordered commit.
+//! Password sign-in and owner registration: pair binding, the ordered commit,
+//! failure details, saved connections, and probes.
 
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 
-use crate::session::controller::Redemption;
+use crate::session::errors::LoginFailure;
 use crate::session::errors::SessionError;
-use crate::session::models::{AnchorState, SessionDocument, SessionLoginInput};
+use crate::session::models::{
+    AnchorState, ConnectionSummary, PasswordLoginInput, ProbeDiagnostic, ProbeStatus,
+    RegisterOwnerInput, SessionDocument,
+};
+use kontainer_native_client::ProbeFailure;
+use zeroize::Zeroizing;
 
 use super::fakes::{
-    future_ms, issued, login_input, past_ms, redeemed, redeemed_for, Harness, CLUSTER, ORIGIN,
-    OTHER_ORIGIN, OTHER_PRINCIPAL_ID, PRINCIPAL_ID,
+    future_ms, issued, login_input, past_ms, redeemed, redeemed_for, Harness, CLUSTER,
+    DISPLAY_NAME, EMAIL, ORIGIN, OTHER_ORIGIN, OTHER_PRINCIPAL_ID, PASSWORD, PRINCIPAL_ID,
 };
 
 #[tokio::test]
@@ -18,8 +23,8 @@ async fn login_commits_record_metadata_and_anchor_before_publishing() {
     harness
         .controllers
         .script()
-        .redeem
-        .push_back(Ok(Redemption::Ready(redeemed(1))));
+        .login
+        .push_back(Ok(redeemed(1)));
     let view = harness
         .manager
         .login(login_input(ORIGIN))
@@ -29,7 +34,8 @@ async fn login_commits_record_metadata_and_anchor_before_publishing() {
     assert_eq!(view.origin, ORIGIN);
     assert_eq!(view.cluster_id, CLUSTER);
     assert_eq!(view.principal_id, PRINCIPAL_ID);
-    assert_eq!(view.github_login, "owner");
+    assert_eq!(view.email, EMAIL);
+    assert_eq!(view.display_name, DISPLAY_NAME);
     assert_eq!(view.label.as_deref(), Some("Default"));
     assert!(view.access_expires_at_unix_ms > past_ms());
 
@@ -39,13 +45,11 @@ async fn login_commits_record_metadata_and_anchor_before_publishing() {
         harness.entries(),
         vec![
             "read_anchor",
-            "start_login",
-            "open_browser",
-            "redeem_begin",
-            "redeem_end",
+            "password_login:owner@example.com:true",
             "read_anchor",
             "write_anchor:commit_pending",
             "write_profile:1",
+            "read_document",
             "write_document",
             "write_anchor:ready",
         ]
@@ -59,12 +63,15 @@ async fn login_commits_record_metadata_and_anchor_before_publishing() {
     let document = harness.metadata.document().expect("document exists");
     assert!(document.hint.is_none());
     assert!(document.session.is_some());
+    assert_eq!(document.connections.len(), 1);
+    assert_eq!(document.connections[0].origin, ORIGIN);
+    assert_eq!(document.connections[0].label.as_deref(), Some("Default"));
 
-    // Rust opened the authorization URL itself; it never crossed IPC.
-    assert_eq!(
-        harness.browser.opened(),
-        vec!["https://github.com/login/oauth/authorize".to_owned()]
-    );
+    // The password never reaches any log, document, or view.
+    assert!(harness
+        .entries()
+        .iter()
+        .all(|entry| !entry.contains(PASSWORD)));
 
     // A restore right after a login must not consume another credential.
     let entries = harness.entries();
@@ -88,15 +95,15 @@ async fn login_reuses_the_profile_uuid_for_the_same_pair_and_updates_origin() {
             .expect_err("active session blocks login"),
         SessionError::ProfileConflict
     );
-    assert_eq!(harness.count("start_login"), 1);
+    assert_eq!(harness.count("password_login"), 1);
 
     harness.controllers.script().logout.push_back(Ok(()));
     harness.manager.logout().await.expect("logout");
     harness
         .controllers
         .script()
-        .redeem
-        .push_back(Ok(Redemption::Ready(redeemed(2))));
+        .login
+        .push_back(Ok(redeemed(2)));
     let second = harness
         .manager
         .login(login_input(OTHER_ORIGIN))
@@ -154,7 +161,7 @@ async fn different_pair_conflicts_without_overwriting_records() {
         document.session.expect("session").principal_id,
         before_anchor.principal_id
     );
-    assert_eq!(harness.count("start_login"), 0);
+    assert_eq!(harness.count("password_login"), 0);
     assert_eq!(harness.count("logout"), 0);
 }
 
@@ -171,8 +178,8 @@ async fn conflicting_login_reports_cleanup_uncertain_when_revoke_fails() {
     harness
         .controllers
         .script()
-        .redeem
-        .push_back(Ok(Redemption::Ready(redeemed_for(9, OTHER_PRINCIPAL_ID))));
+        .login
+        .push_back(Ok(redeemed_for(9, OTHER_PRINCIPAL_ID)));
     harness
         .controllers
         .script()
@@ -226,83 +233,18 @@ async fn login_uses_the_stored_label_and_clears_the_hint_once_committed() {
     harness
         .controllers
         .script()
-        .redeem
-        .push_back(Ok(Redemption::Ready(redeemed(1))));
+        .login
+        .push_back(Ok(redeemed(1)));
     let view = harness
         .manager
-        .login(SessionLoginInput {
-            origin: ORIGIN.to_owned(),
+        .login(PasswordLoginInput {
             label: None,
+            ..login_input(ORIGIN)
         })
         .await
         .expect("login succeeds");
     assert_eq!(view.label.as_deref(), Some("Hinted"));
     assert!(harness.hint().is_none());
-}
-
-#[tokio::test(start_paused = true)]
-async fn replacement_login_cancels_and_joins_the_previous_attempt() {
-    let harness = Arc::new(Harness::new());
-    {
-        let mut script = harness.controllers.script();
-        script.redeem.push_back(Ok(Redemption::Pending));
-        script.redeem.push_back(Ok(Redemption::Ready(redeemed(1))));
-    }
-
-    let first = {
-        let harness = harness.clone();
-        tokio::spawn(async move { harness.manager.login(login_input(ORIGIN)).await })
-    };
-    while harness.count("redeem_begin") < 1 {
-        tokio::task::yield_now().await;
-    }
-
-    let second = harness
-        .manager
-        .login(login_input(ORIGIN))
-        .await
-        .expect("replacement login succeeds");
-    assert_eq!(second.principal_id, PRINCIPAL_ID);
-    assert_eq!(
-        first.await.expect("task joins").unwrap_err(),
-        SessionError::LoginCancelled
-    );
-    assert_eq!(harness.count("redeem_begin"), 2);
-}
-
-#[tokio::test(start_paused = true)]
-async fn cancel_login_joins_the_attempt_and_reports_cancellation() {
-    let harness = Arc::new(Harness::new());
-    harness
-        .controllers
-        .script()
-        .redeem
-        .push_back(Ok(Redemption::Pending));
-    let task = {
-        let harness = harness.clone();
-        tokio::spawn(async move { harness.manager.login(login_input(ORIGIN)).await })
-    };
-    while harness.count("redeem_begin") < 1 {
-        tokio::task::yield_now().await;
-    }
-    harness.manager.cancel_login().await.expect("cancel");
-    assert_eq!(
-        task.await.expect("task joins").unwrap_err(),
-        SessionError::LoginCancelled
-    );
-}
-
-#[tokio::test]
-async fn browser_failure_is_reported_without_starting_redemption() {
-    let harness = Harness::new();
-    harness.browser.fail.store(true, Ordering::SeqCst);
-    let error = harness
-        .manager
-        .login(login_input(ORIGIN))
-        .await
-        .expect_err("browser fails");
-    assert_eq!(error, SessionError::BrowserOpenFailed);
-    assert_eq!(harness.count("redeem_begin"), 0);
 }
 
 #[tokio::test]
@@ -315,60 +257,7 @@ async fn invalid_origin_is_rejected_before_any_attention() {
         .await
         .expect_err("origin rejected");
     assert_eq!(error, SessionError::InvalidOrigin);
-    assert_eq!(harness.count("start_login"), 0);
-}
-
-#[tokio::test]
-async fn expired_attempt_reports_login_expired() {
-    let harness = Harness::new();
-    harness
-        .controllers
-        .script()
-        .start
-        .push_back(Ok(crate::session::controller::LoginStart {
-            attempt_id: uuid::Uuid::from_u128(1),
-            authorize_url: "https://github.com/login/oauth/authorize".to_owned(),
-            expires_at_unix_ms: past_ms(),
-        }));
-    let error = harness
-        .manager
-        .login(login_input(ORIGIN))
-        .await
-        .expect_err("expired");
-    assert_eq!(error, SessionError::LoginExpired);
-    assert_eq!(harness.count("redeem_begin"), 0);
-}
-
-#[tokio::test(start_paused = true)]
-async fn redemption_polls_only_on_not_ready() {
-    let harness = Harness::new();
-    {
-        let mut script = harness.controllers.script();
-        script.redeem.push_back(Ok(Redemption::Pending));
-        script.redeem.push_back(Ok(Redemption::Pending));
-        script.redeem.push_back(Ok(Redemption::Ready(redeemed(1))));
-    }
-    harness
-        .manager
-        .login(login_input(ORIGIN))
-        .await
-        .expect("login succeeds after two pending polls");
-    assert_eq!(harness.count("redeem_begin"), 3);
-
-    // A denial stops immediately instead of polling.
-    let harness = Harness::new();
-    harness
-        .controllers
-        .script()
-        .redeem
-        .push_back(Err(SessionError::LoginDenied));
-    let error = harness
-        .manager
-        .login(login_input(ORIGIN))
-        .await
-        .expect_err("denied");
-    assert_eq!(error, SessionError::LoginDenied);
-    assert_eq!(harness.count("redeem_begin"), 1);
+    assert_eq!(harness.count("password_login"), 0);
 }
 
 #[tokio::test]
@@ -412,8 +301,8 @@ async fn login_profile_write_failure_holds_the_commit_for_local_retry() {
     harness
         .controllers
         .script()
-        .redeem
-        .push_back(Ok(Redemption::Ready(redeemed(1))));
+        .login
+        .push_back(Ok(redeemed(1)));
     harness
         .vault
         .fail_profile_writes
@@ -446,7 +335,7 @@ async fn login_profile_write_failure_holds_the_commit_for_local_retry() {
         .store(false, Ordering::SeqCst);
     let view = harness.manager.retry_commit().await.expect("commit retry");
     assert_eq!(harness.vault.anchor_state(), Some(AnchorState::Ready));
-    assert_eq!(harness.count("start_login"), 1);
+    assert_eq!(harness.count("password_login"), 1);
     assert_eq!(harness.count("refresh"), 0);
     assert_eq!(
         harness.manager.restore().await.expect("restore"),
@@ -460,8 +349,8 @@ async fn login_anchor_commit_failure_holds_the_successor() {
     harness
         .controllers
         .script()
-        .redeem
-        .push_back(Ok(Redemption::Ready(redeemed(1))));
+        .login
+        .push_back(Ok(redeemed(1)));
     harness
         .vault
         .fail_ready_anchor_writes
@@ -486,7 +375,7 @@ async fn login_anchor_commit_failure_holds_the_successor() {
         .store(false, Ordering::SeqCst);
     let view = harness.manager.retry_commit().await.expect("commit retry");
     assert_eq!(harness.vault.anchor_state(), Some(AnchorState::Ready));
-    assert_eq!(harness.count("redeem_begin"), 1);
+    assert_eq!(harness.count("password_login"), 1);
     assert_eq!(view.principal_id, PRINCIPAL_ID);
 }
 
@@ -496,8 +385,8 @@ async fn login_metadata_write_failure_holds_the_commit() {
     harness
         .controllers
         .script()
-        .redeem
-        .push_back(Ok(Redemption::Ready(redeemed(1))));
+        .login
+        .push_back(Ok(redeemed(1)));
     harness.metadata.fail_writes.store(true, Ordering::SeqCst);
 
     let error = harness
@@ -532,8 +421,8 @@ async fn login_failure_before_commit_leaves_no_session() {
     harness
         .controllers
         .script()
-        .redeem
-        .push_back(Err(SessionError::ControllerUnavailable));
+        .login
+        .push_back(Err(SessionError::ControllerUnavailable.into()));
     let error = harness
         .manager
         .login(login_input(ORIGIN))
@@ -550,8 +439,8 @@ async fn pending_anchor_write_failure_revokes_the_issued_family() {
     harness
         .controllers
         .script()
-        .redeem
-        .push_back(Ok(Redemption::Ready(redeemed(1))));
+        .login
+        .push_back(Ok(redeemed(1)));
     harness.controllers.script().logout.push_back(Ok(()));
     harness
         .vault
@@ -576,8 +465,8 @@ async fn pending_anchor_write_failure_with_failed_revoke_is_uncertain() {
     harness
         .controllers
         .script()
-        .redeem
-        .push_back(Ok(Redemption::Ready(redeemed(1))));
+        .login
+        .push_back(Ok(redeemed(1)));
     harness
         .controllers
         .script()
@@ -629,7 +518,7 @@ async fn durable_pending_anchors_block_login_commit() {
                 .expect_err("pending custody blocks commit"),
             expected
         );
-        assert_eq!(harness.count("start_login"), 0);
+        assert_eq!(harness.count("password_login"), 0);
         assert_eq!(harness.vault.anchor_state(), Some(state));
         assert_eq!(
             harness
@@ -648,8 +537,8 @@ async fn post_redemption_read_failure_retains_credentials_for_logout() {
     harness
         .controllers
         .script()
-        .redeem
-        .push_back(Ok(Redemption::Ready(redeemed(1))));
+        .login
+        .push_back(Ok(redeemed(1)));
     harness
         .controllers
         .script()
@@ -700,7 +589,7 @@ async fn a_held_successor_blocks_login_until_committed() {
         .vault
         .fail_profile_writes
         .store(false, Ordering::SeqCst);
-    let starts = harness.count("start_login");
+    let starts = harness.count("password_login");
     assert_eq!(
         harness
             .manager
@@ -709,7 +598,7 @@ async fn a_held_successor_blocks_login_until_committed() {
             .expect_err("held custody blocks login"),
         SessionError::CleanupUncertain
     );
-    assert_eq!(harness.count("start_login"), starts);
+    assert_eq!(harness.count("password_login"), starts);
 
     let view = harness.manager.retry_commit().await.expect("commit retry");
     let record = harness.vault.profile(anchor.profile_id).expect("record");
@@ -734,8 +623,8 @@ async fn a_different_pair_after_logout_still_conflicts() {
     harness
         .controllers
         .script()
-        .redeem
-        .push_back(Ok(Redemption::Ready(redeemed_for(9, OTHER_PRINCIPAL_ID))));
+        .login
+        .push_back(Ok(redeemed_for(9, OTHER_PRINCIPAL_ID)));
     harness.controllers.script().logout.push_back(Ok(()));
 
     // Single-profile custody keeps the retained identity: a different pair
@@ -807,4 +696,191 @@ async fn failed_held_revocation_is_preserved_for_logout_retry() {
             .any(|entry| entry.starts_with("logout:other.example:")),
         "no credential may follow an origin change"
     );
+}
+
+#[tokio::test]
+async fn registration_commits_the_owner_session_like_a_sign_in() {
+    let harness = Harness::new();
+    harness
+        .controllers
+        .script()
+        .register
+        .push_back(Ok(redeemed(1)));
+    let view = harness
+        .manager
+        .register(RegisterOwnerInput {
+            origin: ORIGIN.to_owned(),
+            display_name: DISPLAY_NAME.to_owned(),
+            email: EMAIL.to_owned(),
+            password: Zeroizing::new(PASSWORD.to_owned()),
+            label: Some("Home lab".to_owned()),
+        })
+        .await
+        .expect("registered");
+    assert_eq!(view.display_name, DISPLAY_NAME);
+    assert_eq!(view.label.as_deref(), Some("Home lab"));
+    assert_eq!(
+        harness.count("register_owner:Ada Owner:owner@example.com"),
+        1
+    );
+    assert_eq!(harness.vault.anchor_state(), Some(AnchorState::Ready));
+    assert_eq!(
+        harness.manager.restore().await.expect("restore"),
+        Some(view)
+    );
+
+    let harness = Harness::new();
+    harness
+        .controllers
+        .script()
+        .register
+        .push_back(Err(SessionError::OwnerExists.into()));
+    let failure = harness
+        .manager
+        .register(RegisterOwnerInput {
+            origin: ORIGIN.to_owned(),
+            display_name: DISPLAY_NAME.to_owned(),
+            email: EMAIL.to_owned(),
+            password: Zeroizing::new(PASSWORD.to_owned()),
+            label: None,
+        })
+        .await
+        .expect_err("registration closed");
+    assert_eq!(failure, SessionError::OwnerExists);
+    assert!(harness.vault.anchor().is_none());
+}
+
+#[tokio::test]
+async fn sign_in_failures_keep_their_details_and_leave_nothing_behind() {
+    let harness = Harness::new();
+    harness
+        .controllers
+        .script()
+        .login
+        .push_back(Err(LoginFailure {
+            attempts_remaining: Some(7),
+            request_id: Some("req-7".to_owned()),
+            ..SessionError::InvalidCredentials.into()
+        }));
+    let failure = harness
+        .manager
+        .login(login_input(ORIGIN))
+        .await
+        .expect_err("wrong password");
+    assert_eq!(failure.code, SessionError::InvalidCredentials);
+    assert_eq!(failure.attempts_remaining, Some(7));
+    assert_eq!(failure.request_id.as_deref(), Some("req-7"));
+    assert!(harness.vault.anchor().is_none());
+    assert_eq!(harness.count("write_document"), 0);
+    assert!(harness.manager.connections().is_empty());
+}
+
+#[tokio::test]
+async fn bootstrap_and_probes_answer_for_any_origin() {
+    let harness = Harness::new();
+    {
+        let mut script = harness.controllers.script();
+        script.bootstrap.push_back(Ok(false));
+        script.probe.push_back(Err(ProbeFailure::Tls));
+    }
+    assert!(
+        !harness
+            .manager
+            .bootstrap(ORIGIN)
+            .await
+            .expect("bootstrap")
+            .owner_exists
+    );
+    let probe = harness.manager.probe(OTHER_ORIGIN).await.expect("probe");
+    assert_eq!(probe.status, ProbeStatus::Unreachable);
+    assert_eq!(probe.diagnostic, Some(ProbeDiagnostic::Tls));
+    assert_eq!(harness.count("probe:other.example"), 1);
+
+    // Health follows the signed-in controller only.
+    assert_eq!(harness.manager.health().await, None);
+    harness.login_ok().await;
+    assert_eq!(
+        harness.manager.health().await.map(|view| view.status),
+        Some(ProbeStatus::Ready)
+    );
+    assert_eq!(harness.count("probe:controller.example"), 1);
+
+    harness.controllers.fail_origin();
+    assert_eq!(
+        harness
+            .manager
+            .probe("ftp://nope")
+            .await
+            .expect_err("invalid"),
+        SessionError::InvalidOrigin
+    );
+}
+
+#[tokio::test]
+async fn connections_are_most_recent_first_capped_at_ten_and_survive_sign_out() {
+    let harness = Harness::new();
+    let mut document = SessionDocument::new(None, None);
+    for index in 0..10 {
+        document.touch_connection(&format!("https://c{index}.example/"), None, index);
+    }
+    harness.metadata.set_document(document);
+
+    let view = harness.login_ok().await;
+    let connections = harness.manager.connections();
+    assert_eq!(connections.len(), 10, "the oldest falls off");
+    assert_eq!(connections[0].origin, ORIGIN);
+    assert_eq!(connections[1].origin, "https://c9.example/");
+    assert!(!connections
+        .iter()
+        .any(|connection| connection.origin == "https://c0.example/"));
+
+    // Signing out records the summary React supplied and keeps the list.
+    harness
+        .manager
+        .record_summary(
+            &view.origin,
+            ConnectionSummary {
+                nodes: 3,
+                services: 12,
+            },
+        )
+        .expect("summary");
+    harness.controllers.script().logout.push_back(Ok(()));
+    harness.manager.logout().await.expect("logout");
+    let connections = harness.manager.connections();
+    assert_eq!(connections.len(), 10);
+    assert_eq!(
+        connections[0].last_summary,
+        Some(ConnectionSummary {
+            nodes: 3,
+            services: 12
+        })
+    );
+
+    // Signing in again moves the connection to the front without duplicating it.
+    harness
+        .controllers
+        .script()
+        .login
+        .push_back(Ok(redeemed(2)));
+    harness
+        .manager
+        .login(login_input(ORIGIN))
+        .await
+        .expect("again");
+    let connections = harness.manager.connections();
+    assert_eq!(
+        connections
+            .iter()
+            .filter(|connection| connection.origin == ORIGIN)
+            .count(),
+        1
+    );
+
+    harness
+        .manager
+        .forget_connection(connections[1].id)
+        .expect("forget");
+    assert_eq!(harness.manager.connections().len(), 9);
+    assert_eq!(harness.manager.connections()[0].origin, ORIGIN);
 }

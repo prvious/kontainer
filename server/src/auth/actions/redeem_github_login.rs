@@ -6,7 +6,7 @@ use sea_orm::{
 use uuid::Uuid;
 
 use crate::auth::{
-    actions::create_session,
+    actions::{claim_bootstrap_owner, create_session},
     domain::{IssuedSession, PrincipalStatus},
     entities::{bootstrap_state, github_identity, github_login_attempt, principal},
     github::{
@@ -230,9 +230,7 @@ async fn finish_login(
                 }
                 // The singleton row serializes concurrent first logins:
                 // exactly one transaction observes the unclaimed state.
-                let bootstrap = bootstrap_state::Entity::find_by_id(1)
-                    .lock(LockType::Update)
-                    .one(transaction)
+                let bootstrap = claim_bootstrap_owner::lock_singleton(transaction)
                     .await
                     .map_err(|_| RedeemError::Persistence)?;
                 let Some(bootstrap) = bootstrap else {
@@ -269,18 +267,9 @@ async fn claim_bootstrap_owner<C>(
 where
     C: sea_orm::ConnectionTrait,
 {
-    let principal_id = Uuid::now_v7();
-    principal::ActiveModel {
-        id: Set(principal_id),
-        kind: Set("human".to_owned()),
-        status: Set(PrincipalStatus::Active.as_str().to_owned()),
-        authorization_epoch: Set(0),
-        created_at: Set(now),
-        updated_at: Set(now),
-    }
-    .insert(database)
-    .await
-    .map_err(|_| RedeemError::Persistence)?;
+    let principal_id = claim_bootstrap_owner::insert_owner_principal(database, now, None, None)
+        .await
+        .map_err(|_| RedeemError::Persistence)?;
 
     github_identity::ActiveModel {
         github_account_id: Set(account.account_id),
@@ -294,12 +283,7 @@ where
     .await
     .map_err(|_| RedeemError::Persistence)?;
 
-    let mut claimed: bootstrap_state::ActiveModel = bootstrap.clone().into();
-    claimed.owner_principal_id = Set(Some(principal_id));
-    claimed.claimed_at = Set(Some(now));
-    claimed.updated_at = Set(now);
-    claimed
-        .update(database)
+    claim_bootstrap_owner::claim(database, bootstrap, principal_id, now)
         .await
         .map_err(|_| RedeemError::Persistence)?;
 

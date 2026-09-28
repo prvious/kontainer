@@ -12,7 +12,8 @@ const session: SessionView = {
     origin: "https://controller.example/",
     clusterId: "cluster-1",
     principalId: "0a749bf5-21a9-43ba-81b4-7065cddbb30f",
-    githubLogin: "jane",
+    email: "jane@example.com",
+    displayName: "jane",
     label: "Production",
     accessExpiresAtUnixMs: 2_000_000_000_000,
 };
@@ -31,7 +32,7 @@ function TestConsumer() {
     const auth = useAuth();
     return (
         <div>
-            <span data-testid='user'>{auth.session?.githubLogin ?? "none"}</span>
+            <span data-testid='user'>{auth.session?.displayName ?? "none"}</span>
             <span data-testid='session'>{auth.session?.profileId ?? "none"}</span>
             <span data-testid='credential-keys'>
                 {Object.keys(auth)
@@ -41,9 +42,12 @@ function TestConsumer() {
             <span data-testid='origin'>{auth.session?.origin ?? "none"}</span>
             <span data-testid='issue'>{auth.issue ?? "none"}</span>
             <span data-testid='loading'>{String(auth.isLoading)}</span>
+            <span data-testid='expired'>{String(auth.expired)}</span>
             <button
                 onClick={() => {
-                    void auth.login("https://controller.example", "Production").catch(() => {});
+                    void auth
+                        .login({ origin: "https://controller.example", email: "jane@example.com", password: "correct horse battery", label: "Production" })
+                        .catch(() => {});
                 }}
             >
                 Login
@@ -69,14 +73,8 @@ function TestConsumer() {
             >
                 Retry restore
             </button>
-            <button
-                onClick={() => {
-                    void auth.cancelLogin().catch(() => {});
-                }}
-            >
-                Cancel login
-            </button>
             <button onClick={() => auth.reportInventoryCustodyError?.(session.profileId, "relogin_required")}>Report inventory relogin</button>
+            <button onClick={() => auth.reportInventoryCustodyError?.(session.profileId, "vault_unavailable")}>Report vault failure</button>
             <button onClick={() => auth.reportInventoryCustodyError?.("old-profile", "relogin_required")}>Report stale inventory error</button>
         </div>
     );
@@ -118,7 +116,12 @@ describe("AuthProvider custody", () => {
             screen.getByText("Login").click();
         });
         await waitFor(() => expect(screen.getByTestId("session")).toHaveTextContent(session.profileId));
-        expect(invoke).toHaveBeenCalledWith("session_login", { origin: "https://controller.example", label: "Production" });
+        expect(invoke).toHaveBeenCalledWith("session_login", {
+            origin: "https://controller.example",
+            email: "jane@example.com",
+            password: "correct horse battery",
+            label: "Production",
+        });
         expect(vi.mocked(invoke).mock.calls.every(([command]) => !["auth_listen", "load_profiles", "save_profile"].includes(command))).toBe(true);
         expect(screen.getByTestId("credential-keys")).toHaveTextContent("none");
     });
@@ -174,7 +177,7 @@ describe("AuthProvider custody", () => {
             screen.getByText("Logout").click();
         });
         await waitFor(() => expect(screen.getByTestId("session")).toHaveTextContent("none"));
-        expect(invoke).toHaveBeenCalledWith("session_logout", undefined);
+        expect(invoke).toHaveBeenCalledWith("session_logout", { summary: null });
     });
 
     it("keeps the held session visible when revocation fails", async () => {
@@ -215,14 +218,36 @@ describe("AuthProvider custody", () => {
         expect(screen.getByTestId("session")).toHaveTextContent("none");
     });
 
-    it("clears inventory cache and the visible session after a current-profile custody failure", async () => {
+    it("marks a rejected refresh as expired while keeping the session and the page's data", async () => {
         vi.mocked(invoke).mockImplementation(async (command: string) => (command === "session_restore" ? session : null));
         renderAuth();
         await restored();
         activeQueryClient.setQueryData(["container-inventory", session.profileId], "cached canary");
         await act(async () => screen.getByText("Report inventory relogin").click());
+        expect(screen.getByTestId("expired")).toHaveTextContent("true");
+        expect(screen.getByTestId("session")).toHaveTextContent(session.profileId);
+        expect(activeQueryClient.getQueryData(["container-inventory", session.profileId])).toBe("cached canary");
+    });
+
+    it("signing back in to the same profile clears the expiry and keeps the page's data", async () => {
+        vi.mocked(invoke).mockImplementation(async (command: string) => (command === "session_restore" || command === "session_login" ? session : null));
+        renderAuth();
+        await restored();
+        activeQueryClient.setQueryData(["container-inventory", session.profileId], "cached canary");
+        await act(async () => screen.getByText("Report inventory relogin").click());
+        await act(async () => screen.getByText("Login").click());
+        await waitFor(() => expect(screen.getByTestId("expired")).toHaveTextContent("false"));
+        expect(activeQueryClient.getQueryData(["container-inventory", session.profileId])).toBe("cached canary");
+    });
+
+    it("clears the cache and the visible session after a current-profile custody failure", async () => {
+        vi.mocked(invoke).mockImplementation(async (command: string) => (command === "session_restore" ? session : null));
+        renderAuth();
+        await restored();
+        activeQueryClient.setQueryData(["container-inventory", session.profileId], "cached canary");
+        await act(async () => screen.getByText("Report vault failure").click());
         expect(screen.getByTestId("session")).toHaveTextContent("none");
-        expect(screen.getByTestId("issue")).toHaveTextContent("relogin_required");
+        expect(screen.getByTestId("issue")).toHaveTextContent("vault_unavailable");
         expect(activeQueryClient.getQueryData(["container-inventory", session.profileId])).toBeUndefined();
     });
 
@@ -245,13 +270,39 @@ describe("AuthProvider custody", () => {
         expect(document.body.textContent).not.toContain("secret native error canary");
     });
 
-    it("calls the Rust cancellation command", async () => {
-        renderAuth();
-        await restored();
-        await act(async () => {
-            screen.getByText("Cancel login").click();
+    it("rejects a wrong password with the failure details and no session", async () => {
+        vi.mocked(invoke).mockImplementation(async (command: string) => {
+            if (command === "session_login") throw { code: "invalid_credentials", attemptsRemaining: 7, requestId: "req-1" };
+            return null;
         });
-        expect(invoke).toHaveBeenCalledWith("session_cancel_login", undefined);
+        let failure: unknown;
+        function Probe() {
+            const auth = useAuth();
+            return (
+                <button
+                    onClick={() => {
+                        auth.login({ origin: "https://controller.example", email: "jane@example.com", password: "wrong horse battery" }).catch(
+                            (error: unknown) => {
+                                failure = error;
+                            },
+                        );
+                    }}
+                >
+                    Wrong
+                </button>
+            );
+        }
+        render(
+            <AuthProvider>
+                <Probe />
+                <TestConsumer />
+            </AuthProvider>,
+        );
+        await restored();
+        await act(async () => screen.getByText("Wrong").click());
+        await waitFor(() => expect(failure).toEqual({ code: "invalid_credentials", attemptsRemaining: 7, requestId: "req-1" }));
+        expect(screen.getByTestId("issue")).toHaveTextContent("none");
+        expect(screen.getByTestId("session")).toHaveTextContent("none");
     });
 
     it("logs in, restores after a React restart, and logs out through custody", async () => {

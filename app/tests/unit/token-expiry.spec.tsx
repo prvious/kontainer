@@ -10,7 +10,8 @@ const session: SessionView = {
     origin: "https://controller.example/",
     clusterId: "cluster-id",
     principalId: "principal-id",
-    githubLogin: "jane",
+    email: "jane@example.com",
+    displayName: "jane",
     label: "Production",
     accessExpiresAtUnixMs: 2_000_000_000_000,
 };

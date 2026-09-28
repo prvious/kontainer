@@ -4,7 +4,7 @@
 use std::sync::atomic::Ordering;
 
 use crate::session::errors::SessionError;
-use crate::session::models::{AnchorState, SessionDocument, SessionLoginInput};
+use crate::session::models::{AnchorState, ConnectionSummary, SessionDocument};
 
 use super::fakes::{
     future_ms, issued, past_ms, Harness, CLUSTER, OTHER_ORIGIN, OTHER_PRINCIPAL_ID,
@@ -32,7 +32,8 @@ async fn restore_rotates_once_in_order_and_commits_the_successor() {
     assert_eq!(view.origin, anchor.origin);
     assert_eq!(view.cluster_id, anchor.cluster_id);
     assert_eq!(view.principal_id, anchor.principal_id);
-    assert_eq!(view.github_login, "owner");
+    assert_eq!(view.email, super::fakes::EMAIL);
+    assert_eq!(view.display_name, super::fakes::DISPLAY_NAME);
     assert_eq!(view.access_expires_at_unix_ms, access_expires_at_unix_ms);
 
     // Metadata is checked before the keyed credential is read; the anchor is
@@ -46,6 +47,7 @@ async fn restore_rotates_once_in_order_and_commits_the_successor() {
             "write_anchor:commit_pending",
             "refresh:controller.example:01010101",
             "write_profile:2",
+            "read_document",
             "write_document",
             "write_anchor:ready",
         ]
@@ -439,12 +441,12 @@ async fn restore_skips_the_vault_when_a_session_is_already_published() {
 }
 
 #[tokio::test]
-async fn restore_rejects_login_inputs_with_identity_fields() {
-    // Identity can only come from the controller response: the login input is
-    // strictly origin plus label.
-    let parsed: Result<SessionLoginInput, _> = serde_json::from_value(serde_json::json!({
-        "origin": "https://controller.example/",
-        "label": null,
+async fn ipc_inputs_reject_identity_fields() {
+    // Identity can only come from the controller response: the one structured
+    // IPC input (the sign-out summary) is strictly two counts.
+    let parsed: Result<ConnectionSummary, _> = serde_json::from_value(serde_json::json!({
+        "nodes": 3,
+        "services": 12,
         "principalId": "018f2e34-0000-7000-8000-0000000000aa",
     }));
     assert!(parsed.is_err());

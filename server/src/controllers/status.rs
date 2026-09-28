@@ -32,6 +32,7 @@ impl StatusResponse {
 #[utoipa::path(
     get,
     path = "/api/v1/status",
+    operation_id = "status",
     responses(
         (status = 200, description = "Controller build and liveness only; use /health/ready for readiness", body = StatusResponse),
         (status = 401, description = "Missing, malformed, expired, or revoked access credential"),
@@ -74,6 +75,10 @@ impl Modify for AccessSessionSecurity {
         super::containers::index,
         super::sessions::refresh,
         super::sessions::logout_current,
+        super::password_auth::bootstrap,
+        super::password_auth::register,
+        super::password_auth::password_login,
+        super::account::current,
         super::github_login::start,
         super::github_login::callback,
         super::github_login::redeem,
@@ -97,6 +102,14 @@ impl Modify for AccessSessionSecurity {
         super::nodes::ConfiguredNodeResponse,
         super::sessions::RefreshRequest,
         super::sessions::SessionTokenResponse,
+        super::password_auth::BootstrapResponse,
+        super::password_auth::RegisterRequest,
+        super::password_auth::PasswordLoginRequest,
+        super::password_auth::PasswordSessionResponse,
+        super::password_auth::ValidationErrorResponse,
+        super::password_auth::InvalidCredentialsResponse,
+        super::password_auth::LockedResponse,
+        super::account::AccountResponse,
         super::github_login::StartLoginRequest,
         super::github_login::StartLoginResponse,
         super::github_login::RedeemLoginRequest,
@@ -326,6 +339,48 @@ mod tests {
             ]),
             "page item exposes exactly the seven allowlisted fields"
         );
+    }
+
+    #[test]
+    fn operation_ids_are_unique() {
+        let value = serde_json::to_value(ApiDoc::openapi()).unwrap();
+        let mut seen = BTreeSet::new();
+        for (path, item) in value["paths"].as_object().unwrap() {
+            for (method, operation) in item.as_object().unwrap() {
+                let id = operation["operationId"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned();
+                assert!(
+                    seen.insert(id.clone()),
+                    "{method} {path} reuses operationId {id}"
+                );
+            }
+        }
+        assert!(seen.contains("status") && seen.contains("operation"));
+    }
+
+    #[test]
+    fn password_auth_routes_are_documented_without_a_session_requirement() {
+        let value = serde_json::to_value(ApiDoc::openapi()).unwrap();
+        for (path, method) in [
+            ("/api/v1/auth/bootstrap", "get"),
+            ("/api/v1/auth/register", "post"),
+            ("/api/v1/auth/password/login", "post"),
+        ] {
+            let route = &value["paths"][path][method];
+            assert!(route.is_object(), "{path} is documented");
+            assert_eq!(
+                route["security"],
+                serde_json::json!([{}]),
+                "{path} is anonymous"
+            );
+        }
+        let login = &value["paths"]["/api/v1/auth/password/login"]["post"]["responses"];
+        for status in ["200", "400", "401", "429", "503"] {
+            assert!(login.get(status).is_some(), "login documents {status}");
+        }
+        assert!(value["paths"]["/api/v1/auth/session"]["get"].is_object());
     }
 
     #[test]

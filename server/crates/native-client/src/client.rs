@@ -19,7 +19,7 @@ use url::{Host, Url};
 use uuid::Uuid;
 
 use crate::credentials::AccessCredential;
-use crate::error::{NativeClientError, retryable_pre_response_failure};
+use crate::error::{AccountFieldErrors, NativeClientError, Traced, retryable_pre_response_failure};
 
 /// Default TCP/TLS connect bound for each connection attempt.
 pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -111,13 +111,17 @@ pub(crate) enum RetryPolicy {
     Once,
 }
 
-/// Only inventory interprets its small, closed error envelope. Other calls
-/// continue to discard non-success bodies without reading them.
+/// Inventory and the account calls interpret their small, closed error
+/// envelopes. Other calls discard non-success bodies without reading them.
 #[derive(Clone, Copy)]
 pub(crate) enum ErrorBodyPolicy {
     Ignore,
     Inventory,
+    Account,
 }
+
+/// Longest `x-request-id` value carried into a [`Traced`] error.
+const MAX_REQUEST_ID_LEN: usize = 64;
 
 impl NativeClient {
     /// Validate configuration and build the client. No network traffic
@@ -216,18 +220,33 @@ impl NativeClient {
         cancellation: &CancellationToken,
         error_policy: ErrorBodyPolicy,
     ) -> Result<Vec<u8>, NativeClientError> {
+        self.execute_traced(request, policy, body_limit, cancellation, error_policy)
+            .await
+            .map_err(|traced| traced.error)
+    }
+
+    /// [`Self::execute_with_error_policy`], keeping the controller's request
+    /// id on failures so callers can show it next to the error code.
+    pub(crate) async fn execute_traced(
+        &self,
+        request: Request,
+        policy: RetryPolicy,
+        body_limit: usize,
+        cancellation: &CancellationToken,
+        error_policy: ErrorBodyPolicy,
+    ) -> Result<Vec<u8>, Traced<NativeClientError>> {
         // Construction already rejected unrepresentable durations; this
         // `checked_add` keeps the invariant local and total.
         let deadline = Instant::now()
             .checked_add(self.limits.request_deadline)
-            .ok_or(NativeClientError::InvalidConfiguration)?;
+            .ok_or(Traced::untraced(NativeClientError::InvalidConfiguration))?;
         tokio::select! {
             biased;
-            () = cancellation.cancelled() => Err(NativeClientError::Cancelled),
+            () = cancellation.cancelled() => Err(Traced::untraced(NativeClientError::Cancelled)),
             result = timeout_at(deadline, self.exchange(request, policy, body_limit, error_policy)) => {
                 match result {
                     Ok(result) => result,
-                    Err(_) => Err(NativeClientError::DeadlineExceeded),
+                    Err(_) => Err(Traced::untraced(NativeClientError::DeadlineExceeded)),
                 }
             }
         }
@@ -239,13 +258,13 @@ impl NativeClient {
         policy: RetryPolicy,
         body_limit: usize,
         error_policy: ErrorBodyPolicy,
-    ) -> Result<Vec<u8>, NativeClientError> {
+    ) -> Result<Vec<u8>, Traced<NativeClientError>> {
         let retry_request = match policy {
             RetryPolicy::Never => None,
             RetryPolicy::Once => Some(
                 request
                     .try_clone()
-                    .ok_or(NativeClientError::InvalidConfiguration)?,
+                    .ok_or(Traced::untraced(NativeClientError::InvalidConfiguration))?,
             ),
         };
         let response = match self.http.execute(request).await {
@@ -258,8 +277,8 @@ impl NativeClient {
                         .http
                         .execute(retry_request)
                         .await
-                        .map_err(|error| map_transport_error(&error))?,
-                    None => return Err(map_transport_error(&error)),
+                        .map_err(|error| Traced::untraced(map_transport_error(&error)))?,
+                    None => return Err(Traced::untraced(map_transport_error(&error))),
                 }
             }
         };
@@ -340,15 +359,79 @@ async fn finish(
     response: Response,
     body_limit: usize,
     error_policy: ErrorBodyPolicy,
-) -> Result<Vec<u8>, NativeClientError> {
+) -> Result<Vec<u8>, Traced<NativeClientError>> {
     if !response.status().is_success() {
         let status = response.status();
-        if let ErrorBodyPolicy::Inventory = error_policy {
-            return Err(classify_inventory_error(response).await);
-        }
-        return Err(NativeClientError::from_status(status));
+        let request_id = request_id(&response);
+        let error = match error_policy {
+            ErrorBodyPolicy::Inventory => classify_inventory_error(response).await,
+            ErrorBodyPolicy::Account => classify_account_error(response).await,
+            ErrorBodyPolicy::Ignore => NativeClientError::from_status(status),
+        };
+        return Err(Traced { error, request_id });
     }
-    bounded_body(response, body_limit).await
+    bounded_body(response, body_limit)
+        .await
+        .map_err(Traced::untraced)
+}
+
+/// The controller's `x-request-id`, kept only when it is short and plain.
+fn request_id(response: &Response) -> Option<String> {
+    let value = response.headers().get("x-request-id")?.to_str().ok()?;
+    let plain = !value.is_empty()
+        && value.len() <= MAX_REQUEST_ID_LEN
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'));
+    plain.then(|| value.to_owned())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AccountErrorBody {
+    error: String,
+    #[serde(default)]
+    attempts_remaining: Option<u32>,
+    #[serde(default)]
+    retry_after_seconds: Option<u32>,
+    #[serde(default)]
+    fields: Option<AccountFieldErrors>,
+}
+
+async fn classify_account_error(response: Response) -> NativeClientError {
+    let status = response.status();
+    let fallback = NativeClientError::from_status(status);
+    if !matches!(status.as_u16(), 400 | 401 | 409 | 429) {
+        return fallback;
+    }
+    let Ok(body) = bounded_body(response, 1024).await else {
+        return fallback;
+    };
+    let Ok(body) = serde_json::from_slice::<AccountErrorBody>(&body) else {
+        return fallback;
+    };
+    match (status.as_u16(), body.error.as_str()) {
+        (400, "validation_failed") => {
+            body.fields
+                .map_or(fallback, |fields| NativeClientError::ValidationFailed {
+                    fields,
+                })
+        }
+        (401, "invalid_credentials") => body
+            .attempts_remaining
+            .map_or(fallback, |attempts_remaining| {
+                NativeClientError::InvalidCredentials { attempts_remaining }
+            }),
+        (409, "owner_exists") => NativeClientError::OwnerExists,
+        (429, "locked") => body
+            .retry_after_seconds
+            .map_or(fallback, |retry_after_seconds| {
+                NativeClientError::LoginLocked {
+                    retry_after_seconds,
+                }
+            }),
+        _ => fallback,
+    }
 }
 
 #[derive(Deserialize)]

@@ -14,7 +14,8 @@ const session: SessionView = {
     origin: "https://controller.example/",
     clusterId: "cluster-id",
     principalId: "principal-id",
-    githubLogin: "jane",
+    email: "jane@example.com",
+    displayName: "jane",
     label: "Production",
     accessExpiresAtUnixMs: 2_000_000_000_000,
 };
@@ -33,7 +34,9 @@ const loginRoute = createRoute({
         return (
             <button
                 onClick={() => {
-                    void login(session.origin).then(() => navigate({ to: redirect || "/" }));
+                    void login({ origin: session.origin, email: session.email, password: "correct horse battery" }).then(() =>
+                        navigate({ to: redirect || "/" }),
+                    );
                 }}
             >
                 Login

@@ -7,6 +7,7 @@ pub mod health;
 pub mod operations;
 pub mod rpc;
 pub mod server;
+pub mod tasks;
 
 #[cfg(test)]
 pub mod test_support;

@@ -74,6 +74,7 @@ impl From<OperationSnapshot> for OperationResponse {
 #[utoipa::path(
     get,
     path = "/api/v1/operations/{operation_id}",
+    operation_id = "operation",
     params(("operation_id" = String, Path, description = "Durable operation UUID")),
     responses(
         (status = 200, description = "Current durable operation state", body = OperationResponse),

@@ -60,6 +60,7 @@ impl TryFrom<&str> for PrincipalStatus {
 pub enum RevocationReason {
     Logout,
     RefreshReuse,
+    PasswordReset,
 }
 
 impl RevocationReason {
@@ -68,6 +69,7 @@ impl RevocationReason {
         match self {
             Self::Logout => "logout",
             Self::RefreshReuse => "refresh_reuse",
+            Self::PasswordReset => "password_reset",
         }
     }
 }
@@ -170,6 +172,7 @@ mod tests {
     fn revocation_reasons_are_stable() {
         assert_eq!(RevocationReason::Logout.as_str(), "logout");
         assert_eq!(RevocationReason::RefreshReuse.as_str(), "refresh_reuse");
+        assert_eq!(RevocationReason::PasswordReset.as_str(), "password_reset");
     }
 
     #[test]

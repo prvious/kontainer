@@ -80,7 +80,9 @@ impl Hooks for App {
         Ok(())
     }
 
-    fn register_tasks(_tasks: &mut Tasks) {}
+    fn register_tasks(tasks: &mut Tasks) {
+        tasks.register(crate::tasks::reset_password::ResetPassword);
+    }
 
     async fn truncate(_ctx: &AppContext) -> Result<()> {
         Ok(())

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 export type Tone = "success" | "warning" | "destructive" | "neutral" | "primary";
@@ -27,8 +27,8 @@ const toneSurface: Record<Tone, string> = {
     primary: "border-primary bg-primary-soft",
 };
 
-export function StatusDot({ tone, className }: { tone: Tone; className?: string }) {
-    return <span aria-hidden className={cn("inline-block size-1.75 shrink-0 rounded-full", toneDot[tone], className)} />;
+export function StatusDot({ tone, className, ...props }: { tone: Tone } & ComponentProps<"span">) {
+    return <span aria-hidden data-tone={tone} className={cn("inline-block size-1.75 shrink-0 rounded-full", toneDot[tone], className)} {...props} />;
 }
 
 /** Badge/Status `Wbday`: dot and caps label on a soft tinted surface. */

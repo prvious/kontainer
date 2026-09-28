@@ -610,6 +610,8 @@ mod tests {
         let id = uuid::Uuid::now_v7();
         crate::auth::entities::principal::ActiveModel {
             id: Set(id),
+            email: Set(None),
+            display_name: Set(None),
             kind: Set("human".to_owned()),
             status: Set("active".to_owned()),
             authorization_epoch: Set(0),

@@ -107,6 +107,8 @@ async fn test_principal(database: &sea_orm::DatabaseConnection) -> Result<Uuid, 
     let id = Uuid::now_v7();
     principal::ActiveModel {
         id: Set(id),
+        email: Set(None),
+        display_name: Set(None),
         kind: Set("human".to_owned()),
         status: Set("active".to_owned()),
         authorization_epoch: Set(0),
@@ -161,6 +163,7 @@ async fn postgres_migration_up_down_status_and_cleanup() -> Result<(), Box<dyn E
             schema.has_table("github_login_attempts").await?,
             schema.has_table("github_identities").await?,
             schema.has_table("bootstrap_state").await?,
+            schema.has_table("password_credentials").await?,
         ];
 
         Migrator::down(&test_database.connection, None).await?;
@@ -180,6 +183,7 @@ async fn postgres_migration_up_down_status_and_cleanup() -> Result<(), Box<dyn E
             schema.has_table("github_login_attempts").await?,
             schema.has_table("github_identities").await?,
             schema.has_table("bootstrap_state").await?,
+            schema.has_table("password_credentials").await?,
         ];
 
         Ok::<_, sea_orm::DbErr>((
@@ -195,9 +199,10 @@ async fn postgres_migration_up_down_status_and_cleanup() -> Result<(), Box<dyn E
     let (pending_before, applied_after_up, pending_after_down, tables_after_up, tables_after_down) =
         evidence?;
 
-    assert_eq!(pending_before, 3);
-    assert_eq!(applied_after_up, 3);
-    assert_eq!(pending_after_down, 3);
+    let total = Migrator::migrations().len();
+    assert_eq!(pending_before, total);
+    assert_eq!(applied_after_up, total);
+    assert_eq!(pending_after_down, total);
     assert!(tables_after_up.into_iter().all(|exists| exists));
     assert!(tables_after_down.into_iter().all(|exists| !exists));
     assert!(removed);

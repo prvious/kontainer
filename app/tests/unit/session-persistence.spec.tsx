@@ -12,7 +12,8 @@ const session: SessionView = {
     origin: "https://controller.example/",
     clusterId: "cluster-id",
     principalId: "principal-id",
-    githubLogin: "jane",
+    email: "jane@example.com",
+    displayName: "jane",
     label: "Production",
     accessExpiresAtUnixMs: 2_000_000_000_000,
 };
@@ -36,7 +37,7 @@ function TestConsumer() {
             </span>
             <button
                 onClick={() => {
-                    void login("https://controller.example/").catch(() => {});
+                    void login({ origin: "https://controller.example/", email: "jane@example.com", password: "correct horse battery" }).catch(() => {});
                 }}
             >
                 Login
@@ -92,10 +93,17 @@ describe("Session Persistence", () => {
         expect(screen.getByTestId("query-cache").textContent).not.toContain("native-secret-canary");
     });
 
-    it("sends only origin and label on login", async () => {
+    it("sends the origin, email, password, and label on login", async () => {
         renderWithProvider();
         await userEvent.setup().click(screen.getByRole("button", { name: "Login" }));
-        await waitFor(() => expect(invoke).toHaveBeenCalledWith("session_login", { origin: "https://controller.example/", label: null }));
+        await waitFor(() =>
+            expect(invoke).toHaveBeenCalledWith("session_login", {
+                origin: "https://controller.example/",
+                email: "jane@example.com",
+                password: "correct horse battery",
+                label: null,
+            }),
+        );
     });
 
     it("publishes the native local profile UUID after login", async () => {
