@@ -139,6 +139,14 @@ pub trait ManagerEngine: Send + Sync {
     ) -> Result<SwarmStatus, ManagerError> {
         Err(ManagerError::Unavailable)
     }
+
+    async fn remove_service(
+        &self,
+        _service_id: &str,
+        _cancellation: &CancellationToken,
+    ) -> Result<(), ManagerError> {
+        Err(ManagerError::Unavailable)
+    }
 }
 
 /// The manager engine routes and executors use, when the configured host is a manager.
@@ -242,6 +250,14 @@ impl ManagerEngine for DockerManagerEngine {
         cancellation: &CancellationToken,
     ) -> Result<SwarmStatus, ManagerError> {
         Ok(self.0.swarm_status(cancellation).await?)
+    }
+
+    async fn remove_service(
+        &self,
+        service_id: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<(), ManagerError> {
+        Ok(self.0.remove_service(service_id, cancellation).await?)
     }
 }
 

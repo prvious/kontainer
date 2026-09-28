@@ -13,6 +13,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
 import { Route as AuthenticatedVolumesIndexRouteImport } from './routes/_authenticated/volumes/index'
+import { Route as AuthenticatedStacksIndexRouteImport } from './routes/_authenticated/stacks/index'
 import { Route as AuthenticatedSettingsIndexRouteImport } from './routes/_authenticated/settings/index'
 import { Route as AuthenticatedServicesIndexRouteImport } from './routes/_authenticated/services/index'
 import { Route as AuthenticatedNetworksIndexRouteImport } from './routes/_authenticated/networks/index'
@@ -37,6 +38,12 @@ const AuthenticatedVolumesIndexRoute =
   AuthenticatedVolumesIndexRouteImport.update({
     id: '/volumes/',
     path: '/volumes/',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const AuthenticatedStacksIndexRoute =
+  AuthenticatedStacksIndexRouteImport.update({
+    id: '/stacks/',
+    path: '/stacks/',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
 const AuthenticatedSettingsIndexRoute =
@@ -78,6 +85,7 @@ export interface FileRoutesByFullPath {
   '/networks/': typeof AuthenticatedNetworksIndexRoute
   '/services/': typeof AuthenticatedServicesIndexRoute
   '/settings/': typeof AuthenticatedSettingsIndexRoute
+  '/stacks/': typeof AuthenticatedStacksIndexRoute
   '/volumes/': typeof AuthenticatedVolumesIndexRoute
 }
 export interface FileRoutesByTo {
@@ -88,6 +96,7 @@ export interface FileRoutesByTo {
   '/networks': typeof AuthenticatedNetworksIndexRoute
   '/services': typeof AuthenticatedServicesIndexRoute
   '/settings': typeof AuthenticatedSettingsIndexRoute
+  '/stacks': typeof AuthenticatedStacksIndexRoute
   '/volumes': typeof AuthenticatedVolumesIndexRoute
 }
 export interface FileRoutesById {
@@ -100,6 +109,7 @@ export interface FileRoutesById {
   '/_authenticated/networks/': typeof AuthenticatedNetworksIndexRoute
   '/_authenticated/services/': typeof AuthenticatedServicesIndexRoute
   '/_authenticated/settings/': typeof AuthenticatedSettingsIndexRoute
+  '/_authenticated/stacks/': typeof AuthenticatedStacksIndexRoute
   '/_authenticated/volumes/': typeof AuthenticatedVolumesIndexRoute
 }
 export interface FileRouteTypes {
@@ -112,6 +122,7 @@ export interface FileRouteTypes {
     | '/networks/'
     | '/services/'
     | '/settings/'
+    | '/stacks/'
     | '/volumes/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -122,6 +133,7 @@ export interface FileRouteTypes {
     | '/networks'
     | '/services'
     | '/settings'
+    | '/stacks'
     | '/volumes'
   id:
     | '__root__'
@@ -133,6 +145,7 @@ export interface FileRouteTypes {
     | '/_authenticated/networks/'
     | '/_authenticated/services/'
     | '/_authenticated/settings/'
+    | '/_authenticated/stacks/'
     | '/_authenticated/volumes/'
   fileRoutesById: FileRoutesById
 }
@@ -169,6 +182,13 @@ declare module '@tanstack/react-router' {
       path: '/volumes'
       fullPath: '/volumes/'
       preLoaderRoute: typeof AuthenticatedVolumesIndexRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/stacks/': {
+      id: '/_authenticated/stacks/'
+      path: '/stacks'
+      fullPath: '/stacks/'
+      preLoaderRoute: typeof AuthenticatedStacksIndexRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/settings/': {
@@ -216,6 +236,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedNetworksIndexRoute: typeof AuthenticatedNetworksIndexRoute
   AuthenticatedServicesIndexRoute: typeof AuthenticatedServicesIndexRoute
   AuthenticatedSettingsIndexRoute: typeof AuthenticatedSettingsIndexRoute
+  AuthenticatedStacksIndexRoute: typeof AuthenticatedStacksIndexRoute
   AuthenticatedVolumesIndexRoute: typeof AuthenticatedVolumesIndexRoute
 }
 
@@ -226,6 +247,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedNetworksIndexRoute: AuthenticatedNetworksIndexRoute,
   AuthenticatedServicesIndexRoute: AuthenticatedServicesIndexRoute,
   AuthenticatedSettingsIndexRoute: AuthenticatedSettingsIndexRoute,
+  AuthenticatedStacksIndexRoute: AuthenticatedStacksIndexRoute,
   AuthenticatedVolumesIndexRoute: AuthenticatedVolumesIndexRoute,
 }
 

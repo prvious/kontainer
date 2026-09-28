@@ -172,7 +172,8 @@ pub fn production_registry() -> ExecutorRegistry {
                 crate::services::operations::converge::ServiceConvergeExecutor::new(
                     crate::services::domain::ServiceAction::Rollback,
                 ),
-            ),
+            )
+            .with(crate::stacks::operations::remove::RemoveStackExecutor::default()),
         ExecutorRegistry::with,
     )
 }

@@ -281,6 +281,11 @@ async fn dev_cluster_services_scale_with_versions_on_the_manager() {
         .find(|service| service.name == "monitoring_collector")
         .unwrap();
     assert_eq!(collector.mode, ServiceMode::Global);
+    let redis = services
+        .iter()
+        .find(|service| service.name == "toolbox_redis")
+        .unwrap();
+    assert_eq!(redis.volumes, vec!["toolbox_redis-data".to_owned()]);
     assert_eq!(collector.stack.as_deref(), Some("monitoring"));
     let alpine = services
         .iter()

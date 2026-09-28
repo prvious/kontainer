@@ -776,6 +776,26 @@ impl ContainerEngine for LocalDockerEngine {
         .await
     }
 
+    async fn remove_service(
+        &self,
+        service_id: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<(), EngineError> {
+        if !is_valid_swarm_id(service_id) {
+            return Err(EngineError::new(
+                EngineErrorKind::InvalidInput,
+                EngineOperation::UpdateService,
+            ));
+        }
+        let client = self.negotiate(cancellation).await?;
+        self.execute(
+            EngineOperation::UpdateService,
+            cancellation,
+            client.delete_service(service_id),
+        )
+        .await
+    }
+
     async fn swarm_status(
         &self,
         cancellation: &CancellationToken,
@@ -1243,12 +1263,27 @@ fn map_service(service: bollard::models::Service) -> Option<ServiceSummary> {
         },
         None => ServiceMode::Replicated { replicas: 1 },
     };
-    let image = spec
+    let container = spec
         .task_template
         .as_ref()
-        .and_then(|template| template.container_spec.as_ref())
+        .and_then(|template| template.container_spec.as_ref());
+    let image = container
         .and_then(|container| container.image.clone())
         .unwrap_or_default();
+    let mut volumes: Vec<String> = container
+        .and_then(|container| container.mounts.clone())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|mount| {
+            mount
+                .typ
+                .as_ref()
+                .is_some_and(|typ| typ.to_string() == "volume")
+        })
+        .filter_map(|mount| mount.source.filter(|source| is_valid_volume_name(source)))
+        .collect();
+    volumes.sort();
+    volumes.dedup();
     let mut ports: Vec<String> = service
         .endpoint
         .and_then(|endpoint| endpoint.ports)
@@ -1288,6 +1323,7 @@ fn map_service(service: bollard::models::Service) -> Option<ServiceSummary> {
             .message
             .map(|message| bounded_message(&message))
             .filter(|message| !message.is_empty()),
+        volumes,
     })
 }
 

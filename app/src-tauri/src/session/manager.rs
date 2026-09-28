@@ -55,6 +55,10 @@ pub(crate) use networks::{AttachedContainerView, CreateNetworkInput, NetworkList
 mod services;
 pub(crate) use services::{ServiceDetailView, ServiceListView};
 
+#[path = "manager_stacks.rs"]
+mod stacks;
+pub(crate) use stacks::{StackListView, StackPlanView};
+
 #[path = "manager_volumes.rs"]
 mod volumes;
 pub(crate) use volumes::{CreateVolumeInput, VolumeListView};

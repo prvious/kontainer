@@ -1,0 +1,313 @@
+{
+  "paths": {
+    "/api/v1/stacks": {
+      "get": {
+        "operationId": "list_stacks",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StackListResponse"
+                }
+              }
+            },
+            "description": "Stacks grouped from service labels, with summed task counts and container figures"
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuorumUnavailableResponse"
+                }
+              }
+            },
+            "description": "`quorum_unavailable` or `not_a_manager`"
+          }
+        },
+        "security": [
+          {
+            "access_session": []
+          }
+        ],
+        "tags": [
+          "super::stacks"
+        ]
+      }
+    },
+    "/api/v1/stacks/{name}": {
+      "delete": {
+        "operationId": "remove_stack",
+        "parameters": [
+          {
+            "description": "Stack name",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "16–64 printable ASCII characters, one per user gesture",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmittedResponse"
+                }
+              }
+            },
+            "description": "Admitted as one `stack.remove` operation: services, then their networks; volumes are kept"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FieldErrorResponse"
+                }
+              }
+            },
+            "description": "`idempotency_key_required` or `invalid_request`"
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "No service carries this stack name"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "`idempotency_conflict`"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuorumUnavailableResponse"
+                }
+              }
+            },
+            "description": "`quorum_unavailable` (nothing admitted) or `not_a_manager`"
+          }
+        },
+        "security": [
+          {
+            "access_session": []
+          }
+        ],
+        "tags": [
+          "super::stacks"
+        ]
+      }
+    },
+    "/api/v1/stacks/{name}/plan": {
+      "get": {
+        "operationId": "stack_removal_plan",
+        "parameters": [
+          {
+            "description": "Stack name",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StackPlanResponse"
+                }
+              }
+            },
+            "description": "What removing the stack takes away and what it retains"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FieldErrorResponse"
+                }
+              }
+            },
+            "description": "`invalid_request`"
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "No service carries this stack name"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QuorumUnavailableResponse"
+                }
+              }
+            },
+            "description": "`quorum_unavailable` or `not_a_manager`"
+          }
+        },
+        "security": [
+          {
+            "access_session": []
+          }
+        ],
+        "tags": [
+          "super::stacks"
+        ]
+      }
+    }
+  },
+  "schemas": {
+    "StackListResponse": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/components/schemas/StackResponse"
+          },
+          "type": "array"
+        },
+        "snapshotAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "items",
+        "snapshotAt"
+      ],
+      "type": "object"
+    },
+    "StackPlanResponse": {
+      "properties": {
+        "networks": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "services": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "volumesRetained": {
+          "description": "Named volumes the services mount; removal leaves them.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "services",
+        "networks",
+        "volumesRetained"
+      ],
+      "type": "object"
+    },
+    "StackResponse": {
+      "properties": {
+        "cpuPercent": {
+          "description": "Summed from the stack's running containers' last samples.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "desiredContainers": {
+          "format": "int64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "lastDeployed": {
+          "description": "The newest service update.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "memoryBytes": {
+          "format": "int64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "runningContainers": {
+          "description": "Tasks running and desired, summed over the stack's services.",
+          "format": "int64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "services": {
+          "format": "int32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "status": {
+          "description": "`running` (every service converged), `partial`, or `stopped` (no task runs).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "status",
+        "services",
+        "runningContainers",
+        "desiredContainers"
+      ],
+      "type": "object"
+    }
+  },
+  "securitySchemes": {
+    "access_session": {
+      "bearerFormat": "opaque",
+      "scheme": "bearer",
+      "type": "http"
+    }
+  }
+}

@@ -11,6 +11,7 @@ pub mod password_auth;
 pub mod services;
 pub mod sessions;
 pub mod settings;
+pub mod stacks;
 pub mod status;
 pub mod volumes;
 
@@ -45,5 +46,6 @@ pub fn protected_application_routes() -> Vec<Routes> {
         volumes::routes(),
         networks::routes(),
         services::routes(),
+        stacks::routes(),
     ]
 }

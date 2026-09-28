@@ -14,6 +14,7 @@ mod password_auth;
 mod reads;
 mod retry;
 mod services;
+mod stacks;
 mod support;
 mod transport;
 mod volumes;

@@ -315,6 +315,18 @@ pub trait ContainerEngine: Send + Sync {
         ))
     }
 
+    /// Remove one service; its tasks stop and go away after.
+    async fn remove_service(
+        &self,
+        _service_id: &str,
+        _cancellation: &CancellationToken,
+    ) -> Result<(), EngineError> {
+        Err(EngineError::new(
+            EngineErrorKind::UnsupportedCapability,
+            EngineOperation::UpdateService,
+        ))
+    }
+
     /// Whether this daemon is a manager that can reach the Swarm's majority.
     async fn swarm_status(
         &self,

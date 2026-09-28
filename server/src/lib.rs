@@ -14,6 +14,7 @@ pub mod rpc;
 pub mod server;
 pub mod services;
 pub mod settings;
+pub mod stacks;
 pub mod swarm;
 pub mod tasks;
 pub mod volumes;

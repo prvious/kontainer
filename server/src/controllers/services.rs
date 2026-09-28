@@ -163,7 +163,7 @@ fn quorum_unavailable() -> Response {
     response
 }
 
-fn manager_read_error(error: ManagerError) -> Response {
+pub(super) fn manager_read_error(error: ManagerError) -> Response {
     match error {
         ManagerError::Unavailable | ManagerError::QuorumUnavailable | ManagerError::Cancelled => {
             quorum_unavailable()
@@ -172,7 +172,7 @@ fn manager_read_error(error: ManagerError) -> Response {
     }
 }
 
-fn manager(context: &AppContext) -> Result<SharedManagerEngine, Box<Response>> {
+pub(super) fn manager(context: &AppContext) -> Result<SharedManagerEngine, Box<Response>> {
     context
         .shared_store
         .get::<SharedManagerEngine>()
@@ -184,7 +184,7 @@ fn manager(context: &AppContext) -> Result<SharedManagerEngine, Box<Response>> {
         })
 }
 
-fn shutdown_token(context: &AppContext) -> CancellationToken {
+pub(super) fn shutdown_token(context: &AppContext) -> CancellationToken {
     context
         .shared_store
         .get::<crate::server::ForceCancellation>()

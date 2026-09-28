@@ -11,5 +11,6 @@ mod networks;
 mod operations;
 mod restore;
 mod services;
+mod stacks;
 mod storage;
 mod volumes;

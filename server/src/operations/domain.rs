@@ -154,6 +154,8 @@ impl OperationKind {
             Self::ServiceScale | Self::ServiceRestart | Self::ServiceRollback => {
                 Duration::from_secs(90)
             }
+            // Up to 60 s for the services' tasks to go, then up to 60 s for the networks.
+            Self::StackRemove => Duration::from_secs(150),
             _ => Duration::from_secs(60),
         }
     }

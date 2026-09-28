@@ -58,9 +58,18 @@ export function operationTrack(view: OperationView | undefined): number | null {
     return counts ? counts.done / counts.total : null;
 }
 
+/** `2 services and 1 network removed · 1 volume kept` from a stack removal's detail. */
+function removalText(view: OperationView): string | null {
+    const progress = view.progress;
+    if (!progress || typeof progress.servicesRemoved !== "number" || typeof progress.networksRemoved !== "number") return null;
+    const plural = (count: number, one: string) => `${count} ${one}${count === 1 ? "" : "s"}`;
+    const kept = Array.isArray(progress.volumesRetained) ? progress.volumesRetained.length : 0;
+    return `${plural(progress.servicesRemoved, "service")} and ${plural(progress.networksRemoved, "network")} removed · ${plural(kept, "volume")} kept`;
+}
+
 /** Success toast description: counts and duration when known. */
 export function operationSummary(view: OperationView): string | undefined {
     const elapsed = view.startedAt && view.finishedAt ? shortDuration((Date.parse(view.finishedAt) - Date.parse(view.startedAt)) / 1000) : null;
-    const parts = [countsText(view), elapsed ? `finished in ${elapsed}` : null].filter(Boolean);
+    const parts = [removalText(view) ?? countsText(view), elapsed ? `finished in ${elapsed}` : null].filter(Boolean);
     return parts.length > 0 ? parts.join(" · ") : undefined;
 }

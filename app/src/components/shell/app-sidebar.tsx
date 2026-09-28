@@ -42,7 +42,7 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
     {
         label: "// ORCHESTRATION",
         items: [
-            { label: "Stacks", icon: FileStack },
+            { label: "Stacks", icon: FileStack, to: "/stacks" },
             { label: "Nodes", icon: Server, badge: (badges) => (badges.nodesDown ? `${badges.nodesDown} DOWN` : null) },
             { label: "Services", icon: Activity, to: "/services" },
         ],

@@ -18,6 +18,7 @@ use kontainer_native_client::{
 };
 use kontainer_native_client::{AttachedContainer, NetworkId, NetworkList, NetworkSpec};
 use kontainer_native_client::{ServiceAction, ServiceDetail, ServiceId, ServiceList};
+use kontainer_native_client::{StackList, StackName, StackRemovalPlan};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -245,6 +246,27 @@ pub(crate) trait Controller: Send + Sync + 'static {
         service_id: &'a ServiceId,
         action: ServiceAction,
         version: u64,
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>>;
+
+    fn list_stacks<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<StackList, NativeClientError>>;
+
+    fn stack_removal_plan<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        name: &'a StackName,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<StackRemovalPlan, NativeClientError>>;
+
+    fn remove_stack<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        name: &'a StackName,
         key: &'a IdempotencyKey,
         cancellation: &'a CancellationToken,
     ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>>;
@@ -654,6 +676,33 @@ impl Controller for NativeController {
             self.client
                 .service_action(access, service_id, action, version, key, cancellation),
         )
+    }
+
+    fn list_stacks<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<StackList, NativeClientError>> {
+        Box::pin(self.client.list_stacks(access, cancellation))
+    }
+
+    fn stack_removal_plan<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        name: &'a StackName,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<StackRemovalPlan, NativeClientError>> {
+        Box::pin(self.client.stack_removal_plan(access, name, cancellation))
+    }
+
+    fn remove_stack<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        name: &'a StackName,
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
+        Box::pin(self.client.remove_stack(access, name, key, cancellation))
     }
 
     fn get_operation<'a>(

@@ -7,4 +7,5 @@ pub mod operations;
 pub mod services;
 pub mod session;
 pub mod settings;
+pub mod stacks;
 pub mod volumes;

@@ -34,6 +34,8 @@ pub struct ServiceSummary {
     /// `updating`, `paused`, `completed`, `rollback_started`, … when an update ran.
     pub update_state: Option<String>,
     pub update_message: Option<String>,
+    /// Named volumes its tasks mount (`type: volume` sources).
+    pub volumes: Vec<String>,
 }
 
 /// One task of a service.

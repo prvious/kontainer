@@ -15,6 +15,7 @@ use kontainer_native_client::{
     AttachedContainer, NetworkId, NetworkList, NetworkPlacement, NetworkSpec,
 };
 use kontainer_native_client::{ServiceAction, ServiceDetail, ServiceId, ServiceList};
+use kontainer_native_client::{StackList, StackName, StackRemovalPlan};
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -387,6 +388,8 @@ pub(crate) struct Script {
     pub(crate) attached: VecDeque<Result<Vec<AttachedContainer>, NativeClientError>>,
     pub(crate) services: VecDeque<Result<ServiceList, NativeClientError>>,
     pub(crate) service_details: VecDeque<Result<ServiceDetail, NativeClientError>>,
+    pub(crate) stacks: VecDeque<Result<StackList, NativeClientError>>,
+    pub(crate) plans: VecDeque<Result<StackRemovalPlan, NativeClientError>>,
 }
 
 pub(crate) struct FakeControllerFactory {
@@ -955,6 +958,72 @@ impl Controller for FakeController {
                 "service_action:{}:{}:{action}:{version}:{}",
                 public_tag(access.expose()),
                 service_id.as_str(),
+                key.as_str()
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .admissions
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn list_stacks<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<StackList, NativeClientError>> {
+        record(&self.log, format!("stacks:{}", public_tag(access.expose())));
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .stacks
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn stack_removal_plan<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        name: &'a StackName,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<StackRemovalPlan, NativeClientError>> {
+        record(
+            &self.log,
+            format!(
+                "stack_plan:{}:{}",
+                public_tag(access.expose()),
+                name.as_str()
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .plans
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn remove_stack<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        name: &'a StackName,
+        key: &'a IdempotencyKey,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
+        record(
+            &self.log,
+            format!(
+                "remove_stack:{}:{}:{}",
+                public_tag(access.expose()),
+                name.as_str(),
                 key.as_str()
             ),
         );

@@ -1,0 +1,47 @@
+{
+    "commands": [
+        ["stacks", "list_stacks"],
+        ["stacks", "get_stack_removal_plan"],
+        ["stacks", "remove_stack"]
+    ],
+    "stackList": {
+        "items": [
+            {
+                "name": "monitoring",
+                "status": "running",
+                "services": 2,
+                "runningContainers": 4,
+                "desiredContainers": 4,
+                "cpuPercent": 1.25,
+                "memoryBytes": 41943040,
+                "lastDeployed": "2026-09-27T10:00:00.000Z"
+            },
+            {
+                "name": "toolbox",
+                "status": "partial",
+                "services": 3,
+                "runningContainers": 4,
+                "desiredContainers": 5,
+                "cpuPercent": 0.5,
+                "memoryBytes": 20971520,
+                "lastDeployed": "2026-09-28T11:00:00.000Z"
+            },
+            {
+                "name": "idle",
+                "status": "stopped",
+                "services": 1,
+                "runningContainers": 0,
+                "desiredContainers": 1,
+                "cpuPercent": null,
+                "memoryBytes": null,
+                "lastDeployed": null
+            }
+        ],
+        "snapshotAt": "2026-09-28T12:05:00.000Z"
+    },
+    "plan": {
+        "services": ["toolbox_alpine", "toolbox_nginx", "toolbox_redis"],
+        "networks": ["toolbox_kontainer"],
+        "volumesRetained": ["toolbox_redis-data"]
+    }
+}
