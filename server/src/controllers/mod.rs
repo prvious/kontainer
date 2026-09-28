@@ -1,6 +1,7 @@
 pub mod containers;
 pub mod github_login;
 pub mod health;
+pub mod nodes;
 pub mod operations;
 pub mod sessions;
 pub mod status;
@@ -21,5 +22,10 @@ pub fn auth_lifecycle_routes() -> Vec<Routes> {
 /// [`crate::auth::domain::PrincipalContext`] so a miscomposed route fails
 /// closed instead of serving anonymously.
 pub fn protected_application_routes() -> Vec<Routes> {
-    vec![status::routes(), operations::routes(), containers::routes()]
+    vec![
+        status::routes(),
+        operations::routes(),
+        nodes::routes(),
+        containers::routes(),
+    ]
 }

@@ -58,6 +58,12 @@ pub enum NativeClientError {
     /// The controller or one of its dependencies is unavailable (`503`).
     #[error("controller is not available")]
     ServiceUnavailable,
+    /// The configured node agent is unavailable (`503 agent_unavailable`).
+    #[error("node agent is unavailable")]
+    AgentUnavailable,
+    /// The configured node agent exceeded its deadline (`504 agent_timeout`).
+    #[error("node agent timed out")]
+    AgentTimeout,
     /// A controller dependency exceeded its deadline (`504`).
     #[error("controller dependency timed out")]
     GatewayTimeout,

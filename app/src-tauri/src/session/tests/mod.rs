@@ -2,6 +2,7 @@
 //! closed IPC contract.
 
 pub(crate) mod fakes;
+mod inventory;
 mod ipc;
 mod login;
 mod logout;

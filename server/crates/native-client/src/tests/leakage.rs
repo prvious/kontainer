@@ -85,6 +85,8 @@ fn client_errors_are_credential_free_by_construction() {
         NativeClientError::Conflict,
         NativeClientError::ProviderUnavailable,
         NativeClientError::ServiceUnavailable,
+        NativeClientError::AgentUnavailable,
+        NativeClientError::AgentTimeout,
         NativeClientError::GatewayTimeout,
         NativeClientError::UnexpectedStatus { status: 503 },
     ];

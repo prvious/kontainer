@@ -37,6 +37,10 @@ use super::models::{
 };
 use super::vault::CredentialVault;
 
+#[path = "manager_inventory.rs"]
+mod inventory;
+pub(crate) use inventory::{ContainerPageView, InventoryError};
+
 /// Poll interval between redemption attempts while the browser step is open.
 const REDEEM_POLL_INTERVAL: Duration = Duration::from_secs(1);
 /// Local ceiling for one login attempt, independent of the controller clock.

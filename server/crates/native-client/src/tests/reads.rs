@@ -43,6 +43,115 @@ fn node() -> NodeId {
     NodeId::parse("node-1").unwrap()
 }
 
+#[tokio::test]
+async fn configured_node_discovery_is_strict_and_authenticated() {
+    let server = TestServer::plain(vec![
+        respond(200, r#"{"nodeId":"node-1"}"#),
+        respond(200, r#"{"nodeId":null}"#),
+        respond(401, r#"{"error":"unauthorized"}"#),
+    ])
+    .await;
+    let client = plain_client(&server);
+    assert_eq!(
+        client
+            .discover_node(&access(), &CancellationToken::new())
+            .await
+            .unwrap(),
+        Some(node())
+    );
+    assert_eq!(
+        client
+            .discover_node(&access(), &CancellationToken::new())
+            .await
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        client
+            .discover_node(&access(), &CancellationToken::new())
+            .await
+            .err(),
+        Some(NativeClientError::Unauthorized)
+    );
+    assert_eq!(server.request_count(), 3);
+    for request in server.requests() {
+        assert_eq!(request.method, "GET");
+        assert_eq!(request.target, "/api/v1/nodes/configured");
+        assert!(
+            request
+                .header("authorization")
+                .unwrap()
+                .starts_with("Bearer ")
+        );
+        assert!(!request.target.contains(ACCESS_CANARY));
+    }
+
+    for body in [
+        r#"{"nodeId":"node-1","secret":"canary"}"#,
+        r#"{"nodeId":"../bad"}"#,
+        r#"{}"#,
+    ] {
+        let server = TestServer::plain(vec![respond(200, body)]).await;
+        assert_eq!(
+            plain_client(&server)
+                .discover_node(&access(), &CancellationToken::new())
+                .await
+                .err(),
+            Some(NativeClientError::InvalidResponse)
+        );
+    }
+}
+
+#[tokio::test]
+async fn inventory_error_envelopes_distinguish_agent_from_controller_without_leaking_body() {
+    for (status, body, expected) in [
+        (
+            400,
+            r#"{"error":"invalid_pagination"}"#,
+            NativeClientError::InvalidPagination,
+        ),
+        (
+            503,
+            r#"{"error":"agent_unavailable"}"#,
+            NativeClientError::AgentUnavailable,
+        ),
+        (
+            503,
+            r#"{"error":"unavailable"}"#,
+            NativeClientError::ServiceUnavailable,
+        ),
+        (
+            504,
+            r#"{"error":"agent_timeout"}"#,
+            NativeClientError::AgentTimeout,
+        ),
+        (
+            504,
+            r#"{"error":"proxy_canary"}"#,
+            NativeClientError::GatewayTimeout,
+        ),
+        (
+            503,
+            r#"{"error":"agent_unavailable","identity":"secret-canary"}"#,
+            NativeClientError::ServiceUnavailable,
+        ),
+    ] {
+        let server = TestServer::plain(vec![respond(status, body)]).await;
+        let error = plain_client(&server)
+            .list_containers(
+                &access(),
+                &node(),
+                &ContainerPageRequest::default(),
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error, expected);
+        assert!(!format!("{error:?} {error}").contains("canary"));
+        assert_eq!(server.request_count(), 1);
+    }
+}
+
 #[test]
 fn node_ids_mirror_the_controller_identity_rules() {
     for valid in ["node-1", "node_1", "a.b-c", "NODE", &"a".repeat(128)] {

@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
 import { AuthProvider } from "@/contexts/auth-context";
 import { useAuth } from "@/hooks/use-auth";
 import type { SessionView } from "@/types/session";
@@ -14,6 +16,16 @@ const session: SessionView = {
     label: "Production",
     accessExpiresAtUnixMs: 2_000_000_000_000,
 };
+
+let activeQueryClient: QueryClient;
+
+function CaptureQueryClient() {
+    const queryClient = useQueryClient();
+    useEffect(() => {
+        activeQueryClient = queryClient;
+    }, [queryClient]);
+    return null;
+}
 
 function TestConsumer() {
     const auth = useAuth();
@@ -62,6 +74,8 @@ function TestConsumer() {
             >
                 Cancel login
             </button>
+            <button onClick={() => auth.reportInventoryCustodyError?.(session.profileId, "relogin_required")}>Report inventory relogin</button>
+            <button onClick={() => auth.reportInventoryCustodyError?.("old-profile", "relogin_required")}>Report stale inventory error</button>
         </div>
     );
 }
@@ -69,6 +83,7 @@ function TestConsumer() {
 function renderAuth() {
     return render(
         <AuthProvider>
+            <CaptureQueryClient />
             <TestConsumer />
         </AuthProvider>,
     );
@@ -197,6 +212,28 @@ describe("AuthProvider custody", () => {
         await restored();
         expect(screen.getByTestId("issue")).toHaveTextContent("relogin_required");
         expect(screen.getByTestId("session")).toHaveTextContent("none");
+    });
+
+    it("clears inventory cache and the visible session after a current-profile custody failure", async () => {
+        vi.mocked(invoke).mockImplementation(async (command: string) => (command === "session_restore" ? session : null));
+        renderAuth();
+        await restored();
+        activeQueryClient.setQueryData(["container-inventory", session.profileId], "cached canary");
+        await act(async () => screen.getByText("Report inventory relogin").click());
+        expect(screen.getByTestId("session")).toHaveTextContent("none");
+        expect(screen.getByTestId("issue")).toHaveTextContent("relogin_required");
+        expect(activeQueryClient.getQueryData(["container-inventory", session.profileId])).toBeUndefined();
+    });
+
+    it("ignores a late custody error from a replaced profile", async () => {
+        vi.mocked(invoke).mockImplementation(async (command: string) => (command === "session_restore" ? session : null));
+        renderAuth();
+        await restored();
+        activeQueryClient.setQueryData(["container-inventory", session.profileId], "cached canary");
+        await act(async () => screen.getByText("Report stale inventory error").click());
+        expect(screen.getByTestId("session")).toHaveTextContent(session.profileId);
+        expect(screen.getByTestId("issue")).toHaveTextContent("none");
+        expect(activeQueryClient.getQueryData(["container-inventory", session.profileId])).toBe("cached canary");
     });
 
     it("maps unknown native errors to a closed code without showing raw text", async () => {

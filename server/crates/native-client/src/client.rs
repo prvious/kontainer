@@ -12,7 +12,7 @@
 use std::time::Duration;
 
 use reqwest::{Client, Method, Request, Response, header, redirect, retry};
-use serde::de::DeserializeOwned;
+use serde::{Deserialize, de::DeserializeOwned};
 use tokio::time::{Instant, timeout_at};
 use tokio_util::sync::CancellationToken;
 use url::{Host, Url};
@@ -111,6 +111,14 @@ pub(crate) enum RetryPolicy {
     Once,
 }
 
+/// Only inventory interprets its small, closed error envelope. Other calls
+/// continue to discard non-success bodies without reading them.
+#[derive(Clone, Copy)]
+pub(crate) enum ErrorBodyPolicy {
+    Ignore,
+    Inventory,
+}
+
 impl NativeClient {
     /// Validate configuration and build the client. No network traffic
     /// occurs, and an unreachable controller does not fail construction.
@@ -190,6 +198,24 @@ impl NativeClient {
         body_limit: usize,
         cancellation: &CancellationToken,
     ) -> Result<Vec<u8>, NativeClientError> {
+        self.execute_with_error_policy(
+            request,
+            policy,
+            body_limit,
+            cancellation,
+            ErrorBodyPolicy::Ignore,
+        )
+        .await
+    }
+
+    pub(crate) async fn execute_with_error_policy(
+        &self,
+        request: Request,
+        policy: RetryPolicy,
+        body_limit: usize,
+        cancellation: &CancellationToken,
+        error_policy: ErrorBodyPolicy,
+    ) -> Result<Vec<u8>, NativeClientError> {
         // Construction already rejected unrepresentable durations; this
         // `checked_add` keeps the invariant local and total.
         let deadline = Instant::now()
@@ -198,7 +224,7 @@ impl NativeClient {
         tokio::select! {
             biased;
             () = cancellation.cancelled() => Err(NativeClientError::Cancelled),
-            result = timeout_at(deadline, self.exchange(request, policy, body_limit)) => {
+            result = timeout_at(deadline, self.exchange(request, policy, body_limit, error_policy)) => {
                 match result {
                     Ok(result) => result,
                     Err(_) => Err(NativeClientError::DeadlineExceeded),
@@ -212,6 +238,7 @@ impl NativeClient {
         request: Request,
         policy: RetryPolicy,
         body_limit: usize,
+        error_policy: ErrorBodyPolicy,
     ) -> Result<Vec<u8>, NativeClientError> {
         let retry_request = match policy {
             RetryPolicy::Never => None,
@@ -236,7 +263,7 @@ impl NativeClient {
                 }
             }
         };
-        finish(response, body_limit).await
+        finish(response, body_limit, error_policy).await
     }
 }
 
@@ -309,11 +336,45 @@ fn map_transport_error(error: &reqwest::Error) -> NativeClientError {
     }
 }
 
-async fn finish(response: Response, body_limit: usize) -> Result<Vec<u8>, NativeClientError> {
+async fn finish(
+    response: Response,
+    body_limit: usize,
+    error_policy: ErrorBodyPolicy,
+) -> Result<Vec<u8>, NativeClientError> {
     if !response.status().is_success() {
-        return Err(NativeClientError::from_status(response.status()));
+        let status = response.status();
+        if let ErrorBodyPolicy::Inventory = error_policy {
+            return Err(classify_inventory_error(response).await);
+        }
+        return Err(NativeClientError::from_status(status));
     }
     bounded_body(response, body_limit).await
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct InventoryErrorBody {
+    error: String,
+}
+
+async fn classify_inventory_error(response: Response) -> NativeClientError {
+    let status = response.status();
+    let fallback = NativeClientError::from_status(status);
+    if !matches!(status.as_u16(), 400 | 503 | 504) {
+        return fallback;
+    }
+    let Ok(body) = bounded_body(response, 128).await else {
+        return fallback;
+    };
+    let Ok(body) = serde_json::from_slice::<InventoryErrorBody>(&body) else {
+        return fallback;
+    };
+    match (status.as_u16(), body.error.as_str()) {
+        (400, "invalid_pagination") => NativeClientError::InvalidPagination,
+        (503, "agent_unavailable") => NativeClientError::AgentUnavailable,
+        (504, "agent_timeout") => NativeClientError::AgentTimeout,
+        _ => fallback,
+    }
 }
 
 /// Read a success body in chunks, rejecting anything above the ceiling before

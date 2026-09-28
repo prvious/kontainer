@@ -5,7 +5,11 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use kontainer_native_client::{AccessCredential, LoginVerifier, RefreshCredential};
+use kontainer_native_client::{
+    AccessCredential, ContainerPage, ContainerPageRequest, LoginVerifier, NativeClientError,
+    NodeId, RefreshCredential,
+};
+use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 use zeroize::Zeroizing;
@@ -388,6 +392,9 @@ pub(crate) struct Script {
     pub(crate) redeem: VecDeque<Result<Redemption, SessionError>>,
     pub(crate) refresh: VecDeque<Result<IssuedCredentials, SessionError>>,
     pub(crate) logout: VecDeque<Result<(), SessionError>>,
+    pub(crate) discover: VecDeque<Result<Option<NodeId>, NativeClientError>>,
+    pub(crate) discover_gate: Option<Arc<Notify>>,
+    pub(crate) containers: VecDeque<Result<ContainerPage, NativeClientError>>,
 }
 
 pub(crate) struct FakeControllerFactory {
@@ -436,6 +443,62 @@ struct FakeController {
 impl Controller for FakeController {
     fn canonical_origin(&self) -> &str {
         &self.origin
+    }
+
+    fn discover_node<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<Option<NodeId>, NativeClientError>> {
+        record(
+            &self.log,
+            format!("discover:{}", public_tag(access.expose())),
+        );
+        let (outcome, gate) = {
+            let mut script = self.script.lock().unwrap();
+            (
+                script
+                    .discover
+                    .pop_front()
+                    .unwrap_or(Err(NativeClientError::InvalidResponse)),
+                script.discover_gate.clone(),
+            )
+        };
+        let log = self.log.clone();
+        Box::pin(async move {
+            if let Some(gate) = gate {
+                gate.notified().await;
+            }
+            record(&log, "discover_done");
+            outcome
+        })
+    }
+
+    fn list_containers<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        node_id: &'a NodeId,
+        page: &'a ContainerPageRequest,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ContainerPage, NativeClientError>> {
+        record(
+            &self.log,
+            format!(
+                "containers:{}:{}:{}:{}",
+                public_tag(access.expose()),
+                node_id,
+                page.limit,
+                page.cursor.as_deref().unwrap_or("")
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .containers
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
     }
 
     fn start_login<'a>(
