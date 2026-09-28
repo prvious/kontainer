@@ -65,8 +65,9 @@ pub use networks::{
     NetworkPlacement, NetworkScope, NetworkSpec,
 };
 pub use nodes::{
-    MAX_SAMPLE_POINTS, NodeList, NodeSample, NodeStatus, NodeSummary, SAMPLE_WINDOWS, SamplePoint,
-    SampleSeries,
+    AgentStatus, ClusterSummary, MAX_SAMPLE_POINTS, NodeAvailability, NodeHealth, NodeList,
+    NodeRole, NodeSample, NodeSummary, QuorumState, SAMPLE_WINDOWS, SamplePoint, SampleSeries,
+    SwarmNodeStatus,
 };
 pub use operations::{
     AdmittedOperation, IdempotencyKey, MAX_EVENT_PAGE, OperationEvent, OperationSnapshot,

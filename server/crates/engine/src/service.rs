@@ -1,4 +1,4 @@
-//! Swarm services and tasks in Kontainer's own terms, read and changed on a manager.
+//! Swarm services, tasks, and nodes in Kontainer's own terms, read and changed on a manager.
 
 /// How a service schedules its tasks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,6 +70,50 @@ pub struct SwarmStatus {
     pub control_available: bool,
     pub managers: u32,
     pub nodes: u32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SwarmRole {
+    Manager,
+    #[default]
+    Worker,
+}
+
+/// Whether the scheduler may place tasks on a node.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SwarmAvailability {
+    Active,
+    Pause,
+    Drain,
+}
+
+/// What the manager last heard from a node; `disconnected` counts as down.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SwarmNodeState {
+    Ready,
+    Down,
+    #[default]
+    Unknown,
+}
+
+/// One Swarm member as the manager sees it.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SwarmNode {
+    pub id: String,
+    pub hostname: String,
+    pub role: SwarmRole,
+    pub is_leader: bool,
+    /// Raft reachability; `None` for workers.
+    pub manager_reachable: Option<bool>,
+    pub availability: Option<SwarmAvailability>,
+    pub state: SwarmNodeState,
+    /// The address the manager sees the node at.
+    pub address: Option<String>,
+    pub docker_version: Option<String>,
+    pub os: Option<String>,
+    pub architecture: Option<String>,
+    pub cpu_cores: Option<u32>,
+    pub memory_total_bytes: Option<u64>,
 }
 
 /// Swarm ids: 25 lowercase alphanumerics.

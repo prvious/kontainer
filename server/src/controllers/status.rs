@@ -78,6 +78,7 @@ impl Modify for AccessSessionSecurity {
         super::nodes::index,
         super::nodes::samples,
         super::nodes::cluster_samples,
+        super::nodes::cluster_summary,
         super::settings::show,
         super::settings::update,
         super::containers::index,
@@ -156,7 +157,13 @@ impl Modify for AccessSessionSecurity {
         crate::nodes::fan_out::NodeOutcomeStatus,
         super::nodes::NodeListResponse,
         super::nodes::NodeResponse,
-        super::nodes::NodeStatusResponse,
+        super::nodes::AgentStatusResponse,
+        super::nodes::NodeHealthResponse,
+        super::nodes::NodeRoleResponse,
+        super::nodes::NodeAvailabilityResponse,
+        super::nodes::SwarmNodeStatusResponse,
+        super::nodes::ClusterSummaryResponse,
+        super::nodes::QuorumStateResponse,
         super::nodes::NodeSampleResponse,
         super::nodes::SampleSeriesResponse,
         super::nodes::SamplePointResponse,
@@ -308,6 +315,7 @@ mod tests {
             ("/api/v1/nodes", "get", "list_nodes"),
             ("/api/v1/nodes/{nodeId}/samples", "get", "node_samples"),
             ("/api/v1/cluster/samples", "get", "cluster_samples"),
+            ("/api/v1/cluster/summary", "get", "cluster_summary"),
             ("/api/v1/settings", "get", "get_settings"),
             ("/api/v1/settings", "patch", "update_settings"),
         ] {
@@ -322,8 +330,25 @@ mod tests {
         assert!(document["paths"]["/api/v1/nodes/configured"].is_null());
         let schemas = &document["components"]["schemas"];
         assert_eq!(
-            schemas["NodeStatusResponse"]["enum"],
-            serde_json::json!(["online", "degraded", "offline"])
+            schemas["AgentStatusResponse"]["enum"],
+            serde_json::json!(["online", "degraded", "offline", "no-agent"])
+        );
+        assert_eq!(
+            schemas["NodeHealthResponse"]["enum"],
+            serde_json::json!(["active", "degraded", "down"])
+        );
+        let node = schemas["NodeResponse"]["required"].as_array().unwrap();
+        for nullable in ["availability", "address", "agentVersion", "lastCheckInAt"] {
+            assert!(
+                node.contains(&serde_json::json!(nullable)),
+                "{nullable} is nullable, not optional"
+            );
+        }
+        assert!(
+            schemas["ClusterSummaryResponse"]["required"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("cpuPercent"))
         );
         let point = schemas["SamplePointResponse"]["required"]
             .as_array()

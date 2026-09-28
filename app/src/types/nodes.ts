@@ -6,8 +6,20 @@
  */
 import { exactRecord } from "@/types/inventory";
 
-export const NODE_STATUSES = ["online", "degraded", "offline"] as const;
-export type NodeStatus = (typeof NODE_STATUSES)[number];
+/** The agent side; `no-agent` for a Swarm member that never checked in. */
+export const AGENT_STATUSES = ["online", "degraded", "offline", "no-agent"] as const;
+export type AgentStatus = (typeof AGENT_STATUSES)[number];
+/** Agent and Swarm together: `active` only when both are fine, `down` when either says so. */
+export const NODE_HEALTHS = ["active", "degraded", "down"] as const;
+export type NodeHealth = (typeof NODE_HEALTHS)[number];
+export const NODE_ROLES = ["manager", "worker", "unknown"] as const;
+export type NodeRole = (typeof NODE_ROLES)[number];
+export const NODE_AVAILABILITIES = ["active", "pause", "drain"] as const;
+export type NodeAvailability = (typeof NODE_AVAILABILITIES)[number];
+export const SWARM_NODE_STATUSES = ["ready", "down", "unknown"] as const;
+export type SwarmNodeStatus = (typeof SWARM_NODE_STATUSES)[number];
+export const QUORUM_STATES = ["healthy", "degraded"] as const;
+export type QuorumState = (typeof QUORUM_STATES)[number];
 
 export interface NodeSample {
     sampledAt: string;
@@ -22,23 +34,47 @@ export interface NodeSample {
     netTxBytesPerSec: number | null;
 }
 
+/** Membership joined to the manager's Swarm member. Agent fields are null without an agent. */
 export interface NodeSummary {
+    /** The agent's identity; the Swarm node id for a member without an agent. */
     id: string;
     hostname: string;
-    status: NodeStatus;
+    agentStatus: AgentStatus;
+    health: NodeHealth;
+    role: NodeRole;
+    isLeader: boolean;
+    availability: NodeAvailability | null;
+    swarmStatus: SwarmNodeStatus;
     swarmNodeId: string | null;
-    role: string | null;
-    availability: string | null;
-    agentVersion: string;
+    /** The address the manager sees the node at. */
+    address: string | null;
+    agentVersion: string | null;
     dockerVersion: string;
     os: string;
     arch: string;
     cpuCores: number;
     memoryTotalBytes: number;
-    agentStartedAt: string;
-    firstSeenAt: string;
-    lastCheckInAt: string;
+    agentStartedAt: string | null;
+    firstSeenAt: string | null;
+    lastCheckInAt: string | null;
     latestSample: NodeSample | null;
+}
+
+/** Counts by health, manager reachability, quorum, and load over online nodes. */
+export interface ClusterSummary {
+    nodesTotal: number;
+    nodesActive: number;
+    nodesDegraded: number;
+    nodesDown: number;
+    managersTotal: number;
+    managersReachable: number;
+    quorum: QuorumState;
+    /** Mean over online nodes with a sample; null when there are none. */
+    cpuPercent: number | null;
+    memoryUsedBytes: number;
+    memoryTotalBytes: number;
+    containersRunning: number;
+    snapshotAt: string;
 }
 
 export interface NodeList {
@@ -79,6 +115,8 @@ const isOptionalFigure = (value: unknown): value is number | null => value === n
 const isOptionalText = (value: unknown): value is string | null => value === null || typeof value === "string";
 const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const isTimestamp = (value: unknown): value is string => typeof value === "string" && TIMESTAMP.test(value);
+const isOptionalTimestamp = (value: unknown): value is string | null => value === null || isTimestamp(value);
+const oneOf = <T extends string>(values: readonly T[], value: unknown): value is T => values.some((entry) => entry === value);
 const NODE_ID = /^(?!\.{1,2}$)[A-Za-z0-9._-]{1,128}$/;
 
 function sampleFromIpc(value: unknown): NodeSample {
@@ -112,10 +150,14 @@ function nodeFromIpc(value: unknown): NodeSummary {
     const data = exactRecord(value, [
         "id",
         "hostname",
-        "status",
-        "swarmNodeId",
+        "agentStatus",
+        "health",
         "role",
+        "isLeader",
         "availability",
+        "swarmStatus",
+        "swarmNodeId",
+        "address",
         "agentVersion",
         "dockerVersion",
         "os",
@@ -131,21 +173,29 @@ function nodeFromIpc(value: unknown): NodeSummary {
         typeof data.id !== "string" ||
         !NODE_ID.test(data.id) ||
         typeof data.hostname !== "string" ||
-        !NODE_STATUSES.some((status) => status === data.status) ||
+        !oneOf(AGENT_STATUSES, data.agentStatus) ||
+        !oneOf(NODE_HEALTHS, data.health) ||
+        !oneOf(NODE_ROLES, data.role) ||
+        typeof data.isLeader !== "boolean" ||
+        !(data.availability === null || oneOf(NODE_AVAILABILITIES, data.availability)) ||
+        !oneOf(SWARM_NODE_STATUSES, data.swarmStatus) ||
         !isOptionalText(data.swarmNodeId) ||
-        !isOptionalText(data.role) ||
-        !isOptionalText(data.availability) ||
-        typeof data.agentVersion !== "string" ||
+        !isOptionalText(data.address) ||
+        !isOptionalText(data.agentVersion) ||
         typeof data.dockerVersion !== "string" ||
         typeof data.os !== "string" ||
         typeof data.arch !== "string" ||
         !isCount(data.cpuCores) ||
         !isCount(data.memoryTotalBytes) ||
-        !isTimestamp(data.agentStartedAt) ||
-        !isTimestamp(data.firstSeenAt) ||
-        !isTimestamp(data.lastCheckInAt)
+        !isOptionalTimestamp(data.agentStartedAt) ||
+        !isOptionalTimestamp(data.firstSeenAt) ||
+        !isOptionalTimestamp(data.lastCheckInAt)
     )
         throw "invalid_response";
+    // An agent row carries every agent field; a Swarm-only row carries none.
+    const hasAgent = data.agentStatus !== "no-agent";
+    const agentFields = [data.agentVersion, data.agentStartedAt, data.firstSeenAt, data.lastCheckInAt];
+    if (agentFields.some((field) => (field !== null) !== hasAgent) || (!hasAgent && data.latestSample !== null)) throw "invalid_response";
     return { ...(data as unknown as NodeSummary), latestSample: data.latestSample === null ? null : sampleFromIpc(data.latestSample) };
 }
 
@@ -153,6 +203,40 @@ export function nodeListFromIpc(value: unknown): NodeList {
     const data = exactRecord(value, ["items", "snapshotAt"]);
     if (!Array.isArray(data.items) || !isTimestamp(data.snapshotAt)) throw "invalid_response";
     return { items: data.items.map(nodeFromIpc), snapshotAt: data.snapshotAt };
+}
+
+export function clusterSummaryFromIpc(value: unknown): ClusterSummary {
+    const data = exactRecord(value, [
+        "nodesTotal",
+        "nodesActive",
+        "nodesDegraded",
+        "nodesDown",
+        "managersTotal",
+        "managersReachable",
+        "quorum",
+        "cpuPercent",
+        "memoryUsedBytes",
+        "memoryTotalBytes",
+        "containersRunning",
+        "snapshotAt",
+    ]);
+    const counts = [
+        data.nodesTotal,
+        data.nodesActive,
+        data.nodesDegraded,
+        data.nodesDown,
+        data.managersTotal,
+        data.managersReachable,
+        data.memoryUsedBytes,
+        data.memoryTotalBytes,
+        data.containersRunning,
+    ];
+    if (!counts.every(isCount) || !oneOf(QUORUM_STATES, data.quorum) || !isOptionalFigure(data.cpuPercent) || !isTimestamp(data.snapshotAt))
+        throw "invalid_response";
+    const summary = data as unknown as ClusterSummary;
+    if (summary.nodesActive + summary.nodesDegraded + summary.nodesDown !== summary.nodesTotal || summary.managersReachable > summary.managersTotal)
+        throw "invalid_response";
+    return summary;
 }
 
 export function sampleSeriesFromIpc(value: unknown): SampleSeries {
@@ -198,24 +282,28 @@ export function controllerSettingsFromIpc(value: unknown): ControllerSettings {
     return { metricsRetentionDays: data.metricsRetentionDays };
 }
 
-/** Status bar figures across online nodes: mean CPU, summed memory; undefined without samples. */
-export function clusterUsage(nodes: NodeSummary[] | undefined): {
+/** Status bar figures from the cluster summary; the Docker version comes from the first online node. */
+export function clusterUsage(
+    summary: ClusterSummary | undefined,
+    nodes: NodeSummary[] | undefined,
+): {
     cpuPercent?: number;
     memoryUsedBytes?: number;
     memoryTotalBytes?: number;
     dockerVersion?: string;
 } {
-    const sampled = (nodes ?? []).filter((node) => node.status === "online" && node.latestSample);
-    if (sampled.length === 0) return {};
-    return {
-        cpuPercent: sampled.reduce((sum, node) => sum + (node.latestSample?.cpuPercent ?? 0), 0) / sampled.length,
-        memoryUsedBytes: sampled.reduce((sum, node) => sum + (node.latestSample?.memoryUsedBytes ?? 0), 0),
-        memoryTotalBytes: sampled.reduce((sum, node) => sum + node.memoryTotalBytes, 0),
-        dockerVersion: sampled[0].dockerVersion,
-    };
+    const online = nodes?.find((node) => node.agentStatus === "online" && node.dockerVersion !== "");
+    const usage = online ? { dockerVersion: online.dockerVersion } : {};
+    if (!summary || summary.cpuPercent === null) return usage;
+    return { ...usage, cpuPercent: summary.cpuPercent, memoryUsedBytes: summary.memoryUsedBytes, memoryTotalBytes: summary.memoryTotalBytes };
 }
 
-/** Nodes not online: the sidebar's `N DOWN` badge. */
-export function nodesDown(nodes: NodeSummary[] | undefined): number | undefined {
-    return nodes?.filter((node) => node.status !== "online").length;
+/** Nodes degraded or down: the sidebar's `N DOWN` badge. */
+export function nodesDown(summary: ClusterSummary | undefined): number | undefined {
+    return summary ? summary.nodesDegraded + summary.nodesDown : undefined;
+}
+
+/** Nodes an agent can act on: pull, create, and target pickers offer only these. */
+export function agentNodes(nodes: NodeSummary[]): NodeSummary[] {
+    return nodes.filter((node) => node.agentStatus !== "no-agent");
 }

@@ -1,4 +1,4 @@
-import { useState, type KeyboardEvent, type ReactNode } from "react";
+import { useState, type ComponentProps, type KeyboardEvent, type ReactNode } from "react";
 import { Bar, BarChart, Cell, YAxis } from "recharts";
 import { ChartTooltip, type ChartTooltipRow } from "@/components/charts/chart-tooltip";
 import { cn } from "@/lib/utils";
@@ -26,6 +26,8 @@ export function SparkBars({
     height = 28,
     label,
     tooltipRows,
+    tooltipTime,
+    tooltipDelta,
     className,
 }: {
     buckets: SparkBucket[];
@@ -35,6 +37,10 @@ export function SparkBars({
     label: string;
     /** Rows for the hovered bucket; defaults to one row with the raw value. */
     tooltipRows?: (bucket: SparkBucket, index: number) => ChartTooltipRow[];
+    /** The tooltip's time line; defaults to the bucket's `HH:MM – HH:MM`. */
+    tooltipTime?: (bucket: SparkBucket) => string;
+    /** A footer line under the rows, e.g. how many nodes contributed. */
+    tooltipDelta?: (bucket: SparkBucket, index: number) => ComponentProps<typeof ChartTooltip>["delta"];
     className?: string;
 }) {
     const [active, setActive] = useState<number | null>(null);
@@ -62,7 +68,13 @@ export function SparkBars({
                 ? [{ label: "no data", value: "—", swatch: "neutral" as const }]
                 : (tooltipRows?.(hovered, active) ?? [{ label: label, value: String(hovered.value) }]);
         const left = Math.min(Math.max(0, active * barWidth + barWidth / 2 - 88), Math.max(0, width - 176));
-        tooltip = <ChartTooltip className='absolute bottom-full z-10 mb-2' time={`${clock(hovered.start)} – ${clock(hovered.end)}`} rows={rows} />;
+        tooltip = (
+            <ChartTooltip
+                time={tooltipTime?.(hovered) ?? `${clock(hovered.start)} – ${clock(hovered.end)}`}
+                rows={rows}
+                delta={tooltipDelta?.(hovered, active)}
+            />
+        );
         tooltip = (
             <div className='absolute bottom-full z-10 mb-2' style={{ left }}>
                 {tooltip}

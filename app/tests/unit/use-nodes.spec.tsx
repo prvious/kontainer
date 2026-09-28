@@ -4,7 +4,15 @@ import { invoke } from "@tauri-apps/api/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthContext } from "@/contexts/auth-context-value";
 import type { AuthContextValue } from "@/contexts/auth-context-value";
-import { controllerSettingsKey, nodesQueries, useControllerSettings, useNodes, useSamples, useUpdateControllerSettings } from "@/hooks/use-nodes";
+import {
+    controllerSettingsKey,
+    nodesQueries,
+    useClusterSummary,
+    useControllerSettings,
+    useNodes,
+    useSamples,
+    useUpdateControllerSettings,
+} from "@/hooks/use-nodes";
 import fixture from "../fixtures/nodes-ipc.json";
 
 const profileId = "018f2e34-0000-7000-8000-0000000000bb";
@@ -36,9 +44,18 @@ describe("node membership queries", () => {
         mockCommands({ list_nodes: () => fixture.nodeList });
         const { queryClient, wrapper } = createWrapper();
         const { result } = renderHook(() => useNodes(), { wrapper });
-        await waitFor(() => expect(result.current.data?.items).toHaveLength(2));
+        await waitFor(() => expect(result.current.data?.items).toHaveLength(3));
         expect(invoke).toHaveBeenCalledWith("list_nodes", { profileId });
         expect(queryClient.getQueryData(nodesQueries.all(profileId))).toEqual(fixture.nodeList);
+    });
+
+    it("reads the cluster summary under the nodes key so node refetches refresh it too", async () => {
+        mockCommands({ get_cluster_summary: () => fixture.clusterSummary });
+        const { queryClient, wrapper } = createWrapper();
+        const { result } = renderHook(() => useClusterSummary(), { wrapper });
+        await waitFor(() => expect(result.current.data?.nodesTotal).toBe(3));
+        expect(invoke).toHaveBeenCalledWith("get_cluster_summary", { profileId });
+        expect(queryClient.getQueryData([...nodesQueries.all(profileId), "summary"])).toEqual(fixture.clusterSummary);
     });
 
     it("reads cluster and node series under the samples keys", async () => {

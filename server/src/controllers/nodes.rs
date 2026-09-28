@@ -7,10 +7,12 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use chrono::{DateTime, SecondsFormat, Utc};
+use kontainer_engine::{SwarmAvailability, SwarmNodeState};
 use loco_rs::{app::AppContext, controller::Routes};
 use serde::Serialize;
 use utoipa::ToSchema;
 
+use super::services::shutdown_token;
 use crate::{
     auth::domain::PrincipalContext,
     metrics::{
@@ -18,25 +20,108 @@ use crate::{
         domain::{SamplePoint, SampleRange, SampleScope},
     },
     nodes::{
-        actions::list_nodes,
-        domain::{LatestSample, NodeStatus, NodeView},
+        actions::{cluster_summary, list_cluster_nodes},
+        domain::{
+            AgentStatus, ClusterNode, ClusterSummary, LatestSample, NodeHealth, NodeRole,
+            QuorumState,
+        },
     },
+    swarm::engine::SharedManagerEngine,
 };
 
+/// The agent side: derived from the last check-in, or `no-agent` for a Swarm member that never
+/// checked in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum NodeStatusResponse {
+#[serde(rename_all = "kebab-case")]
+pub enum AgentStatusResponse {
     Online,
     Degraded,
     Offline,
+    NoAgent,
 }
 
-impl From<NodeStatus> for NodeStatusResponse {
-    fn from(status: NodeStatus) -> Self {
+impl From<AgentStatus> for AgentStatusResponse {
+    fn from(status: AgentStatus) -> Self {
         match status {
-            NodeStatus::Online => Self::Online,
-            NodeStatus::Degraded => Self::Degraded,
-            NodeStatus::Offline => Self::Offline,
+            AgentStatus::Online => Self::Online,
+            AgentStatus::Degraded => Self::Degraded,
+            AgentStatus::Offline => Self::Offline,
+            AgentStatus::NoAgent => Self::NoAgent,
+        }
+    }
+}
+
+/// `active` when the agent is online and Swarm says ready; `down` when either says down.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeHealthResponse {
+    Active,
+    Degraded,
+    Down,
+}
+
+impl From<NodeHealth> for NodeHealthResponse {
+    fn from(health: NodeHealth) -> Self {
+        match health {
+            NodeHealth::Active => Self::Active,
+            NodeHealth::Degraded => Self::Degraded,
+            NodeHealth::Down => Self::Down,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeRoleResponse {
+    Manager,
+    Worker,
+    Unknown,
+}
+
+impl From<NodeRole> for NodeRoleResponse {
+    fn from(role: NodeRole) -> Self {
+        match role {
+            NodeRole::Manager => Self::Manager,
+            NodeRole::Worker => Self::Worker,
+            NodeRole::Unknown => Self::Unknown,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeAvailabilityResponse {
+    Active,
+    Pause,
+    Drain,
+}
+
+impl From<SwarmAvailability> for NodeAvailabilityResponse {
+    fn from(availability: SwarmAvailability) -> Self {
+        match availability {
+            SwarmAvailability::Active => Self::Active,
+            SwarmAvailability::Pause => Self::Pause,
+            SwarmAvailability::Drain => Self::Drain,
+        }
+    }
+}
+
+/// What the manager last heard from the node; `unknown` when it did not answer or does not
+/// know the node.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SwarmNodeStatusResponse {
+    Ready,
+    Down,
+    Unknown,
+}
+
+impl From<SwarmNodeState> for SwarmNodeStatusResponse {
+    fn from(state: SwarmNodeState) -> Self {
+        match state {
+            SwarmNodeState::Ready => Self::Ready,
+            SwarmNodeState::Down => Self::Down,
+            SwarmNodeState::Unknown => Self::Unknown,
         }
     }
 }
@@ -59,30 +144,39 @@ pub struct NodeSampleResponse {
     pub net_tx_bytes_per_sec: Option<f64>,
 }
 
+/// One node: a membership row joined to the manager's Swarm member.
 #[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct NodeResponse {
-    /// Node id from the agent's certificate identity.
+    /// The agent's certificate identity; the Swarm node id for a member without an agent.
     pub id: String,
     pub hostname: String,
-    /// Derived from the last check-in: `online` within 15 s, `degraded` within 60 s.
-    pub status: NodeStatusResponse,
-    /// Swarm fields are null until Swarm inventory fills them.
+    pub agent_status: AgentStatusResponse,
+    pub health: NodeHealthResponse,
+    pub role: NodeRoleResponse,
+    pub is_leader: bool,
+    #[schema(required = true)]
+    pub availability: Option<NodeAvailabilityResponse>,
+    pub swarm_status: SwarmNodeStatusResponse,
     #[schema(required = true)]
     pub swarm_node_id: Option<String>,
+    /// The address the manager sees the node at.
     #[schema(required = true)]
-    pub role: Option<String>,
+    pub address: Option<String>,
+    /// Agent fields are null for a member without an agent.
     #[schema(required = true)]
-    pub availability: Option<String>,
-    pub agent_version: String,
+    pub agent_version: Option<String>,
     pub docker_version: String,
     pub os: String,
     pub arch: String,
-    pub cpu_cores: i32,
-    pub memory_total_bytes: i64,
-    pub agent_started_at: String,
-    pub first_seen_at: String,
-    pub last_check_in_at: String,
+    pub cpu_cores: u32,
+    pub memory_total_bytes: u64,
+    #[schema(required = true)]
+    pub agent_started_at: Option<String>,
+    #[schema(required = true)]
+    pub first_seen_at: Option<String>,
+    #[schema(required = true)]
+    pub last_check_in_at: Option<String>,
     #[schema(required = true)]
     pub latest_sample: Option<NodeSampleResponse>,
 }
@@ -125,6 +219,35 @@ pub struct SampleSeriesResponse {
     pub snapshot_at: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum QuorumStateResponse {
+    Healthy,
+    Degraded,
+}
+
+/// Counts by health, manager reachability, quorum, and load over online agents.
+#[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ClusterSummaryResponse {
+    pub nodes_total: u32,
+    pub nodes_active: u32,
+    pub nodes_degraded: u32,
+    pub nodes_down: u32,
+    pub managers_total: u32,
+    pub managers_reachable: u32,
+    /// `healthy` when the manager answers and every manager is ready and reachable.
+    pub quorum: QuorumStateResponse,
+    /// Mean over online nodes with a sample; null when there are none.
+    #[schema(required = true)]
+    pub cpu_percent: Option<f64>,
+    /// Summed over the same nodes.
+    pub memory_used_bytes: u64,
+    pub memory_total_bytes: u64,
+    pub containers_running: u64,
+    pub snapshot_at: String,
+}
+
 #[derive(Debug, Serialize, ToSchema)]
 pub struct NodeErrorResponse {
     pub error: String,
@@ -161,25 +284,92 @@ fn sample_response(sample: LatestSample) -> NodeSampleResponse {
     }
 }
 
-fn node_response(node: NodeView) -> NodeResponse {
-    NodeResponse {
-        id: node.id,
-        hostname: node.hostname,
-        status: node.status.into(),
-        swarm_node_id: node.swarm_node_id,
-        role: None,
-        availability: None,
-        agent_version: node.agent_version,
-        docker_version: node.docker_version,
-        os: node.os,
-        arch: node.arch,
-        cpu_cores: node.cpu_cores,
-        memory_total_bytes: node.memory_total_bytes,
-        agent_started_at: timestamp(node.agent_started_at),
-        first_seen_at: timestamp(node.first_seen_at),
-        last_check_in_at: timestamp(node.last_check_in_at),
-        latest_sample: node.latest_sample.map(sample_response),
+fn node_response(node: ClusterNode) -> NodeResponse {
+    let agent_status = node.agent_status().into();
+    let health = node.health().into();
+    let role = node.role().into();
+    let swarm_status = node.swarm_state().into();
+    let ClusterNode { agent, swarm } = node;
+    let is_leader = swarm.as_ref().is_some_and(|swarm| swarm.is_leader);
+    let availability = swarm
+        .as_ref()
+        .and_then(|swarm| swarm.availability)
+        .map(Into::into);
+    let address = swarm.as_ref().and_then(|swarm| swarm.address.clone());
+    match (agent, swarm) {
+        (Some(agent), swarm) => NodeResponse {
+            id: agent.id,
+            hostname: agent.hostname,
+            agent_status,
+            health,
+            role,
+            is_leader,
+            availability,
+            swarm_status,
+            swarm_node_id: agent.swarm_node_id,
+            address,
+            agent_version: Some(agent.agent_version),
+            docker_version: agent.docker_version,
+            os: agent.os,
+            arch: agent.arch,
+            cpu_cores: u32::try_from(agent.cpu_cores)
+                .ok()
+                .or(swarm.as_ref().and_then(|swarm| swarm.cpu_cores))
+                .unwrap_or(0),
+            memory_total_bytes: u64::try_from(agent.memory_total_bytes).unwrap_or(0),
+            agent_started_at: Some(timestamp(agent.agent_started_at)),
+            first_seen_at: Some(timestamp(agent.first_seen_at)),
+            last_check_in_at: Some(timestamp(agent.last_check_in_at)),
+            latest_sample: agent.latest_sample.map(sample_response),
+        },
+        (None, Some(swarm)) => NodeResponse {
+            swarm_node_id: Some(swarm.id.clone()),
+            id: swarm.id,
+            hostname: swarm.hostname,
+            agent_status,
+            health,
+            role,
+            is_leader,
+            availability,
+            swarm_status,
+            address,
+            agent_version: None,
+            docker_version: swarm.docker_version.unwrap_or_default(),
+            os: swarm.os.unwrap_or_default(),
+            arch: swarm.architecture.unwrap_or_default(),
+            cpu_cores: swarm.cpu_cores.unwrap_or(0),
+            memory_total_bytes: swarm.memory_total_bytes.unwrap_or(0),
+            agent_started_at: None,
+            first_seen_at: None,
+            last_check_in_at: None,
+            latest_sample: None,
+        },
+        (None, None) => unreachable!("a cluster node has an agent, a Swarm member, or both"),
     }
+}
+
+fn summary_response(summary: ClusterSummary, now: DateTime<Utc>) -> ClusterSummaryResponse {
+    ClusterSummaryResponse {
+        nodes_total: summary.nodes_total,
+        nodes_active: summary.nodes_active,
+        nodes_degraded: summary.nodes_degraded,
+        nodes_down: summary.nodes_down,
+        managers_total: summary.managers_total,
+        managers_reachable: summary.managers_reachable,
+        quorum: match summary.quorum {
+            QuorumState::Healthy => QuorumStateResponse::Healthy,
+            QuorumState::Degraded => QuorumStateResponse::Degraded,
+        },
+        cpu_percent: summary.cpu_percent,
+        memory_used_bytes: summary.memory_used_bytes,
+        memory_total_bytes: summary.memory_total_bytes,
+        containers_running: summary.containers_running,
+        snapshot_at: timestamp(now),
+    }
+}
+
+fn optional_manager(context: &AppContext) -> Option<SharedManagerEngine> {
+    context.shared_store.get::<SharedManagerEngine>()
 }
 
 #[utoipa::path(
@@ -187,7 +377,7 @@ fn node_response(node: NodeView) -> NodeResponse {
     path = "/api/v1/nodes",
     operation_id = "list_nodes",
     responses(
-        (status = 200, description = "Every node that has checked in, with derived status and latest sample", body = NodeListResponse),
+        (status = 200, description = "Every node that checked in or that Swarm lists, joined by Swarm node id, with derived health and latest sample. Swarm fields are unknown when the manager does not answer.", body = NodeListResponse),
         (status = 401, description = "Missing, malformed, expired, or revoked access credential"),
         (status = 503, description = "Persistence unavailable or controller draining", body = NodeErrorResponse)
     ),
@@ -197,14 +387,51 @@ pub(crate) async fn index(
     State(context): State<AppContext>,
     _principal: PrincipalContext,
 ) -> Response {
-    match list_nodes::execute(&context.db).await {
-        Ok((nodes, now)) => json_no_store(
+    let manager = optional_manager(&context);
+    let cancellation = shutdown_token(&context);
+    match list_cluster_nodes::execute(
+        &context.db,
+        manager.as_ref().map(|manager| manager.0.as_ref()),
+        &cancellation,
+    )
+    .await
+    {
+        Ok(cluster) => json_no_store(
             StatusCode::OK,
             NodeListResponse {
-                items: nodes.into_iter().map(node_response).collect(),
-                snapshot_at: timestamp(now),
+                items: cluster.nodes.into_iter().map(node_response).collect(),
+                snapshot_at: timestamp(cluster.snapshot_at),
             },
         ),
+        Err(_) => error(StatusCode::SERVICE_UNAVAILABLE, "persistence_unavailable"),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/cluster/summary",
+    operation_id = "cluster_summary",
+    responses(
+        (status = 200, description = "Node counts by health, manager reachability and quorum, and load summed over online nodes", body = ClusterSummaryResponse),
+        (status = 401, description = "Missing, malformed, expired, or revoked access credential"),
+        (status = 503, description = "Persistence unavailable or controller draining", body = NodeErrorResponse)
+    ),
+    security(("access_session" = []))
+)]
+pub(crate) async fn cluster_summary(
+    State(context): State<AppContext>,
+    _principal: PrincipalContext,
+) -> Response {
+    let manager = optional_manager(&context);
+    let cancellation = shutdown_token(&context);
+    match cluster_summary::execute(
+        &context.db,
+        manager.as_ref().map(|manager| manager.0.as_ref()),
+        &cancellation,
+    )
+    .await
+    {
+        Ok((summary, now)) => json_no_store(StatusCode::OK, summary_response(summary, now)),
         Err(_) => error(StatusCode::SERVICE_UNAVAILABLE, "persistence_unavailable"),
     }
 }
@@ -331,6 +558,7 @@ pub fn routes() -> Routes {
         .get("/nodes", index)
         .get("/nodes/{nodeId}/samples", samples)
         .get("/cluster/samples", cluster_samples)
+        .get("/cluster/summary", cluster_summary)
 }
 
 #[cfg(test)]

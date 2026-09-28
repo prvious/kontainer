@@ -68,6 +68,44 @@
         ]
       }
     },
+    "/api/v1/cluster/summary": {
+      "get": {
+        "operationId": "cluster_summary",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClusterSummaryResponse"
+                }
+              }
+            },
+            "description": "Node counts by health, manager reachability and quorum, and load summed over online nodes"
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeErrorResponse"
+                }
+              }
+            },
+            "description": "Persistence unavailable or controller draining"
+          }
+        },
+        "security": [
+          {
+            "access_session": []
+          }
+        ],
+        "tags": [
+          "super::nodes"
+        ]
+      }
+    },
     "/api/v1/containers": {
       "get": {
         "operationId": "list_containers",
@@ -347,7 +385,7 @@
                 }
               }
             },
-            "description": "Every node that has checked in, with derived status and latest sample"
+            "description": "Every node that checked in or that Swarm lists, joined by Swarm node id, with derived health and latest sample. Swarm fields are unknown when the manager does not answer."
           },
           "401": {
             "description": "Missing, malformed, expired, or revoked access credential"
@@ -820,6 +858,16 @@
       ],
       "type": "object"
     },
+    "AgentStatusResponse": {
+      "description": "The agent side: derived from the last check-in, or `no-agent` for a Swarm member that never\nchecked in.",
+      "enum": [
+        "online",
+        "degraded",
+        "offline",
+        "no-agent"
+      ],
+      "type": "string"
+    },
     "BulkActionRequest": {
       "additionalProperties": false,
       "properties": {
@@ -843,6 +891,87 @@
       "required": [
         "action",
         "targets"
+      ],
+      "type": "object"
+    },
+    "ClusterSummaryResponse": {
+      "description": "Counts by health, manager reachability, quorum, and load over online agents.",
+      "properties": {
+        "containersRunning": {
+          "format": "int64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "cpuPercent": {
+          "description": "Mean over online nodes with a sample; null when there are none.",
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "managersReachable": {
+          "format": "int32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "managersTotal": {
+          "format": "int32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "memoryTotalBytes": {
+          "format": "int64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "memoryUsedBytes": {
+          "description": "Summed over the same nodes.",
+          "format": "int64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "nodesActive": {
+          "format": "int32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "nodesDegraded": {
+          "format": "int32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "nodesDown": {
+          "format": "int32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "nodesTotal": {
+          "format": "int32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "quorum": {
+          "$ref": "#/components/schemas/QuorumStateResponse",
+          "description": "`healthy` when the manager answers and every manager is ready and reachable."
+        },
+        "snapshotAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "nodesTotal",
+        "nodesActive",
+        "nodesDegraded",
+        "nodesDown",
+        "managersTotal",
+        "managersReachable",
+        "quorum",
+        "cpuPercent",
+        "memoryUsedBytes",
+        "memoryTotalBytes",
+        "containersRunning",
+        "snapshotAt"
       ],
       "type": "object"
     },
@@ -1026,6 +1155,14 @@
       ],
       "type": "string"
     },
+    "NodeAvailabilityResponse": {
+      "enum": [
+        "active",
+        "pause",
+        "drain"
+      ],
+      "type": "string"
+    },
     "NodeErrorResponse": {
       "properties": {
         "error": {
@@ -1036,6 +1173,15 @@
         "error"
       ],
       "type": "object"
+    },
+    "NodeHealthResponse": {
+      "description": "`active` when the agent is online and Swarm says ready; `down` when either says down.",
+      "enum": [
+        "active",
+        "degraded",
+        "down"
+      ],
+      "type": "string"
     },
     "NodeListResponse": {
       "properties": {
@@ -1087,41 +1233,76 @@
       "type": "string"
     },
     "NodeResponse": {
+      "description": "One node: a membership row joined to the manager's Swarm member.",
       "properties": {
-        "agentStartedAt": {
-          "type": "string"
-        },
-        "agentVersion": {
-          "type": "string"
-        },
-        "arch": {
-          "type": "string"
-        },
-        "availability": {
+        "address": {
+          "description": "The address the manager sees the node at.",
           "type": [
             "string",
             "null"
           ]
         },
+        "agentStartedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "agentStatus": {
+          "$ref": "#/components/schemas/AgentStatusResponse"
+        },
+        "agentVersion": {
+          "description": "Agent fields are null for a member without an agent.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "arch": {
+          "type": "string"
+        },
+        "availability": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/components/schemas/NodeAvailabilityResponse"
+            }
+          ]
+        },
         "cpuCores": {
           "format": "int32",
+          "minimum": 0,
           "type": "integer"
         },
         "dockerVersion": {
           "type": "string"
         },
         "firstSeenAt": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "health": {
+          "$ref": "#/components/schemas/NodeHealthResponse"
         },
         "hostname": {
           "type": "string"
         },
         "id": {
-          "description": "Node id from the agent's certificate identity.",
+          "description": "The agent's certificate identity; the Swarm node id for a member without an agent.",
           "type": "string"
         },
+        "isLeader": {
+          "type": "boolean"
+        },
         "lastCheckInAt": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "latestSample": {
           "oneOf": [
@@ -1135,36 +1316,36 @@
         },
         "memoryTotalBytes": {
           "format": "int64",
+          "minimum": 0,
           "type": "integer"
         },
         "os": {
           "type": "string"
         },
         "role": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "status": {
-          "$ref": "#/components/schemas/NodeStatusResponse",
-          "description": "Derived from the last check-in: `online` within 15 s, `degraded` within 60 s."
+          "$ref": "#/components/schemas/NodeRoleResponse"
         },
         "swarmNodeId": {
-          "description": "Swarm fields are null until Swarm inventory fills them.",
           "type": [
             "string",
             "null"
           ]
+        },
+        "swarmStatus": {
+          "$ref": "#/components/schemas/SwarmNodeStatusResponse"
         }
       },
       "required": [
         "id",
         "hostname",
-        "status",
-        "swarmNodeId",
+        "agentStatus",
+        "health",
         "role",
+        "isLeader",
         "availability",
+        "swarmStatus",
+        "swarmNodeId",
+        "address",
         "agentVersion",
         "dockerVersion",
         "os",
@@ -1177,6 +1358,14 @@
         "latestSample"
       ],
       "type": "object"
+    },
+    "NodeRoleResponse": {
+      "enum": [
+        "manager",
+        "worker",
+        "unknown"
+      ],
+      "type": "string"
     },
     "NodeSampleResponse": {
       "properties": {
@@ -1238,14 +1427,6 @@
         "netTxBytesPerSec"
       ],
       "type": "object"
-    },
-    "NodeStatusResponse": {
-      "enum": [
-        "online",
-        "degraded",
-        "offline"
-      ],
-      "type": "string"
     },
     "OperationEventResponse": {
       "properties": {
@@ -1390,6 +1571,13 @@
       ],
       "type": "string"
     },
+    "QuorumStateResponse": {
+      "enum": [
+        "healthy",
+        "degraded"
+      ],
+      "type": "string"
+    },
     "SamplePointResponse": {
       "properties": {
         "at": {
@@ -1509,6 +1697,15 @@
         "metricsRetentionDays"
       ],
       "type": "object"
+    },
+    "SwarmNodeStatusResponse": {
+      "description": "What the manager last heard from the node; `unknown` when it did not answer or does not\nknow the node.",
+      "enum": [
+        "ready",
+        "down",
+        "unknown"
+      ],
+      "type": "string"
     },
     "TooManyContainersResponse": {
       "properties": {

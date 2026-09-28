@@ -1,6 +1,6 @@
 //! Membership against real PostgreSQL: check-in upserts, samples, and derived status.
 
-use std::error::Error;
+use std::{error::Error, sync::Arc};
 
 use chrono::{Duration, Utc};
 use sea_orm::{
@@ -12,7 +12,12 @@ use super::{
     domain::{CheckIn, NodeStatus, SampleReading},
     entities::{node, node_sample},
 };
-use crate::test_support::PostgresTestDatabase;
+use tokio_util::sync::CancellationToken;
+
+use crate::{
+    swarm::engine::{ManagerEngine, ManagerError, SharedManagerEngine},
+    test_support::PostgresTestDatabase,
+};
 
 pub(crate) fn check_in(node_id: &str, sample: Option<SampleReading>) -> CheckIn {
     CheckIn {
@@ -207,6 +212,256 @@ async fn postgres_status_boundaries_follow_the_database_clock() -> Result<(), Bo
                 .filter(|node| node.id != "fresh")
                 .all(|node| node.latest_sample.is_none())
         );
+        Ok::<_, Box<dyn Error>>(())
+    }
+    .await;
+    let removed = database.cleanup().await?;
+    evidence?;
+    assert!(removed);
+    Ok(())
+}
+
+/// A manager that lists fixed Swarm members, or fails the way a manager without quorum does.
+struct FakeManager(std::sync::Mutex<Result<Vec<kontainer_engine::SwarmNode>, ManagerError>>);
+
+#[async_trait::async_trait]
+impl ManagerEngine for FakeManager {
+    async fn list_networks(
+        &self,
+        _: &CancellationToken,
+    ) -> Result<Vec<kontainer_engine::NetworkSummary>, ManagerError> {
+        Ok(Vec::new())
+    }
+
+    async fn inspect_network(
+        &self,
+        _: &str,
+        _: &CancellationToken,
+    ) -> Result<kontainer_engine::NetworkDetail, ManagerError> {
+        Err(ManagerError::NotFound)
+    }
+
+    async fn create_network(
+        &self,
+        _: &kontainer_engine::NetworkCreate,
+        _: &CancellationToken,
+    ) -> Result<String, ManagerError> {
+        Err(ManagerError::Rejected)
+    }
+
+    async fn remove_network(&self, _: &str, _: &CancellationToken) -> Result<(), ManagerError> {
+        Err(ManagerError::Rejected)
+    }
+
+    async fn list_swarm_nodes(
+        &self,
+        _: &CancellationToken,
+    ) -> Result<Vec<kontainer_engine::SwarmNode>, ManagerError> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
+const MANAGER_SWARM_ID: &str = "managerswarm0000000000000";
+const WORKER_SWARM_ID: &str = "workeroneswarm00000000000";
+const LONE_SWARM_ID: &str = "workerthreeswarm000000000";
+
+fn swarm_members() -> Vec<kontainer_engine::SwarmNode> {
+    use kontainer_engine::{SwarmAvailability, SwarmNode, SwarmNodeState, SwarmRole};
+
+    let member = |id: &str, hostname: &str, role| SwarmNode {
+        id: id.to_owned(),
+        hostname: hostname.to_owned(),
+        role,
+        manager_reachable: (role == SwarmRole::Manager).then_some(true),
+        availability: Some(SwarmAvailability::Active),
+        state: SwarmNodeState::Ready,
+        address: Some("10.0.1.10".to_owned()),
+        docker_version: Some("29.1.0".to_owned()),
+        os: Some("linux".to_owned()),
+        architecture: Some("aarch64".to_owned()),
+        cpu_cores: Some(2),
+        memory_total_bytes: Some(4 << 30),
+        ..SwarmNode::default()
+    };
+    let mut leader = member(MANAGER_SWARM_ID, "manager", SwarmRole::Manager);
+    leader.is_leader = true;
+    let mut drained = member(WORKER_SWARM_ID, "worker-1", SwarmRole::Worker);
+    drained.availability = Some(SwarmAvailability::Drain);
+    vec![
+        leader,
+        drained,
+        member(LONE_SWARM_ID, "worker-3", SwarmRole::Worker),
+    ]
+}
+
+async fn authorized_json(
+    router: &axum::Router,
+    path: &str,
+    authorization: &str,
+) -> Result<(axum::http::StatusCode, serde_json::Value), Box<dyn Error>> {
+    use axum::{
+        body::{Body, to_bytes},
+        http::{Request, header},
+    };
+    use tower::ServiceExt;
+
+    let response = router
+        .clone()
+        .oneshot(
+            Request::get(path)
+                .header(header::AUTHORIZATION, authorization)
+                .body(Body::empty())?,
+        )
+        .await?;
+    let status = response.status();
+    let bytes = to_bytes(response.into_body(), 1 << 20).await?;
+    Ok((status, serde_json::from_slice(&bytes)?))
+}
+
+#[tokio::test]
+async fn postgres_nodes_join_swarm_members_and_summarize_the_cluster() -> Result<(), Box<dyn Error>>
+{
+    use loco_rs::{
+        app::{AppContext, Hooks},
+        config::Config,
+        environment::Environment,
+    };
+
+    let Some(database) = PostgresTestDatabase::create(true).await? else {
+        return Ok(());
+    };
+    let evidence = async {
+        let db = &database.connection;
+        let config = Config::from_folder(&Environment::Test, std::path::Path::new("config"))?;
+        let context = crate::app::App::after_context(
+            AppContext::builder(Environment::Test, db.clone(), config).build(),
+        )
+        .await?;
+        let fake = Arc::new(FakeManager(std::sync::Mutex::new(Ok(swarm_members()))));
+        context
+            .shared_store
+            .insert(SharedManagerEngine(fake.clone() as Arc<dyn ManagerEngine>));
+        let router = crate::app::App::routes(&context)
+            .to_router::<crate::app::App>(context.clone(), axum::Router::new())?;
+        let now = Utc::now();
+        let principal = uuid::Uuid::now_v7();
+        crate::auth::entities::principal::ActiveModel {
+            id: Set(principal),
+            email: Set(None),
+            display_name: Set(None),
+            kind: Set("human".to_owned()),
+            status: Set("active".to_owned()),
+            authorization_epoch: Set(0),
+            created_at: Set(now),
+            updated_at: Set(now),
+        }
+        .insert(db)
+        .await?;
+        let session = crate::auth::actions::create_session::execute(db, principal).await?;
+        let authorization = format!("Bearer {}", session.access_plaintext);
+
+        let at = database_now(db).await?;
+        for (node_id, swarm_id, cpu) in [
+            ("manager", Some(MANAGER_SWARM_ID), 30.0),
+            ("worker-1", Some(WORKER_SWARM_ID), 10.0),
+            ("standalone", None, 50.0),
+        ] {
+            let mut check_in = check_in(node_id, Some(reading(at, cpu, None)));
+            check_in.swarm_node_id = swarm_id.map(str::to_owned);
+            record_check_in::execute(db, "development", check_in).await?;
+        }
+        let row = node::Entity::find_by_id("standalone")
+            .one(db)
+            .await?
+            .unwrap();
+        let mut row: node::ActiveModel = row.into();
+        row.last_check_in_at = Set(at - Duration::seconds(120));
+        row.update(db).await?;
+
+        let (status, body) = authorized_json(&router, "/api/v1/nodes", &authorization).await?;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        let rows: Vec<_> = body["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|node| {
+                (
+                    node["id"].as_str().unwrap().to_owned(),
+                    node["role"].as_str().unwrap().to_owned(),
+                    node["agentStatus"].as_str().unwrap().to_owned(),
+                    node["health"].as_str().unwrap().to_owned(),
+                )
+            })
+            .collect();
+        let row = |id: &str, role: &str, agent: &str, health: &str| {
+            (
+                id.to_owned(),
+                role.to_owned(),
+                agent.to_owned(),
+                health.to_owned(),
+            )
+        };
+        assert_eq!(
+            rows,
+            vec![
+                row("manager", "manager", "online", "active"),
+                row("worker-1", "worker", "online", "active"),
+                row(LONE_SWARM_ID, "worker", "no-agent", "degraded"),
+                row("standalone", "unknown", "offline", "down"),
+            ]
+        );
+        let manager = &body["items"][0];
+        assert_eq!(manager["isLeader"], true);
+        assert_eq!(manager["swarmStatus"], "ready");
+        assert_eq!(manager["address"], "10.0.1.10");
+        assert_eq!(manager["os"], "Alpine Linux", "agent facts win");
+        assert_eq!(body["items"][1]["availability"], "drain");
+        let lone = &body["items"][2];
+        assert_eq!(lone["hostname"], "worker-3");
+        assert_eq!(lone["swarmNodeId"], LONE_SWARM_ID);
+        assert!(lone["agentVersion"].is_null() && lone["lastCheckInAt"].is_null());
+        assert_eq!(lone["cpuCores"], 2, "Swarm fills what it knows");
+        assert_eq!(body["items"][3]["swarmStatus"], "unknown");
+
+        let (status, summary) =
+            authorized_json(&router, "/api/v1/cluster/summary", &authorization).await?;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        let snapshot = summary["snapshotAt"].clone();
+        assert!(snapshot.is_string());
+        assert_eq!(
+            summary,
+            serde_json::json!({
+                "nodesTotal": 4,
+                "nodesActive": 2,
+                "nodesDegraded": 1,
+                "nodesDown": 1,
+                "managersTotal": 1,
+                "managersReachable": 1,
+                "quorum": "healthy",
+                "cpuPercent": 20.0,
+                "memoryUsedBytes": 2_u64 << 30,
+                "memoryTotalBytes": 16_u64 << 30,
+                "containersRunning": 6,
+                "snapshotAt": snapshot,
+            })
+        );
+
+        *fake.0.lock().unwrap() = Err(ManagerError::QuorumUnavailable);
+        let (status, body) = authorized_json(&router, "/api/v1/nodes", &authorization).await?;
+        assert_eq!(status, axum::http::StatusCode::OK, "membership still reads");
+        assert_eq!(body["items"].as_array().unwrap().len(), 3);
+        assert!(
+            body["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|node| node["swarmStatus"] == "unknown" && node["role"] == "unknown")
+        );
+        let (_, summary) =
+            authorized_json(&router, "/api/v1/cluster/summary", &authorization).await?;
+        assert_eq!(summary["quorum"], "degraded");
+        assert_eq!(summary["managersReachable"], 0);
+        assert_eq!(summary["nodesActive"], 0);
         Ok::<_, Box<dyn Error>>(())
     }
     .await;

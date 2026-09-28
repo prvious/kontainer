@@ -5,6 +5,7 @@
 
 mod list;
 mod samples;
+mod summary;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -16,16 +17,60 @@ use crate::error::NativeClientError;
 /// Most points a series may carry.
 pub const MAX_SAMPLE_POINTS: usize = 200;
 
-/// Membership status derived by the controller from the last check-in.
+/// The agent side, derived by the controller from the last check-in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum NodeStatus {
+#[serde(rename_all = "kebab-case")]
+pub enum AgentStatus {
     /// Checked in within 15 seconds.
     Online,
     /// Silent for 15 to 60 seconds.
     Degraded,
     /// Silent for more than a minute.
     Offline,
+    /// A Swarm member that never checked in.
+    NoAgent,
+}
+
+/// Agent and Swarm state together: `active` only when both are fine, `down` when either says so.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeHealth {
+    Active,
+    Degraded,
+    Down,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeRole {
+    Manager,
+    Worker,
+    /// The manager did not name the node.
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeAvailability {
+    Active,
+    Pause,
+    Drain,
+}
+
+/// What the manager last heard from the node.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SwarmNodeStatus {
+    Ready,
+    Down,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QuorumState {
+    Healthy,
+    Degraded,
 }
 
 /// The newest sample a node reported.
@@ -42,25 +87,47 @@ pub struct NodeSample {
     pub net_tx_bytes_per_sec: Option<f64>,
 }
 
-/// One member node.
+/// One node: membership joined to the manager's Swarm member. Agent fields are `None` for a
+/// member without an agent, whose id is its Swarm node id.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NodeSummary {
     pub id: NodeId,
     pub hostname: String,
-    pub status: NodeStatus,
+    pub agent_status: AgentStatus,
+    pub health: NodeHealth,
+    pub role: NodeRole,
+    pub is_leader: bool,
+    pub availability: Option<NodeAvailability>,
+    pub swarm_status: SwarmNodeStatus,
     pub swarm_node_id: Option<String>,
-    pub role: Option<String>,
-    pub availability: Option<String>,
-    pub agent_version: String,
+    pub address: Option<String>,
+    pub agent_version: Option<String>,
     pub docker_version: String,
     pub os: String,
     pub arch: String,
     pub cpu_cores: u32,
     pub memory_total_bytes: u64,
-    pub agent_started_at: DateTime<Utc>,
-    pub first_seen_at: DateTime<Utc>,
-    pub last_check_in_at: DateTime<Utc>,
+    pub agent_started_at: Option<DateTime<Utc>>,
+    pub first_seen_at: Option<DateTime<Utc>>,
+    pub last_check_in_at: Option<DateTime<Utc>>,
     pub latest_sample: Option<NodeSample>,
+}
+
+/// Node counts by health, manager reachability, quorum, and load over online nodes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ClusterSummary {
+    pub nodes_total: u32,
+    pub nodes_active: u32,
+    pub nodes_degraded: u32,
+    pub nodes_down: u32,
+    pub managers_total: u32,
+    pub managers_reachable: u32,
+    pub quorum: QuorumState,
+    pub cpu_percent: Option<f64>,
+    pub memory_used_bytes: u64,
+    pub memory_total_bytes: u64,
+    pub containers_running: u64,
+    pub snapshot_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -121,20 +188,41 @@ pub(crate) struct NodeListBody {
 pub(crate) struct NodeBody {
     id: String,
     hostname: String,
-    status: NodeStatus,
+    agent_status: AgentStatus,
+    health: NodeHealth,
+    role: NodeRole,
+    is_leader: bool,
+    availability: Option<NodeAvailability>,
+    swarm_status: SwarmNodeStatus,
     swarm_node_id: Option<String>,
-    role: Option<String>,
-    availability: Option<String>,
-    agent_version: String,
+    address: Option<String>,
+    agent_version: Option<String>,
     docker_version: String,
     os: String,
     arch: String,
     cpu_cores: u32,
     memory_total_bytes: u64,
-    agent_started_at: String,
-    first_seen_at: String,
-    last_check_in_at: String,
+    agent_started_at: Option<String>,
+    first_seen_at: Option<String>,
+    last_check_in_at: Option<String>,
     latest_sample: Option<NodeSampleBody>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ClusterSummaryBody {
+    nodes_total: u32,
+    nodes_active: u32,
+    nodes_degraded: u32,
+    nodes_down: u32,
+    managers_total: u32,
+    managers_reachable: u32,
+    quorum: QuorumState,
+    cpu_percent: Option<f64>,
+    memory_used_bytes: u64,
+    memory_total_bytes: u64,
+    containers_running: u64,
+    snapshot_at: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -205,27 +293,72 @@ impl NodeListBody {
                     })
                 })
                 .transpose()?;
+            let time = |value: Option<String>| value.as_deref().map(parse_timestamp).transpose();
+            // An agent row carries every agent field; a Swarm-only row carries none.
+            let has_agent = node.agent_status != AgentStatus::NoAgent;
+            let agent_fields = [
+                node.agent_version.is_some(),
+                node.agent_started_at.is_some(),
+                node.first_seen_at.is_some(),
+                node.last_check_in_at.is_some(),
+            ];
+            if agent_fields.iter().any(|present| *present != has_agent)
+                || (!has_agent && latest_sample.is_some())
+            {
+                return Err(NativeClientError::InvalidResponse);
+            }
             items.push(NodeSummary {
                 id: NodeId::parse(&node.id).map_err(|_| NativeClientError::InvalidResponse)?,
                 hostname: node.hostname,
-                status: node.status,
-                swarm_node_id: node.swarm_node_id,
+                agent_status: node.agent_status,
+                health: node.health,
                 role: node.role,
+                is_leader: node.is_leader,
                 availability: node.availability,
+                swarm_status: node.swarm_status,
+                swarm_node_id: node.swarm_node_id,
+                address: node.address,
                 agent_version: node.agent_version,
                 docker_version: node.docker_version,
                 os: node.os,
                 arch: node.arch,
                 cpu_cores: node.cpu_cores,
                 memory_total_bytes: node.memory_total_bytes,
-                agent_started_at: parse_timestamp(&node.agent_started_at)?,
-                first_seen_at: parse_timestamp(&node.first_seen_at)?,
-                last_check_in_at: parse_timestamp(&node.last_check_in_at)?,
+                agent_started_at: time(node.agent_started_at)?,
+                first_seen_at: time(node.first_seen_at)?,
+                last_check_in_at: time(node.last_check_in_at)?,
                 latest_sample,
             });
         }
         Ok(NodeList {
             items,
+            snapshot_at: parse_timestamp(&self.snapshot_at)?,
+        })
+    }
+}
+
+impl ClusterSummaryBody {
+    pub(crate) fn into_summary(self) -> Result<ClusterSummary, NativeClientError> {
+        let health_total = u64::from(self.nodes_active)
+            + u64::from(self.nodes_degraded)
+            + u64::from(self.nodes_down);
+        if health_total != u64::from(self.nodes_total)
+            || self.managers_reachable > self.managers_total
+        {
+            return Err(NativeClientError::InvalidResponse);
+        }
+        Ok(ClusterSummary {
+            nodes_total: self.nodes_total,
+            nodes_active: self.nodes_active,
+            nodes_degraded: self.nodes_degraded,
+            nodes_down: self.nodes_down,
+            managers_total: self.managers_total,
+            managers_reachable: self.managers_reachable,
+            quorum: self.quorum,
+            cpu_percent: optional_finite(self.cpu_percent)?,
+            memory_used_bytes: self.memory_used_bytes,
+            memory_total_bytes: self.memory_total_bytes,
+            containers_running: self.containers_running,
             snapshot_at: parse_timestamp(&self.snapshot_at)?,
         })
     }

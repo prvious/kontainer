@@ -44,7 +44,7 @@ const RETRY = "018f2e34-0000-7000-8000-0000000000c2";
 const [managerNode] = nodes.nodeList.items;
 const threeOnline = {
     ...nodes.nodeList,
-    items: ["manager", "worker-1", "worker-2"].map((id) => ({ ...managerNode, id, hostname: id, status: "online" })),
+    items: ["manager", "worker-1", "worker-2"].map((id) => ({ ...managerNode, id, hostname: id, agentStatus: "online" })),
 };
 const containerList = {
     ...containers.containerList,

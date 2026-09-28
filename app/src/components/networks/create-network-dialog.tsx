@@ -62,7 +62,7 @@ function CreateNetworkBody({
     const nodeId = useId();
     const subnetId = useId();
     const attachableId = useId();
-    const online = nodes.filter((node) => node.status === "online");
+    const online = nodes.filter((node) => node.agentStatus === "online");
     const [name, setName] = useState("");
     const [nameChecked, setNameChecked] = useState(false);
     const [driver, setDriver] = useState<Driver>("overlay");

@@ -48,7 +48,7 @@ function PullImageBody({ nodes, onClose }: { nodes: NodeSummary[]; onClose: () =
     const cancel = useCancelOperation();
     const [reference, setReference] = useState("");
     const [referenceError, setReferenceError] = useState<string | null>(null);
-    const [selected, setSelected] = useState<string[]>(() => nodes.filter((node) => node.status === "online").map((node) => node.id));
+    const [selected, setSelected] = useState<string[]>(() => nodes.filter((node) => node.agentStatus === "online").map((node) => node.id));
     const [attempts, setAttempts] = useState<PullAttempt[]>([]);
     const views = useOperationViews(attempts.map((attempt) => attempt.operationId));
     const rows = nodeProgress(attempts, views);
@@ -157,15 +157,15 @@ function PullImageBody({ nodes, onClose }: { nodes: NodeSummary[]; onClose: () =
                                       <Checkbox
                                           aria-label={`Pull on ${node.id}`}
                                           checked={selected.includes(node.id)}
-                                          disabled={node.status === "offline"}
+                                          disabled={node.agentStatus === "offline"}
                                           onCheckedChange={(checked) =>
                                               setSelected((current) => (checked === true ? [...current, node.id] : current.filter((id) => id !== node.id)))
                                           }
                                           className='size-3.5 rounded-sm'
                                       />
                                       <span className='flex-1 truncate'>{node.id}</span>
-                                      <span className={cn("text-3xs uppercase", node.status === "online" ? "text-success" : "text-muted-foreground")}>
-                                          {node.status}
+                                      <span className={cn("text-3xs uppercase", node.agentStatus === "online" ? "text-success" : "text-muted-foreground")}>
+                                          {node.agentStatus}
                                       </span>
                                   </label>
                               ))}

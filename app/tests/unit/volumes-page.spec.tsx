@@ -43,7 +43,7 @@ const OPERATION = "018f2e34-0000-7000-8000-0000000000c1";
 const [managerNode] = nodes.nodeList.items;
 const twoOnline = {
     ...nodes.nodeList,
-    items: ["manager", "worker-1"].map((id) => ({ ...managerNode, id, hostname: id, status: "online" })),
+    items: ["manager", "worker-1"].map((id) => ({ ...managerNode, id, hostname: id, agentStatus: "online" })),
 };
 const created = {
     nodeId: "worker-1",

@@ -1,6 +1,7 @@
 {
     "commands": [
         ["nodes", "list_nodes"],
+        ["nodes", "get_cluster_summary"],
         ["nodes", "get_cluster_samples"],
         ["nodes", "get_node_samples"],
         ["settings", "get_settings"],
@@ -11,10 +12,14 @@
             {
                 "id": "manager",
                 "hostname": "manager",
-                "status": "online",
-                "swarmNodeId": "tj42rq5nzwf8",
-                "role": null,
-                "availability": null,
+                "agentStatus": "online",
+                "health": "active",
+                "role": "manager",
+                "isLeader": true,
+                "availability": "active",
+                "swarmStatus": "ready",
+                "swarmNodeId": "tj42rq5nzwf8jx0a2b4c6d8e1",
+                "address": "10.0.1.10",
                 "agentVersion": "0.1.0",
                 "dockerVersion": "29.8.0",
                 "os": "Alpine Linux v3.22",
@@ -39,10 +44,14 @@
             {
                 "id": "worker-2",
                 "hostname": "worker-2",
-                "status": "offline",
-                "swarmNodeId": null,
-                "role": null,
+                "agentStatus": "offline",
+                "health": "down",
+                "role": "unknown",
+                "isLeader": false,
                 "availability": null,
+                "swarmStatus": "unknown",
+                "swarmNodeId": null,
+                "address": null,
                 "agentVersion": "0.1.0",
                 "dockerVersion": "29.8.0",
                 "os": "Alpine Linux v3.22",
@@ -53,8 +62,44 @@
                 "firstSeenAt": "2026-09-28T11:00:01.000Z",
                 "lastCheckInAt": "2026-09-28T11:30:00.000Z",
                 "latestSample": null
+            },
+            {
+                "id": "w3kq2m9p0r1s3t5u7w9y0z2b4",
+                "hostname": "worker-3",
+                "agentStatus": "no-agent",
+                "health": "degraded",
+                "role": "worker",
+                "isLeader": false,
+                "availability": "drain",
+                "swarmStatus": "ready",
+                "swarmNodeId": "w3kq2m9p0r1s3t5u7w9y0z2b4",
+                "address": "10.0.1.13",
+                "agentVersion": null,
+                "dockerVersion": "29.8.0",
+                "os": "linux",
+                "arch": "aarch64",
+                "cpuCores": 2,
+                "memoryTotalBytes": 4294967296,
+                "agentStartedAt": null,
+                "firstSeenAt": null,
+                "lastCheckInAt": null,
+                "latestSample": null
             }
         ],
+        "snapshotAt": "2026-09-28T12:00:02.000Z"
+    },
+    "clusterSummary": {
+        "nodesTotal": 3,
+        "nodesActive": 1,
+        "nodesDegraded": 1,
+        "nodesDown": 1,
+        "managersTotal": 1,
+        "managersReachable": 1,
+        "quorum": "healthy",
+        "cpuPercent": 12.5,
+        "memoryUsedBytes": 1073741824,
+        "memoryTotalBytes": 8589934592,
+        "containersRunning": 5,
         "snapshotAt": "2026-09-28T12:00:02.000Z"
     },
     "clusterSamples": {
@@ -84,5 +129,7 @@
         ],
         "snapshotAt": "2026-09-28T12:00:30.000Z"
     },
-    "settings": { "metricsRetentionDays": 7 }
+    "settings": {
+        "metricsRetentionDays": 7
+    }
 }

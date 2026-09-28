@@ -1,0 +1,14 @@
+{
+  "nodesTotal": 3,
+  "nodesActive": 1,
+  "nodesDegraded": 1,
+  "nodesDown": 1,
+  "managersTotal": 1,
+  "managersReachable": 1,
+  "quorum": "healthy",
+  "cpuPercent": 12.5,
+  "memoryUsedBytes": 1073741824,
+  "memoryTotalBytes": 8589934592,
+  "containersRunning": 5,
+  "snapshotAt": "2026-09-28T12:00:02.000Z"
+}

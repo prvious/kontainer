@@ -53,7 +53,7 @@ function CreateVolumeBody({
     const nameId = useId();
     const nodeId = useId();
     const labelId = useId();
-    const online = nodes.filter((node) => node.status === "online");
+    const online = nodes.filter((node) => node.agentStatus === "online");
     const [node, setNode] = useState<string | null>(online[0]?.id ?? null);
     const [name, setName] = useState("");
     // The name last left (blur or submit): format and conflict checks run against it.

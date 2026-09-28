@@ -30,7 +30,10 @@ use crate::{
     is_valid_cidr, is_valid_network_id, is_valid_network_name, is_valid_volume_name,
     volume::bounded_labels,
 };
-use crate::{ServiceMode, ServiceSummary, SwarmStatus, TaskSummary, is_valid_swarm_id};
+use crate::{
+    ServiceMode, ServiceSummary, SwarmAvailability, SwarmNode, SwarmNodeState, SwarmRole,
+    SwarmStatus, TaskSummary, is_valid_swarm_id,
+};
 
 const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_CONTAINER_NETWORKS: usize = 16;
@@ -817,6 +820,23 @@ impl ContainerEngine for LocalDockerEngine {
         })
     }
 
+    async fn list_swarm_nodes(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> Result<Vec<SwarmNode>, EngineError> {
+        use bollard::query_parameters::ListNodesOptions;
+
+        let client = self.negotiate(cancellation).await?;
+        let nodes = self
+            .execute(
+                EngineOperation::ReadSwarm,
+                cancellation,
+                client.list_nodes(None::<ListNodesOptions>),
+            )
+            .await?;
+        Ok(nodes.into_iter().filter_map(map_swarm_node).collect())
+    }
+
     async fn list_networks(
         &self,
         cancellation: &CancellationToken,
@@ -1362,6 +1382,55 @@ fn map_task(task: bollard::models::Task) -> Option<TaskSummary> {
     })
 }
 
+fn map_swarm_node(node: bollard::models::Node) -> Option<SwarmNode> {
+    use bollard::models::{NodeSpecAvailabilityEnum, NodeSpecRoleEnum, NodeState, Reachability};
+
+    let id = node.id.filter(|id| is_valid_swarm_id(id))?;
+    let spec = node.spec.unwrap_or_default();
+    let description = node.description.unwrap_or_default();
+    let status = node.status.unwrap_or_default();
+    let platform = description.platform.unwrap_or_default();
+    let resources = description.resources.unwrap_or_default();
+    let text = |value: Option<String>| bounded_label(value.as_ref());
+    let manager = node.manager_status;
+    Some(SwarmNode {
+        id,
+        hostname: text(description.hostname).unwrap_or_default(),
+        role: match spec.role {
+            Some(NodeSpecRoleEnum::MANAGER) => SwarmRole::Manager,
+            _ => SwarmRole::Worker,
+        },
+        is_leader: manager
+            .as_ref()
+            .and_then(|manager| manager.leader)
+            .unwrap_or(false),
+        manager_reachable: manager
+            .as_ref()
+            .map(|manager| manager.reachability == Some(Reachability::REACHABLE)),
+        availability: match spec.availability {
+            Some(NodeSpecAvailabilityEnum::ACTIVE) => Some(SwarmAvailability::Active),
+            Some(NodeSpecAvailabilityEnum::PAUSE) => Some(SwarmAvailability::Pause),
+            Some(NodeSpecAvailabilityEnum::DRAIN) => Some(SwarmAvailability::Drain),
+            _ => None,
+        },
+        state: match status.state {
+            Some(NodeState::READY) => SwarmNodeState::Ready,
+            Some(NodeState::DOWN | NodeState::DISCONNECTED) => SwarmNodeState::Down,
+            _ => SwarmNodeState::Unknown,
+        },
+        address: text(status.addr),
+        docker_version: text(description.engine.and_then(|engine| engine.engine_version)),
+        os: text(platform.os),
+        architecture: text(platform.architecture),
+        cpu_cores: resources
+            .nano_cpus
+            .and_then(|nanos| u32::try_from(nanos / 1_000_000_000).ok()),
+        memory_total_bytes: resources
+            .memory_bytes
+            .and_then(|bytes| u64::try_from(bytes).ok()),
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn map_network(
     id: String,
@@ -1620,12 +1689,108 @@ mod tests {
 
     use super::{
         LocalDockerEngine, LocalEngineOptions, capabilities_from_swarm, map_container_state,
-        map_container_stats, map_container_summary, map_disk_usage, map_node_info, map_volume,
+        map_container_stats, map_container_summary, map_disk_usage, map_node_info, map_swarm_node,
+        map_volume,
     };
     use crate::{
         CapabilityStatus, ContainerEngine, ContainerPageRequest, ContainerState, EngineAccessScope,
-        EngineErrorKind, EngineOperation, UnsupportedCapabilityReason,
+        EngineErrorKind, EngineOperation, SwarmAvailability, SwarmNode, SwarmNodeState, SwarmRole,
+        UnsupportedCapabilityReason,
     };
+
+    #[test]
+    fn swarm_nodes_map_role_leadership_state_and_resources() {
+        use bollard::models::{
+            EngineDescription, ManagerStatus, Node, NodeDescription, NodeSpec,
+            NodeSpecAvailabilityEnum, NodeSpecRoleEnum, NodeState, NodeStatus, Platform,
+            Reachability, ResourceObject,
+        };
+
+        let id = "x7kq2m9p0r1s3t5u7w9y0z2b4".to_owned();
+        let leader = Node {
+            id: Some(id.clone()),
+            spec: Some(NodeSpec {
+                role: Some(NodeSpecRoleEnum::MANAGER),
+                availability: Some(NodeSpecAvailabilityEnum::ACTIVE),
+                ..NodeSpec::default()
+            }),
+            description: Some(NodeDescription {
+                hostname: Some("manager".to_owned()),
+                platform: Some(Platform {
+                    architecture: Some("aarch64".to_owned()),
+                    os: Some("linux".to_owned()),
+                }),
+                resources: Some(ResourceObject {
+                    nano_cpus: Some(4_000_000_000),
+                    memory_bytes: Some(8 << 30),
+                    ..ResourceObject::default()
+                }),
+                engine: Some(EngineDescription {
+                    engine_version: Some("29.1.0".to_owned()),
+                    ..EngineDescription::default()
+                }),
+                ..NodeDescription::default()
+            }),
+            status: Some(NodeStatus {
+                state: Some(NodeState::READY),
+                addr: Some("172.20.0.2".to_owned()),
+                ..NodeStatus::default()
+            }),
+            manager_status: Some(ManagerStatus {
+                leader: Some(true),
+                reachability: Some(Reachability::REACHABLE),
+                addr: None,
+            }),
+            ..Node::default()
+        };
+        assert_eq!(
+            map_swarm_node(leader),
+            Some(SwarmNode {
+                id: id.clone(),
+                hostname: "manager".to_owned(),
+                role: SwarmRole::Manager,
+                is_leader: true,
+                manager_reachable: Some(true),
+                availability: Some(SwarmAvailability::Active),
+                state: SwarmNodeState::Ready,
+                address: Some("172.20.0.2".to_owned()),
+                docker_version: Some("29.1.0".to_owned()),
+                os: Some("linux".to_owned()),
+                architecture: Some("aarch64".to_owned()),
+                cpu_cores: Some(4),
+                memory_total_bytes: Some(8 << 30),
+            })
+        );
+
+        let drained = map_swarm_node(Node {
+            id: Some(id.clone()),
+            spec: Some(NodeSpec {
+                role: Some(NodeSpecRoleEnum::WORKER),
+                availability: Some(NodeSpecAvailabilityEnum::DRAIN),
+                ..NodeSpec::default()
+            }),
+            status: Some(NodeStatus {
+                state: Some(NodeState::DISCONNECTED),
+                ..NodeStatus::default()
+            }),
+            ..Node::default()
+        })
+        .unwrap();
+        assert_eq!(drained.role, SwarmRole::Worker);
+        assert_eq!(drained.availability, Some(SwarmAvailability::Drain));
+        assert_eq!(drained.state, SwarmNodeState::Down, "disconnected is down");
+        assert_eq!(
+            drained.manager_reachable, None,
+            "workers have no raft state"
+        );
+        assert_eq!(drained.cpu_cores, None);
+
+        assert_eq!(
+            map_swarm_node(Node::default()),
+            None,
+            "a node without a valid id is dropped"
+        );
+    }
 
     #[test]
     fn manager_and_node_constructors_preserve_their_authority() {

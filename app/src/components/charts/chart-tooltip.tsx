@@ -25,7 +25,7 @@ export function ChartTooltip({
 }: {
     time: string;
     rows: ChartTooltipRow[];
-    delta?: { text: string; tone: "success" | "destructive" | "neutral" };
+    delta?: { text: string; tone: "success" | "warning" | "destructive" | "neutral" };
     className?: string;
 }) {
     return (
@@ -48,7 +48,13 @@ export function ChartTooltip({
                 <span
                     className={cn(
                         "text-3xs font-medium",
-                        delta.tone === "success" ? "text-success" : delta.tone === "destructive" ? "text-destructive" : "text-muted-foreground",
+                        delta.tone === "success"
+                            ? "text-success"
+                            : delta.tone === "warning"
+                              ? "text-warning"
+                              : delta.tone === "destructive"
+                                ? "text-destructive"
+                                : "text-muted-foreground",
                     )}
                 >
                     {delta.text}

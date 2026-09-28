@@ -17,8 +17,8 @@ use kontainer_native_client::{
     SampleSeries, Traced, VolumeList, VolumeName, VolumeQuery, VolumeSpec,
 };
 use kontainer_native_client::{AttachedContainer, NetworkId, NetworkList, NetworkSpec};
+use kontainer_native_client::{ClusterSummary, StackList, StackName, StackRemovalPlan};
 use kontainer_native_client::{ServiceAction, ServiceDetail, ServiceId, ServiceList};
-use kontainer_native_client::{StackList, StackName, StackRemovalPlan};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -95,6 +95,12 @@ pub(crate) trait Controller: Send + Sync + 'static {
         access: &'a AccessCredential,
         cancellation: &'a CancellationToken,
     ) -> ControllerFuture<'a, Result<NodeList, NativeClientError>>;
+
+    fn cluster_summary<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ClusterSummary, NativeClientError>>;
 
     /// `node_id` `None` reads the cluster series.
     fn samples<'a>(
@@ -441,6 +447,14 @@ impl Controller for NativeController {
         cancellation: &'a CancellationToken,
     ) -> ControllerFuture<'a, Result<NodeList, NativeClientError>> {
         Box::pin(self.client.list_nodes(access, cancellation))
+    }
+
+    fn cluster_summary<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ClusterSummary, NativeClientError>> {
+        Box::pin(self.client.cluster_summary(access, cancellation))
     }
 
     fn samples<'a>(

@@ -3,7 +3,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { useQueriesPaused } from "@/hooks/use-queries-paused";
 import { authenticatedInvoke, type ReportCustodyError as Report } from "@/hooks/authenticated-invoke";
-import { controllerSettingsFromIpc, nodeListFromIpc, sampleSeriesFromIpc, type SampleWindow } from "@/types/nodes";
+import { clusterSummaryFromIpc, controllerSettingsFromIpc, nodeListFromIpc, sampleSeriesFromIpc, type SampleWindow } from "@/types/nodes";
 import { DEFAULT_APP_SETTINGS } from "@/types/settings";
 
 /** `node` is a node id, or `"cluster"` for the cluster-wide series. */
@@ -15,6 +15,11 @@ export const nodesQueries = {
         queryOptions({
             queryKey: nodesQueries.all(profileId),
             queryFn: () => authenticatedInvoke("list_nodes", profileId, {}, nodeListFromIpc, report),
+        }),
+    summary: (profileId: string, report: Report) =>
+        queryOptions({
+            queryKey: [...nodesQueries.all(profileId), "summary"] as const,
+            queryFn: () => authenticatedInvoke("get_cluster_summary", profileId, {}, clusterSummaryFromIpc, report),
         }),
     samples: (profileId: string, scope: SampleScope, window: SampleWindow, bucket: string, report: Report) =>
         queryOptions({
@@ -42,6 +47,21 @@ export function useNodes() {
     const profileId = session?.profileId ?? "";
     return useQuery({
         ...nodesQueries.list(profileId, reportInventoryCustodyError),
+        enabled: Boolean(session) && !paused,
+        refetchInterval: interval,
+        retry: false,
+        placeholderData: keepPreviousData,
+    });
+}
+
+/** Node counts, quorum, and load for the strip, the Overview, and the status bar. */
+export function useClusterSummary() {
+    const { session, reportInventoryCustodyError } = useAuth();
+    const paused = useQueriesPaused();
+    const interval = useRefreshInterval();
+    const profileId = session?.profileId ?? "";
+    return useQuery({
+        ...nodesQueries.summary(profileId, reportInventoryCustodyError),
         enabled: Boolean(session) && !paused,
         refetchInterval: interval,
         retry: false,

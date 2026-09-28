@@ -14,8 +14,8 @@ use kontainer_native_client::{
 use kontainer_native_client::{
     AttachedContainer, NetworkId, NetworkList, NetworkPlacement, NetworkSpec,
 };
+use kontainer_native_client::{ClusterSummary, StackList, StackName, StackRemovalPlan};
 use kontainer_native_client::{ServiceAction, ServiceDetail, ServiceId, ServiceList};
-use kontainer_native_client::{StackList, StackName, StackRemovalPlan};
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -390,6 +390,7 @@ pub(crate) struct Script {
     pub(crate) service_details: VecDeque<Result<ServiceDetail, NativeClientError>>,
     pub(crate) stacks: VecDeque<Result<StackList, NativeClientError>>,
     pub(crate) plans: VecDeque<Result<StackRemovalPlan, NativeClientError>>,
+    pub(crate) summaries: VecDeque<Result<ClusterSummary, NativeClientError>>,
 }
 
 pub(crate) struct FakeControllerFactory {
@@ -464,6 +465,25 @@ impl Controller for FakeController {
             record(&log, "nodes_done");
             outcome
         })
+    }
+
+    fn cluster_summary<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ClusterSummary, NativeClientError>> {
+        record(
+            &self.log,
+            format!("summary:{}", public_tag(access.expose())),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .summaries
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
     }
 
     fn samples<'a>(

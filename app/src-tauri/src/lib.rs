@@ -50,6 +50,7 @@ pub fn run() {
             actions::stacks::get_stack_removal_plan::get_stack_removal_plan,
             actions::stacks::remove_stack::remove_stack,
             actions::nodes::list_nodes::list_nodes,
+            actions::nodes::get_cluster_summary::get_cluster_summary,
             actions::nodes::get_cluster_samples::get_cluster_samples,
             actions::nodes::get_node_samples::get_node_samples,
             actions::settings::get_settings::get_settings,

@@ -6,9 +6,10 @@ use std::{
 };
 
 use kontainer_native_client::{
-    AdmittedOperation, ContainerItem, ContainerList, ContainerState, ControllerSettings,
-    NativeClientError, NodeId, NodeList, NodeOutcome, NodeOutcomeStatus, NodeSample, NodeStatus,
-    NodeSummary, SamplePoint, SampleSeries,
+    AdmittedOperation, AgentStatus, ClusterSummary, ContainerItem, ContainerList, ContainerState,
+    ControllerSettings, NativeClientError, NodeAvailability, NodeHealth, NodeId, NodeList,
+    NodeOutcome, NodeOutcomeStatus, NodeRole, NodeSample, NodeSummary, QuorumState, SamplePoint,
+    SampleSeries, SwarmNodeStatus,
 };
 use tokio::sync::Notify;
 
@@ -98,7 +99,7 @@ fn container_list() -> ContainerList {
     }
 }
 
-fn node(id: &str, status: NodeStatus, cores: u32, memory: u64) -> NodeSummary {
+fn node(id: &str, agent_status: AgentStatus, cores: u32, memory: u64) -> NodeSummary {
     let (started, first, last) = if id == "manager" {
         (
             "2026-09-28T11:58:00.000Z",
@@ -115,25 +116,38 @@ fn node(id: &str, status: NodeStatus, cores: u32, memory: u64) -> NodeSummary {
     NodeSummary {
         id: NodeId::parse(id).unwrap(),
         hostname: id.to_owned(),
-        status,
-        swarm_node_id: (id == "manager").then(|| "tj42rq5nzwf8".to_owned()),
-        role: None,
+        agent_status,
+        health: NodeHealth::Down,
+        role: NodeRole::Unknown,
+        is_leader: false,
         availability: None,
-        agent_version: "0.1.0".to_owned(),
+        swarm_status: SwarmNodeStatus::Unknown,
+        swarm_node_id: None,
+        address: None,
+        agent_version: Some("0.1.0".to_owned()),
         docker_version: "29.8.0".to_owned(),
         os: "Alpine Linux v3.22".to_owned(),
         arch: "aarch64".to_owned(),
         cpu_cores: cores,
         memory_total_bytes: memory,
-        agent_started_at: started.parse().unwrap(),
-        first_seen_at: first.parse().unwrap(),
-        last_check_in_at: last.parse().unwrap(),
+        agent_started_at: Some(started.parse().unwrap()),
+        first_seen_at: Some(first.parse().unwrap()),
+        last_check_in_at: Some(last.parse().unwrap()),
         latest_sample: None,
     }
 }
 
+/// A leader manager with an agent, an offline agent Swarm doesn't list, and a drained Swarm
+/// worker without an agent.
 fn node_list() -> NodeList {
-    let mut manager = node("manager", NodeStatus::Online, 4, 8 << 30);
+    let mut manager = node("manager", AgentStatus::Online, 4, 8 << 30);
+    manager.health = NodeHealth::Active;
+    manager.role = NodeRole::Manager;
+    manager.is_leader = true;
+    manager.availability = Some(NodeAvailability::Active);
+    manager.swarm_status = SwarmNodeStatus::Ready;
+    manager.swarm_node_id = Some("tj42rq5nzwf8jx0a2b4c6d8e1".to_owned());
+    manager.address = Some("10.0.1.10".to_owned());
     manager.latest_sample = Some(NodeSample {
         sampled_at: "2026-09-28T12:00:00.000Z".parse().unwrap(),
         cpu_percent: 12.5,
@@ -145,8 +159,43 @@ fn node_list() -> NodeList {
         net_rx_bytes_per_sec: Some(2048.0),
         net_tx_bytes_per_sec: None,
     });
+    let swarm_id = "w3kq2m9p0r1s3t5u7w9y0z2b4";
+    let mut worker_3 = node(swarm_id, AgentStatus::NoAgent, 2, 4 << 30);
+    worker_3.hostname = "worker-3".to_owned();
+    worker_3.health = NodeHealth::Degraded;
+    worker_3.role = NodeRole::Worker;
+    worker_3.availability = Some(NodeAvailability::Drain);
+    worker_3.swarm_status = SwarmNodeStatus::Ready;
+    worker_3.swarm_node_id = Some(swarm_id.to_owned());
+    worker_3.address = Some("10.0.1.13".to_owned());
+    worker_3.os = "linux".to_owned();
+    worker_3.agent_version = None;
+    worker_3.agent_started_at = None;
+    worker_3.first_seen_at = None;
+    worker_3.last_check_in_at = None;
     NodeList {
-        items: vec![manager, node("worker-2", NodeStatus::Offline, 2, 4 << 30)],
+        items: vec![
+            manager,
+            node("worker-2", AgentStatus::Offline, 2, 4 << 30),
+            worker_3,
+        ],
+        snapshot_at: "2026-09-28T12:00:02.000Z".parse().unwrap(),
+    }
+}
+
+fn cluster_summary() -> ClusterSummary {
+    ClusterSummary {
+        nodes_total: 3,
+        nodes_active: 1,
+        nodes_degraded: 1,
+        nodes_down: 1,
+        managers_total: 1,
+        managers_reachable: 1,
+        quorum: QuorumState::Healthy,
+        cpu_percent: Some(12.5),
+        memory_used_bytes: 1 << 30,
+        memory_total_bytes: 8 << 30,
+        containers_running: 5,
         snapshot_at: "2026-09-28T12:00:02.000Z".parse().unwrap(),
     }
 }
@@ -235,6 +284,13 @@ fn node_and_settings_ipc_views_match_shared_fixture() {
         fixture["clusterSamples"]
     );
     assert_eq!(
+        serde_json::to_value(super::super::manager::ClusterSummaryView::from(
+            cluster_summary()
+        ))
+        .unwrap(),
+        fixture["clusterSummary"]
+    );
+    assert_eq!(
         serde_json::to_value(super::super::manager::ControllerSettingsView::from(
             ControllerSettings {
                 metrics_retention_days: 7
@@ -313,6 +369,11 @@ async fn reads_use_only_the_active_profile_and_serialize_their_views() {
     harness
         .controllers
         .script()
+        .summaries
+        .push_back(Ok(cluster_summary()));
+    harness
+        .controllers
+        .script()
         .settings
         .push_back(Ok(ControllerSettings {
             metrics_retention_days: 7,
@@ -327,8 +388,14 @@ async fn reads_use_only_the_active_profile_and_serialize_their_views() {
 
     assert_eq!(
         node_ids(harness.manager.nodes(view.profile_id).await.unwrap()),
-        vec!["manager", "worker-2"]
+        vec!["manager", "worker-2", "w3kq2m9p0r1s3t5u7w9y0z2b4"]
     );
+    let summary = harness
+        .manager
+        .cluster_summary(view.profile_id)
+        .await
+        .unwrap();
+    assert_eq!(serde_json::to_value(summary).unwrap()["nodesDown"], 1);
     let result = harness
         .manager
         .containers(view.profile_id, None)
@@ -369,6 +436,7 @@ async fn reads_use_only_the_active_profile_and_serialize_their_views() {
     );
 
     assert_eq!(harness.count("nodes:"), 1);
+    assert_eq!(harness.count("summary:"), 1);
     assert_eq!(harness.count("containers:"), 1);
     let samples: Vec<_> = harness
         .entries()
@@ -432,7 +500,7 @@ async fn one_401_rotates_in_order_then_retries_the_same_read_once() {
 
     assert_eq!(
         node_ids(harness.manager.nodes(view.profile_id).await.unwrap()),
-        vec!["manager", "worker-2"]
+        vec!["manager", "worker-2", "w3kq2m9p0r1s3t5u7w9y0z2b4"]
     );
     assert_eq!(harness.count("nodes:"), 2);
     assert_eq!(harness.count("refresh:"), 1);

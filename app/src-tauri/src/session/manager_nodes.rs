@@ -4,8 +4,9 @@
 //! keeps both sides in sync.
 
 use kontainer_native_client::{
-    ControllerSettings, NodeId, NodeList, NodeSample, NodeStatus, NodeSummary, SamplePoint,
-    SampleSeries,
+    AgentStatus, ClusterSummary, ControllerSettings, NodeAvailability, NodeHealth, NodeId,
+    NodeList, NodeRole, NodeSample, NodeSummary, QuorumState, SamplePoint, SampleSeries,
+    SwarmNodeStatus,
 };
 use serde::Serialize;
 use uuid::Uuid;
@@ -31,20 +32,41 @@ pub(crate) struct NodeListView {
 struct NodeView {
     id: String,
     hostname: String,
-    status: NodeStatus,
+    agent_status: AgentStatus,
+    health: NodeHealth,
+    role: NodeRole,
+    is_leader: bool,
+    availability: Option<NodeAvailability>,
+    swarm_status: SwarmNodeStatus,
     swarm_node_id: Option<String>,
-    role: Option<String>,
-    availability: Option<String>,
-    agent_version: String,
+    address: Option<String>,
+    agent_version: Option<String>,
     docker_version: String,
     os: String,
     arch: String,
     cpu_cores: u32,
     memory_total_bytes: u64,
-    agent_started_at: String,
-    first_seen_at: String,
-    last_check_in_at: String,
+    agent_started_at: Option<String>,
+    first_seen_at: Option<String>,
+    last_check_in_at: Option<String>,
     latest_sample: Option<NodeSampleView>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ClusterSummaryView {
+    nodes_total: u32,
+    nodes_active: u32,
+    nodes_degraded: u32,
+    nodes_down: u32,
+    managers_total: u32,
+    managers_reachable: u32,
+    quorum: QuorumState,
+    cpu_percent: Option<f64>,
+    memory_used_bytes: u64,
+    memory_total_bytes: u64,
+    containers_running: u64,
+    snapshot_at: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -110,19 +132,23 @@ impl From<NodeSummary> for NodeView {
         Self {
             id: node.id.to_string(),
             hostname: node.hostname,
-            status: node.status,
-            swarm_node_id: node.swarm_node_id,
+            agent_status: node.agent_status,
+            health: node.health,
             role: node.role,
+            is_leader: node.is_leader,
             availability: node.availability,
+            swarm_status: node.swarm_status,
+            swarm_node_id: node.swarm_node_id,
+            address: node.address,
             agent_version: node.agent_version,
             docker_version: node.docker_version,
             os: node.os,
             arch: node.arch,
             cpu_cores: node.cpu_cores,
             memory_total_bytes: node.memory_total_bytes,
-            agent_started_at: timestamp!(node.agent_started_at),
-            first_seen_at: timestamp!(node.first_seen_at),
-            last_check_in_at: timestamp!(node.last_check_in_at),
+            agent_started_at: node.agent_started_at.map(|at| timestamp!(at)),
+            first_seen_at: node.first_seen_at.map(|at| timestamp!(at)),
+            last_check_in_at: node.last_check_in_at.map(|at| timestamp!(at)),
             latest_sample: node.latest_sample.map(NodeSampleView::from),
         }
     }
@@ -133,6 +159,25 @@ impl From<NodeList> for NodeListView {
         Self {
             items: list.items.into_iter().map(NodeView::from).collect(),
             snapshot_at: timestamp!(list.snapshot_at),
+        }
+    }
+}
+
+impl From<ClusterSummary> for ClusterSummaryView {
+    fn from(summary: ClusterSummary) -> Self {
+        Self {
+            nodes_total: summary.nodes_total,
+            nodes_active: summary.nodes_active,
+            nodes_degraded: summary.nodes_degraded,
+            nodes_down: summary.nodes_down,
+            managers_total: summary.managers_total,
+            managers_reachable: summary.managers_reachable,
+            quorum: summary.quorum,
+            cpu_percent: summary.cpu_percent,
+            memory_used_bytes: summary.memory_used_bytes,
+            memory_total_bytes: summary.memory_total_bytes,
+            containers_running: summary.containers_running,
+            snapshot_at: timestamp!(summary.snapshot_at),
         }
     }
 }
@@ -183,6 +228,18 @@ impl SessionManager {
             })
             .await?;
         Ok(list.into())
+    }
+
+    pub(crate) async fn cluster_summary(
+        &self,
+        profile_id: Uuid,
+    ) -> Result<ClusterSummaryView, InventoryError> {
+        let summary = self
+            .authenticated(profile_id, &(), |controller, access, cancellation, ()| {
+                controller.cluster_summary(access, cancellation)
+            })
+            .await?;
+        Ok(summary.into())
     }
 
     /// `node_id` `None` reads the cluster series.

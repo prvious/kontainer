@@ -60,3 +60,4 @@ What becomes easier, what becomes harder, what must be revisited and when.
 | [0020](./0020-networks-and-manager-engine.md) | Networks, the manager engine, and container networks | accepted |
 | [0021](./0021-swarm-services.md) | Swarm services, convergence, and the quorum state | accepted |
 | [0022](./0022-stacks-from-labels.md) | Stacks from service labels, and stack removal | accepted |
+| [0023](./0023-nodes-joined-with-swarm.md) | Nodes joined with Swarm, and the cluster summary | accepted |

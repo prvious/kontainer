@@ -1,3 +1,5 @@
+pub mod cluster_summary;
+pub mod list_cluster_nodes;
 pub mod list_nodes;
 pub mod record_check_in;
 

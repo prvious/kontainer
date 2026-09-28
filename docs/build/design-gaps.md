@@ -36,14 +36,14 @@ Node ids refer to `docs/design.pen`. Open the file with the Pencil MCP using its
 | G14 | Settings entry point for Integrations | Traefik breadcrumb `lXH8d` says Settings › Integrations, but Settings `8wGs5` has no Integrations section | Add an "INTEGRATIONS" section header at the bottom of Settings with one row linking to the hub `r9tns`. | Missing |
 | G15 | Integrations hub GitHub card in the not-connected state | `r9tns` GitHub card shows CONNECTED | Mirror the Discord card pattern: NOT CONNECTED badge, disabled CONNECT with tooltip "Arrives with deployments". | Missing |
 | G16 | Deployments and Vault navigation placement | Sidebar `YJkf8` has no entries; Deployments screens override the Services item with a rocket icon | No nav entries. Sections deferred entirely. | Missing, deferred |
-| G17 | Add-node enrollment flow end to end | State `MjblZ` draws the dialog; controller enrollment isn't built | Dialog renders as skeleton with the "coming soon" tooltip on ADD NODE. Dev cluster uses static certificates from `dev/`. | Designed, deferred |
+| G17 | Add-node enrollment flow end to end | State `MjblZ` draws the dialog; controller enrollment isn't built | ADD NODE is disabled with a "Not built yet" tooltip, in the header and the empty state; the dialog isn't built (spec 13). Dev cluster uses static certificates from `dev/`. | Deferred (button built) |
 | G18 | Volume Explorer and File Preview backend | `5mQoG`, `mhztj`, states `D5EBq`, `NZNrn` | No route. The volume row action "Browse files" renders disabled with tooltip "Not built yet". | Designed, deferred |
 | G19 | "Load more history" control for logs | State `f3Rq5` caption mentions a way to load more history | Empty State secondary action "Load previous hour" that widens the `since` window once. | Missing |
 | G20 | Narrow window layout | All screens are 1440 × 900 | Minimum window 1100 × 700; tables scroll horizontally inside their card; sidebar stays fixed. | Missing |
 | G21 | Session expired dialog copy after password auth | State `ME9dW` button reads SIGN IN WITH GITHUB | Button text becomes SIGN IN and opens the password form in place. Design updated in this pass. | Designed |
 | G22 | Settings "Auth provider" value | `8wGs5` shows GitHub | Read-only row showing "Password". Design updated in this pass. | Designed |
 | G23 | GitHub integration page in the deferred state | `kx4iP` shows a fully connected integration | Page renders every section as skeleton with a single Alert: "GitHub connects when deployments arrive." | Designed, deferred |
-| G24 | Certificate expiry surfaces (RENEW NOW on a manager card) | State `SedYE` (04.S5) | Not rendered; no certificate lifecycle exists yet. | Designed, deferred |
+| G24 | Certificate expiry surfaces (RENEW NOW on a manager card) | State `SedYE` (04.S5) | Not rendered; no certificate lifecycle exists yet. Node cards show only the degraded and down notes (spec 13). | Designed, deferred |
 | G25 | Exec connection line shows PID and TTY | Exec `f8D6u` footer | Docker's exec API does not expose them; the line shows the container name and session count only. | Missing, deferred |
 | G26 | Theme setting row (system / light / dark) | Settings `8wGs5` has no appearance row | A "Theme" select as the first APPLICATION row, styled like the other rows. | Missing |
 

@@ -17,6 +17,7 @@ import { IMAGE_SORTS, IMAGE_SORT_LABELS, imageSortFor, imageSortingFor, parseIma
 import { useContainers } from "@/hooks/use-containers";
 import { useImages, useRemoveImage } from "@/hooks/use-images";
 import { useNodes } from "@/hooks/use-nodes";
+import { agentNodes } from "@/types/nodes";
 import { isSettled, useTrackedOperations } from "@/hooks/use-operation";
 import { withIdempotencyKey } from "@/hooks/use-operations";
 import { imageLabel, type ImageView } from "@/types/images";
@@ -148,7 +149,7 @@ function ImagesPage() {
                 onOpenChange={(open) => !open && setDeleting(null)}
                 onConfirm={confirmDelete}
             />
-            <PullImageDialog open={pullOpen} onOpenChange={setPullOpen} nodes={nodes.data?.items ?? []} />
+            <PullImageDialog open={pullOpen} onOpenChange={setPullOpen} nodes={agentNodes(nodes.data?.items ?? [])} />
         </div>
     );
 }

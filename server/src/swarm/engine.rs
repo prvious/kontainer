@@ -1,6 +1,6 @@
-//! `ManagerEngine`: the controller-owned port for swarm-wide objects (networks now, services in
-//! spec 11). The Docker implementation wraps the engine crate's manager-scoped engine built from
-//! `settings.docker.host`; a host that is not a Swarm manager leaves the port absent and
+//! `ManagerEngine`: the controller-owned port for swarm-wide objects: networks, services, tasks,
+//! and Swarm members. The Docker implementation wraps the engine crate's manager-scoped engine
+//! built from `settings.docker.host`; a host that is not a Swarm manager leaves the port absent and
 //! manager-scoped routes answer 503 `not_a_manager`.
 
 use std::{sync::Arc, time::Duration};
@@ -8,8 +8,8 @@ use std::{sync::Arc, time::Duration};
 use async_trait::async_trait;
 use kontainer_engine::{
     CapabilityStatus, ContainerEngine, DockerHost, EngineErrorKind, LocalDockerEngine,
-    LocalEngineOptions, NetworkCreate, NetworkDetail, NetworkSummary, ServiceSummary, SwarmStatus,
-    TaskSummary,
+    LocalEngineOptions, NetworkCreate, NetworkDetail, NetworkSummary, ServiceSummary, SwarmNode,
+    SwarmStatus, TaskSummary,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -147,6 +147,13 @@ pub trait ManagerEngine: Send + Sync {
     ) -> Result<(), ManagerError> {
         Err(ManagerError::Unavailable)
     }
+
+    async fn list_swarm_nodes(
+        &self,
+        _cancellation: &CancellationToken,
+    ) -> Result<Vec<SwarmNode>, ManagerError> {
+        Err(ManagerError::Unavailable)
+    }
 }
 
 /// The manager engine routes and executors use, when the configured host is a manager.
@@ -258,6 +265,13 @@ impl ManagerEngine for DockerManagerEngine {
         cancellation: &CancellationToken,
     ) -> Result<(), ManagerError> {
         Ok(self.0.remove_service(service_id, cancellation).await?)
+    }
+
+    async fn list_swarm_nodes(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> Result<Vec<SwarmNode>, ManagerError> {
+        Ok(self.0.list_swarm_nodes(cancellation).await?)
     }
 }
 

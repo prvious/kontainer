@@ -18,13 +18,17 @@ use crate::containers::{
 };
 use crate::credentials::AccessCredential;
 use crate::error::NativeClientError;
-use crate::nodes::{NodeListBody, NodeStatus, SampleSeriesBody};
+use crate::nodes::{
+    AgentStatus, ClusterSummaryBody, NodeAvailability, NodeHealth, NodeListBody, NodeRole,
+    QuorumState, SampleSeriesBody, SwarmNodeStatus,
+};
 use crate::operations::IdempotencyKey;
 use crate::operations::{OperationBody, OperationState};
 
 const CONTAINER_LIST: &str = include_str!("fixtures/reads/container-list.json");
 const NODES: &str = include_str!("fixtures/reads/nodes.json");
 const CLUSTER_SAMPLES: &str = include_str!("fixtures/reads/cluster-samples.json");
+const CLUSTER_SUMMARY: &str = include_str!("fixtures/reads/cluster-summary.json");
 const OPERATION: &str = include_str!("fixtures/reads/operation.json");
 const OPERATION_UNCERTAIN: &str = include_str!("fixtures/reads/operation-uncertain.json");
 const OPERATION_INCONSISTENT: &str = include_str!("fixtures/reads/operation-inconsistent.json");
@@ -54,17 +58,34 @@ async fn node_membership_is_strict_and_authenticated() {
         .list_nodes(&access(), &CancellationToken::new())
         .await
         .unwrap();
-    assert_eq!(list.items.len(), 2);
+    assert_eq!(list.items.len(), 3);
     let manager = &list.items[0];
     assert_eq!(manager.id, NodeId::parse("manager").unwrap());
-    assert_eq!(manager.status, NodeStatus::Online);
+    assert_eq!(manager.agent_status, AgentStatus::Online);
+    assert_eq!(
+        (manager.health, manager.role, manager.is_leader),
+        (NodeHealth::Active, NodeRole::Manager, true)
+    );
+    assert_eq!(manager.swarm_status, SwarmNodeStatus::Ready);
+    assert_eq!(manager.address.as_deref(), Some("10.0.1.10"));
     assert_eq!(manager.cpu_cores, 4);
     let sample = manager.latest_sample.unwrap();
     assert_eq!(sample.cpu_percent, 12.5);
     assert_eq!(sample.disk_used_bytes, Some(5 << 30));
     assert_eq!(sample.net_tx_bytes_per_sec, None);
-    assert_eq!(list.items[1].status, NodeStatus::Offline);
+    assert_eq!(list.items[1].agent_status, AgentStatus::Offline);
+    assert_eq!(list.items[1].health, NodeHealth::Down);
     assert!(list.items[1].latest_sample.is_none());
+    let swarm_only = &list.items[2];
+    assert_eq!(swarm_only.agent_status, AgentStatus::NoAgent);
+    assert_eq!(swarm_only.availability, Some(NodeAvailability::Drain));
+    assert_eq!(
+        (
+            swarm_only.agent_version.as_ref(),
+            swarm_only.last_check_in_at
+        ),
+        (None, None)
+    );
     assert_eq!(
         client
             .list_nodes(&access(), &CancellationToken::new())
@@ -92,14 +113,78 @@ async fn node_membership_is_strict_and_authenticated() {
     let mut bad_time = valid.clone();
     bad_time["items"][0]["lastCheckInAt"] = json!("2026-09-28T12:00:00Z");
     let mut bad_status = valid.clone();
-    bad_status["items"][0]["status"] = json!("unknown");
-    let mut negative_cpu = valid;
+    bad_status["items"][0]["agentStatus"] = json!("unknown");
+    let mut bad_role = valid.clone();
+    bad_role["items"][0]["role"] = json!("leader");
+    let mut negative_cpu = valid.clone();
     negative_cpu["items"][0]["latestSample"]["cpuPercent"] = json!(-1.0);
-    for body in [extra, bad_id, bad_time, bad_status, negative_cpu] {
+    let mut agentless_with_version = valid.clone();
+    agentless_with_version["items"][2]["agentVersion"] = json!("0.1.0");
+    let mut agent_without_check_in = valid;
+    agent_without_check_in["items"][0]["lastCheckInAt"] = json!(null);
+    for body in [
+        extra,
+        bad_id,
+        bad_time,
+        bad_status,
+        bad_role,
+        negative_cpu,
+        agentless_with_version,
+        agent_without_check_in,
+    ] {
         let server = TestServer::plain(vec![respond(200, &body.to_string())]).await;
         assert_eq!(
             plain_client(&server)
                 .list_nodes(&access(), &CancellationToken::new())
+                .await
+                .err(),
+            Some(NativeClientError::InvalidResponse),
+            "{body}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn cluster_summary_is_strict_and_consistent() {
+    let server = TestServer::plain(vec![respond(200, CLUSTER_SUMMARY)]).await;
+    let summary = plain_client(&server)
+        .cluster_summary(&access(), &CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(
+        (
+            summary.nodes_total,
+            summary.nodes_active,
+            summary.nodes_degraded,
+            summary.nodes_down
+        ),
+        (3, 1, 1, 1)
+    );
+    assert_eq!(summary.quorum, QuorumState::Healthy);
+    assert_eq!(summary.cpu_percent, Some(12.5));
+    assert_eq!(summary.containers_running, 5);
+    let request = &server.requests()[0];
+    assert_eq!(
+        (request.method.as_str(), request.target.as_str()),
+        ("GET", "/api/v1/cluster/summary")
+    );
+
+    let valid: serde_json::Value = serde_json::from_str(CLUSTER_SUMMARY).unwrap();
+    let mut extra = valid.clone();
+    extra["secret"] = json!("canary");
+    let mut miscounted = valid.clone();
+    miscounted["nodesTotal"] = json!(4);
+    let mut unreachable = valid.clone();
+    unreachable["managersReachable"] = json!(2);
+    let mut bad_quorum = valid.clone();
+    bad_quorum["quorum"] = json!("lost");
+    let mut negative_cpu = valid;
+    negative_cpu["cpuPercent"] = json!(-1.0);
+    for body in [extra, miscounted, unreachable, bad_quorum, negative_cpu] {
+        let server = TestServer::plain(vec![respond(200, &body.to_string())]).await;
+        assert_eq!(
+            plain_client(&server)
+                .cluster_summary(&access(), &CancellationToken::new())
                 .await
                 .err(),
             Some(NativeClientError::InvalidResponse),
@@ -731,10 +816,11 @@ fn default_limits_are_the_documented_bounds() {
 }
 
 /// Paths covered by the client's read surface, with their documented method.
-const READ_OPENAPI_PATHS: [(&str, &str); 12] = [
+const READ_OPENAPI_PATHS: [(&str, &str); 13] = [
     ("/api/v1/nodes", "get"),
     ("/api/v1/nodes/{nodeId}/samples", "get"),
     ("/api/v1/cluster/samples", "get"),
+    ("/api/v1/cluster/summary", "get"),
     ("/api/v1/settings", "get"),
     ("/api/v1/settings", "patch"),
     ("/api/v1/containers", "get"),
@@ -748,10 +834,16 @@ const READ_OPENAPI_PATHS: [(&str, &str); 12] = [
     ("/api/v1/operations/{operation_id}/cancel", "post"),
     ("/api/v1/operations/noop", "post"),
 ];
-const READ_OPENAPI_SCHEMAS: [&str; 23] = [
+const READ_OPENAPI_SCHEMAS: [&str; 29] = [
     "NodeListResponse",
     "NodeResponse",
-    "NodeStatusResponse",
+    "AgentStatusResponse",
+    "NodeHealthResponse",
+    "NodeRoleResponse",
+    "NodeAvailabilityResponse",
+    "SwarmNodeStatusResponse",
+    "ClusterSummaryResponse",
+    "QuorumStateResponse",
     "NodeSampleResponse",
     "SampleSeriesResponse",
     "SamplePointResponse",
@@ -891,12 +983,48 @@ fn openapi_reads_contract_matches_the_checked_artifact() {
             .cloned()
             .collect(),
     );
-    assert_eq!(
-        document["components"]["schemas"]["NodeStatusResponse"]["enum"],
-        json!(["online", "degraded", "offline"])
+    assert_schema_fields(
+        &document,
+        "ClusterSummaryResponse",
+        round_trip_keys::<ClusterSummaryBody>(CLUSTER_SUMMARY),
     );
-    for name in ["online", "degraded", "offline"] {
-        assert!(serde_json::from_value::<NodeStatus>(json!(name)).is_ok());
+    let schemas = &document["components"]["schemas"];
+    assert_eq!(
+        schemas["AgentStatusResponse"]["enum"],
+        json!(["online", "degraded", "offline", "no-agent"])
+    );
+    for name in ["online", "degraded", "offline", "no-agent"] {
+        assert!(serde_json::from_value::<AgentStatus>(json!(name)).is_ok());
+    }
+    for (schema, names) in [
+        ("NodeHealthResponse", json!(["active", "degraded", "down"])),
+        ("NodeRoleResponse", json!(["manager", "worker", "unknown"])),
+        (
+            "NodeAvailabilityResponse",
+            json!(["active", "pause", "drain"]),
+        ),
+        (
+            "SwarmNodeStatusResponse",
+            json!(["ready", "down", "unknown"]),
+        ),
+        ("QuorumStateResponse", json!(["healthy", "degraded"])),
+    ] {
+        assert_eq!(schemas[schema]["enum"], names, "{schema}");
+    }
+    for name in ["active", "degraded", "down"] {
+        assert!(serde_json::from_value::<NodeHealth>(json!(name)).is_ok());
+    }
+    for name in ["manager", "worker", "unknown"] {
+        assert!(serde_json::from_value::<NodeRole>(json!(name)).is_ok());
+    }
+    for name in ["active", "pause", "drain"] {
+        assert!(serde_json::from_value::<NodeAvailability>(json!(name)).is_ok());
+    }
+    for name in ["ready", "down", "unknown"] {
+        assert!(serde_json::from_value::<SwarmNodeStatus>(json!(name)).is_ok());
+    }
+    for name in ["healthy", "degraded"] {
+        assert!(serde_json::from_value::<QuorumState>(json!(name)).is_ok());
     }
 
     let security = &document["components"]["securitySchemes"]["access_session"];

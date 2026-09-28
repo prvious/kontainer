@@ -48,7 +48,8 @@ describe("AppSidebar", () => {
 
     it("renders routes that do not exist yet as disabled", async () => {
         renderSidebar("/");
-        expect(await screen.findByRole("link", { name: "Nodes" })).toHaveAttribute("aria-disabled", "true");
+        expect(await screen.findByRole("link", { name: "Exec" })).toHaveAttribute("aria-disabled", "true");
+        expect(screen.getByRole("link", { name: "Nodes" })).not.toHaveAttribute("aria-disabled");
         expect(screen.getByRole("link", { name: "Stacks" })).not.toHaveAttribute("aria-disabled");
         expect(screen.getByRole("link", { name: "Networks" })).not.toHaveAttribute("aria-disabled");
         expect(screen.getByRole("link", { name: "Containers" })).not.toHaveAttribute("aria-disabled");

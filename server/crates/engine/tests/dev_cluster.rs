@@ -260,6 +260,39 @@ async fn dev_cluster_network_lifecycle_on_the_manager_and_a_worker() {
     assert!(!seed_detail.endpoints.is_empty());
 }
 
+/// Swarm members on the manager: one leader manager and two ready workers with resources.
+#[tokio::test]
+async fn dev_cluster_swarm_nodes_have_one_leader_and_two_workers() {
+    use kontainer_engine::{SwarmNodeState, SwarmRole};
+
+    let manager = engine(dev_host(
+        "KONTAINER_TEST_DEV_MANAGER_HOST",
+        "tcp://localhost:2375",
+    ));
+    let cancellation = CancellationToken::new();
+    let nodes = manager.list_swarm_nodes(&cancellation).await.unwrap();
+    assert_eq!(nodes.len(), 3);
+    let leaders = nodes
+        .iter()
+        .filter(|node| node.is_leader)
+        .collect::<Vec<_>>();
+    assert_eq!(leaders.len(), 1);
+    assert_eq!(leaders[0].role, SwarmRole::Manager);
+    assert_eq!(leaders[0].manager_reachable, Some(true));
+    assert_eq!(
+        nodes
+            .iter()
+            .filter(|node| node.role == SwarmRole::Worker)
+            .count(),
+        2
+    );
+    for node in &nodes {
+        assert_eq!(node.state, SwarmNodeState::Ready, "{}", node.hostname);
+        assert!(node.cpu_cores.is_some_and(|cores| cores > 0));
+        assert!(node.address.is_some());
+    }
+}
+
 /// Services and tasks on the manager: list with modes and ports, versioned scaling (a stale
 /// version is refused), force update, and Swarm status. Scales a seed service up and back.
 #[tokio::test]

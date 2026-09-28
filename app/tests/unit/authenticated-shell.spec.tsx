@@ -51,6 +51,8 @@ function mockCommands(overrides: Record<string, Handler> = {}, restored: Session
                 return { status: "ready" };
             case "list_nodes":
                 return nodesFixture.nodeList;
+            case "get_cluster_summary":
+                return nodesFixture.clusterSummary;
             default:
                 return null;
         }
@@ -84,14 +86,15 @@ describe("authenticated shell", () => {
         expect(screen.getByText(session.email)).toBeInTheDocument();
     });
 
-    it("fills the status bar CPU and MEM and the sidebar DOWN badge from membership", async () => {
+    it("fills the status bar CPU and MEM and the sidebar DOWN badge from the cluster summary", async () => {
         mockCommands();
         renderApp();
-        // One online node sampled: 12.5 % CPU, 1 of 8 GB; worker-2 is offline.
+        // One online node sampled: 12.5 % CPU, 1 of 8 GB; one node degraded and one down.
         await waitFor(() => expect(screen.getByText("CPU 13%")).toBeInTheDocument());
         expect(screen.getByText("MEM 1/8G")).toBeInTheDocument();
-        expect(screen.getByText("Docker 29.8.0")).toBeInTheDocument();
-        expect(screen.getByTestId("nav-badge-nodes")).toHaveTextContent("1 DOWN");
+        await waitFor(() => expect(screen.getByText("Docker 29.8.0")).toBeInTheDocument());
+        expect(screen.getByTestId("nav-badge-nodes")).toHaveTextContent("2 DOWN");
+        expect(invoke).toHaveBeenCalledWith("get_cluster_summary", { profileId: session.profileId });
         expect(invoke).toHaveBeenCalledWith("list_nodes", { profileId: session.profileId });
     });
 

@@ -224,7 +224,16 @@ async fn postgres_deep_status_enforces_session_and_drain_before_diagnostics()
         assert_eq!(body["nodesTotal"], 1);
         let (_, _, body) = authorized_get(&router, nodes_path, &access).await?;
         assert_eq!(body["items"][0]["id"], "manager");
-        assert_eq!(body["items"][0]["status"], "online");
+        assert_eq!(body["items"][0]["agentStatus"], "online");
+        assert_eq!(
+            (
+                &body["items"][0]["role"],
+                &body["items"][0]["swarmStatus"],
+                &body["items"][0]["health"],
+            ),
+            (&"unknown".into(), &"unknown".into(), &"degraded".into()),
+            "without a manager Swarm state is unknown, so the node is degraded"
+        );
         assert!(body["items"][0]["latestSample"].is_null());
 
         assert_challenged(&router, path, None).await?;

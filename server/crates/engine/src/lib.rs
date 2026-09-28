@@ -40,7 +40,8 @@ pub use network::{
 };
 pub use node::{ContainerStats, CpuCounters, DiskUsage, NodeInfo, cpu_percent, memory_used};
 pub use service::{
-    ServiceMode, ServiceSummary, SwarmStatus, TaskSummary, image_without_digest, is_valid_swarm_id,
+    ServiceMode, ServiceSummary, SwarmAvailability, SwarmNode, SwarmNodeState, SwarmRole,
+    SwarmStatus, TaskSummary, image_without_digest, is_valid_swarm_id,
 };
 pub use volume::{
     MAX_VOLUME_LABELS, MAX_VOLUME_NAME_LEN, MAX_VOLUME_USERS, VolumeCreate, VolumeSummary,
@@ -332,6 +333,17 @@ pub trait ContainerEngine: Send + Sync {
         &self,
         _cancellation: &CancellationToken,
     ) -> Result<SwarmStatus, EngineError> {
+        Err(EngineError::new(
+            EngineErrorKind::UnsupportedCapability,
+            EngineOperation::ReadSwarm,
+        ))
+    }
+
+    /// Every Swarm member, as the manager sees it.
+    async fn list_swarm_nodes(
+        &self,
+        _cancellation: &CancellationToken,
+    ) -> Result<Vec<SwarmNode>, EngineError> {
         Err(EngineError::new(
             EngineErrorKind::UnsupportedCapability,
             EngineOperation::ReadSwarm,
