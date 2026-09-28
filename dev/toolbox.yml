@@ -30,6 +30,8 @@ services:
 
   redis:
     image: redis:alpine
+    volumes:
+      - redis-data:/data
     deploy:
       replicas: 1
       resources:
@@ -41,6 +43,9 @@ services:
           memory: 32M
     networks:
       - kontainer
+
+volumes:
+  redis-data:
 
 networks:
   kontainer:

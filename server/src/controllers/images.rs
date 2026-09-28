@@ -3,10 +3,9 @@
 //! Images across the cluster: the merged list, removal, and pulls.
 
 use axum::{
-    Json,
     extract::{Path, State},
-    http::{StatusCode, header},
-    response::{IntoResponse, Response},
+    http::StatusCode,
+    response::Response,
 };
 use chrono::{DateTime, SecondsFormat, Utc};
 use loco_rs::{
@@ -19,7 +18,9 @@ use tokio_util::sync::CancellationToken;
 use utoipa::ToSchema;
 
 use super::{
-    admission::{Admission, AdmittingRequestId, IdempotencyKey, admission_error, admit},
+    admission::{
+        Admission, AdmittingRequestId, IdempotencyKey, admission_error, admit, field_error,
+    },
     nodes::json_no_store,
 };
 use crate::{
@@ -39,7 +40,7 @@ use crate::{
     operations::domain::OperationKind,
 };
 
-const MAX_TARGET_NODES: usize = 64;
+pub(super) const MAX_TARGET_NODES: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -126,26 +127,6 @@ pub(crate) async fn index(
     }
 }
 
-/// A 400 naming the field that failed.
-#[derive(Debug, Serialize, ToSchema)]
-pub struct ImageFieldErrorResponse {
-    pub error: String,
-    #[schema(value_type = Object)]
-    pub fields: serde_json::Value,
-}
-
-fn field_error(field: &str, problem: &str) -> Response {
-    (
-        StatusCode::BAD_REQUEST,
-        [(header::CACHE_CONTROL, "no-store")],
-        Json(ImageFieldErrorResponse {
-            error: "invalid_request".to_owned(),
-            fields: serde_json::json!({ field: problem }),
-        }),
-    )
-        .into_response()
-}
-
 fn valid_image_id(value: &str) -> bool {
     value.strip_prefix("sha256:").is_some_and(|hex| {
         hex.len() == 64
@@ -156,7 +137,7 @@ fn valid_image_id(value: &str) -> bool {
 }
 
 /// Every listed node must be a member; `None` when membership could not be read.
-async fn all_members(context: &AppContext, node_ids: &[String]) -> Option<bool> {
+pub(super) async fn all_members(context: &AppContext, node_ids: &[String]) -> Option<bool> {
     use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
     let distinct: std::collections::BTreeSet<_> = node_ids.iter().collect();
     if distinct.len() != node_ids.len()
@@ -198,7 +179,7 @@ pub struct RemoveImageRequest {
     request_body = RemoveImageRequest,
     responses(
         (status = 202, description = "Admitted as one `image.remove` operation", body = super::admission::AdmittedResponse),
-        (status = 400, description = "`idempotency_key_required` or `invalid_request` with the field", body = ImageFieldErrorResponse),
+        (status = 400, description = "`idempotency_key_required` or `invalid_request` with the field", body = super::admission::FieldErrorResponse),
         (status = 401, description = "Missing, malformed, expired, or revoked access credential"),
         (status = 409, description = "`idempotency_conflict`", body = super::admission::AdmissionErrorResponse),
         (status = 503, description = "Persistence unavailable or controller draining")
@@ -275,7 +256,7 @@ fn reference_problem(error: ReferenceError) -> &'static str {
     request_body = PullImageRequest,
     responses(
         (status = 202, description = "Admitted as one `image.pull` operation; poll it for per-node progress", body = super::admission::AdmittedResponse),
-        (status = 400, description = "`idempotency_key_required`, or `invalid_request` naming `reference` or `nodeIds`", body = ImageFieldErrorResponse),
+        (status = 400, description = "`idempotency_key_required`, or `invalid_request` naming `reference` or `nodeIds`", body = super::admission::FieldErrorResponse),
         (status = 401, description = "Missing, malformed, expired, or revoked access credential"),
         (status = 409, description = "`idempotency_conflict`", body = super::admission::AdmissionErrorResponse),
         (status = 503, description = "Persistence unavailable or controller draining")

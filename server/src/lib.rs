@@ -13,6 +13,7 @@ pub mod rpc;
 pub mod server;
 pub mod settings;
 pub mod tasks;
+pub mod volumes;
 
 #[cfg(test)]
 pub mod test_support;

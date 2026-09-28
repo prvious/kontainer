@@ -16,6 +16,10 @@ use kontainer_agent_proto::v1::{
     ContainerState as ProtoContainerState, DescribeRequest, ListContainersRequest,
     ListImagesRequest, PullImageRequest, RemoveImageRequest, node_agent_client::NodeAgentClient,
 };
+use kontainer_agent_proto::v1::{
+    CreateVolumeRequest, ListVolumesRequest, RemoveVolumeRequest,
+    VolumeSummary as ProtoVolumeSummary,
+};
 use kontainer_rpc_auth::{MutualTlsIdentityFiles, WorkloadIdentity};
 use tokio_util::sync::CancellationToken;
 use tonic::transport::{Channel, Endpoint};
@@ -473,6 +477,95 @@ impl NodeAgentClientConfig {
         )))
     }
 
+    /// Every volume on the node, with its users and last known size.
+    pub async fn list_volumes(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> Result<Vec<AgentVolume>, AgentClientError> {
+        let channel = self.channel(cancellation).await?;
+        let mut client = NodeAgentClient::new(channel);
+        let mut request = tonic::Request::new(ListVolumesRequest {});
+        request.set_timeout(self.rpc_timeout);
+        let response = tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => return Err(AgentClientError::Cancelled),
+            result = tokio::time::timeout(self.rpc_timeout, client.list_volumes(request)) => match result {
+                Ok(Ok(response)) => response.into_inner(),
+                Ok(Err(status)) => return Err(map_rpc_status(status)),
+                Err(_) => return Err(AgentClientError::TimedOut),
+            }
+        };
+        if response.volumes.len() > MAX_VOLUMES_PER_NODE {
+            return Err(AgentClientError::InvalidResponse);
+        }
+        response.volumes.into_iter().map(agent_volume).collect()
+    }
+
+    /// Create one volume on this node.
+    pub async fn create_volume(
+        &self,
+        volume: &AgentVolumeCreate,
+        cancellation: &CancellationToken,
+    ) -> Result<AgentVolume, AgentClientError> {
+        let deadline = self.rpc_timeout + ACTION_ALLOWANCE;
+        let channel = self.channel_with_timeout(cancellation, deadline).await?;
+        let mut client = NodeAgentClient::new(channel);
+        let mut request = tonic::Request::new(CreateVolumeRequest {
+            name: volume.name.clone(),
+            driver: volume.driver.clone(),
+            labels: volume.labels.clone().into_iter().collect(),
+            driver_opts: std::collections::HashMap::new(),
+        });
+        request.set_timeout(deadline);
+        let response = tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => return Err(AgentClientError::Cancelled),
+            result = tokio::time::timeout(deadline, client.create_volume(request)) => match result {
+                Ok(Ok(response)) => response.into_inner(),
+                Ok(Err(status)) => return Err(map_action_status(&status)),
+                Err(_) => return Err(AgentClientError::TimedOut),
+            }
+        };
+        response
+            .volume
+            .ok_or(AgentClientError::InvalidResponse)
+            .and_then(agent_volume)
+    }
+
+    /// Remove one volume from this node; a mounted volume comes back as [`VolumeRemoval::InUse`].
+    pub async fn remove_volume(
+        &self,
+        name: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<VolumeRemoval, AgentClientError> {
+        let deadline = self.rpc_timeout + ACTION_ALLOWANCE;
+        let channel = self.channel_with_timeout(cancellation, deadline).await?;
+        let mut client = NodeAgentClient::new(channel);
+        let mut request = tonic::Request::new(RemoveVolumeRequest {
+            name: name.to_owned(),
+        });
+        request.set_timeout(deadline);
+        let response = tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => return Err(AgentClientError::Cancelled),
+            result = tokio::time::timeout(deadline, client.remove_volume(request)) => match result {
+                Ok(Ok(response)) => response.into_inner(),
+                Ok(Err(status)) => return Err(map_action_status(&status)),
+                Err(_) => return Err(AgentClientError::TimedOut),
+            }
+        };
+        if response.in_use_by.len() > MAX_VOLUME_USERS
+            || response.in_use_by.iter().any(|user| user.len() > 512)
+        {
+            return Err(AgentClientError::InvalidResponse);
+        }
+        Ok(if response.in_use_by.is_empty() {
+            VolumeRemoval::Removed
+        } else {
+            VolumeRemoval::InUse(response.in_use_by)
+        })
+    }
+
     /// Expected node ID, for shared-store diagnostics without exposing TLS.
     #[must_use]
     pub fn node_id(&self) -> &str {
@@ -553,6 +646,65 @@ pub enum AgentPullEvent {
 
 pub type AgentPullStream =
     std::pin::Pin<Box<dyn futures_util::Stream<Item = AgentPullEvent> + Send>>;
+
+/// One volume on one node, controller-owned.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct AgentVolume {
+    pub name: String,
+    pub driver: String,
+    pub mountpoint: String,
+    pub created_at_seconds: Option<i64>,
+    pub labels: std::collections::BTreeMap<String, String>,
+    pub used_by: u32,
+    pub users: Vec<String>,
+    pub size_bytes: Option<u64>,
+}
+
+/// What a create asks an agent for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentVolumeCreate {
+    pub name: String,
+    pub driver: String,
+    pub labels: std::collections::BTreeMap<String, String>,
+}
+
+/// How a removal ended when the agent answered.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VolumeRemoval {
+    Removed,
+    /// Docker refused: these containers mount it. Nothing was removed.
+    InUse(Vec<String>),
+}
+
+fn agent_volume(volume: ProtoVolumeSummary) -> Result<AgentVolume, AgentClientError> {
+    let bounded = |value: &str| value.len() <= 512;
+    if volume.name.is_empty()
+        || !bounded(&volume.name)
+        || !bounded(&volume.driver)
+        || volume.mountpoint.len() > 4096
+        || volume.labels.len() > 64
+        || !volume
+            .labels
+            .iter()
+            .all(|(key, value)| bounded(key) && bounded(value))
+        || volume.users.len() > MAX_VOLUME_USERS
+        || !volume.users.iter().all(|user| bounded(user))
+    {
+        return Err(AgentClientError::InvalidResponse);
+    }
+    Ok(AgentVolume {
+        name: volume.name,
+        driver: volume.driver,
+        mountpoint: volume.mountpoint,
+        created_at_seconds: volume
+            .created_at_unix_seconds
+            .filter(|seconds| *seconds >= 0),
+        labels: volume.labels.into_iter().collect(),
+        used_by: volume.used_by,
+        users: volume.users,
+        size_bytes: volume.size_bytes,
+    })
+}
 
 /// Lifecycle actions the controller asks an agent for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -666,6 +818,29 @@ pub trait AgentClient: std::fmt::Debug + Send + Sync {
         Err(AgentClientError::Unavailable)
     }
 
+    async fn list_volumes(
+        &self,
+        _cancellation: &CancellationToken,
+    ) -> Result<Vec<AgentVolume>, AgentClientError> {
+        Err(AgentClientError::Unavailable)
+    }
+
+    async fn create_volume(
+        &self,
+        _volume: &AgentVolumeCreate,
+        _cancellation: &CancellationToken,
+    ) -> Result<AgentVolume, AgentClientError> {
+        Err(AgentClientError::Unavailable)
+    }
+
+    async fn remove_volume(
+        &self,
+        _name: &str,
+        _cancellation: &CancellationToken,
+    ) -> Result<VolumeRemoval, AgentClientError> {
+        Err(AgentClientError::Unavailable)
+    }
+
     fn node_id(&self) -> &str;
 }
 
@@ -730,6 +905,29 @@ impl AgentClient for NodeAgentClientConfig {
         NodeAgentClientConfig::pull_image(self, reference, cancellation).await
     }
 
+    async fn list_volumes(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> Result<Vec<AgentVolume>, AgentClientError> {
+        NodeAgentClientConfig::list_volumes(self, cancellation).await
+    }
+
+    async fn create_volume(
+        &self,
+        volume: &AgentVolumeCreate,
+        cancellation: &CancellationToken,
+    ) -> Result<AgentVolume, AgentClientError> {
+        NodeAgentClientConfig::create_volume(self, volume, cancellation).await
+    }
+
+    async fn remove_volume(
+        &self,
+        name: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<VolumeRemoval, AgentClientError> {
+        NodeAgentClientConfig::remove_volume(self, name, cancellation).await
+    }
+
     fn node_id(&self) -> &str {
         NodeAgentClientConfig::node_id(self)
     }
@@ -762,6 +960,8 @@ pub enum AgentClientError {
     EngineError,
     /// Containers use the image; removing it needs `force`.
     ImageInUse,
+    /// A volume with that name already exists on the node.
+    VolumeExists,
 }
 
 impl std::fmt::Display for AgentClientError {
@@ -778,6 +978,7 @@ impl std::fmt::Display for AgentClientError {
             Self::ContainerRunning => formatter.write_str("container is running"),
             Self::EngineError => formatter.write_str("engine failed the action"),
             Self::ImageInUse => formatter.write_str("image is in use"),
+            Self::VolumeExists => formatter.write_str("volume already exists"),
         }
     }
 }
@@ -882,6 +1083,7 @@ fn map_action_status(status: &tonic::Status) -> AgentClientError {
         (Code::FailedPrecondition, "already_in_state") => AgentClientError::AlreadyInState,
         (Code::FailedPrecondition, "container_running") => AgentClientError::ContainerRunning,
         (Code::FailedPrecondition, "image_in_use") => AgentClientError::ImageInUse,
+        (Code::AlreadyExists, "volume_exists") => AgentClientError::VolumeExists,
         (Code::DeadlineExceeded, _) => AgentClientError::TimedOut,
         (Code::Cancelled, _) => AgentClientError::Cancelled,
         (Code::Unauthenticated | Code::PermissionDenied, _) => AgentClientError::IdentityMismatch,
@@ -896,6 +1098,8 @@ const ACTION_ALLOWANCE: Duration = Duration::from_secs(20);
 /// A pull stream may run as long as the `image.pull` operation.
 const PULL_DEADLINE: Duration = Duration::from_secs(10 * 60);
 const MAX_IMAGES_PER_NODE: usize = 2_000;
+const MAX_VOLUMES_PER_NODE: usize = 2_000;
+const MAX_VOLUME_USERS: usize = 16;
 
 fn is_valid_image_id(value: &str) -> bool {
     value

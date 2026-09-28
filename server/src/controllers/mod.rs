@@ -10,6 +10,7 @@ pub mod password_auth;
 pub mod sessions;
 pub mod settings;
 pub mod status;
+pub mod volumes;
 
 use loco_rs::controller::Routes;
 
@@ -39,5 +40,6 @@ pub fn protected_application_routes() -> Vec<Routes> {
         settings::routes(),
         containers::routes(),
         images::routes(),
+        volumes::routes(),
     ]
 }

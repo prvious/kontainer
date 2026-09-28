@@ -10,6 +10,7 @@ mod host;
 mod image;
 mod local;
 mod node;
+mod volume;
 
 pub use capability::{
     CapabilityStatus, EngineAccessScope, EngineApiVersion, EngineApiVersionParseError,
@@ -31,6 +32,10 @@ pub use image::{
 };
 pub use local::{LocalDockerEngine, LocalEngineOptions};
 pub use node::{ContainerStats, CpuCounters, DiskUsage, NodeInfo, cpu_percent, memory_used};
+pub use volume::{
+    MAX_VOLUME_LABELS, MAX_VOLUME_NAME_LEN, MAX_VOLUME_USERS, VolumeCreate, VolumeSummary,
+    are_valid_volume_labels, is_valid_volume_name,
+};
 
 #[async_trait]
 pub trait ContainerEngine: Send + Sync {
@@ -147,6 +152,44 @@ pub trait ContainerEngine: Send + Sync {
         Err(EngineError::new(
             EngineErrorKind::UnsupportedCapability,
             EngineOperation::PullImage,
+        ))
+    }
+
+    /// Every volume on the node with the containers that mount it. Sizes are left `None`: they
+    /// come from [`ContainerEngine::disk_usage`], which callers sample sparingly.
+    async fn list_volumes(
+        &self,
+        _cancellation: &CancellationToken,
+    ) -> Result<Vec<VolumeSummary>, EngineError> {
+        Err(EngineError::new(
+            EngineErrorKind::UnsupportedCapability,
+            EngineOperation::ListVolumes,
+        ))
+    }
+
+    /// Create one volume. An existing name is [`EngineErrorKind::Conflict`]: Docker would
+    /// silently hand back the existing volume instead.
+    async fn create_volume(
+        &self,
+        _volume: &VolumeCreate,
+        _cancellation: &CancellationToken,
+    ) -> Result<VolumeSummary, EngineError> {
+        Err(EngineError::new(
+            EngineErrorKind::UnsupportedCapability,
+            EngineOperation::CreateVolume,
+        ))
+    }
+
+    /// Remove one volume. A volume a container mounts is [`EngineErrorKind::Conflict`], with or
+    /// without force.
+    async fn remove_volume(
+        &self,
+        _name: &str,
+        _cancellation: &CancellationToken,
+    ) -> Result<(), EngineError> {
+        Err(EngineError::new(
+            EngineErrorKind::UnsupportedCapability,
+            EngineOperation::RemoveVolume,
         ))
     }
 

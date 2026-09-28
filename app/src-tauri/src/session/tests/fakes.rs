@@ -9,7 +9,7 @@ use kontainer_native_client::{
     AccessCredential, AdmittedOperation, ContainerAction, ContainerActionOptions, ContainerList,
     ContainerTarget, ControllerSettings, IdempotencyKey, ImageList, ImageNodes, NativeClientError,
     NodeId, NodeList, OperationEvent, OperationSnapshot, ProbeFailure, RefreshCredential,
-    SampleSeries,
+    SampleSeries, VolumeList, VolumeName, VolumeQuery, VolumeSpec,
 };
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
@@ -378,6 +378,7 @@ pub(crate) struct Script {
     pub(crate) admissions: VecDeque<Result<AdmittedOperation, NativeClientError>>,
     pub(crate) containers: VecDeque<Result<ContainerList, NativeClientError>>,
     pub(crate) images: VecDeque<Result<ImageList, NativeClientError>>,
+    pub(crate) volumes: VecDeque<Result<VolumeList, NativeClientError>>,
 }
 
 pub(crate) struct FakeControllerFactory {
@@ -676,6 +677,91 @@ impl Controller for FakeController {
                     .map(ToString::to_string)
                     .collect::<Vec<_>>()
                     .join(","),
+                key.as_str()
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .admissions
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn list_volumes<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        query: &'a VolumeQuery,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<VolumeList, NativeClientError>> {
+        record(
+            &self.log,
+            format!(
+                "volumes:{}:{}:{}",
+                public_tag(access.expose()),
+                query.node.as_ref().map_or("all", NodeId::as_str),
+                query.name.as_ref().map_or("any", VolumeName::as_str),
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .volumes
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn create_volume<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        spec: &'a VolumeSpec,
+        key: &'a IdempotencyKey,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
+        let labels: Vec<_> = spec
+            .labels
+            .iter()
+            .map(|(label, value)| format!("{label}={value}"))
+            .collect();
+        record(
+            &self.log,
+            format!(
+                "create_volume:{}:{}:{}:{}:{}",
+                public_tag(access.expose()),
+                spec.node_id,
+                spec.name.as_str(),
+                labels.join(","),
+                key.as_str()
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .admissions
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn remove_volume<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        node_id: &'a NodeId,
+        name: &'a VolumeName,
+        key: &'a IdempotencyKey,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
+        record(
+            &self.log,
+            format!(
+                "remove_volume:{}:{node_id}:{}:{}",
+                public_tag(access.expose()),
+                name.as_str(),
                 key.as_str()
             ),
         );

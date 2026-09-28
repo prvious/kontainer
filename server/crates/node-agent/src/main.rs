@@ -5,7 +5,8 @@ use std::{env, error::Error, ffi::OsString, sync::Arc, time::SystemTime};
 use kontainer_engine::{ContainerEngine, LocalDockerEngine, LocalEngineOptions};
 use kontainer_node_agent::{
     AgentConfig, AgentFacts, AgentShutdown, CheckInTiming, ContainerStatsCache, MtlsControllerLink,
-    NodeAgentService, NodeSampler, run_check_in, serve_node_agent_rpc, supervise_node_agent_server,
+    NodeAgentService, NodeSampler, VolumeSizeCache, run_check_in, serve_node_agent_rpc,
+    supervise_node_agent_server,
 };
 use tokio::net::TcpListener;
 use tokio_util::task::TaskTracker;
@@ -56,6 +57,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         }
     }
     let stats = ContainerStatsCache::default();
+    let volume_sizes = VolumeSizeCache::default();
     let facts = AgentFacts {
         node_id: config.node_id.clone(),
         advertise_address: config.advertise_address.clone(),
@@ -67,12 +69,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // Tracked with in-flight requests: draining cancels the loop and the grace deadline joins it.
     requests.spawn(run_check_in(
         controller,
-        NodeSampler::new(engine.clone(), stats.clone()),
+        NodeSampler::new(engine.clone(), stats.clone()).with_volume_sizes(volume_sizes.clone()),
         facts,
         CheckInTiming::default(),
         shutdown.draining(),
     ));
-    let service = NodeAgentService::new(config.node_id, engine, shutdown.force()).with_stats(stats);
+    let service = NodeAgentService::new(config.node_id, engine, shutdown.force())
+        .with_stats(stats)
+        .with_volume_sizes(volume_sizes);
     let server = serve_node_agent_rpc(
         listener,
         config.cluster_id,

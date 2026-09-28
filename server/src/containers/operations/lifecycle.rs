@@ -112,6 +112,10 @@ pub(crate) fn action_failure(
             "image_in_use",
             "Containers use the image; delete it with force.".to_owned(),
         ),
+        AgentClientError::VolumeExists => (
+            "volume_exists",
+            "A volume with that name already exists on that node.".to_owned(),
+        ),
         AgentClientError::EngineError => (
             "engine_error",
             "Docker on that node refused the action.".to_owned(),

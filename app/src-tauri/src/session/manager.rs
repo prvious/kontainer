@@ -47,6 +47,10 @@ pub(crate) use containers::{ContainerActionOptionsInput, ContainerListView, Cont
 mod images;
 pub(crate) use images::{ImageListView, ImageNodesInput};
 
+#[path = "manager_volumes.rs"]
+mod volumes;
+pub(crate) use volumes::{CreateVolumeInput, VolumeListView};
+
 #[path = "manager_nodes.rs"]
 mod nodes;
 pub(crate) use nodes::{ControllerSettingsView, NodeListView, SampleSeriesView};

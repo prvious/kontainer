@@ -1,0 +1,39 @@
+{
+    "commands": [
+        ["volumes", "list_volumes"],
+        ["volumes", "create_volume"],
+        ["volumes", "remove_volume"]
+    ],
+    "volumeList": {
+        "items": [
+            {
+                "nodeId": "manager",
+                "name": "toolbox_redis-data",
+                "driver": "local",
+                "mountPoint": "/var/lib/docker/volumes/toolbox_redis-data/_data",
+                "createdAt": "2026-09-21T14:13:20.000Z",
+                "labels": { "com.docker.stack.namespace": "toolbox" },
+                "usedBy": 1,
+                "users": ["toolbox_redis.1.x7kq"],
+                "sizeBytes": 536870912
+            },
+            {
+                "nodeId": "worker-1",
+                "name": "scratch",
+                "driver": "local",
+                "mountPoint": "/var/lib/docker/volumes/scratch/_data",
+                "createdAt": "2026-09-27T08:00:00.000Z",
+                "labels": {},
+                "usedBy": 0,
+                "users": [],
+                "sizeBytes": null
+            }
+        ],
+        "nodes": [
+            { "nodeId": "manager", "status": "ok", "message": null },
+            { "nodeId": "worker-1", "status": "ok", "message": null },
+            { "nodeId": "worker-2", "status": "ok", "message": null }
+        ],
+        "snapshotAt": "2026-09-28T12:05:00.000Z"
+    }
+}

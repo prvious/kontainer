@@ -10,3 +10,4 @@ mod logout;
 mod operations;
 mod restore;
 mod storage;
+mod volumes;

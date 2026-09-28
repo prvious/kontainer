@@ -10,5 +10,5 @@ pub mod server;
 pub use check_in::{AgentFacts, CheckInTiming, ControllerLink, MtlsControllerLink, run_check_in};
 pub use config::{AgentConfig, AgentEnvironment};
 pub use rpc::NodeAgentService;
-pub use sampling::{ContainerStatsCache, NodeSampler};
+pub use sampling::{ContainerStatsCache, NodeSampler, VolumeSizeCache};
 pub use server::{AgentShutdown, serve_node_agent_rpc, supervise_node_agent_server};

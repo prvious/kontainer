@@ -7,17 +7,27 @@ use kontainer_agent_proto::v1::{
     ListContainersResponse, ListImagesRequest, ListImagesResponse, PullImageEvent,
     PullImageRequest, RemoveImageRequest, RemoveImageResponse, node_agent_server::NodeAgent,
 };
+use kontainer_agent_proto::v1::{
+    CreateVolumeRequest, CreateVolumeResponse, ListVolumesRequest, ListVolumesResponse,
+    RemoveVolumeRequest, RemoveVolumeResponse, VolumeSummary as ProtoVolumeSummary,
+};
 use kontainer_engine::{
     ContainerAction, ContainerActionOptions, ContainerEngine, ContainerPageRequest, ContainerState,
     EngineError, EngineErrorKind, MAX_STOP_TIMEOUT_SECONDS, PullEvent, is_plausible_reference,
     is_valid_container_id, is_valid_image_id,
+};
+use kontainer_engine::{
+    VolumeCreate, VolumeSummary, are_valid_volume_labels, is_valid_volume_name,
 };
 use kontainer_rpc_auth::AuthenticatedPeerIdentity;
 use tokio_util::sync::CancellationToken;
 use tonic::{Request, Response, Status};
 use tracing::warn;
 
-use crate::{container_times::ContainerTimesCache, sampling::ContainerStatsCache};
+use crate::{
+    container_times::ContainerTimesCache,
+    sampling::{ContainerStatsCache, VolumeSizeCache},
+};
 
 #[derive(Clone)]
 pub struct NodeAgentService {
@@ -26,6 +36,7 @@ pub struct NodeAgentService {
     cancellation: CancellationToken,
     stats: ContainerStatsCache,
     times: ContainerTimesCache,
+    volume_sizes: VolumeSizeCache,
 }
 
 impl NodeAgentService {
@@ -41,6 +52,7 @@ impl NodeAgentService {
             cancellation,
             stats: ContainerStatsCache::default(),
             times: ContainerTimesCache::default(),
+            volume_sizes: VolumeSizeCache::default(),
         }
     }
 
@@ -49,6 +61,28 @@ impl NodeAgentService {
     pub fn with_stats(mut self, stats: ContainerStatsCache) -> Self {
         self.stats = stats;
         self
+    }
+
+    /// Serve volume sizes from the sampler's last `docker system df`.
+    #[must_use]
+    pub fn with_volume_sizes(mut self, volume_sizes: VolumeSizeCache) -> Self {
+        self.volume_sizes = volume_sizes;
+        self
+    }
+
+    fn volume_to_proto(&self, volume: VolumeSummary) -> ProtoVolumeSummary {
+        ProtoVolumeSummary {
+            size_bytes: volume
+                .size_bytes
+                .or_else(|| self.volume_sizes.get(&volume.name)),
+            name: volume.name,
+            driver: volume.driver,
+            mountpoint: volume.mountpoint,
+            created_at_unix_seconds: volume.created_at_seconds,
+            labels: volume.labels.into_iter().collect(),
+            used_by: volume.used_by,
+            users: volume.users,
+        }
     }
 }
 
@@ -122,6 +156,108 @@ impl NodeAgent for NodeAgentService {
             }
         })?;
         Ok(Response::new(RemoveImageResponse {}))
+    }
+
+    async fn list_volumes(
+        &self,
+        request: Request<ListVolumesRequest>,
+    ) -> Result<Response<ListVolumesResponse>, Status> {
+        require_controller(&request)?;
+        let volumes = tokio::select! {
+            biased;
+            _ = self.cancellation.cancelled() => {
+                return Err(Status::cancelled("node agent is shutting down"));
+            }
+            volumes = self.engine.list_volumes(&self.cancellation) => volumes.map_err(|error| {
+                warn!(%error, "volume listing failed");
+                engine_error_to_status(&error)
+            })?,
+        };
+        Ok(Response::new(ListVolumesResponse {
+            volumes: volumes
+                .into_iter()
+                .map(|volume| self.volume_to_proto(volume))
+                .collect(),
+        }))
+    }
+
+    async fn create_volume(
+        &self,
+        request: Request<CreateVolumeRequest>,
+    ) -> Result<Response<CreateVolumeResponse>, Status> {
+        require_controller(&request)?;
+        let inner = request.into_inner();
+        let volume = VolumeCreate {
+            name: inner.name,
+            driver: inner.driver,
+            labels: inner.labels.into_iter().collect(),
+            driver_opts: inner.driver_opts.into_iter().collect(),
+        };
+        if !is_valid_volume_name(&volume.name)
+            || volume.driver.is_empty()
+            || volume.driver.len() > 64
+            || !are_valid_volume_labels(&volume.labels)
+            || !are_valid_volume_labels(&volume.driver_opts)
+        {
+            return Err(Status::invalid_argument("invalid_volume"));
+        }
+        let result = tokio::select! {
+            biased;
+            _ = self.cancellation.cancelled() => {
+                return Err(Status::cancelled("node agent is shutting down"));
+            }
+            result = self.engine.create_volume(&volume, &self.cancellation) => result,
+        };
+        let created = result.map_err(|error| {
+            warn!(%error, "volume creation failed");
+            match error.kind() {
+                EngineErrorKind::Conflict => Status::already_exists("volume_exists"),
+                _ => action_error_to_status(&error),
+            }
+        })?;
+        Ok(Response::new(CreateVolumeResponse {
+            volume: Some(self.volume_to_proto(created)),
+        }))
+    }
+
+    async fn remove_volume(
+        &self,
+        request: Request<RemoveVolumeRequest>,
+    ) -> Result<Response<RemoveVolumeResponse>, Status> {
+        require_controller(&request)?;
+        let name = request.into_inner().name;
+        if !is_valid_volume_name(&name) {
+            return Err(Status::invalid_argument("invalid_volume"));
+        }
+        let result = tokio::select! {
+            biased;
+            _ = self.cancellation.cancelled() => {
+                return Err(Status::cancelled("node agent is shutting down"));
+            }
+            result = self.engine.remove_volume(&name, &self.cancellation) => result,
+        };
+        match result {
+            Ok(()) => Ok(Response::new(RemoveVolumeResponse {
+                in_use_by: Vec::new(),
+            })),
+            // Docker's 409 names container ids; list the volume's users by name instead.
+            Err(error) if error.kind() == EngineErrorKind::Conflict => {
+                let users = self
+                    .engine
+                    .list_volumes(&self.cancellation)
+                    .await
+                    .ok()
+                    .and_then(|volumes| volumes.into_iter().find(|volume| volume.name == name))
+                    .map(|volume| volume.users)
+                    .filter(|users| !users.is_empty())
+                    .unwrap_or_else(|| vec!["a container".to_owned()]);
+                Ok(Response::new(RemoveVolumeResponse { in_use_by: users }))
+            }
+            Err(error) => {
+                warn!(%error, "volume removal failed");
+                Err(action_error_to_status(&error))
+            }
+        }
     }
 
     async fn pull_image(
@@ -737,6 +873,175 @@ mod tests {
         assert_eq!(rejected.code(), tonic::Code::InvalidArgument);
         let anonymous = service
             .list_images(Request::new(ListImagesRequest {}))
+            .await
+            .unwrap_err();
+        assert_eq!(anonymous.code(), tonic::Code::Unauthenticated);
+    }
+
+    /// One `pg-data` volume mounted by `db.1`; creates refuse existing names.
+    struct VolumeEngine;
+
+    #[async_trait]
+    impl ContainerEngine for VolumeEngine {
+        async fn is_available(&self) -> Result<bool, EngineError> {
+            Ok(true)
+        }
+
+        async fn list_volumes(
+            &self,
+            _: &CancellationToken,
+        ) -> Result<Vec<kontainer_engine::VolumeSummary>, EngineError> {
+            Ok(vec![kontainer_engine::VolumeSummary {
+                name: "pg-data".to_owned(),
+                driver: "local".to_owned(),
+                mountpoint: "/var/lib/docker/volumes/pg-data/_data".to_owned(),
+                used_by: 1,
+                users: vec!["db.1".to_owned()],
+                ..Default::default()
+            }])
+        }
+
+        async fn create_volume(
+            &self,
+            volume: &kontainer_engine::VolumeCreate,
+            _: &CancellationToken,
+        ) -> Result<kontainer_engine::VolumeSummary, EngineError> {
+            if volume.name == "pg-data" {
+                return Err(EngineError::new(
+                    EngineErrorKind::Conflict,
+                    EngineOperation::CreateVolume,
+                ));
+            }
+            Ok(kontainer_engine::VolumeSummary {
+                name: volume.name.clone(),
+                driver: volume.driver.clone(),
+                labels: volume.labels.clone(),
+                ..Default::default()
+            })
+        }
+
+        async fn remove_volume(
+            &self,
+            name: &str,
+            _: &CancellationToken,
+        ) -> Result<(), EngineError> {
+            match name {
+                "pg-data" => Err(EngineError::new(
+                    EngineErrorKind::Conflict,
+                    EngineOperation::RemoveVolume,
+                )),
+                "scratch" => Ok(()),
+                _ => Err(EngineError::new(
+                    EngineErrorKind::NotFound,
+                    EngineOperation::RemoveVolume,
+                )),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn volumes_list_with_cached_sizes_create_and_refuse_removal_while_mounted() {
+        use kontainer_agent_proto::v1::{
+            CreateVolumeRequest, ListVolumesRequest, RemoveVolumeRequest,
+        };
+
+        let service =
+            NodeAgentService::new("node-1", Arc::new(VolumeEngine), CancellationToken::new());
+        let listed = service
+            .list_volumes(authenticated(ListVolumesRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(listed.volumes[0].size_bytes, None, "no df yet");
+        assert_eq!(listed.volumes[0].users, vec!["db.1"]);
+
+        // Sizes come from the sampler's last df.
+        let engine = Arc::new(crate::sampling::tests::FakeNodeEngine::two_containers());
+        let sizes = crate::sampling::VolumeSizeCache::default();
+        let mut sampler = crate::sampling::NodeSampler::new(
+            engine,
+            crate::sampling::ContainerStatsCache::default(),
+        )
+        .with_volume_sizes(sizes.clone());
+        sampler
+            .sample(std::time::Duration::from_secs(1), &CancellationToken::new())
+            .await
+            .unwrap();
+        let sized = service.clone().with_volume_sizes(sizes);
+        let listed = sized
+            .list_volumes(authenticated(ListVolumesRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(listed.volumes[0].size_bytes, Some(4096));
+
+        let created = service
+            .create_volume(authenticated(CreateVolumeRequest {
+                name: "scratch".to_owned(),
+                driver: "local".to_owned(),
+                labels: std::collections::HashMap::from([("app".to_owned(), "billing".to_owned())]),
+                driver_opts: std::collections::HashMap::new(),
+            }))
+            .await
+            .unwrap()
+            .into_inner()
+            .volume
+            .unwrap();
+        assert_eq!(
+            created.labels.get("app").map(String::as_str),
+            Some("billing")
+        );
+        let exists = service
+            .create_volume(authenticated(CreateVolumeRequest {
+                name: "pg-data".to_owned(),
+                driver: "local".to_owned(),
+                ..Default::default()
+            }))
+            .await
+            .unwrap_err();
+        assert_eq!(
+            (exists.code(), exists.message()),
+            (tonic::Code::AlreadyExists, "volume_exists")
+        );
+        for name in ["a", "-bad", "has space"] {
+            let invalid = service
+                .create_volume(authenticated(CreateVolumeRequest {
+                    name: name.to_owned(),
+                    driver: "local".to_owned(),
+                    ..Default::default()
+                }))
+                .await
+                .unwrap_err();
+            assert_eq!(invalid.code(), tonic::Code::InvalidArgument, "{name}");
+        }
+
+        let in_use = service
+            .remove_volume(authenticated(RemoveVolumeRequest {
+                name: "pg-data".to_owned(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(in_use.in_use_by, vec!["db.1"], "refused, with the names");
+        let removed = service
+            .remove_volume(authenticated(RemoveVolumeRequest {
+                name: "scratch".to_owned(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+        assert!(removed.in_use_by.is_empty());
+        let missing = service
+            .remove_volume(authenticated(RemoveVolumeRequest {
+                name: "ghost".to_owned(),
+            }))
+            .await
+            .unwrap_err();
+        assert_eq!(missing.code(), tonic::Code::NotFound);
+        let anonymous = service
+            .remove_volume(Request::new(RemoveVolumeRequest {
+                name: "scratch".to_owned(),
+            }))
             .await
             .unwrap_err();
         assert_eq!(anonymous.code(), tonic::Code::Unauthenticated);

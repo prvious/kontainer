@@ -140,7 +140,9 @@ pub fn production_registry() -> ExecutorRegistry {
             .with(super::executors::noop::NoopExecutor)
             .with(ContainersBulkExecutor)
             .with(crate::images::operations::remove::RemoveImageExecutor)
-            .with(crate::images::operations::pull::PullImageExecutor),
+            .with(crate::images::operations::pull::PullImageExecutor)
+            .with(crate::volumes::operations::create::CreateVolumeExecutor)
+            .with(crate::volumes::operations::remove::RemoveVolumeExecutor),
         ExecutorRegistry::with,
     )
 }

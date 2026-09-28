@@ -5,7 +5,7 @@
 //! or a node exporter) is the upgrade when node overhead outside containers matters.
 
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     sync::{Arc, PoisonError, RwLock},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -46,6 +46,27 @@ impl ContainerStatsCache {
     }
 }
 
+/// Volume sizes from the last `docker system df`, which runs every twelfth sample. `None` until
+/// the first one; `ListVolumes` reads it so listing never walks volume contents.
+#[derive(Debug, Clone, Default)]
+pub struct VolumeSizeCache(Arc<RwLock<Option<BTreeMap<String, u64>>>>);
+
+impl VolumeSizeCache {
+    /// The size of one volume, `None` while unknown.
+    #[must_use]
+    pub fn get(&self, name: &str) -> Option<u64> {
+        self.0
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .and_then(|sizes| sizes.get(name).copied())
+    }
+
+    fn replace(&self, sizes: BTreeMap<String, u64>) {
+        *self.0.write().unwrap_or_else(PoisonError::into_inner) = Some(sizes);
+    }
+}
+
 /// One node reading in Kontainer's own terms; `check_in` maps it to protobuf.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NodeReading {
@@ -62,6 +83,7 @@ pub struct NodeReading {
 pub struct NodeSampler {
     engine: Arc<dyn ContainerEngine>,
     cache: ContainerStatsCache,
+    volume_sizes: VolumeSizeCache,
     ticks: u64,
     previous_at: Option<Instant>,
 }
@@ -72,9 +94,17 @@ impl NodeSampler {
         Self {
             engine,
             cache,
+            volume_sizes: VolumeSizeCache::default(),
             ticks: 0,
             previous_at: None,
         }
+    }
+
+    /// Publish each `docker system df`'s volume sizes for `ListVolumes`.
+    #[must_use]
+    pub fn with_volume_sizes(mut self, volume_sizes: VolumeSizeCache) -> Self {
+        self.volume_sizes = volume_sizes;
+        self
     }
 
     /// Take one reading. Container stats that miss `stats_deadline` are left out of this tick;
@@ -105,11 +135,13 @@ impl NodeSampler {
             .filter_map(|stats| stats.memory_used_bytes)
             .fold(0_u64, u64::saturating_add);
         let disk_used_bytes = if tick.is_multiple_of(DISK_SAMPLE_EVERY) {
-            self.engine
-                .disk_usage(cancellation)
-                .await
-                .ok()
-                .and_then(|usage| usage.total_bytes)
+            match self.engine.disk_usage(cancellation).await {
+                Ok(usage) => {
+                    self.volume_sizes.replace(usage.volume_sizes);
+                    usage.total_bytes
+                }
+                Err(_) => None,
+            }
         } else {
             None
         };
@@ -221,7 +253,9 @@ pub(crate) mod tests {
     };
     use tokio_util::sync::CancellationToken;
 
-    use super::{ContainerStatsCache, NodeSampler, network_rates, node_cpu_percent};
+    use super::{
+        ContainerStatsCache, NodeSampler, VolumeSizeCache, network_rates, node_cpu_percent,
+    };
 
     /// Two running containers with known stats; network counters grow by `step` per read.
     pub(crate) struct FakeNodeEngine {
@@ -316,6 +350,7 @@ pub(crate) mod tests {
             self.disk_reads.fetch_add(1, Ordering::SeqCst);
             Ok(DiskUsage {
                 total_bytes: Some(5 << 30),
+                volume_sizes: std::collections::BTreeMap::from([("pg-data".to_owned(), 4096)]),
             })
         }
     }
@@ -345,7 +380,10 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn disk_usage_is_read_on_every_twelfth_sample_only() {
         let engine = Arc::new(FakeNodeEngine::two_containers());
-        let mut sampler = NodeSampler::new(engine.clone(), ContainerStatsCache::default());
+        let sizes = VolumeSizeCache::default();
+        let mut sampler = NodeSampler::new(engine.clone(), ContainerStatsCache::default())
+            .with_volume_sizes(sizes.clone());
+        assert_eq!(sizes.get("pg-data"), None, "unknown before the first df");
         let mut with_disk = Vec::new();
         for tick in 0..25 {
             let reading = sampler
@@ -358,6 +396,8 @@ pub(crate) mod tests {
         }
         assert_eq!(with_disk, vec![0, 12, 24]);
         assert_eq!(engine.disk_reads.load(Ordering::SeqCst), 3);
+        assert_eq!(sizes.get("pg-data"), Some(4096));
+        assert_eq!(sizes.get("other"), None);
     }
 
     #[tokio::test]

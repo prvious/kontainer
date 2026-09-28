@@ -14,7 +14,7 @@ use kontainer_native_client::{
     ContainerActionOptions, ContainerList, ContainerTarget, ControllerSettings, IdempotencyKey,
     ImageList, ImageNodes, NativeClient, NativeClientConfig, NativeClientError, NodeId, NodeList,
     OperationEvent, OperationSnapshot, PasswordSession, ProbeFailure, RefreshCredential,
-    SampleSeries, Traced,
+    SampleSeries, Traced, VolumeList, VolumeName, VolumeQuery, VolumeSpec,
 };
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -164,6 +164,30 @@ pub(crate) trait Controller: Send + Sync + 'static {
         access: &'a AccessCredential,
         reference: &'a str,
         nodes: &'a [NodeId],
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>>;
+
+    fn list_volumes<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        query: &'a VolumeQuery,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<VolumeList, NativeClientError>>;
+
+    fn create_volume<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        spec: &'a VolumeSpec,
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>>;
+
+    fn remove_volume<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        node_id: &'a NodeId,
+        name: &'a VolumeName,
         key: &'a IdempotencyKey,
         cancellation: &'a CancellationToken,
     ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>>;
@@ -461,6 +485,39 @@ impl Controller for NativeController {
         Box::pin(
             self.client
                 .pull_image(access, reference, nodes, key, cancellation),
+        )
+    }
+
+    fn list_volumes<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        query: &'a VolumeQuery,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<VolumeList, NativeClientError>> {
+        Box::pin(self.client.list_volumes(access, query, cancellation))
+    }
+
+    fn create_volume<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        spec: &'a VolumeSpec,
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
+        Box::pin(self.client.create_volume(access, spec, key, cancellation))
+    }
+
+    fn remove_volume<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        node_id: &'a NodeId,
+        name: &'a VolumeName,
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
+        Box::pin(
+            self.client
+                .remove_volume(access, node_id, name, key, cancellation),
         )
     }
 

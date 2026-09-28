@@ -24,6 +24,10 @@ use crate::{
     is_plausible_reference, is_valid_container_id, is_valid_image_id, memory_used,
     parse_docker_time, truncate_status_text,
 };
+use crate::{
+    MAX_VOLUME_USERS, VolumeCreate, VolumeSummary, are_valid_volume_labels, is_valid_volume_name,
+    volume::bounded_labels,
+};
 
 const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -593,15 +597,144 @@ impl ContainerEngine for LocalDockerEngine {
     }
 
     async fn disk_usage(&self, cancellation: &CancellationToken) -> Result<DiskUsage, EngineError> {
+        use bollard::query_parameters::DataUsageOptionsBuilder;
+
         let client = self.negotiate(cancellation).await?;
+        // Verbose keeps the category totals and adds each volume's size.
         let usage = self
             .execute(
                 EngineOperation::ReadDiskUsage,
                 cancellation,
-                client.df(None::<bollard::query_parameters::DataUsageOptions>),
+                client.df(Some(DataUsageOptionsBuilder::new().verbose(true).build())),
             )
             .await?;
         Ok(map_disk_usage(&usage))
+    }
+
+    async fn list_volumes(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> Result<Vec<VolumeSummary>, EngineError> {
+        use bollard::query_parameters::{ListContainersOptionsBuilder, ListVolumesOptions};
+
+        let client = self.negotiate(cancellation).await?;
+        let volumes = self
+            .execute(
+                EngineOperation::ListVolumes,
+                cancellation,
+                client.list_volumes(None::<ListVolumesOptions>),
+            )
+            .await?;
+        let containers = self
+            .execute(
+                EngineOperation::ListVolumes,
+                cancellation,
+                client.list_containers(Some(
+                    ListContainersOptionsBuilder::new()
+                        .all(true)
+                        .size(false)
+                        .build(),
+                )),
+            )
+            .await?;
+        let mut users: HashMap<String, Vec<String>> = HashMap::new();
+        for container in containers {
+            let name = canonical_display_name(&container.names.unwrap_or_default())
+                .unwrap_or_else(|| container.id.unwrap_or_default().chars().take(12).collect());
+            for mount in container.mounts.unwrap_or_default() {
+                if let Some(volume) = mount.name {
+                    users
+                        .entry(volume)
+                        .or_default()
+                        .push(bounded_message(&name));
+                }
+            }
+        }
+        Ok(volumes
+            .volumes
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|volume| !volume.name.is_empty())
+            .map(|volume| {
+                let names = users.remove(&volume.name).unwrap_or_default();
+                map_volume(volume, &names)
+            })
+            .collect())
+    }
+
+    async fn create_volume(
+        &self,
+        volume: &VolumeCreate,
+        cancellation: &CancellationToken,
+    ) -> Result<VolumeSummary, EngineError> {
+        use bollard::models::VolumeCreateRequest;
+
+        if !is_valid_volume_name(&volume.name)
+            || volume.driver.is_empty()
+            || !are_valid_volume_labels(&volume.labels)
+            || !are_valid_volume_labels(&volume.driver_opts)
+        {
+            return Err(EngineError::new(
+                EngineErrorKind::InvalidInput,
+                EngineOperation::CreateVolume,
+            ));
+        }
+        let client = self.negotiate(cancellation).await?;
+        // Docker answers a create for an existing name with that volume; refuse instead.
+        match self
+            .execute(
+                EngineOperation::CreateVolume,
+                cancellation,
+                client.inspect_volume(&volume.name),
+            )
+            .await
+        {
+            Ok(_) => {
+                return Err(EngineError::new(
+                    EngineErrorKind::Conflict,
+                    EngineOperation::CreateVolume,
+                ));
+            }
+            Err(error) if error.kind() == EngineErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+        let request = VolumeCreateRequest {
+            name: Some(volume.name.clone()),
+            driver: Some(volume.driver.clone()),
+            driver_opts: Some(volume.driver_opts.clone().into_iter().collect()),
+            labels: Some(volume.labels.clone().into_iter().collect()),
+            cluster_volume_spec: None,
+        };
+        let created = self
+            .execute(
+                EngineOperation::CreateVolume,
+                cancellation,
+                client.create_volume(request),
+            )
+            .await?;
+        Ok(map_volume(created, &[]))
+    }
+
+    async fn remove_volume(
+        &self,
+        name: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<(), EngineError> {
+        use bollard::query_parameters::RemoveVolumeOptions;
+
+        if !is_valid_volume_name(name) {
+            return Err(EngineError::new(
+                EngineErrorKind::InvalidInput,
+                EngineOperation::RemoveVolume,
+            ));
+        }
+        let client = self.negotiate(cancellation).await?;
+        self.execute(
+            EngineOperation::RemoveVolume,
+            cancellation,
+            client.remove_volume(name, None::<RemoveVolumeOptions>),
+        )
+        .await
     }
 }
 
@@ -719,6 +852,35 @@ fn map_container_stats(response: ContainerStatsResponse) -> ContainerStats {
     }
 }
 
+fn map_volume(volume: bollard::models::Volume, users: &[String]) -> VolumeSummary {
+    VolumeSummary {
+        created_at_seconds: volume.created_at.as_deref().and_then(parse_docker_time),
+        labels: bounded_labels(volume.labels),
+        used_by: u32::try_from(users.len()).unwrap_or(u32::MAX),
+        users: users.iter().take(MAX_VOLUME_USERS).cloned().collect(),
+        size_bytes: None,
+        driver: bounded_message(&volume.driver),
+        mountpoint: bounded_message(&volume.mountpoint),
+        name: volume.name,
+    }
+}
+
+/// Per-volume sizes from a verbose `df`; `-1` (the driver can't say) is left out.
+fn volume_sizes(usage: &SystemDataUsageResponse) -> std::collections::BTreeMap<String, u64> {
+    usage
+        .volume_usage
+        .as_ref()
+        .and_then(|usage| usage.items.as_ref())
+        .into_iter()
+        .flatten()
+        .filter_map(|item| {
+            let name = item.get("Name")?.as_str()?;
+            let size = item.get("UsageData")?.get("Size")?.as_i64()?;
+            Some((name.to_owned(), u64::try_from(size).ok()?))
+        })
+        .collect()
+}
+
 fn map_disk_usage(usage: &SystemDataUsageResponse) -> DiskUsage {
     let totals = [
         usage
@@ -745,6 +907,7 @@ fn map_disk_usage(usage: &SystemDataUsageResponse) -> DiskUsage {
         .collect();
     DiskUsage {
         total_bytes: (!reported.is_empty()).then(|| reported.iter().sum()),
+        volume_sizes: volume_sizes(usage),
     }
 }
 
@@ -893,7 +1056,7 @@ mod tests {
 
     use super::{
         LocalDockerEngine, LocalEngineOptions, capabilities_from_swarm, map_container_state,
-        map_container_stats, map_container_summary, map_disk_usage, map_node_info,
+        map_container_stats, map_container_summary, map_disk_usage, map_node_info, map_volume,
     };
     use crate::{
         CapabilityStatus, ContainerEngine, ContainerPageRequest, ContainerState, EngineAccessScope,
@@ -1627,6 +1790,63 @@ mod tests {
             map_disk_usage(&SystemDataUsageResponse::default()).total_bytes,
             None
         );
+    }
+
+    /// A verbose `df` volume item, built through the JSON value type bollard exposes.
+    fn volume_item<V>(name: &str, size: Option<i64>) -> V
+    where
+        V: FromIterator<(String, V)> + From<String> + From<i64>,
+    {
+        let mut fields = vec![("Name".to_owned(), V::from(name.to_owned()))];
+        if let Some(size) = size {
+            let usage = [("Size".to_owned(), V::from(size))].into_iter().collect();
+            fields.push(("UsageData".to_owned(), usage));
+        }
+        fields.into_iter().collect()
+    }
+
+    #[test]
+    fn verbose_disk_usage_carries_each_volume_size_it_knows() {
+        use bollard::models::{SystemDataUsageResponse, VolumesDiskUsage};
+
+        let usage = SystemDataUsageResponse {
+            volume_usage: Some(VolumesDiskUsage {
+                items: Some(vec![
+                    volume_item("pg-data", Some(4096)),
+                    volume_item("nfs", Some(-1)),
+                    volume_item("no-usage", None),
+                ]),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let sizes = map_disk_usage(&usage).volume_sizes;
+        assert_eq!(
+            sizes.into_iter().collect::<Vec<_>>(),
+            vec![("pg-data".to_owned(), 4096)]
+        );
+    }
+
+    #[test]
+    fn volumes_map_with_bounded_labels_users_and_parsed_times() {
+        let volume = bollard::models::Volume {
+            name: "pg-data".to_owned(),
+            driver: "local".to_owned(),
+            mountpoint: "/var/lib/docker/volumes/pg-data/_data".to_owned(),
+            created_at: Some("2026-09-28T19:32:16Z".to_owned()),
+            labels: std::collections::HashMap::from([("app".to_owned(), "billing".to_owned())]),
+            ..Default::default()
+        };
+        let users: Vec<String> = (0..20).map(|index| format!("web.{index}")).collect();
+        let mapped = map_volume(volume, &users);
+        assert_eq!(mapped.used_by, 20);
+        assert_eq!(mapped.users.len(), crate::MAX_VOLUME_USERS);
+        assert_eq!(mapped.created_at_seconds, Some(1_790_623_936));
+        assert_eq!(
+            mapped.labels.get("app").map(String::as_str),
+            Some("billing")
+        );
+        assert_eq!(mapped.size_bytes, None);
     }
 
     #[test]

@@ -41,6 +41,26 @@ pub struct AdmissionErrorResponse {
     pub error: String,
 }
 
+/// A 400 naming the field that failed: `{ "error": "invalid_request", "fields": { field: problem } }`.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct FieldErrorResponse {
+    pub error: String,
+    #[schema(value_type = Object)]
+    pub fields: serde_json::Value,
+}
+
+pub(crate) fn field_error(field: &str, problem: &str) -> Response {
+    (
+        StatusCode::BAD_REQUEST,
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(FieldErrorResponse {
+            error: "invalid_request".to_owned(),
+            fields: serde_json::json!({ field: problem }),
+        }),
+    )
+        .into_response()
+}
+
 pub(crate) fn admission_error(status: StatusCode, code: &str) -> Response {
     (
         status,

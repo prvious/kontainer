@@ -38,6 +38,9 @@ pub enum EngineOperation {
     ListImages,
     RemoveImage,
     PullImage,
+    ListVolumes,
+    CreateVolume,
+    RemoveVolume,
 }
 
 impl fmt::Display for EngineOperation {
@@ -57,6 +60,9 @@ impl fmt::Display for EngineOperation {
             Self::ListImages => "list images",
             Self::RemoveImage => "remove image",
             Self::PullImage => "pull image",
+            Self::ListVolumes => "list volumes",
+            Self::CreateVolume => "create volume",
+            Self::RemoveVolume => "remove volume",
         };
         formatter.write_str(name)
     }

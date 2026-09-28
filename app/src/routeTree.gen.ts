@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
+import { Route as AuthenticatedVolumesIndexRouteImport } from './routes/_authenticated/volumes/index'
 import { Route as AuthenticatedSettingsIndexRouteImport } from './routes/_authenticated/settings/index'
 import { Route as AuthenticatedImagesIndexRouteImport } from './routes/_authenticated/images/index'
 import { Route as AuthenticatedContainersIndexRouteImport } from './routes/_authenticated/containers/index'
@@ -30,6 +31,12 @@ const AuthenticatedIndexRoute = AuthenticatedIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AuthenticatedRoute,
 } as any)
+const AuthenticatedVolumesIndexRoute =
+  AuthenticatedVolumesIndexRouteImport.update({
+    id: '/volumes/',
+    path: '/volumes/',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedSettingsIndexRoute =
   AuthenticatedSettingsIndexRouteImport.update({
     id: '/settings/',
@@ -55,6 +62,7 @@ export interface FileRoutesByFullPath {
   '/containers/': typeof AuthenticatedContainersIndexRoute
   '/images/': typeof AuthenticatedImagesIndexRoute
   '/settings/': typeof AuthenticatedSettingsIndexRoute
+  '/volumes/': typeof AuthenticatedVolumesIndexRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
@@ -62,6 +70,7 @@ export interface FileRoutesByTo {
   '/containers': typeof AuthenticatedContainersIndexRoute
   '/images': typeof AuthenticatedImagesIndexRoute
   '/settings': typeof AuthenticatedSettingsIndexRoute
+  '/volumes': typeof AuthenticatedVolumesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -71,12 +80,19 @@ export interface FileRoutesById {
   '/_authenticated/containers/': typeof AuthenticatedContainersIndexRoute
   '/_authenticated/images/': typeof AuthenticatedImagesIndexRoute
   '/_authenticated/settings/': typeof AuthenticatedSettingsIndexRoute
+  '/_authenticated/volumes/': typeof AuthenticatedVolumesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/containers/' | '/images/' | '/settings/'
+  fullPaths:
+    | '/'
+    | '/login'
+    | '/containers/'
+    | '/images/'
+    | '/settings/'
+    | '/volumes/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/login' | '/' | '/containers' | '/images' | '/settings'
+  to: '/login' | '/' | '/containers' | '/images' | '/settings' | '/volumes'
   id:
     | '__root__'
     | '/_authenticated'
@@ -85,6 +101,7 @@ export interface FileRouteTypes {
     | '/_authenticated/containers/'
     | '/_authenticated/images/'
     | '/_authenticated/settings/'
+    | '/_authenticated/volumes/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -113,6 +130,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof AuthenticatedIndexRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/volumes/': {
+      id: '/_authenticated/volumes/'
+      path: '/volumes'
+      fullPath: '/volumes/'
+      preLoaderRoute: typeof AuthenticatedVolumesIndexRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
     '/_authenticated/settings/': {
@@ -144,6 +168,7 @@ interface AuthenticatedRouteChildren {
   AuthenticatedContainersIndexRoute: typeof AuthenticatedContainersIndexRoute
   AuthenticatedImagesIndexRoute: typeof AuthenticatedImagesIndexRoute
   AuthenticatedSettingsIndexRoute: typeof AuthenticatedSettingsIndexRoute
+  AuthenticatedVolumesIndexRoute: typeof AuthenticatedVolumesIndexRoute
 }
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
@@ -151,6 +176,7 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedContainersIndexRoute: AuthenticatedContainersIndexRoute,
   AuthenticatedImagesIndexRoute: AuthenticatedImagesIndexRoute,
   AuthenticatedSettingsIndexRoute: AuthenticatedSettingsIndexRoute,
+  AuthenticatedVolumesIndexRoute: AuthenticatedVolumesIndexRoute,
 }
 
 const AuthenticatedRouteWithChildren = AuthenticatedRoute._addFileChildren(

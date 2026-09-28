@@ -5,3 +5,4 @@ pub mod nodes;
 pub mod operations;
 pub mod session;
 pub mod settings;
+pub mod volumes;

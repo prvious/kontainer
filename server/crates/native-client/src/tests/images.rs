@@ -208,7 +208,7 @@ const IMAGE_OPENAPI_PATHS: [(&str, &str); 3] = [
 const IMAGE_OPENAPI_SCHEMAS: [&str; 5] = [
     "ImageListResponse",
     "ImageResponse",
-    "ImageFieldErrorResponse",
+    "FieldErrorResponse",
     "RemoveImageRequest",
     "PullImageRequest",
 ];

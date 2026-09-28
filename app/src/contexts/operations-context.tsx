@@ -43,6 +43,7 @@ export function OperationsProvider({ children }: { children: ReactNode }) {
                 if (!operation || handled.current.has(view.id)) return;
                 handled.current.add(view.id);
                 for (const queryKey of operation.invalidate) void queryClient.invalidateQueries({ queryKey });
+                operation.onSettled?.(view);
                 switch (view.state) {
                     case "succeeded":
                         notify.success(operation.success?.title ?? operation.title, {

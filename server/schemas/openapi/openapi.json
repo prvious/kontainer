@@ -799,7 +799,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ImageFieldErrorResponse"
+                  "$ref": "#/components/schemas/FieldErrorResponse"
                 }
               }
             }
@@ -880,7 +880,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ImageFieldErrorResponse"
+                  "$ref": "#/components/schemas/FieldErrorResponse"
                 }
               }
             }
@@ -1456,6 +1456,234 @@
         ]
       }
     },
+    "/api/v1/volumes": {
+      "get": {
+        "tags": [
+          "super::volumes"
+        ],
+        "operationId": "list_volumes",
+        "parameters": [
+          {
+            "name": "node",
+            "in": "query",
+            "description": "Only this member node",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "description": "Only volumes with this exact name (the create dialog's conflict check)",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Volumes on every answering node, one row per node and name, and one outcome per member",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VolumeListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`invalid_request` naming the query field",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FieldErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "404": {
+            "description": "No such member node",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Agent RPC not configured, persistence unavailable, or controller draining",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access_session": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "super::volumes"
+        ],
+        "operationId": "create_volume",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "16–64 printable ASCII characters, one per user gesture",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateVolumeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Admitted as one `volume.create` operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmittedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`idempotency_key_required`, or `invalid_request` naming `nodeId`, `name`, `driver`, or `labels`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FieldErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "409": {
+            "description": "`idempotency_conflict`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Persistence unavailable or controller draining"
+          }
+        },
+        "security": [
+          {
+            "access_session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/volumes/{nodeId}/{name}": {
+      "delete": {
+        "tags": [
+          "super::volumes"
+        ],
+        "operationId": "remove_volume",
+        "parameters": [
+          {
+            "name": "nodeId",
+            "in": "path",
+            "description": "Member node that holds the volume",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "name",
+            "in": "path",
+            "description": "Volume name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "16–64 printable ASCII characters, one per user gesture",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Admitted as one `volume.remove` operation; a mounted volume fails it with `volume_in_use` and the containers' names",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmittedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`idempotency_key_required`, or `invalid_request` naming `nodeId` or `name`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FieldErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "409": {
+            "description": "`idempotency_conflict`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Persistence unavailable or controller draining"
+          }
+        },
+        "security": [
+          {
+            "access_session": []
+          }
+        ]
+      }
+    },
     "/health/live": {
       "get": {
         "tags": [
@@ -1812,6 +2040,38 @@
           "stopping"
         ]
       },
+      "CreateVolumeRequest": {
+        "type": "object",
+        "required": [
+          "nodeId",
+          "name",
+          "driver"
+        ],
+        "properties": {
+          "driver": {
+            "type": "string",
+            "description": "`local` only in this phase."
+          },
+          "labels": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "name": {
+            "type": "string",
+            "description": "`[a-zA-Z0-9][a-zA-Z0-9_.-]+`, 2–255 characters."
+          },
+          "nodeId": {
+            "type": "string",
+            "description": "The member node that holds it; volumes are node-local."
+          }
+        },
+        "additionalProperties": false
+      },
       "DatabaseState": {
         "type": "string",
         "enum": [
@@ -1860,6 +2120,22 @@
         },
         "additionalProperties": false
       },
+      "FieldErrorResponse": {
+        "type": "object",
+        "description": "A 400 naming the field that failed: `{ \"error\": \"invalid_request\", \"fields\": { field: problem } }`.",
+        "required": [
+          "error",
+          "fields"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "fields": {
+            "type": "object"
+          }
+        }
+      },
       "GithubLoginResponse": {
         "type": "object",
         "required": [
@@ -1903,22 +2179,6 @@
         "properties": {
           "ok": {
             "type": "boolean"
-          }
-        }
-      },
-      "ImageFieldErrorResponse": {
-        "type": "object",
-        "description": "A 400 naming the field that failed.",
-        "required": [
-          "error",
-          "fields"
-        ],
-        "properties": {
-          "error": {
-            "type": "string"
-          },
-          "fields": {
-            "type": "object"
           }
         }
       },
@@ -2772,6 +3032,95 @@
           },
           "fields": {
             "type": "object"
+          }
+        }
+      },
+      "VolumeListResponse": {
+        "type": "object",
+        "required": [
+          "items",
+          "nodes",
+          "snapshotAt"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VolumeResponse"
+            }
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NodeOutcomeResponse"
+            }
+          },
+          "snapshotAt": {
+            "type": "string"
+          }
+        }
+      },
+      "VolumeResponse": {
+        "type": "object",
+        "required": [
+          "nodeId",
+          "name",
+          "driver",
+          "mountPoint",
+          "labels",
+          "usedBy",
+          "users"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "driver": {
+            "type": "string"
+          },
+          "labels": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
+          "mountPoint": {
+            "type": "string",
+            "description": "Host path of a `local` volume."
+          },
+          "name": {
+            "type": "string"
+          },
+          "nodeId": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "From the node's last disk sample; `null` until then or when the driver can't say.",
+            "minimum": 0
+          },
+          "usedBy": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Containers on the node (any state) that mount it.",
+            "minimum": 0
+          },
+          "users": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Up to 16 of their names."
           }
         }
       }

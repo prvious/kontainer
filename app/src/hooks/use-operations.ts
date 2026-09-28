@@ -3,7 +3,7 @@ import { useMutation, type QueryKey } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { authenticatedInvoke } from "@/hooks/authenticated-invoke";
 import { OperationsContext, type OperationsContextValue } from "@/contexts/operations-context-value";
-import { admittedFromIpc } from "@/types/operations";
+import { admittedFromIpc, type OperationView } from "@/types/operations";
 
 export function useOperations(): OperationsContextValue {
     const context = useContext(OperationsContext);
@@ -34,6 +34,7 @@ export function useStartOperation<V extends WithIdempotencyKey>({
     success,
     targets,
     args = (variables) => ({ ...variables }) as Record<string, unknown>,
+    onSettled,
 }: {
     command: string;
     scope: string;
@@ -45,6 +46,8 @@ export function useStartOperation<V extends WithIdempotencyKey>({
     targets?: (variables: V) => string[];
     /** The command's arguments; defaults to the variables themselves. */
     args?: (variables: V) => Record<string, unknown>;
+    /** Called once when the operation settles, with the variables that started it. */
+    onSettled?: (view: OperationView, variables: V) => void;
 }) {
     const { session, reportInventoryCustodyError } = useAuth();
     const { track } = useOperations();
@@ -60,6 +63,7 @@ export function useStartOperation<V extends WithIdempotencyKey>({
                 invalidate,
                 success: success?.(variables),
                 targets: targets?.(variables),
+                onSettled: onSettled && ((view) => onSettled(view, variables)),
             }),
     });
 }

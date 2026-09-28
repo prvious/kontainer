@@ -23,6 +23,13 @@ service NodeAgent {
   // Anonymous pull. Progress events until the pull ends; a failed pull ends with one event whose
   // `error` is the registry's or daemon's own message.
   rpc PullImage(PullImageRequest) returns (stream PullImageEvent);
+  rpc ListVolumes(ListVolumesRequest) returns (ListVolumesResponse);
+  // An existing name is ALREADY_EXISTS `volume_exists`; Docker itself would hand the existing
+  // volume back.
+  rpc CreateVolume(CreateVolumeRequest) returns (CreateVolumeResponse);
+  // A volume that containers mount is refused by Docker with or without force. That refusal is a
+  // result, not an error: `in_use_by` names the containers and nothing is removed.
+  rpc RemoveVolume(RemoveVolumeRequest) returns (RemoveVolumeResponse);
 }
 
 message CheckInRequest {
@@ -188,4 +195,43 @@ message PullImageEvent {
   optional uint64 current = 3;
   optional uint64 total = 4;
   optional string error = 5;
+}
+
+message ListVolumesRequest {}
+
+message VolumeSummary {
+  string name = 1;
+  string driver = 2;
+  string mountpoint = 3;
+  optional int64 created_at_unix_seconds = 4;
+  map<string, string> labels = 5;
+  // Containers on this node (any state) that mount it, and up to 16 of their names.
+  uint32 used_by = 6;
+  repeated string users = 7;
+  // From the agent's last `docker system df`; absent until it ran or when the driver can't say.
+  optional uint64 size_bytes = 8;
+}
+
+message ListVolumesResponse {
+  repeated VolumeSummary volumes = 1;
+}
+
+message CreateVolumeRequest {
+  string name = 1;
+  string driver = 2;
+  map<string, string> labels = 3;
+  map<string, string> driver_opts = 4;
+}
+
+message CreateVolumeResponse {
+  VolumeSummary volume = 1;
+}
+
+message RemoveVolumeRequest {
+  string name = 1;
+}
+
+message RemoveVolumeResponse {
+  // Non-empty when Docker refused because these containers mount the volume.
+  repeated string in_use_by = 1;
 }

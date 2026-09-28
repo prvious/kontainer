@@ -15,6 +15,8 @@ export interface TrackedOperation {
     success?: { title: string; description?: string };
     /** Row ids the operation acts on, so tables can mark them while it runs. */
     targets?: string[];
+    /** Called once with the settled snapshot, after the toast (e.g. to close a dialog). */
+    onSettled?: (view: OperationView) => void;
 }
 
 export interface OperationsContextValue {
