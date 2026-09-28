@@ -2,10 +2,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider } from "@tanstack/react-router";
-import { SettingsContext } from "@/contexts/settings-context-value";
-import type { SettingsContextValue } from "@/contexts/settings-context-value";
+import { useSettings } from "@/hooks/use-settings";
 
-vi.unmock("@/hooks/use-settings");
+type SettingsValue = ReturnType<typeof useSettings>;
 
 import { useAuth } from "@/hooks/use-auth";
 vi.mock("@/hooks/use-auth", () => ({
@@ -42,7 +41,7 @@ function createTestQueryClient() {
     });
 }
 
-const mockSettings: SettingsContextValue = {
+const mockSettings: SettingsValue = {
     refreshInterval: 5000,
     setRefreshInterval: vi.fn(),
     terminalDefaults: {
@@ -66,6 +65,7 @@ const defaultAuthReturn = {
         accessExpiresAtUnixMs: 2_000_000_000_000,
     },
     issue: null,
+    restoreError: null,
     isLoading: false,
     login: vi.fn(),
     logout: vi.fn(),
@@ -89,17 +89,15 @@ function createTestRouter() {
     });
 }
 
-function renderWithProviders(settingsOverrides: Partial<SettingsContextValue> = {}) {
+function renderWithProviders(settingsOverrides: Partial<SettingsValue> = {}) {
     const queryClient = createTestQueryClient();
-    const settings = { ...mockSettings, ...settingsOverrides };
+    vi.mocked(useSettings).mockReturnValue({ ...mockSettings, ...settingsOverrides });
     const router = createTestRouter();
 
     return render(
-        <SettingsContext value={settings}>
-            <QueryClientProvider client={queryClient}>
-                <RouterProvider router={router} />
-            </QueryClientProvider>
-        </SettingsContext>,
+        <QueryClientProvider client={queryClient}>
+            <RouterProvider router={router} />
+        </QueryClientProvider>,
     );
 }
 
@@ -176,21 +174,14 @@ describe("SettingsPage - Appearance section", () => {
         vi.mocked(useAuth).mockReturnValue(defaultAuthReturn);
     });
 
-    it("shows font selector label", async () => {
+    it("offers the theme instead of a font picker", async () => {
         renderWithProviders();
 
         await waitFor(() => {
-            expect(screen.getByText("Font")).toBeInTheDocument();
-            expect(screen.getByText("The typeface used across the app UI")).toBeInTheDocument();
+            expect(screen.getByLabelText("Theme")).toBeInTheDocument();
+            expect(screen.getByText("System")).toBeInTheDocument();
         });
-    });
-
-    it("renders font select trigger", async () => {
-        renderWithProviders();
-
-        await waitFor(() => {
-            expect(screen.getByLabelText("Font")).toBeInTheDocument();
-        });
+        expect(screen.queryByText("Font")).not.toBeInTheDocument();
     });
 });
 

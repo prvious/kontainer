@@ -71,7 +71,7 @@ function ContainerInventory({ profileId, nodeId }: { profileId: string; nodeId: 
     const page = inventory.data;
 
     return (
-        <div className='mx-auto flex w-full max-w-7xl flex-col gap-5 p-6'>
+        <div className='flex w-full flex-col gap-5'>
             <PageHeader title='CONTAINERS' subtitle={`Node ${nodeId} · read-only inventory`}>
                 <Button variant='outline' size='sm' onClick={() => void inventory.refetch()} disabled={inventory.isFetching}>
                     <RefreshCw className='size-3.5' /> Refresh
@@ -142,23 +142,13 @@ function ContainersPage() {
     const { session } = useAuth();
     const profileId = session?.profileId ?? null;
     const discovery = useConfiguredNode(profileId);
-    if (!profileId || discovery.isPending)
-        return (
-            <div className='p-6'>
-                <LoadingRows />
-            </div>
-        );
-    if (discovery.error)
-        return (
-            <div className='p-6'>
-                <ErrorPanel error={discovery.error} retry={() => void discovery.refetch()} />
-            </div>
-        );
+    if (!profileId || discovery.isPending) return <LoadingRows />;
+    if (discovery.error) return <ErrorPanel error={discovery.error} retry={() => void discovery.refetch()} />;
     if (!discovery.data)
         return (
-            <div className='mx-auto max-w-7xl p-6'>
+            <div className='flex flex-col gap-5'>
                 <PageHeader title='CONTAINERS' subtitle='Read-only inventory' />
-                <div className='mt-5 rounded-lg border border-border px-6 py-12 text-center text-sm text-muted-foreground'>
+                <div className='rounded-md border border-border bg-card px-6 py-12 text-center font-mono text-2xs text-muted-foreground'>
                     No node is configured on this controller.
                 </div>
             </div>

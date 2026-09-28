@@ -1,10 +1,7 @@
 import { Outlet, createRootRouteWithContext } from "@tanstack/react-router";
-// import { TanStackDevtools } from "@tanstack/react-devtools";
-// import { ReactQueryDevtoolsPanel } from "@tanstack/react-query-devtools";
-// import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
 import { AppearanceProvider } from "@/contexts/appearance-context";
-import { SettingsProvider } from "@/contexts/settings-context";
-import { Toaster } from "@/components/ui/sonner";
+import { AppToaster } from "@/components/kit/app-toaster";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import type { AuthContextValue } from "@/contexts/auth-context-value";
 
 export interface RouterContext {
@@ -14,19 +11,11 @@ export interface RouterContext {
 export const Route = createRootRouteWithContext<RouterContext>()({
     component: () => (
         <AppearanceProvider>
-            <SettingsProvider>
+            {/* Icon-only actions show their label tooltip after 400 ms. */}
+            <TooltipProvider delay={400}>
                 <Outlet />
-                <Toaster />
-                {/* <TanStackDevtools
-                        config={{
-                            position: "top-left",
-                        }}
-                        plugins={[
-                            { name: "TanStack Query", render: <ReactQueryDevtoolsPanel />, defaultOpen: true },
-                            { name: "TanStack Router", render: <TanStackRouterDevtoolsPanel /> },
-                        ]}
-                    /> */}
-            </SettingsProvider>
+                <AppToaster />
+            </TooltipProvider>
         </AppearanceProvider>
     ),
 });

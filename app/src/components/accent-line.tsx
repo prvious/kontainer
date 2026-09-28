@@ -1,10 +1,4 @@
+/** Accent Line `09e1f`: the 2 px primary line across the top of every window. */
 export function AccentLine() {
-    return (
-        <div
-            className='h-0.5 w-full shrink-0'
-            style={{
-                background: "linear-gradient(90deg, #00FF88, #00D4FF 50%, #A78BFA)",
-            }}
-        />
-    );
+    return <div aria-hidden className='h-0.5 w-full shrink-0 bg-linear-to-r from-primary to-primary-deep' />;
 }

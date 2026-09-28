@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { ChevronDown } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ActionButton } from "@/components/kit/action-button";
+import { StatusDot } from "@/components/kit/badges";
 import { useAuth } from "@/hooks/use-auth";
 
-export function ClusterSwitcher({ variant = "sidebar" }: { variant?: "sidebar" | "titlebar" }) {
+/** The titlebar centre pill (status dot, connection label, chevron) and its switcher popover. */
+export function ClusterSwitcher({ variant = "titlebar" }: { variant?: "titlebar" }) {
     const { session, logout } = useAuth();
     const [open, setOpen] = useState(false);
     const label = session?.label ?? session?.githubLogin ?? "No connection";
@@ -12,52 +14,38 @@ export function ClusterSwitcher({ variant = "sidebar" }: { variant?: "sidebar" |
     async function handleLogout() {
         try {
             await logout();
-            setOpen(false);
         } catch {
             // The provider exposes a closed error code and clears the session
             // only when Rust has left authenticated state.
+        } finally {
             setOpen(false);
         }
     }
 
-    const trigger =
-        variant === "titlebar" ? (
-            <button className='flex items-center gap-2 text-text-secondary transition-colors hover:text-foreground'>
-                <span className='size-[7px] shrink-0 rounded-full bg-accent-green' />
-                <span className='font-mono text-[11px] font-medium tracking-[0.5px]'>{label}</span>
-                <ChevronDown className='size-3 text-muted-foreground' />
-            </button>
-        ) : (
-            <button className='flex w-full items-center gap-3 rounded-md p-1.5 text-left transition-colors hover:bg-accent'>
-                <span className='size-2 shrink-0 rounded-full bg-accent-green' />
-                <div className='flex-1 overflow-hidden'>
-                    <p className='truncate text-sm font-semibold'>{label}</p>
-                    <span className='truncate font-mono text-[11px] text-muted-foreground'>
-                        {session?.origin.replace(/^https?:\/\//, "") ?? "Connect a controller"}
-                    </span>
-                </div>
-                <ChevronDown className={`size-4 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
-            </button>
-        );
-
     return (
         <Popover open={open} onOpenChange={setOpen}>
-            <PopoverTrigger render={trigger} />
-            <PopoverContent side={variant === "titlebar" ? "bottom" : "top"} align='center' className='w-[300px] space-y-3 border-border bg-card p-3'>
-                <div>
-                    <p className='truncate text-sm font-semibold'>{label}</p>
-                    <p className='truncate font-mono text-[11px] text-muted-foreground'>{session?.origin}</p>
+            <PopoverTrigger
+                data-variant={variant}
+                className='flex items-center gap-2 rounded-sm px-2 py-1 font-mono text-2xs font-medium tracking-[0.5px] text-secondary-foreground transition-colors hover:text-foreground'
+            >
+                <StatusDot tone='success' />
+                <span>{label}</span>
+                <ChevronDown aria-hidden className='size-3 text-muted-foreground' />
+            </PopoverTrigger>
+            <PopoverContent side='bottom' align='center' className='w-75 gap-3 border-border bg-popover p-3'>
+                <div className='min-w-0'>
+                    <p className='truncate font-mono text-xs font-semibold text-foreground'>{label}</p>
+                    <p className='truncate font-mono text-2xs text-muted-foreground'>{session?.origin}</p>
                 </div>
-                <Button
+                <ActionButton
                     variant='outline'
-                    size='sm'
                     className='w-full'
                     onClick={() => {
                         void handleLogout();
                     }}
                 >
                     Sign out
-                </Button>
+                </ActionButton>
             </PopoverContent>
         </Popover>
     );

@@ -18,12 +18,12 @@ export function AuthenticatingScreen({ provider, agentUrl, step, onCancel }: { p
         <div className='flex flex-1 items-center justify-center'>
             <div className='flex w-[500px] flex-col items-center gap-6 border border-border bg-card p-10'>
                 {/* Loader */}
-                <Loader2 className='size-8 animate-spin text-accent-green' />
+                <Loader2 className='size-8 animate-spin text-primary' />
 
                 {/* Title */}
                 <div className='flex flex-col items-center gap-2'>
                     <h1 className='text-xl font-bold text-foreground'>Authenticating...</h1>
-                    <p className='font-mono text-[13px] text-text-secondary'>Waiting for {providerLabel} authorization</p>
+                    <p className='font-mono text-[13px] text-secondary-foreground'>Waiting for {providerLabel} authorization</p>
                 </div>
 
                 {/* Steps */}
@@ -36,13 +36,11 @@ export function AuthenticatingScreen({ provider, agentUrl, step, onCancel }: { p
                         return (
                             <div key={s.id} className='flex flex-col items-center gap-2'>
                                 <Icon
-                                    className={`size-5 ${
-                                        isCompleted ? "text-accent-green" : isCurrent ? 'animate-pulse text-accent-orange' : "text-muted-foreground"
-                                    }`}
+                                    className={`size-5 ${isCompleted ? "text-primary" : isCurrent ? 'animate-pulse text-warning' : "text-muted-foreground"}`}
                                 />
                                 <span
                                     className={`font-mono text-[10px] font-semibold ${
-                                        isCompleted ? "text-accent-green" : isCurrent ? "text-accent-orange" : "text-muted-foreground"
+                                        isCompleted ? "text-primary" : isCurrent ? "text-warning" : "text-muted-foreground"
                                     }`}
                                 >
                                     {s.label}

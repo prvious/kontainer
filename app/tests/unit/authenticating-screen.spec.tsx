@@ -23,13 +23,13 @@ describe("AuthenticatingScreen", () => {
     it("shows current step as active", () => {
         render(<AuthenticatingScreen {...defaultProps} step='auth' />);
         const authStepLabel = screen.getByText("Github Auth");
-        expect(authStepLabel).toHaveClass("text-accent-orange");
+        expect(authStepLabel).toHaveClass("text-warning");
     });
 
     it("marks previous steps as completed", () => {
         render(<AuthenticatingScreen {...defaultProps} step='auth' />);
         const browserStepLabel = screen.getByText("Browser Opened");
-        expect(browserStepLabel).toHaveClass("text-accent-green");
+        expect(browserStepLabel).toHaveClass("text-primary");
     });
 
     it("cancel button calls onCancel", async () => {

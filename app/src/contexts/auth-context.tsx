@@ -23,9 +23,9 @@ function SessionAuthProvider({ children }: { children: React.ReactNode }) {
 
     const publishSession = useCallback(
         (view: SessionView | null) => {
-            // Legacy resource queries have no profile key. Remove them on
-            // replacement or logout; new queries use the local profile UUID.
-            queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== "session" });
+            // Controller data belongs to the signed-in profile: drop it on
+            // replacement or logout. App-level data (["app", ...]) stays.
+            queryClient.removeQueries({ predicate: (query) => query.queryKey[0] !== "session" && query.queryKey[0] !== "app" });
             queryClient.getMutationCache().clear();
             queryClient.setQueryData(sessionRestoreKey, view);
             queryClient.removeQueries({ queryKey: ["session", "login-hint"] });
@@ -121,7 +121,9 @@ function SessionAuthProvider({ children }: { children: React.ReactNode }) {
                 session,
                 reportInventoryCustodyError,
                 issue,
-                isLoading: restore.isPending,
+                // A retried restore counts as loading, so the splash shows progress, not the old failure.
+                isLoading: restore.isPending || restore.isRefetching,
+                restoreError: restore.error ? sessionErrorCode(restore.error) : null,
                 login,
                 logout,
                 retryCommit,

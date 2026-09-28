@@ -74,11 +74,11 @@ export function LoginScreen() {
         <div className='flex flex-1 items-center justify-center'>
             <div className='flex w-[480px] flex-col gap-8 border border-border bg-card p-10'>
                 <div className='flex flex-col items-center gap-3'>
-                    <div className='flex size-14 items-center justify-center border border-accent-green bg-accent-green-20'>
-                        <Container className='size-7 text-accent-green' />
+                    <div className='flex size-14 items-center justify-center border border-primary bg-primary-soft'>
+                        <Container className='size-7 text-primary' />
                     </div>
                     <span className='text-[28px] font-bold text-foreground'>kontainer</span>
-                    <span className='font-mono text-xs font-medium text-text-secondary'>Connect to your controller</span>
+                    <span className='font-mono text-xs font-medium text-secondary-foreground'>Connect to your controller</span>
                 </div>
 
                 <div className='flex flex-col gap-4'>
@@ -93,7 +93,7 @@ export function LoginScreen() {
                             placeholder='https://controller.example'
                             value={origin}
                             onChange={(event) => setOriginInput(event.target.value)}
-                            className='h-11 bg-bg-elevated pl-10 font-mono text-[13px]'
+                            className='h-11 bg-muted pl-10 font-mono text-[13px]'
                         />
                     </div>
                     {issue && (

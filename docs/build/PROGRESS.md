@@ -7,8 +7,8 @@ finished it and the checks that passed.
 | Spec | Status | Note | Commit |
 |------|--------|------|--------|
 | 01 Cleanup | done | v1 client deleted, scaffold renamed, tests type-checked, dead-code guard; `/` redirects to `/tasks` until spec 14; CodeMirror removed (ADR 0011). Checks: app test/types/lint/fmt, Tauri fmt/test | 7f47279 |
-| 02 Dev environment | done | `DockerHost` tcp override gated by env (ADR 0012), dev/pki.sh, agent launchers, smoke.sh passes (ready + 3 mTLS handshakes), DinD IPs pinned. Deep-status curl is recorded under spec 04 | see log |
-| 03 Shell and foundations | todo | | |
+| 02 Dev environment | done | `DockerHost` tcp override gated by env (ADR 0012), dev/pki.sh, agent launchers, smoke.sh passes (ready + 3 mTLS handshakes), DinD IPs pinned. Deep-status curl is recorded under spec 04. Checks: server fmt/clippy/test (Postgres), dev-cluster engine tests | 6853145 |
+| 03 Shell and foundations | done | Design tokens (light/dark), chrome (titlebar, sidebar, status bar, splash + 02.S1), kit, DataTable on TanStack Table v9, Recharts primitives (ADR 0013). Checks: app test/types/lint/fmt, Tauri fmt/test | see next |
 | 04 Auth and connect | todo | | |
 | 05 Membership and node metrics | todo | | |
 | 06 Operations | todo | | |

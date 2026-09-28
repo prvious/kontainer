@@ -30,9 +30,9 @@ vi.mock("@tauri-apps/plugin-opener", () => ({
     openUrl: vi.fn(),
 }));
 
-// Mock useSettings so all hooks that depend on SettingsProvider work in tests
+// Mock useSettings so hooks that read polling and terminal defaults work in tests
 vi.mock("@/hooks/use-settings", () => ({
-    useSettings: () => ({
+    useSettings: vi.fn(() => ({
         refreshInterval: 5000,
         setRefreshInterval: vi.fn(),
         terminalDefaults: {
@@ -43,24 +43,36 @@ vi.mock("@/hooks/use-settings", () => ({
         },
         setTerminalDefaults: vi.fn(),
         isLoading: false,
-    }),
+    })),
 }));
 
-// Mock useAppearance so components using AppearanceProvider work in tests
+// Mock useAppearance so components outside AppearanceProvider work in tests
 vi.mock("@/hooks/use-appearance", () => ({
-    useAppearance: () => ({
+    useAppearance: vi.fn(() => ({
         scheme: "system",
         setScheme: vi.fn(),
-        resolvedScheme: "light",
-        theme: "default",
-        setTheme: vi.fn(),
-        themes: [{ id: "default", label: "Default" }],
-        font: "figtree",
-        setFont: vi.fn(),
-        fonts: [
-            { id: "figtree", label: "Figtree", cssFamily: '"Figtree Variable", sans-serif', load: vi.fn() },
-            { id: "inter", label: "Inter", cssFamily: '"Inter Variable", sans-serif', load: vi.fn() },
-        ],
-        isFontLoading: false,
-    }),
+        resolvedScheme: "dark",
+    })),
 }));
+
+// jsdom has no matchMedia or ResizeObserver; the shadcn sidebar and Recharts read them.
+Object.defineProperty(window, "matchMedia", {
+    writable: true,
+    value: (query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        addListener: () => {},
+        removeListener: () => {},
+        dispatchEvent: () => false,
+    }),
+});
+
+class ResizeObserverStub {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+}
+globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver;

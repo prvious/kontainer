@@ -1,22 +1,23 @@
 import { useEffect } from "react";
-import { Link, Outlet, createFileRoute, redirect, useRouter } from "@tanstack/react-router";
+import { Outlet, createFileRoute, redirect, useRouter } from "@tanstack/react-router";
 import { AccentLine } from "@/components/accent-line";
 import { ClusterSwitcher } from "@/components/cluster-switcher";
-import { Logo } from "@/components/logo";
 import { SessionIssue } from "@/components/session-issue";
+import { AppSidebar } from "@/components/shell/app-sidebar";
+import { StatusBar } from "@/components/shell/status-bar";
+import { Titlebar } from "@/components/shell/titlebar";
+import { SidebarProvider } from "@/components/ui/sidebar";
+import { ActionButton } from "@/components/kit/action-button";
 import { useAuth } from "@/hooks/use-auth";
 
 function ShellError() {
     return (
         <div className='flex h-screen items-center justify-center bg-background text-foreground'>
-            <div className='max-w-md text-center'>
+            <div className='flex max-w-md flex-col items-center gap-4 text-center'>
                 <p className='font-mono text-sm text-muted-foreground'>Something went wrong.</p>
-                <button
-                    className='mt-4 rounded border border-border px-3 py-1.5 font-mono text-xs text-foreground transition-colors hover:bg-bg-elevated'
-                    onClick={() => window.location.reload()}
-                >
-                    Reload
-                </button>
+                <ActionButton variant='outline' onClick={() => window.location.reload()}>
+                    RELOAD
+                </ActionButton>
             </div>
         </div>
     );
@@ -54,23 +55,11 @@ function AuthenticatedLayout() {
 
     if (!session) return null;
 
+    // Chrome stays put; only the main column scrolls.
     return (
-        <div className='flex h-screen flex-col bg-background'>
+        <div className='flex h-screen flex-col overflow-hidden bg-background'>
             <AccentLine />
-            <header data-tauri-drag-region className='flex h-[38px] shrink-0 items-center justify-between border-b border-border bg-titlebar-bg/90 px-4'>
-                <Link to='/' aria-label='Home'>
-                    <Logo />
-                </Link>
-                <div className='flex items-center gap-5'>
-                    <Link to='/tasks' className='font-mono text-xs text-muted-foreground hover:text-foreground'>
-                        Containers
-                    </Link>
-                    <Link to='/settings' className='font-mono text-xs text-muted-foreground hover:text-foreground'>
-                        Settings
-                    </Link>
-                    <ClusterSwitcher variant='titlebar' />
-                </div>
-            </header>
+            <Titlebar center={<ClusterSwitcher variant='titlebar' />} />
             {issue && (
                 <SessionIssue
                     code={issue}
@@ -85,9 +74,13 @@ function AuthenticatedLayout() {
                     }}
                 />
             )}
-            <main className='flex-1 overflow-y-auto'>
-                <Outlet />
-            </main>
+            <SidebarProvider className='min-h-0 flex-1' style={{ "--sidebar-width": "220px" } as React.CSSProperties}>
+                <AppSidebar />
+                <main className='min-w-0 flex-1 overflow-y-auto bg-background p-6'>
+                    <Outlet />
+                </main>
+            </SidebarProvider>
+            <StatusBar data={{}} />
         </div>
     );
 }

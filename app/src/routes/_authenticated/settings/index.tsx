@@ -6,7 +6,7 @@ import { ConnectionSection } from "@/components/settings/connection-tab";
 
 function SettingsPage() {
     return (
-        <div className='mx-auto max-w-2xl px-6 py-6'>
+        <div className='mx-auto max-w-2xl'>
             <div className='mb-8'>
                 <h1 className='text-xl font-semibold tracking-tight'>Settings</h1>
                 <p className='mt-1 text-sm text-muted-foreground'>Application and cluster configuration</p>

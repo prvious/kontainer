@@ -6,6 +6,8 @@ export interface AuthContextValue {
     session: SessionView | null;
     isLoading: boolean;
     issue: SessionErrorCode | null;
+    /** The code session restore failed with, if it did; the splash reports startup failures. */
+    restoreError: SessionErrorCode | null;
     login: (origin: string, label?: string) => Promise<void>;
     logout: () => Promise<void>;
     retryCommit: () => Promise<void>;
