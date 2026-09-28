@@ -42,6 +42,8 @@ struct AdmissionMaterial {
     audit_action: String,
     audit_target_ref: Option<String>,
     expires_at: chrono::DateTime<Utc>,
+    payload: serde_json::Value,
+    request_id: Option<String>,
 }
 
 enum AdmissionAttempt {
@@ -86,6 +88,8 @@ async fn execute_at_failure_point(
         audit_action: request.audit_action().to_owned(),
         audit_target_ref: request.audit_target_ref().map(ToOwned::to_owned),
         expires_at: request.idempotency_expires_at(),
+        payload: request.payload().clone(),
+        request_id: request.request_id().map(ToOwned::to_owned),
     };
     let transaction_material = material.clone();
 
@@ -147,6 +151,10 @@ where
         claimed_at: Set(None),
         created_at: Set(now),
         updated_at: Set(now),
+        payload: Set(material.payload.clone()),
+        started_at: Set(None),
+        finished_at: Set(None),
+        request_id: Set(material.request_id.clone()),
     }
     .insert(database)
     .await?;

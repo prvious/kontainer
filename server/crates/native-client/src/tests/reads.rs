@@ -705,7 +705,7 @@ fn default_limits_are_the_documented_bounds() {
 }
 
 /// Paths covered by the client's read surface, with their documented method.
-const READ_OPENAPI_PATHS: [(&str, &str); 7] = [
+const READ_OPENAPI_PATHS: [(&str, &str); 10] = [
     ("/api/v1/nodes", "get"),
     ("/api/v1/nodes/{nodeId}/samples", "get"),
     ("/api/v1/cluster/samples", "get"),
@@ -713,8 +713,11 @@ const READ_OPENAPI_PATHS: [(&str, &str); 7] = [
     ("/api/v1/settings", "patch"),
     ("/api/v1/nodes/{nodeId}/containers", "get"),
     ("/api/v1/operations/{operation_id}", "get"),
+    ("/api/v1/operations/{operation_id}/events", "get"),
+    ("/api/v1/operations/{operation_id}/cancel", "post"),
+    ("/api/v1/operations/noop", "post"),
 ];
-const READ_OPENAPI_SCHEMAS: [&str; 15] = [
+const READ_OPENAPI_SCHEMAS: [&str; 19] = [
     "NodeListResponse",
     "NodeResponse",
     "NodeStatusResponse",
@@ -730,6 +733,10 @@ const READ_OPENAPI_SCHEMAS: [&str; 15] = [
     "OperationResponse",
     "OperationStateResponse",
     "NodeErrorResponse",
+    "OperationEventResponse",
+    "OperationEventsResponse",
+    "AdmittedResponse",
+    "AdmissionErrorResponse",
 ];
 const CONTAINER_STATES: [&str; 9] = [
     "unknown",

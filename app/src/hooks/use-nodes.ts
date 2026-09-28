@@ -1,30 +1,10 @@
 import { keepPreviousData, queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { invoke } from "@tauri-apps/api/core";
 import { useAuth } from "@/hooks/use-auth";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { useQueriesPaused } from "@/hooks/use-queries-paused";
-import { inventoryErrorCode, type InventoryErrorCode } from "@/types/inventory";
+import { authenticatedInvoke, type ReportCustodyError as Report } from "@/hooks/authenticated-invoke";
 import { controllerSettingsFromIpc, nodeListFromIpc, sampleSeriesFromIpc, type SampleWindow } from "@/types/nodes";
 import { DEFAULT_APP_SETTINGS } from "@/types/settings";
-
-type Report = ((profileId: string, code: InventoryErrorCode) => void) | undefined;
-
-/** Invoke a Rust-authenticated read; failures become closed codes and custody errors are reported. */
-async function authenticatedInvoke<T>(
-    command: string,
-    profileId: string,
-    args: Record<string, unknown>,
-    parse: (value: unknown) => T,
-    report: Report,
-): Promise<T> {
-    try {
-        return parse(await invoke<unknown>(command, { profileId, ...args }));
-    } catch (error) {
-        const code = inventoryErrorCode(error);
-        report?.(profileId, code);
-        throw code;
-    }
-}
 
 /** `node` is a node id, or `"cluster"` for the cluster-wide series. */
 export type SampleScope = string;

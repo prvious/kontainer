@@ -7,6 +7,7 @@
 mod auth;
 mod credentials;
 mod leakage;
+mod operations;
 mod password_auth;
 mod reads;
 mod retry;

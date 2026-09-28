@@ -55,6 +55,9 @@ pub use nodes::{
     MAX_SAMPLE_POINTS, NodeList, NodeSample, NodeStatus, NodeSummary, SAMPLE_WINDOWS, SamplePoint,
     SampleSeries,
 };
-pub use operations::{OperationSnapshot, OperationState};
+pub use operations::{
+    AdmittedOperation, IdempotencyKey, MAX_EVENT_PAGE, OperationEvent, OperationSnapshot,
+    OperationState,
+};
 pub use probe::ProbeFailure;
 pub use settings::{ControllerSettings, RETENTION_DAYS};

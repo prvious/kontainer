@@ -6,8 +6,9 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use kontainer_native_client::{
-    AccessCredential, ContainerPage, ContainerPageRequest, ControllerSettings, NativeClientError,
-    NodeId, NodeList, ProbeFailure, RefreshCredential, SampleSeries,
+    AccessCredential, AdmittedOperation, ContainerPage, ContainerPageRequest, ControllerSettings,
+    IdempotencyKey, NativeClientError, NodeId, NodeList, OperationEvent, OperationSnapshot,
+    ProbeFailure, RefreshCredential, SampleSeries,
 };
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
@@ -371,6 +372,9 @@ pub(crate) struct Script {
     pub(crate) nodes_gate: Option<Arc<Notify>>,
     pub(crate) samples: VecDeque<Result<SampleSeries, NativeClientError>>,
     pub(crate) settings: VecDeque<Result<ControllerSettings, NativeClientError>>,
+    pub(crate) operations: VecDeque<Result<OperationSnapshot, NativeClientError>>,
+    pub(crate) events: VecDeque<Result<Vec<OperationEvent>, NativeClientError>>,
+    pub(crate) admissions: VecDeque<Result<AdmittedOperation, NativeClientError>>,
     pub(crate) containers: VecDeque<Result<ContainerPage, NativeClientError>>,
 }
 
@@ -538,6 +542,102 @@ impl Controller for FakeController {
             .lock()
             .unwrap()
             .containers
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn get_operation<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        operation_id: Uuid,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<OperationSnapshot, NativeClientError>> {
+        record(
+            &self.log,
+            format!(
+                "get_operation:{}:{operation_id}",
+                public_tag(access.expose())
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .operations
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn list_operation_events<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        operation_id: Uuid,
+        after: u32,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<Vec<OperationEvent>, NativeClientError>> {
+        record(
+            &self.log,
+            format!(
+                "operation_events:{}:{operation_id}:{after}",
+                public_tag(access.expose())
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .events
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn cancel_operation<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        operation_id: Uuid,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<OperationSnapshot, NativeClientError>> {
+        record(
+            &self.log,
+            format!(
+                "cancel_operation:{}:{operation_id}",
+                public_tag(access.expose())
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .operations
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn admit<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        path: &'a str,
+        key: &'a IdempotencyKey,
+        body: &'a serde_json::Value,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
+        record(
+            &self.log,
+            format!(
+                "admit:{}:{path}:{}:{body}",
+                public_tag(access.expose()),
+                key.as_str()
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .admissions
             .pop_front()
             .unwrap_or(Err(NativeClientError::InvalidResponse));
         Box::pin(async move { outcome })

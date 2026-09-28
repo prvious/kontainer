@@ -43,6 +43,10 @@ pub(crate) use inventory::{ContainerPageView, InventoryError};
 mod nodes;
 pub(crate) use nodes::{ControllerSettingsView, NodeListView, SampleSeriesView};
 
+#[path = "manager_operations.rs"]
+mod operations;
+pub(crate) use operations::{OperationEventView, OperationView};
+
 /// The one published session plus whatever work is in flight.
 struct SessionSlots {
     active: Option<ActiveSession>,

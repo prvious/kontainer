@@ -672,6 +672,81 @@
         ]
       }
     },
+    "/api/v1/operations/noop": {
+      "post": {
+        "tags": [
+          "super::operations"
+        ],
+        "operationId": "admit_noop",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "16–64 printable ASCII characters, one per user gesture",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Admitted; poll the operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmittedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`idempotency_key_required` or `invalid_request`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "404": {
+            "description": "Not available outside development and test"
+          },
+          "409": {
+            "description": "`idempotency_conflict`: the key was used for a different request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Persistence unavailable or controller draining"
+          }
+        },
+        "security": [
+          {
+            "access_session": []
+          }
+        ]
+      }
+    },
     "/api/v1/operations/{operation_id}": {
       "get": {
         "tags": [
@@ -716,6 +791,148 @@
             "description": "Controller draining new work or session persistence unavailable; the body is either HealthResponse or a generic error"
           }
         }
+      }
+    },
+    "/api/v1/operations/{operation_id}/cancel": {
+      "post": {
+        "tags": [
+          "super::operations"
+        ],
+        "operationId": "cancel_operation",
+        "parameters": [
+          {
+            "name": "operation_id",
+            "in": "path",
+            "description": "Durable operation UUID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Cancelled before it started; the body is the operation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid operation identifier",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "404": {
+            "description": "Operation not found or not visible to the authenticated principal"
+          },
+          "409": {
+            "description": "`not_cancellable`: the operation already started or finished",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Persistence unavailable or controller draining"
+          }
+        },
+        "security": [
+          {
+            "access_session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/operations/{operation_id}/events": {
+      "get": {
+        "tags": [
+          "super::operations"
+        ],
+        "operationId": "operation_events",
+        "parameters": [
+          {
+            "name": "operation_id",
+            "in": "path",
+            "description": "Durable operation UUID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "description": "Return events after this sequence (default 0)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "At most this many events, 1–100 (default 100)",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Events in sequence order",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationEventsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid operation identifier or query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "404": {
+            "description": "Operation not found or not visible to the authenticated principal"
+          },
+          "503": {
+            "description": "Persistence unavailable or controller draining"
+          }
+        },
+        "security": [
+          {
+            "access_session": []
+          }
+        ]
       }
     },
     "/api/v1/settings": {
@@ -982,6 +1199,33 @@
           },
           "principalId": {
             "type": "string"
+          }
+        }
+      },
+      "AdmissionErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "AdmittedResponse": {
+        "type": "object",
+        "required": [
+          "operationId",
+          "replayed"
+        ],
+        "properties": {
+          "operationId": {
+            "type": "string"
+          },
+          "replayed": {
+            "type": "boolean",
+            "description": "True when this key already admitted the same request; no second operation exists."
           }
         }
       },
@@ -1426,6 +1670,59 @@
           "offline"
         ]
       },
+      "OperationEventResponse": {
+        "type": "object",
+        "required": [
+          "sequence",
+          "state",
+          "createdAt"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string"
+          },
+          "detail": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "errorCode": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sequence": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "state": {
+            "$ref": "#/components/schemas/OperationStateResponse"
+          }
+        }
+      },
+      "OperationEventsResponse": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OperationEventResponse"
+            },
+            "maxItems": 100
+          }
+        }
+      },
       "OperationResponse": {
         "type": "object",
         "required": [
@@ -1441,6 +1738,19 @@
         "properties": {
           "createdAt": {
             "type": "string"
+          },
+          "errorMessage": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Failure message of a failed operation; never daemon or transport internals."
+          },
+          "finishedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "id": {
             "type": "string"
@@ -1458,8 +1768,28 @@
             "type": "integer",
             "format": "int32"
           },
+          "progress": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "The latest progress or result document for the kind."
+          },
           "recoverable": {
             "type": "boolean"
+          },
+          "requestId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The admitting request's id, shown next to failures."
+          },
+          "startedAt": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "state": {
             "$ref": "#/components/schemas/OperationStateResponse"

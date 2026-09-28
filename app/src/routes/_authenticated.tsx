@@ -12,6 +12,7 @@ import { ActionButton } from "@/components/kit/action-button";
 import { useAuth } from "@/hooks/use-auth";
 import { useControllerHealth } from "@/hooks/session/use-controller-health";
 import { useNodes } from "@/hooks/use-nodes";
+import { OperationsProvider } from "@/contexts/operations-context";
 import { clusterUsage, nodesDown } from "@/types/nodes";
 
 function ShellError() {
@@ -63,37 +64,39 @@ function AuthenticatedLayout() {
 
     // Chrome stays put; only the main column scrolls.
     return (
-        <div className='flex h-screen flex-col overflow-hidden bg-background'>
-            <AccentLine />
-            <Titlebar center={<ClusterSwitcher health={health.data} />} />
-            {issue && issue !== "relogin_required" && (
-                <SessionIssue
-                    code={issue}
-                    onRetryCommit={() => {
-                        void retryCommit().catch(() => {});
-                    }}
-                    onRetryRestore={() => {
-                        void retryRestore().catch(() => {});
-                    }}
-                    onLogout={() => {
-                        void retryLogout();
+        <OperationsProvider>
+            <div className='flex h-screen flex-col overflow-hidden bg-background'>
+                <AccentLine />
+                <Titlebar center={<ClusterSwitcher health={health.data} />} />
+                {issue && issue !== "relogin_required" && (
+                    <SessionIssue
+                        code={issue}
+                        onRetryCommit={() => {
+                            void retryCommit().catch(() => {});
+                        }}
+                        onRetryRestore={() => {
+                            void retryRestore().catch(() => {});
+                        }}
+                        onLogout={() => {
+                            void retryLogout();
+                        }}
+                    />
+                )}
+                {/* While the session-expired dialog is up the page stays mounted but inert (02.S5). */}
+                <SidebarProvider inert={expired || undefined} className='min-h-0 flex-1' style={{ "--sidebar-width": "220px" } as React.CSSProperties}>
+                    <AppSidebar badges={{ nodesDown: nodesDown(nodes.data?.items) }} />
+                    <main className='min-w-0 flex-1 overflow-y-auto bg-background p-6'>
+                        <Outlet />
+                    </main>
+                </SidebarProvider>
+                <StatusBar
+                    data={{
+                        ...clusterUsage(nodes.data?.items),
+                        connection: health.data ? (health.data.status === "ready" ? "connected" : "reconnecting") : undefined,
                     }}
                 />
-            )}
-            {/* While the session-expired dialog is up the page stays mounted but inert (02.S5). */}
-            <SidebarProvider inert={expired || undefined} className='min-h-0 flex-1' style={{ "--sidebar-width": "220px" } as React.CSSProperties}>
-                <AppSidebar badges={{ nodesDown: nodesDown(nodes.data?.items) }} />
-                <main className='min-w-0 flex-1 overflow-y-auto bg-background p-6'>
-                    <Outlet />
-                </main>
-            </SidebarProvider>
-            <StatusBar
-                data={{
-                    ...clusterUsage(nodes.data?.items),
-                    connection: health.data ? (health.data.status === "ready" ? "connected" : "reconnecting") : undefined,
-                }}
-            />
-            <SessionExpiredDialog />
-        </div>
+                <SessionExpiredDialog />
+            </div>
+        </OperationsProvider>
     );
 }

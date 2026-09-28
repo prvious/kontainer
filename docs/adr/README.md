@@ -53,3 +53,4 @@ What becomes easier, what becomes harder, what must be revisited and when.
 | [0013](./0013-shell-and-component-kit.md) | Shell and component kit decisions | accepted |
 | [0014](./0014-password-auth-and-connections.md) | Password authentication, throttling, and saved connections | accepted |
 | [0015](./0015-membership-and-node-metrics.md) | Membership, node samples, and fan-out | accepted |
+| [0016](./0016-operation-execution.md) | Operation execution, events schema, and the desktop operation model | accepted |

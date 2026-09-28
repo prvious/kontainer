@@ -49,6 +49,7 @@ pub async fn execute(
                 active_model.state = Set(OperationState::Running.as_str().to_owned());
                 active_model.claimed_by = Set(Some(worker_reference));
                 active_model.claimed_at = Set(Some(now));
+                active_model.started_at = Set(Some(now));
                 active_model.updated_at = Set(now);
                 let updated = active_model.update(transaction).await?;
 

@@ -6,6 +6,11 @@
   "uncertain": true,
   "lastEventSequence": 4,
   "lastErrorCode": "engine_timeout",
+  "errorMessage": null,
+  "progress": null,
   "createdAt": "2026-09-19T06:50:00.000Z",
-  "updatedAt": "2026-09-19T06:52:00.000Z"
+  "updatedAt": "2026-09-19T06:52:00.000Z",
+  "startedAt": "2026-09-19T06:50:01.000Z",
+  "finishedAt": null,
+  "requestId": "01J9ZM2R"
 }

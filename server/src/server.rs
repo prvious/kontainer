@@ -279,6 +279,22 @@ pub async fn serve(router: Router, ctx: &AppContext, params: &ServeParams) -> Re
         ctx.db.clone(),
         shutdown.draining(),
     ));
+    // The operation worker recovers interrupted operations first, then claims until the drain,
+    // and gets the shutdown grace to finish in-flight executions (ADR 0009).
+    let worker = tokio::spawn(
+        crate::operations::worker::Worker {
+            database: ctx.db.clone(),
+            registry: Arc::new(crate::operations::executor::production_registry()),
+            agents: ctx
+                .shared_store
+                .get::<crate::nodes::agents::SharedAgentDirectory>()
+                .map(|directory| directory.0),
+            settings: crate::operations::worker::WorkerSettings::new(
+                settings.shutdown_grace.duration(),
+            ),
+        }
+        .run(shutdown.draining()),
+    );
 
     let result = tokio::select! {
         result = &mut servers => result,
@@ -290,6 +306,9 @@ pub async fn serve(router: Router, ctx: &AppContext, params: &ServeParams) -> Re
     shutdown.begin_drain();
     if let Err(error) = pruner.await {
         tracing::error!(%error, "sample pruning task failed");
+    }
+    if let Err(error) = worker.await {
+        tracing::error!(%error, "operation worker task failed");
     }
     result
 }

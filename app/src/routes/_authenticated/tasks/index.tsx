@@ -24,6 +24,8 @@ const errorMessages: Record<InventoryErrorCode, string> = {
     invalid_pagination: "This page is no longer available. Start again from page one.",
     invalid_request: "The controller rejected the request.",
     node_not_found: "The node left the cluster or is no longer available.",
+    not_found: "The controller no longer has this item.",
+    conflict: "The controller refused because the item changed. Refresh and try again.",
     forbidden: "Your session cannot read this inventory.",
     controller_unavailable: "The controller is unavailable. Try again.",
     agent_unavailable: "The node agent is unavailable. Try again.",

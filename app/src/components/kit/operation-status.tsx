@@ -1,10 +1,10 @@
-import { CircleCheck, CircleDashed, CircleHelp, CircleSlash, CircleX, LoaderCircle, type LucideIcon } from "lucide-react";
+import { CircleCheck, CircleHelp, CircleSlash, CircleX, Clock, LoaderCircle, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export type OperationPhase = "queued" | "running" | "succeeded" | "failed" | "cancelled" | "uncertain";
 
 const phaseIcon: Record<OperationPhase, { icon: LucideIcon; className: string }> = {
-    queued: { icon: CircleDashed, className: "text-muted-foreground" },
+    queued: { icon: Clock, className: "text-muted-foreground" },
     running: { icon: LoaderCircle, className: "animate-spin text-primary" },
     succeeded: { icon: CircleCheck, className: "text-success" },
     failed: { icon: CircleX, className: "text-destructive" },
@@ -13,7 +13,7 @@ const phaseIcon: Record<OperationPhase, { icon: LucideIcon; className: string }>
 };
 
 const trackFill: Record<OperationPhase, string> = {
-    queued: "bg-secondary",
+    queued: "bg-muted-foreground",
     running: "bg-primary",
     succeeded: "bg-success",
     failed: "bg-destructive",

@@ -6,6 +6,14 @@
   "uncertain": false,
   "lastEventSequence": 3,
   "lastErrorCode": null,
+  "errorMessage": null,
+  "progress": {
+    "total": 3,
+    "done": 1
+  },
   "createdAt": "2026-09-19T06:50:00.000Z",
-  "updatedAt": "2026-09-19T06:51:00.000Z"
+  "updatedAt": "2026-09-19T06:51:00.000Z",
+  "startedAt": "2026-09-19T06:50:01.000Z",
+  "finishedAt": null,
+  "requestId": "01J9ZM2R"
 }

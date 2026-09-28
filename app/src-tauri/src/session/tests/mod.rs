@@ -6,5 +6,6 @@ mod inventory;
 mod ipc;
 mod login;
 mod logout;
+mod operations;
 mod restore;
 mod storage;

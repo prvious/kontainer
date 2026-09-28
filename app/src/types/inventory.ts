@@ -28,6 +28,8 @@ export const INVENTORY_ERROR_CODES = [
     "invalid_pagination",
     "invalid_request",
     "node_not_found",
+    "not_found",
+    "conflict",
     "forbidden",
     "controller_unavailable",
     "agent_unavailable",

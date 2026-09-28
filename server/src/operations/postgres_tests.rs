@@ -85,7 +85,7 @@ async fn readiness_tracks_postgres_and_shutdown_without_reporting_dependency_det
     Ok(())
 }
 
-fn admission_request(
+pub(super) fn admission_request(
     principal_id: Uuid,
     idempotency_key: &str,
     canonical_request: &[u8],
@@ -102,7 +102,9 @@ fn admission_request(
     )?)
 }
 
-async fn test_principal(database: &sea_orm::DatabaseConnection) -> Result<Uuid, Box<dyn Error>> {
+pub(super) async fn test_principal(
+    database: &sea_orm::DatabaseConnection,
+) -> Result<Uuid, Box<dyn Error>> {
     let now = Utc::now();
     let id = Uuid::now_v7();
     principal::ActiveModel {
@@ -123,7 +125,7 @@ async fn test_principal(database: &sea_orm::DatabaseConnection) -> Result<Uuid, 
 /// Production route composition: lifecycle routes unlayered, application
 /// routes behind access-session middleware. Tests must exercise this exact
 /// composition rather than hand-built single-route routers.
-async fn production_router(
+pub(super) async fn production_router(
     connection: &sea_orm::DatabaseConnection,
 ) -> Result<Router, Box<dyn Error>> {
     let config_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("config");

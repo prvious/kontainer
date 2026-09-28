@@ -1234,7 +1234,9 @@ async fn postgres_session_openapi_registers_auth_routes_without_secrets()
                                 && ["limit", "cursor"].contains(&name))
                             || (["/api/v1/nodes/{nodeId}/samples", "/api/v1/cluster/samples"]
                                 .contains(&path.as_str())
-                                && ["window", "bucket"].contains(&name));
+                                && ["window", "bucket"].contains(&name))
+                            || (path == "/api/v1/operations/{operation_id}/events"
+                                && ["after", "limit"].contains(&name));
                         if !allowed {
                             violations.push(format!("{method} {path} query {name}"));
                         }

@@ -10,6 +10,11 @@ pub struct Model {
     pub state: String,
     pub error_code: Option<String>,
     pub created_at: DateTimeUtc,
+    /// Progress or result document for the kind.
+    #[sea_orm(column_type = "JsonBinary", nullable)]
+    pub detail: Option<Json>,
+    /// Human-readable failure message; never daemon or transport internals.
+    pub message: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

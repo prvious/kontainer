@@ -34,6 +34,9 @@ pub fn run() {
             actions::nodes::get_node_samples::get_node_samples,
             actions::settings::get_settings::get_settings,
             actions::settings::update_settings::update_settings,
+            actions::operations::get_operation::get_operation,
+            actions::operations::list_operation_events::list_operation_events,
+            actions::operations::cancel_operation::cancel_operation,
             actions::app::close_splashscreen::close_splashscreen,
             actions::app::load_app_settings::load_app_settings,
             actions::app::save_app_settings::save_app_settings

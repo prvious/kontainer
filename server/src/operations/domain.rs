@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
@@ -60,6 +62,99 @@ impl TryFrom<&str> for OperationState {
 #[error("operation has an unknown persisted state")]
 pub struct CorruptOperationState(String);
 
+impl OperationState {
+    /// `succeeded`, `failed`, and `cancelled` never change again.
+    #[must_use]
+    pub const fn is_terminal(self) -> bool {
+        matches!(self, Self::Succeeded | Self::Failed | Self::Cancelled)
+    }
+}
+
+/// Every mutation the controller runs. Specs 07 to 12 register executors for their kinds;
+/// `noop` exists for the operation pipeline itself (development and test routes only).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum OperationKind {
+    ContainerStart,
+    ContainerStop,
+    ContainerRestart,
+    ContainerPause,
+    ContainerUnpause,
+    ContainerRemove,
+    ContainersBulk,
+    ImageRemove,
+    ImagePull,
+    VolumeCreate,
+    VolumeRemove,
+    NetworkCreate,
+    NetworkRemove,
+    ServiceScale,
+    ServiceRestart,
+    ServiceRollback,
+    StackRemove,
+    Noop,
+}
+
+impl OperationKind {
+    pub const ALL: [Self; 18] = [
+        Self::ContainerStart,
+        Self::ContainerStop,
+        Self::ContainerRestart,
+        Self::ContainerPause,
+        Self::ContainerUnpause,
+        Self::ContainerRemove,
+        Self::ContainersBulk,
+        Self::ImageRemove,
+        Self::ImagePull,
+        Self::VolumeCreate,
+        Self::VolumeRemove,
+        Self::NetworkCreate,
+        Self::NetworkRemove,
+        Self::ServiceScale,
+        Self::ServiceRestart,
+        Self::ServiceRollback,
+        Self::StackRemove,
+        Self::Noop,
+    ];
+
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ContainerStart => "container.start",
+            Self::ContainerStop => "container.stop",
+            Self::ContainerRestart => "container.restart",
+            Self::ContainerPause => "container.pause",
+            Self::ContainerUnpause => "container.unpause",
+            Self::ContainerRemove => "container.remove",
+            Self::ContainersBulk => "containers.bulk",
+            Self::ImageRemove => "image.remove",
+            Self::ImagePull => "image.pull",
+            Self::VolumeCreate => "volume.create",
+            Self::VolumeRemove => "volume.remove",
+            Self::NetworkCreate => "network.create",
+            Self::NetworkRemove => "network.remove",
+            Self::ServiceScale => "service.scale",
+            Self::ServiceRestart => "service.restart",
+            Self::ServiceRollback => "service.rollback",
+            Self::StackRemove => "stack.remove",
+            Self::Noop => "noop",
+        }
+    }
+
+    #[must_use]
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.as_str() == value)
+    }
+
+    /// Wall-clock budget for one execution: pulls get ten minutes, everything else one.
+    #[must_use]
+    pub const fn timeout(self) -> Duration {
+        match self {
+            Self::ImagePull => Duration::from_secs(10 * 60),
+            _ => Duration::from_secs(60),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DurableOperation {
     pub id: Uuid,
@@ -69,6 +164,10 @@ pub struct DurableOperation {
     pub claimed_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    pub payload: serde_json::Value,
+    pub started_at: Option<DateTime<Utc>>,
+    pub finished_at: Option<DateTime<Utc>>,
+    pub request_id: Option<String>,
 }
 
 impl TryFrom<operation::Model> for DurableOperation {
@@ -83,6 +182,10 @@ impl TryFrom<operation::Model> for DurableOperation {
             claimed_at: model.claimed_at,
             created_at: model.created_at,
             updated_at: model.updated_at,
+            payload: model.payload,
+            started_at: model.started_at,
+            finished_at: model.finished_at,
+            request_id: model.request_id,
         })
     }
 }
@@ -92,6 +195,21 @@ pub struct OperationSnapshot {
     pub operation: DurableOperation,
     pub last_event_sequence: i32,
     pub last_error_code: Option<String>,
+    /// The latest progress or result detail, if any event carried one.
+    pub progress: Option<serde_json::Value>,
+    /// The failure message of a failed operation.
+    pub error_message: Option<String>,
+}
+
+/// One entry of an operation's history.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperationEventView {
+    pub sequence: i32,
+    pub state: OperationState,
+    pub error_code: Option<String>,
+    pub message: Option<String>,
+    pub detail: Option<serde_json::Value>,
+    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone)]
@@ -104,6 +222,8 @@ pub struct AdmitOperationRequest {
     audit_target_ref: Option<String>,
     canonical_request: Vec<u8>,
     idempotency_expires_at: DateTime<Utc>,
+    payload: serde_json::Value,
+    request_id: Option<String>,
 }
 
 impl AdmitOperationRequest {
@@ -142,7 +262,35 @@ impl AdmitOperationRequest {
             audit_target_ref,
             canonical_request,
             idempotency_expires_at,
+            payload: serde_json::Value::Object(serde_json::Map::new()),
+            request_id: None,
         })
+    }
+
+    /// The validated request the executor will read. Defaults to `{}`.
+    #[must_use]
+    pub fn with_payload(mut self, payload: serde_json::Value) -> Self {
+        self.payload = payload;
+        self
+    }
+
+    /// The admitting HTTP request id; bounded so a hostile header cannot bloat the row.
+    #[must_use]
+    pub fn with_request_id(mut self, request_id: Option<String>) -> Self {
+        self.request_id = request_id.filter(|id| {
+            !id.is_empty() && id.len() <= 128 && id.bytes().all(|b| b.is_ascii_graphic())
+        });
+        self
+    }
+
+    #[must_use]
+    pub fn payload(&self) -> &serde_json::Value {
+        &self.payload
+    }
+
+    #[must_use]
+    pub fn request_id(&self) -> Option<&str> {
+        self.request_id.as_deref()
     }
 
     #[must_use]
@@ -232,6 +380,49 @@ mod tests {
             assert_eq!(OperationState::try_from(value).unwrap(), state);
             assert_eq!(state.as_str(), value);
         }
+    }
+
+    #[test]
+    fn kinds_round_trip_and_pulls_get_ten_minutes() {
+        use super::OperationKind;
+        for kind in OperationKind::ALL {
+            assert_eq!(OperationKind::parse(kind.as_str()), Some(kind));
+        }
+        assert_eq!(OperationKind::parse("container.explode"), None);
+        assert_eq!(OperationKind::ImagePull.timeout().as_secs(), 600);
+        assert_eq!(OperationKind::ContainerRestart.timeout().as_secs(), 60);
+        assert!(OperationState::Failed.is_terminal());
+        assert!(!OperationState::Uncertain.is_terminal());
+    }
+
+    #[test]
+    fn request_ids_are_bounded_printable_text() {
+        let request = || {
+            AdmitOperationRequest::new(
+                PrincipalContext::new(uuid::Uuid::now_v7()),
+                "operations.create",
+                "idempotency-key",
+                "noop",
+                "operation.admit",
+                None,
+                b"{}".to_vec(),
+                Utc::now() + Duration::hours(1),
+            )
+            .unwrap()
+        };
+        assert_eq!(
+            request()
+                .with_request_id(Some("01J9ZM2R".to_owned()))
+                .request_id(),
+            Some("01J9ZM2R")
+        );
+        for bad in ["", "has space", "\u{7f}", &"x".repeat(129)] {
+            assert_eq!(
+                request().with_request_id(Some(bad.to_owned())).request_id(),
+                None
+            );
+        }
+        assert_eq!(request().payload(), &serde_json::json!({}));
     }
 
     #[test]
