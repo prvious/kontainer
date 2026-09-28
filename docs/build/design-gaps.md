@@ -1,0 +1,54 @@
+# Design gaps
+
+Screens, dialogs, and states the build needs that `docs/design.pen` does not draw yet.
+Each row says where the gap shows up, what the implementation does until a design exists,
+and whether the interim behaviour is acceptable to ship. Add the design, then update the
+"Interim" column to "designed" with the new node id.
+
+Node ids refer to `docs/design.pen`. Open the file with the Pencil MCP using its full path.
+
+## Rules for the implementing agent
+
+- Never invent a screen for a "Missing" row. Use the interim behaviour exactly as written.
+- Interim dialogs are built from Foundations components only: Confirm Dialog `KIuxe`,
+  Field Error `JRLoZ`, Empty State `SJK65`, Error State `X7KWf`, buttons `z5Rrz` / `BSMVd` /
+  `qXPxh` / `jeLSJ`, badges `Wbday` / `hcuLC`.
+- Every interim dialog follows the Create Volume dialog (state `iPOa2`) for layout: title,
+  one column of labelled fields, helper text under invalid fields, Cancel + primary action.
+
+## Gaps
+
+| # | Gap | Referenced from | Interim behaviour | Status |
+|---|-----|-----------------|-------------------|--------|
+| G1 | Create network dialog | Networks page `isFfK`, header button CREATE NETWORK | Minimal dialog modelled on Create Volume `iPOa2`: name, driver (overlay / bridge), attachable toggle, node picker for bridge. | Missing |
+| G2 | Create service dialog | Services page `LMjiS`, header button CREATE SERVICE | Button disabled with tooltip "Coming soon". Feature deferred. | Missing, deferred |
+| G3 | Deploy stack flow (compose editor, validation, plan preview) | Stacks page `twXyi`, Overview `WCBzg` DEPLOY button, empty state `Y1Nv0` | Buttons disabled with tooltip "Coming soon". Feature deferred by the reset doc. | Missing, deferred |
+| G4 | Service detail (tasks per service, task state, placement, last error) | Services rows; state `Y3UuOQ` hover text mentions "why the last task can't be placed" | No detail page. Task-level reasons surface only in the row tooltip. | Missing |
+| G5 | Container detail / inspect | Containers rows `2rYBA`, Overview table | No detail page. Row menu offers Logs, Exec, and lifecycle actions only. | Missing |
+| G6 | Row "⋮" menu contents for containers, services, stacks | `2rYBA`, `LMjiS`, `twXyi` action columns | Containers: Logs, Exec, Restart, Stop / Start, Pause / Unpause, Remove. Services: Scale, Restart, Rollback, Logs. Stacks: Remove. Rendered with the shadcn dropdown menu. | Missing |
+| G7 | Remove container confirmation | Container row and bulk actions | Confirm Dialog `KIuxe` without typed confirmation for a single stopped container; typed name when the container is running; bulk remove lists the names and needs typed count. | Missing |
+| G8 | Remove volume confirmation | Volumes page `jigga` row action | Confirm Dialog with typed volume name when the volume is attached; plain Cancel / Remove when unattached, same rule as images `iuoVz`. | Missing |
+| G9 | Stack detail (services grouped by stack) | Stack rows `twXyi` | No detail page. Clicking a stack filters the Services page by stack via search param. | Missing |
+| G10 | Log stream picker ("New Stream") | Logs page `ZkgXL` header button and "+" tab | shadcn Command list of services with search; selecting opens a tab. | Missing |
+| G11 | Exec target picker ("+" tab) and custom-shell retry | Exec page `f8D6u`; state `p1V0Po` mentions retry with a custom shell | Command list of running containers grouped by node; custom shell is a text field in the Error State block. | Missing |
+| G12 | Registry credentials for private pulls | State `D9mu7` says registry errors show "the fix (credentials)" | No credentials UI. Pull errors show the registry message verbatim; private registries unsupported this pass. | Missing, deferred |
+| G13 | Titlebar search and notifications panels | Titlebar `iHwhS` right side icons | Icons hidden. Command palette deleted. | Missing, deferred |
+| G14 | Settings entry point for Integrations | Traefik breadcrumb `lXH8d` says Settings › Integrations, but Settings `8wGs5` has no Integrations section | Add an "INTEGRATIONS" section header at the bottom of Settings with one row linking to the hub `r9tns`. | Missing |
+| G15 | Integrations hub GitHub card in the not-connected state | `r9tns` GitHub card shows CONNECTED | Mirror the Discord card pattern: NOT CONNECTED badge, disabled CONNECT with tooltip "Arrives with deployments". | Missing |
+| G16 | Deployments and Vault navigation placement | Sidebar `YJkf8` has no entries; Deployments screens override the Services item with a rocket icon | No nav entries. Sections deferred entirely. | Missing, deferred |
+| G17 | Add-node enrollment flow end to end | State `MjblZ` draws the dialog; controller enrollment isn't built | Dialog renders as skeleton with the "coming soon" tooltip on ADD NODE. Dev cluster uses static certificates from `dev/`. | Designed, deferred |
+| G18 | Volume Explorer and File Preview backend | `5mQoG`, `mhztj`, states `D5EBq`, `NZNrn` | No route. The volume row action "Browse files" renders disabled with tooltip "Not built yet". | Designed, deferred |
+| G19 | "Load more history" control for logs | State `f3Rq5` caption mentions a way to load more history | Empty State secondary action "Load previous hour" that widens the `since` window once. | Missing |
+| G20 | Narrow window layout | All screens are 1440 × 900 | Minimum window 1100 × 700; tables scroll horizontally inside their card; sidebar stays fixed. | Missing |
+| G21 | Session expired dialog copy after password auth | State `ME9dW` button reads SIGN IN WITH GITHUB | Button text becomes SIGN IN and opens the password form in place. Design updated in this pass. | Designed |
+| G22 | Settings "Auth provider" value | `8wGs5` shows GitHub | Read-only row showing "Password". Design updated in this pass. | Designed |
+| G23 | GitHub integration page in the deferred state | `kx4iP` shows a fully connected integration | Page renders every section as skeleton with a single Alert: "GitHub connects when deployments arrive." | Designed, deferred |
+| G24 | Certificate expiry surfaces (RENEW NOW on a manager card) | State `SedYE` (04.S5) | Not rendered; no certificate lifecycle exists yet. | Designed, deferred |
+| G25 | Exec connection line shows PID and TTY | Exec `f8D6u` footer | Docker's exec API does not expose them; the line shows the container name and session count only. | Missing, deferred |
+| G26 | Theme setting row (system / light / dark) | Settings `8wGs5` has no appearance row | A "Theme" select as the first APPLICATION row, styled like the other rows. | Missing |
+
+## Added in this pass
+
+- `wwb6d` Kontainer — Connect · Sign in (dark) and `HTrey` (light)
+- `wLzP9` Kontainer — Connect · Create owner (dark) and `T0KgTd` (light)
+- `W8OmXO` State 02.S7 · Connect — Invalid credentials, caption `J7Hnlc`

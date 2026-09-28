@@ -73,7 +73,9 @@ Use the action-per-file pattern for discrete operations.
 - The controller and node agent are separate binaries; do not recreate leader/follower modes in one executable.
 - Keep Docker operations behind Kontainer-owned traits such as `ContainerEngine`; do not leak Bollard wire types into domain actions or public responses.
 - Supervise long-running reconcilers and RPC/HTTP servers under explicit cancellation and graceful shutdown.
-- See `docs/v2/approved-greenfield-reset.md` for authoritative decisions. Older v1/Goravel documents are historical research.
+- See `docs/v2/approved-greenfield-reset.md` for authoritative decisions; `docs/adr/` extends it with later decisions. `docs/v2` is historical research.
+- `docs/build/` is the execution plan: `00-goal.md` holds the standing instructions, one spec per feature follows, `PROGRESS.md` is the ledger, `design-gaps.md` lists screens the design lacks.
+- The product design is `docs/design.pen`; read it through the Pencil MCP with the full path, never with Read or Grep.
 
 ## Testing And Verification
 

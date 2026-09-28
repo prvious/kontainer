@@ -47,7 +47,15 @@ Frontend requests flow through the desktop boundary like this:
 ## Architecture Decisions
 
 - `docs/v2/approved-greenfield-reset.md` - authoritative rewrite decisions
+- `docs/adr/` - decisions made after the reset, one file each
 - `docs/v2/decision-register.md` - decision history and superseded research
+
+## Build Plan
+
+- `docs/build/00-goal.md` - standing instructions for the implementing agent and the `/goal` condition
+- `docs/build/NN-*.md` - one spec per feature, in build order
+- `docs/build/PROGRESS.md` - the ledger; `docs/build/design-gaps.md` - screens the design does not draw yet
+- `docs/design.pen` - the product design; read it through the Pencil MCP
 
 ## Local Development
 
