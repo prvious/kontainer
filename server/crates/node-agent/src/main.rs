@@ -2,7 +2,7 @@
 
 use std::{env, error::Error, ffi::OsString, sync::Arc};
 
-use kontainer_engine::{LocalDockerEngine, LocalEngineOptions};
+use kontainer_engine::{ContainerEngine, LocalDockerEngine, LocalEngineOptions};
 use kontainer_node_agent::{
     AgentConfig, AgentShutdown, NodeAgentService, serve_node_agent_rpc, supervise_node_agent_server,
 };
@@ -35,13 +35,19 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let connections = TaskTracker::new();
     let requests = TaskTracker::new();
     let (failures, task_failures) = tokio::sync::mpsc::unbounded_channel();
-    let service = NodeAgentService::new(
-        config.node_id,
-        Arc::new(LocalDockerEngine::connect_for_node(
-            LocalEngineOptions::default(),
-        )?),
-        shutdown.force(),
-    );
+    let engine = Arc::new(LocalDockerEngine::connect_for_node(LocalEngineOptions {
+        host: config.docker_host.clone(),
+        ..LocalEngineOptions::default()
+    })?);
+    // A failed ping is logged, not fatal: Describe reports Docker health and
+    // the agent keeps serving while the daemon restarts.
+    match engine.is_available().await {
+        Ok(true) => tracing::info!(docker.host = %config.docker_host, "docker ping succeeded"),
+        Ok(false) | Err(_) => {
+            tracing::warn!(docker.host = %config.docker_host, "docker ping failed");
+        }
+    }
+    let service = NodeAgentService::new(config.node_id, engine, shutdown.force());
     let server = serve_node_agent_rpc(
         listener,
         config.cluster_id,

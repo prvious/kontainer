@@ -17,9 +17,9 @@ The greenfield Rust rewrite is now the active implementation. The old Go/Goravel
 - Operate services with actions like scale, restart, rollback, and selected configuration updates.
 - Stream service and task logs over WebSocket.
 - Open terminal sessions into running containers from the desktop app.
-- View cluster and node metrics collected by the leader agent.
+- View cluster and node metrics reported by every node agent.
 - Connect to multiple clusters from one desktop app.
-- Authenticate through a browser-based GitHub OAuth flow.
+- Sign in with an owner email and password; GitHub login arrives later as an integration.
 
 ## Architecture
 
@@ -66,30 +66,49 @@ Frontend requests flow through the desktop boundary like this:
 - Docker
 - PostgreSQL
 
-### Common Commands
+### Bring the stack up
 
-Run from the repository root:
+Run from the repository root, in this order:
 
 ```bash
-pnpm dev:app          # Start the Tauri desktop app
-pnpm dev:cluster      # Start the local Docker-in-Docker Swarm cluster
-pnpm dev:controller   # Start the controller (requires PostgreSQL)
+pnpm dev:cluster       # three docker:dind nodes as a Swarm (tcp://localhost:2375, 2376, 2378) + seed stacks
+pnpm dev:pki           # dev mTLS CA, controller and node certificates in dev/pki/ (idempotent; --force regenerates)
+docker compose -f server/compose.postgres.yaml up -d --wait postgres
+pnpm dev:controller    # controller on http://127.0.0.1:5150, agent RPC on 127.0.0.1:50051
+pnpm dev:agents        # manager, worker-1, worker-2 agents on 127.0.0.1:50052-50054, logs in dev/logs/
+pnpm dev:app           # the Tauri desktop app
+```
+
+`pnpm dev:smoke` runs the same sequence (skipping what is already up), waits for
+`/health/ready`, and checks that every agent answers an mTLS handshake. `dev/Procfile`
+lists the same processes for a process manager; `./dev/agent.sh <node>` runs one
+agent in the foreground.
+
+The dev agents and the controller reach the DinD daemons over TCP. That override
+(`KONTAINER_DOCKER_HOST=tcp://…` for agents, `settings.docker.host` for the
+controller) is accepted only when `KONTAINER_ENV` / the Loco environment is
+`development` or `test` (ADR 0004); production requires the Unix socket.
+
+To reset: `pnpm dev:agents:stop`, stop the controller, then `pnpm reset` (removes the
+cluster and its volumes). `pnpm dev:cluster:seed` redeploys the seed stacks.
+PostgreSQL keeps its data; see below.
+
+### Common Commands
+
+```bash
 pnpm build:server     # Build both server binaries
 pnpm test:server      # Test the Rust server workspace
 pnpm lint:server      # Run Clippy with warnings denied
-pnpm lint          # Lint the frontend
-pnpm fmt           # Format the frontend
-pnpm types         # Run frontend type checking
-pnpm down          # Tear down the local dev cluster
-pnpm reset         # Tear down the local dev cluster and volumes
+pnpm lint             # Lint the frontend
+pnpm fmt              # Format the frontend
+pnpm types            # Run frontend type checking
 ```
 
 The controller development configuration expects PostgreSQL at
 `postgres://kontainer:kontainer@127.0.0.1:55466/kontainer_development` unless
-`DATABASE_URL` overrides it. Start the matching development service with
-`docker compose -f server/compose.postgres.yaml up -d --wait postgres`. Private
-controller-agent RPC is disabled in the development config until an mTLS
-certificate bundle is supplied.
+`DATABASE_URL` overrides it. Private controller-agent RPC is enabled in the
+development config and reads its certificates from `dev/pki/`, so run
+`pnpm dev:pki` before the first start.
 
 Use Docker exclusively for local PostgreSQL; do not install or start a host
 PostgreSQL service. The development Compose service uses `postgres:17-alpine`,

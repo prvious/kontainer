@@ -14,6 +14,7 @@ use axum::{
 };
 use hyper::server::conn::http1;
 use hyper_util::{rt::TokioIo, server::conn::auto, service::TowerToHyperService};
+use kontainer_engine::DockerHost;
 use kontainer_lifecycle::{DrainClock, ShutdownGrace};
 use kontainer_rpc_auth::{MutualTlsIdentityFiles, spawn_tracked, valid_identity_segment};
 use loco_rs::{
@@ -39,10 +40,52 @@ use crate::{
 pub(crate) struct ControllerSettings {
     agent_rpc: AgentRpcSettings,
     public_http: PublicHttpSettings,
+    #[serde(default)]
+    docker: DockerSettings,
     #[serde(default, deserialize_with = "deserialize_shutdown_grace")]
     shutdown_grace: ShutdownGrace,
     #[serde(default)]
     github_auth: GitHubAuthSettings,
+}
+
+/// The Docker Engine the controller's manager-scoped engine talks to
+/// (spec 10). `tcp://` is the dev-cluster override from ADR 0004 and is
+/// refused outside development and test by [`validate_docker_host`].
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct DockerSettings {
+    #[serde(deserialize_with = "deserialize_docker_host")]
+    pub(crate) host: DockerHost,
+}
+
+fn deserialize_docker_host<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<DockerHost, D::Error> {
+    String::deserialize(deserializer)?
+        .parse()
+        .map_err(serde::de::Error::custom)
+}
+
+/// The manager-scoped Docker host, validated for the running environment.
+#[derive(Debug, Clone)]
+pub struct ManagerDockerHost(pub DockerHost);
+
+fn validate_docker_host(docker: &DockerSettings, environment: &Environment) -> Result<()> {
+    if docker.host.is_tcp() && !matches!(environment, Environment::Development | Environment::Test)
+    {
+        return Err(Error::Message(format!(
+            "settings.docker.host may use tcp:// only in development or test, not {environment:?}"
+        )));
+    }
+    Ok(())
+}
+
+pub fn init_docker_state(ctx: &AppContext) -> Result<()> {
+    let settings = controller_settings(ctx)?;
+    validate_docker_host(&settings.docker, &ctx.environment)?;
+    ctx.shared_store
+        .insert(ManagerDockerHost(settings.docker.host));
+    Ok(())
 }
 
 fn deserialize_shutdown_grace<'de, D: serde::Deserializer<'de>>(
@@ -598,7 +641,7 @@ fn parse_controller_settings(settings: serde_json::Value) -> Result<ControllerSe
     serde_json::from_value(settings)
         .map_err(|_| {
             Error::string(
-                "invalid controller settings: check agent_rpc, public_http, github_auth, shutdown_grace, and cluster_id keys and types",
+                "invalid controller settings: check agent_rpc, public_http, docker, github_auth, shutdown_grace, and cluster_id keys and types",
             )
         })
         .and_then(|settings: ControllerSettings| {
@@ -915,6 +958,7 @@ mod tests {
                 }
             },
             "public_http": { "mode": "plaintext" },
+            "docker": { "host": "unix:///var/run/docker.sock" },
             "github_auth": { "enabled": false }
         })
     }
@@ -993,6 +1037,7 @@ mod tests {
             "/agent_rpc",
             "/agent_rpc/tls",
             "/public_http",
+            "/docker",
             "/github_auth",
         ] {
             let mut settings = valid_settings();
@@ -1122,9 +1167,42 @@ mod tests {
             let settings: ControllerSettings =
                 serde_json::from_value(config.settings.unwrap()).unwrap();
 
-            assert!(!settings.agent_rpc.enabled);
+            // Development runs the agent RPC against dev/pki by default.
+            assert_eq!(
+                settings.agent_rpc.enabled,
+                environment == Environment::Development
+            );
             assert_eq!(settings.public_http.mode, PublicHttpMode::Plaintext);
             assert!(!settings.github_auth.enabled);
+        }
+    }
+
+    #[test]
+    fn docker_host_defaults_to_the_socket_and_tcp_is_development_only() {
+        let settings = parse_controller_settings(valid_settings()).unwrap();
+        assert_eq!(
+            settings.docker.host,
+            kontainer_engine::DockerHost::default()
+        );
+
+        let mut tcp = valid_settings();
+        tcp["docker"] = serde_json::json!({ "host": "tcp://localhost:2375" });
+        let settings = parse_controller_settings(tcp).unwrap();
+        for environment in [Environment::Development, Environment::Test] {
+            assert!(super::validate_docker_host(&settings.docker, &environment).is_ok());
+        }
+        let error =
+            super::validate_docker_host(&settings.docker, &Environment::Production).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("tcp:// only in development or test")
+        );
+
+        for invalid in ["http://localhost:2375", "localhost:2375", ""] {
+            let mut settings = valid_settings();
+            settings["docker"] = serde_json::json!({ "host": invalid });
+            assert!(parse_controller_settings(settings).is_err(), "{invalid}");
         }
     }
 

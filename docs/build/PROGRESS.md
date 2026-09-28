@@ -6,8 +6,8 @@ finished it and the checks that passed.
 
 | Spec | Status | Note | Commit |
 |------|--------|------|--------|
-| 01 Cleanup | in-progress | v1 client deleted, scaffold renamed, tests type-checked, dead-code guard added | |
-| 02 Dev environment | todo | | |
+| 01 Cleanup | done | v1 client deleted, scaffold renamed, tests type-checked, dead-code guard; `/` redirects to `/tasks` until spec 14; CodeMirror removed (ADR 0011). Checks: app test/types/lint/fmt, Tauri fmt/test | 7f47279 |
+| 02 Dev environment | done | `DockerHost` tcp override gated by env (ADR 0012), dev/pki.sh, agent launchers, smoke.sh passes (ready + 3 mTLS handshakes), DinD IPs pinned. Deep-status curl is recorded under spec 04 | see log |
 | 03 Shell and foundations | todo | | |
 | 04 Auth and connect | todo | | |
 | 05 Membership and node metrics | todo | | |
@@ -30,3 +30,11 @@ finished it and the checks that passed.
 Append one line per work session: date, spec, what happened, what is next.
 
 - 2026-09-28 — plan written; nothing implemented yet.
+- 2026-09-28 — spec 01 done. Spec 02: engine TCP host, agent/controller env gates, dev PKI verified by a
+  real `Describe` (`KONTAINER_TEST_DEV_PKI_DIR=../dev/pki`), dev-cluster engine tests green. The DinD
+  cluster was reset because Docker reassigned bridge IPs and stranded the workers; node IPs are now
+  fixed. The owner's local `kontainer_development` database carries a stale migration
+  (`m20260907_000001_create_sessions`) from an abandoned schema and the controller refuses to start
+  on it; verification runs use `DATABASE_URL=…/kontainer_build_verification` instead. To reset it:
+  `docker exec kontainer-server-postgres-1 psql -U kontainer -d postgres -c 'DROP DATABASE kontainer_development' -c 'CREATE DATABASE kontainer_development'`.
+  Next: spec 03.

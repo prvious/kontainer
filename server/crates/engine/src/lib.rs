@@ -6,6 +6,7 @@ use tokio_util::sync::CancellationToken;
 mod capability;
 mod container;
 mod error;
+mod host;
 mod local;
 
 pub use capability::{
@@ -19,6 +20,7 @@ pub use container::{
     parse_page_token, truncate_status_text,
 };
 pub use error::{EngineError, EngineErrorKind, EngineOperation};
+pub use host::{DEFAULT_DOCKER_SOCKET, DockerHost, DockerHostParseError};
 pub use local::{LocalDockerEngine, LocalEngineOptions};
 
 #[async_trait]

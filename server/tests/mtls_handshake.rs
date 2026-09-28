@@ -194,6 +194,70 @@ async fn describe_reports_node_identity_and_engine_health() {
     node_agent.stop().await;
 }
 
+/// The certificates `dev/pki.sh` writes must satisfy the same rpc-auth rules
+/// as the generated fixtures. Runs when `KONTAINER_TEST_DEV_PKI_DIR` points at
+/// that directory (for example `../dev/pki`).
+#[tokio::test]
+async fn dev_pki_files_complete_a_verified_describe() {
+    let Ok(directory) = std::env::var("KONTAINER_TEST_DEV_PKI_DIR") else {
+        return;
+    };
+    let directory = std::path::PathBuf::from(directory);
+    let files = |stem: &str| {
+        MutualTlsIdentityFiles::new(
+            directory.join(format!("{stem}.pem")),
+            directory.join(format!("{stem}-key.pem")),
+            directory.join("agent-ca.pem"),
+        )
+    };
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let cancellation = CancellationToken::new();
+    let service = NodeAgentService::new("manager", Arc::new(AvailableEngine), cancellation.clone());
+    let server = serve_node_agent_rpc(
+        listener,
+        "development".to_owned(),
+        files("node-manager"),
+        service,
+        cancellation.clone(),
+        cancellation.clone(),
+        TaskTracker::new(),
+        TaskTracker::new(),
+        unused_failure_sender(),
+    )
+    .unwrap();
+    let task = tokio::spawn(server);
+
+    let client = NodeAgentClientConfig::new(
+        format!("https://{address}"),
+        "manager.agent.kontainer.internal".to_owned(),
+        "development".to_owned(),
+        "manager".to_owned(),
+        files("controller"),
+    )
+    .unwrap();
+    let description = client.describe(&CancellationToken::new()).await.unwrap();
+    assert_eq!(description.node_id, "manager");
+
+    let wrong_node = NodeAgentClientConfig::new(
+        format!("https://{address}"),
+        "manager.agent.kontainer.internal".to_owned(),
+        "development".to_owned(),
+        "worker-1".to_owned(),
+        files("controller"),
+    )
+    .unwrap();
+    assert!(
+        wrong_node
+            .describe(&CancellationToken::new())
+            .await
+            .is_err()
+    );
+
+    cancellation.cancel();
+    let _ = timeout(Duration::from_secs(2), task).await;
+}
+
 #[tokio::test]
 async fn production_client_describes_the_configured_agent() {
     let pki = TestPki::generate();

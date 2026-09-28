@@ -91,6 +91,7 @@ axum.workspace = true
 base64.workspace = true
 chrono.workspace = true
 kontainer-agent-proto = { path = "crates/agent-proto" }
+kontainer-engine = { path = "crates/engine" }
 kontainer-lifecycle = { path = "crates/lifecycle" }
 kontainer-rpc-auth = { path = "crates/rpc-auth" }
 futures-util.workspace = true
@@ -119,7 +120,6 @@ utoipa.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
-kontainer-engine = { path = "crates/engine" }
 kontainer-node-agent = { path = "crates/node-agent" }
 rcgen = "0.14.9"
 tempfile = "3.27.0"

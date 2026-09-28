@@ -1,4 +1,4 @@
-use std::{collections::HashMap, future::Future, path::PathBuf, time::Duration};
+use std::{collections::HashMap, future::Future, time::Duration};
 
 use async_trait::async_trait;
 use bollard::{
@@ -11,24 +11,23 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     CapabilityStatus, ContainerEngine, ContainerPage, ContainerPageRequest, ContainerState,
-    ContainerSummary, EngineAccessScope, EngineApiVersion, EngineCapabilities, EngineDescription,
-    EngineError, EngineErrorKind, EngineOperation, UnsupportedCapabilityReason,
+    ContainerSummary, DockerHost, EngineAccessScope, EngineApiVersion, EngineCapabilities,
+    EngineDescription, EngineError, EngineErrorKind, EngineOperation, UnsupportedCapabilityReason,
     canonical_display_name, format_page_token, is_valid_container_id, truncate_status_text,
 };
 
-const DEFAULT_DOCKER_SOCKET: &str = "/var/run/docker.sock";
 const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalEngineOptions {
-    pub socket_path: PathBuf,
+    pub host: DockerHost,
     pub operation_timeout: Duration,
 }
 
 impl Default for LocalEngineOptions {
     fn default() -> Self {
         Self {
-            socket_path: DEFAULT_DOCKER_SOCKET.into(),
+            host: DockerHost::default(),
             operation_timeout: DEFAULT_OPERATION_TIMEOUT,
         }
     }
@@ -61,15 +60,24 @@ impl LocalDockerEngine {
             ));
         }
 
-        let socket_path = options.socket_path.to_str().ok_or_else(|| {
-            EngineError::new(
-                EngineErrorKind::InvalidConfiguration,
-                EngineOperation::Connect,
-            )
-        })?;
         let bollard_timeout = options.operation_timeout.as_secs().max(1);
-        let client = Docker::connect_with_socket(socket_path, bollard_timeout, API_DEFAULT_VERSION)
-            .map_err(|error| EngineError::from_bollard(EngineOperation::Connect, &error))?;
+        let client = match &options.host {
+            DockerHost::UnixSocket(socket_path) => {
+                let socket_path = socket_path.to_str().ok_or_else(|| {
+                    EngineError::new(
+                        EngineErrorKind::InvalidConfiguration,
+                        EngineOperation::Connect,
+                    )
+                })?;
+                Docker::connect_with_socket(socket_path, bollard_timeout, API_DEFAULT_VERSION)
+            }
+            DockerHost::Tcp { .. } => Docker::connect_with_http(
+                &options.host.to_string(),
+                bollard_timeout,
+                API_DEFAULT_VERSION,
+            ),
+        }
+        .map_err(|error| EngineError::from_bollard(EngineOperation::Connect, &error))?;
 
         Ok(Self {
             access_scope,
@@ -391,7 +399,7 @@ mod tests {
                 as fn(LocalEngineOptions) -> Result<LocalDockerEngine, crate::EngineError>,
         ] {
             let error = connect(LocalEngineOptions {
-                socket_path: missing_socket.clone(),
+                host: crate::DockerHost::UnixSocket(missing_socket.clone()),
                 operation_timeout: Duration::from_secs(1),
             })
             .err()
@@ -403,10 +411,25 @@ mod tests {
         assert_ne!(EngineAccessScope::Manager, EngineAccessScope::NodeLocal);
     }
 
+    #[tokio::test]
+    async fn tcp_hosts_connect_over_http_and_map_refusal_to_unavailable() {
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = closed.local_addr().unwrap().port();
+        drop(closed);
+        let engine = LocalDockerEngine::connect_for_node(LocalEngineOptions {
+            host: format!("tcp://127.0.0.1:{port}").parse().unwrap(),
+            operation_timeout: Duration::from_secs(1),
+        })
+        .unwrap();
+
+        let error = engine.is_available().await.unwrap_err();
+        assert_eq!(error.kind(), EngineErrorKind::ConnectionUnavailable);
+    }
+
     #[test]
     fn zero_timeout_is_rejected_before_adapter_construction() {
         let error = LocalDockerEngine::connect_for_node(LocalEngineOptions {
-            socket_path: "/var/run/docker.sock".into(),
+            host: crate::DockerHost::default(),
             operation_timeout: Duration::ZERO,
         })
         .err()
@@ -479,7 +502,7 @@ mod tests {
         ));
         let listener = UnixListener::bind(&socket_path).unwrap();
         let engine = LocalDockerEngine::connect_for_node(LocalEngineOptions {
-            socket_path: socket_path.clone(),
+            host: crate::DockerHost::UnixSocket(socket_path.clone()),
             operation_timeout: Duration::from_secs(1),
         })
         .unwrap();
@@ -686,7 +709,7 @@ mod tests {
         let _ = std::fs::remove_file(&socket_path);
         let listener = UnixListener::bind(&socket_path).unwrap();
         let engine = LocalDockerEngine::connect_for_node(LocalEngineOptions {
-            socket_path: socket_path.clone(),
+            host: crate::DockerHost::UnixSocket(socket_path.clone()),
             operation_timeout: Duration::from_secs(2),
         })
         .unwrap();
@@ -803,7 +826,7 @@ mod tests {
         let _ = std::fs::remove_file(&socket_path);
         let listener = UnixListener::bind(&socket_path).unwrap();
         let engine = LocalDockerEngine::connect_for_node(LocalEngineOptions {
-            socket_path: socket_path.clone(),
+            host: crate::DockerHost::UnixSocket(socket_path.clone()),
             operation_timeout: Duration::from_secs(2),
         })
         .unwrap();
