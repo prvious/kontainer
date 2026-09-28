@@ -3,6 +3,7 @@ pub mod admission;
 pub mod containers;
 pub mod github_login;
 pub mod health;
+pub mod images;
 pub mod nodes;
 pub mod operations;
 pub mod password_auth;
@@ -37,5 +38,6 @@ pub fn protected_application_routes() -> Vec<Routes> {
         nodes::routes(),
         settings::routes(),
         containers::routes(),
+        images::routes(),
     ]
 }

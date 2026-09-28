@@ -228,6 +228,17 @@ pub(crate) struct NodeOutcomeBody {
     message: Option<String>,
 }
 
+impl NodeOutcomeBody {
+    pub(crate) fn into_outcome(self) -> Result<NodeOutcome, NativeClientError> {
+        Ok(NodeOutcome {
+            node_id: NodeId::parse(&self.node_id)
+                .map_err(|_| NativeClientError::InvalidResponse)?,
+            status: self.status,
+            message: self.message,
+        })
+    }
+}
+
 fn optional_time(value: Option<&str>) -> Result<Option<DateTime<Utc>>, NativeClientError> {
     value.map(parse_timestamp).transpose()
 }
@@ -240,14 +251,7 @@ impl ContainerListBody {
         let nodes = self
             .nodes
             .into_iter()
-            .map(|node| {
-                Ok(NodeOutcome {
-                    node_id: NodeId::parse(&node.node_id)
-                        .map_err(|_| NativeClientError::InvalidResponse)?,
-                    status: node.status,
-                    message: node.message,
-                })
-            })
+            .map(NodeOutcomeBody::into_outcome)
             .collect::<Result<Vec<_>, NativeClientError>>()?;
         // Items only come from nodes that answered.
         let answered: std::collections::HashSet<_> = nodes

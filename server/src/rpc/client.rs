@@ -14,7 +14,7 @@ use std::time::Duration;
 use kontainer_agent_proto::v1::{
     ContainerAction as ProtoContainerAction, ContainerActionRequest,
     ContainerState as ProtoContainerState, DescribeRequest, ListContainersRequest,
-    node_agent_client::NodeAgentClient,
+    ListImagesRequest, PullImageRequest, RemoveImageRequest, node_agent_client::NodeAgentClient,
 };
 use kontainer_rpc_auth::{MutualTlsIdentityFiles, WorkloadIdentity};
 use tokio_util::sync::CancellationToken;
@@ -340,6 +340,139 @@ impl NodeAgentClientConfig {
         }
     }
 
+    /// Every image on the node.
+    pub async fn list_images(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> Result<Vec<AgentImage>, AgentClientError> {
+        let channel = self.channel(cancellation).await?;
+        let mut client = NodeAgentClient::new(channel);
+        let mut request = tonic::Request::new(ListImagesRequest {});
+        request.set_timeout(self.rpc_timeout);
+        let response = tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => return Err(AgentClientError::Cancelled),
+            result = tokio::time::timeout(self.rpc_timeout, client.list_images(request)) => match result {
+                Ok(Ok(response)) => response.into_inner(),
+                Ok(Err(status)) => return Err(map_rpc_status(status)),
+                Err(_) => return Err(AgentClientError::TimedOut),
+            }
+        };
+        if response.images.len() > MAX_IMAGES_PER_NODE {
+            return Err(AgentClientError::InvalidResponse);
+        }
+        response
+            .images
+            .into_iter()
+            .map(|image| {
+                let text_ok = |values: &[String]| {
+                    values.len() <= 64 && values.iter().all(|value| value.len() <= 512)
+                };
+                if !is_valid_image_id(&image.image_id)
+                    || !text_ok(&image.repo_tags)
+                    || !text_ok(&image.repo_digests)
+                {
+                    return Err(AgentClientError::InvalidResponse);
+                }
+                Ok(AgentImage {
+                    image_id: image.image_id,
+                    repo_tags: image.repo_tags,
+                    repo_digests: image.repo_digests,
+                    size_bytes: image.size_bytes,
+                    created_at_seconds: image.created_at_unix_seconds.max(0),
+                    used_by: image.used_by,
+                    dangling: image.dangling,
+                })
+            })
+            .collect()
+    }
+
+    /// Remove one image from this node.
+    pub async fn remove_image(
+        &self,
+        image_id: &str,
+        force: bool,
+        cancellation: &CancellationToken,
+    ) -> Result<(), AgentClientError> {
+        if !is_valid_image_id(image_id) {
+            return Err(AgentClientError::InvalidResponse);
+        }
+        let deadline = self.rpc_timeout + ACTION_ALLOWANCE;
+        let channel = self.channel_with_timeout(cancellation, deadline).await?;
+        let mut client = NodeAgentClient::new(channel);
+        let mut request = tonic::Request::new(RemoveImageRequest {
+            image_id: image_id.to_owned(),
+            force,
+        });
+        request.set_timeout(deadline);
+        tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => Err(AgentClientError::Cancelled),
+            result = tokio::time::timeout(deadline, client.remove_image(request)) => match result {
+                Ok(Ok(_)) => Ok(()),
+                Ok(Err(status)) => Err(map_action_status(&status)),
+                Err(_) => Err(AgentClientError::TimedOut),
+            }
+        }
+    }
+
+    /// Start an anonymous pull on this node; events end with the pull or one failure.
+    pub async fn pull_image(
+        &self,
+        reference: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<AgentPullStream, AgentClientError> {
+        let channel = self
+            .channel_with_timeout(cancellation, PULL_DEADLINE)
+            .await?;
+        let mut client = NodeAgentClient::new(channel);
+        let mut request = tonic::Request::new(PullImageRequest {
+            reference: reference.to_owned(),
+        });
+        request.set_timeout(PULL_DEADLINE);
+        let streaming = tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => return Err(AgentClientError::Cancelled),
+            result = tokio::time::timeout(self.rpc_timeout + ACTION_ALLOWANCE, client.pull_image(request)) => match result {
+                Ok(Ok(response)) => response.into_inner(),
+                Ok(Err(status)) => return Err(map_action_status(&status)),
+                Err(_) => return Err(AgentClientError::TimedOut),
+            }
+        };
+        Ok(Box::pin(futures_util::stream::unfold(
+            Some(streaming),
+            |state| async move {
+                let mut streaming = state?;
+                match streaming.message().await {
+                    Ok(Some(event)) => {
+                        let event = match event.error {
+                            Some(message) => AgentPullEvent::Failed(message),
+                            None => AgentPullEvent::Progress {
+                                layer_id: event.layer_id,
+                                status: event.status,
+                                current: event.current,
+                                total: event.total,
+                            },
+                        };
+                        let next = if matches!(event, AgentPullEvent::Failed(_)) {
+                            None
+                        } else {
+                            Some(streaming)
+                        };
+                        Some((event, next))
+                    }
+                    Ok(None) => None,
+                    Err(_) => Some((
+                        AgentPullEvent::Failed(
+                            "the node agent stopped answering during the pull".to_owned(),
+                        ),
+                        None,
+                    )),
+                }
+            },
+        )))
+    }
+
     /// Expected node ID, for shared-store diagnostics without exposing TLS.
     #[must_use]
     pub fn node_id(&self) -> &str {
@@ -392,6 +525,34 @@ pub struct AgentContainerSummary {
     pub memory_used_bytes: Option<u64>,
     pub memory_limit_bytes: Option<u64>,
 }
+
+/// One image on one node, controller-owned.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentImage {
+    pub image_id: String,
+    pub repo_tags: Vec<String>,
+    pub repo_digests: Vec<String>,
+    pub size_bytes: u64,
+    pub created_at_seconds: i64,
+    pub used_by: u32,
+    pub dangling: bool,
+}
+
+/// One pull event from a node.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentPullEvent {
+    Progress {
+        layer_id: Option<String>,
+        status: String,
+        current: Option<u64>,
+        total: Option<u64>,
+    },
+    /// The registry's or daemon's message, verbatim (bounded by the agent).
+    Failed(String),
+}
+
+pub type AgentPullStream =
+    std::pin::Pin<Box<dyn futures_util::Stream<Item = AgentPullEvent> + Send>>;
 
 /// Lifecycle actions the controller asks an agent for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -481,6 +642,30 @@ pub trait AgentClient: std::fmt::Debug + Send + Sync {
         Err(AgentClientError::Unavailable)
     }
 
+    async fn list_images(
+        &self,
+        _cancellation: &CancellationToken,
+    ) -> Result<Vec<AgentImage>, AgentClientError> {
+        Err(AgentClientError::Unavailable)
+    }
+
+    async fn remove_image(
+        &self,
+        _image_id: &str,
+        _force: bool,
+        _cancellation: &CancellationToken,
+    ) -> Result<(), AgentClientError> {
+        Err(AgentClientError::Unavailable)
+    }
+
+    async fn pull_image(
+        &self,
+        _reference: &str,
+        _cancellation: &CancellationToken,
+    ) -> Result<AgentPullStream, AgentClientError> {
+        Err(AgentClientError::Unavailable)
+    }
+
     fn node_id(&self) -> &str;
 }
 
@@ -521,6 +706,30 @@ impl AgentClient for NodeAgentClientConfig {
         .await
     }
 
+    async fn list_images(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> Result<Vec<AgentImage>, AgentClientError> {
+        NodeAgentClientConfig::list_images(self, cancellation).await
+    }
+
+    async fn remove_image(
+        &self,
+        image_id: &str,
+        force: bool,
+        cancellation: &CancellationToken,
+    ) -> Result<(), AgentClientError> {
+        NodeAgentClientConfig::remove_image(self, image_id, force, cancellation).await
+    }
+
+    async fn pull_image(
+        &self,
+        reference: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<AgentPullStream, AgentClientError> {
+        NodeAgentClientConfig::pull_image(self, reference, cancellation).await
+    }
+
     fn node_id(&self) -> &str {
         NodeAgentClientConfig::node_id(self)
     }
@@ -551,6 +760,8 @@ pub enum AgentClientError {
     ContainerRunning,
     /// The node's Docker Engine refused or failed.
     EngineError,
+    /// Containers use the image; removing it needs `force`.
+    ImageInUse,
 }
 
 impl std::fmt::Display for AgentClientError {
@@ -566,6 +777,7 @@ impl std::fmt::Display for AgentClientError {
             Self::AlreadyInState => formatter.write_str("container is already in that state"),
             Self::ContainerRunning => formatter.write_str("container is running"),
             Self::EngineError => formatter.write_str("engine failed the action"),
+            Self::ImageInUse => formatter.write_str("image is in use"),
         }
     }
 }
@@ -669,6 +881,7 @@ fn map_action_status(status: &tonic::Status) -> AgentClientError {
         (Code::NotFound, _) => AgentClientError::NotFound,
         (Code::FailedPrecondition, "already_in_state") => AgentClientError::AlreadyInState,
         (Code::FailedPrecondition, "container_running") => AgentClientError::ContainerRunning,
+        (Code::FailedPrecondition, "image_in_use") => AgentClientError::ImageInUse,
         (Code::DeadlineExceeded, _) => AgentClientError::TimedOut,
         (Code::Cancelled, _) => AgentClientError::Cancelled,
         (Code::Unauthenticated | Code::PermissionDenied, _) => AgentClientError::IdentityMismatch,
@@ -680,6 +893,15 @@ fn map_action_status(status: &tonic::Status) -> AgentClientError {
 
 /// Extra time an action gets beyond the RPC timeout and the stop grace.
 const ACTION_ALLOWANCE: Duration = Duration::from_secs(20);
+/// A pull stream may run as long as the `image.pull` operation.
+const PULL_DEADLINE: Duration = Duration::from_secs(10 * 60);
+const MAX_IMAGES_PER_NODE: usize = 2_000;
+
+fn is_valid_image_id(value: &str) -> bool {
+    value
+        .strip_prefix("sha256:")
+        .is_some_and(is_valid_container_id)
+}
 
 /// #82 pagination bounds mirrored without an Engine dependency so the
 /// controller never forwards an unbounded page or cursor shape.

@@ -51,7 +51,7 @@ struct ContainerView {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct NodeOutcomeView {
+pub(super) struct NodeOutcomeView {
     node_id: String,
     status: NodeOutcomeStatus,
     message: Option<String>,

@@ -1,0 +1,52 @@
+{
+    "commands": [
+        ["images", "list_images"],
+        ["images", "remove_image"],
+        ["images", "pull_image"]
+    ],
+    "imageList": {
+        "items": [
+            {
+                "imageId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "repoTags": ["nginx:1.27"],
+                "repoDigests": [],
+                "sizeBytes": 192000000,
+                "createdAt": "2026-09-01T10:00:00.000Z",
+                "usedBy": 3,
+                "dangling": false,
+                "nodeIds": ["manager", "worker-1"]
+            },
+            {
+                "imageId": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                "repoTags": [],
+                "repoDigests": [],
+                "sizeBytes": 7800000,
+                "createdAt": "2026-08-20T08:30:00.000Z",
+                "usedBy": 0,
+                "dangling": true,
+                "nodeIds": ["manager"]
+            }
+        ],
+        "nodes": [
+            { "nodeId": "manager", "status": "ok", "message": null },
+            { "nodeId": "worker-1", "status": "ok", "message": null },
+            { "nodeId": "worker-2", "status": "unavailable", "message": null }
+        ],
+        "snapshotAt": "2026-09-28T12:05:00.000Z"
+    },
+    "pullProgress": {
+        "nodes": [
+            { "nodeId": "manager", "status": "done", "layersDone": 3, "layersTotal": 3, "bytes": 3600000, "totalBytes": 3600000 },
+            { "nodeId": "worker-1", "status": "pulling", "layersDone": 1, "layersTotal": 3, "bytes": 1200000, "totalBytes": 3600000 },
+            {
+                "nodeId": "worker-2",
+                "status": "failed",
+                "layersDone": 0,
+                "layersTotal": 0,
+                "bytes": 0,
+                "totalBytes": 0,
+                "error": "unauthorized: authentication required"
+            }
+        ]
+    }
+}

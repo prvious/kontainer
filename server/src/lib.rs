@@ -5,6 +5,7 @@ pub mod auth;
 pub mod containers;
 pub mod controllers;
 pub mod health;
+pub mod images;
 pub mod metrics;
 pub mod nodes;
 pub mod operations;

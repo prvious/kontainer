@@ -40,15 +40,24 @@ export function useOperation(operationId: string) {
  * watchers keep fresh (these observers never fetch themselves).
  */
 export function useTrackedOperations(scope: string): { operation: TrackedOperation; view: OperationView | undefined }[] {
-    const { session } = useAuth();
     const operations = useContext(OperationsContext);
-    const profileId = session?.profileId ?? "";
     const tracked = (operations?.tracked ?? []).filter((operation) => operation.scope === scope);
+    const views = useOperationViews(tracked.map((operation) => operation.id));
+    return tracked.map((operation, index) => ({ operation, view: views[index] }));
+}
+
+/**
+ * The latest snapshots of these operations, read from the cache the provider's watchers keep
+ * fresh; a settled one keeps its last snapshot after it leaves the tracked list.
+ */
+export function useOperationViews(operationIds: string[]): (OperationView | undefined)[] {
+    const { session } = useAuth();
+    const profileId = session?.profileId ?? "";
     const views = useQueries({
-        queries: tracked.map((operation) => ({
-            queryKey: operationKey(profileId, operation.id),
+        queries: operationIds.map((operationId) => ({
+            queryKey: operationKey(profileId, operationId),
             queryFn: skipToken,
         })),
     });
-    return tracked.map((operation, index) => ({ operation, view: views[index]?.data as OperationView | undefined }));
+    return views.map((view) => view.data as OperationView | undefined);
 }

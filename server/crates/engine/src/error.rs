@@ -35,6 +35,9 @@ pub enum EngineOperation {
     ReadDiskUsage,
     InspectContainer,
     ContainerAction,
+    ListImages,
+    RemoveImage,
+    PullImage,
 }
 
 impl fmt::Display for EngineOperation {
@@ -51,6 +54,9 @@ impl fmt::Display for EngineOperation {
             Self::ReadDiskUsage => "read disk usage",
             Self::InspectContainer => "inspect container",
             Self::ContainerAction => "container action",
+            Self::ListImages => "list images",
+            Self::RemoveImage => "remove image",
+            Self::PullImage => "pull image",
         };
         formatter.write_str(name)
     }

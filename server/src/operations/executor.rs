@@ -138,7 +138,9 @@ pub fn production_registry() -> ExecutorRegistry {
     ContainerLifecycleExecutor::all().fold(
         ExecutorRegistry::default()
             .with(super::executors::noop::NoopExecutor)
-            .with(ContainersBulkExecutor),
+            .with(ContainersBulkExecutor)
+            .with(crate::images::operations::remove::RemoveImageExecutor)
+            .with(crate::images::operations::pull::PullImageExecutor),
         ExecutorRegistry::with,
     )
 }

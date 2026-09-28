@@ -43,6 +43,10 @@ pub(crate) use inventory::InventoryError;
 mod containers;
 pub(crate) use containers::{ContainerActionOptionsInput, ContainerListView, ContainerTargetInput};
 
+#[path = "manager_images.rs"]
+mod images;
+pub(crate) use images::{ImageListView, ImageNodesInput};
+
 #[path = "manager_nodes.rs"]
 mod nodes;
 pub(crate) use nodes::{ControllerSettingsView, NodeListView, SampleSeriesView};

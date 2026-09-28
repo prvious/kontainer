@@ -13,6 +13,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as AuthenticatedRouteImport } from './routes/_authenticated'
 import { Route as AuthenticatedIndexRouteImport } from './routes/_authenticated/index'
 import { Route as AuthenticatedSettingsIndexRouteImport } from './routes/_authenticated/settings/index'
+import { Route as AuthenticatedImagesIndexRouteImport } from './routes/_authenticated/images/index'
 import { Route as AuthenticatedContainersIndexRouteImport } from './routes/_authenticated/containers/index'
 
 const LoginRoute = LoginRouteImport.update({
@@ -35,6 +36,12 @@ const AuthenticatedSettingsIndexRoute =
     path: '/settings/',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
+const AuthenticatedImagesIndexRoute =
+  AuthenticatedImagesIndexRouteImport.update({
+    id: '/images/',
+    path: '/images/',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 const AuthenticatedContainersIndexRoute =
   AuthenticatedContainersIndexRouteImport.update({
     id: '/containers/',
@@ -46,12 +53,14 @@ export interface FileRoutesByFullPath {
   '/': typeof AuthenticatedIndexRoute
   '/login': typeof LoginRoute
   '/containers/': typeof AuthenticatedContainersIndexRoute
+  '/images/': typeof AuthenticatedImagesIndexRoute
   '/settings/': typeof AuthenticatedSettingsIndexRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/': typeof AuthenticatedIndexRoute
   '/containers': typeof AuthenticatedContainersIndexRoute
+  '/images': typeof AuthenticatedImagesIndexRoute
   '/settings': typeof AuthenticatedSettingsIndexRoute
 }
 export interface FileRoutesById {
@@ -60,19 +69,21 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
   '/_authenticated/containers/': typeof AuthenticatedContainersIndexRoute
+  '/_authenticated/images/': typeof AuthenticatedImagesIndexRoute
   '/_authenticated/settings/': typeof AuthenticatedSettingsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login' | '/containers/' | '/settings/'
+  fullPaths: '/' | '/login' | '/containers/' | '/images/' | '/settings/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/login' | '/' | '/containers' | '/settings'
+  to: '/login' | '/' | '/containers' | '/images' | '/settings'
   id:
     | '__root__'
     | '/_authenticated'
     | '/login'
     | '/_authenticated/'
     | '/_authenticated/containers/'
+    | '/_authenticated/images/'
     | '/_authenticated/settings/'
   fileRoutesById: FileRoutesById
 }
@@ -111,6 +122,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSettingsIndexRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/images/': {
+      id: '/_authenticated/images/'
+      path: '/images'
+      fullPath: '/images/'
+      preLoaderRoute: typeof AuthenticatedImagesIndexRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/containers/': {
       id: '/_authenticated/containers/'
       path: '/containers'
@@ -124,12 +142,14 @@ declare module '@tanstack/react-router' {
 interface AuthenticatedRouteChildren {
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
   AuthenticatedContainersIndexRoute: typeof AuthenticatedContainersIndexRoute
+  AuthenticatedImagesIndexRoute: typeof AuthenticatedImagesIndexRoute
   AuthenticatedSettingsIndexRoute: typeof AuthenticatedSettingsIndexRoute
 }
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
   AuthenticatedContainersIndexRoute: AuthenticatedContainersIndexRoute,
+  AuthenticatedImagesIndexRoute: AuthenticatedImagesIndexRoute,
   AuthenticatedSettingsIndexRoute: AuthenticatedSettingsIndexRoute,
 }
 

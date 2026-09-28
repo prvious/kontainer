@@ -14,8 +14,9 @@ function OperationWatcher({ id }: { id: string }) {
 
 /**
  * The operations this window started (mounted in the authenticated layout). When one settles it
- * refreshes the queries it affects and toasts once; succeeded and cancelled ones leave the list,
- * failed and uncertain ones stay pinned until dismissed.
+ * refreshes the queries it affects and toasts once, keyed by the operation id so the result
+ * replaces a loading toast shown for it; succeeded and cancelled ones leave the list, failed and
+ * uncertain ones stay pinned until dismissed.
  */
 export function OperationsProvider({ children }: { children: ReactNode }) {
     const queryClient = useQueryClient();
@@ -46,23 +47,25 @@ export function OperationsProvider({ children }: { children: ReactNode }) {
                     case "succeeded":
                         notify.success(operation.success?.title ?? operation.title, {
                             description: operation.success?.description ?? operationSummary(view),
+                            id: view.id,
                         });
                         remove(view.id);
                         return;
                     case "cancelled":
-                        notify.warning(`${operation.title} cancelled`, { description: "It had not started, so nothing changed." });
+                        notify.warning(`${operation.title} cancelled`, { description: "It had not started, so nothing changed.", id: view.id });
                         remove(view.id);
                         return;
                     case "failed":
-                        notify.error(`${operation.title} failed`, {
-                            code: view.errorCode ?? "failed",
-                            message: view.errorMessage ?? "The operation failed.",
-                            requestId: view.requestId,
-                        });
+                        notify.error(
+                            `${operation.title} failed`,
+                            { code: view.errorCode ?? "failed", message: view.errorMessage ?? "The operation failed.", requestId: view.requestId },
+                            { id: view.id },
+                        );
                         return;
                     default:
                         notify.warning(`${operation.title}: outcome uncertain`, {
                             description: "The controller restarted while this ran. Check the result before retrying.",
+                            id: view.id,
                         });
                 }
             },

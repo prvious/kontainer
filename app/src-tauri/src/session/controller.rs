@@ -12,8 +12,9 @@ use std::time::Duration;
 use kontainer_native_client::{
     AccessCredential, AccountFieldErrors, AdmittedOperation, ContainerAction,
     ContainerActionOptions, ContainerList, ContainerTarget, ControllerSettings, IdempotencyKey,
-    NativeClient, NativeClientConfig, NativeClientError, NodeId, NodeList, OperationEvent,
-    OperationSnapshot, PasswordSession, ProbeFailure, RefreshCredential, SampleSeries, Traced,
+    ImageList, ImageNodes, NativeClient, NativeClientConfig, NativeClientError, NodeId, NodeList,
+    OperationEvent, OperationSnapshot, PasswordSession, ProbeFailure, RefreshCredential,
+    SampleSeries, Traced,
 };
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -138,6 +139,31 @@ pub(crate) trait Controller: Send + Sync + 'static {
         action: ContainerAction,
         targets: &'a [ContainerTarget],
         force: bool,
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>>;
+
+    fn list_images<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ImageList, NativeClientError>>;
+
+    fn remove_image<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        image_id: &'a str,
+        nodes: &'a ImageNodes,
+        force: bool,
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>>;
+
+    fn pull_image<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        reference: &'a str,
+        nodes: &'a [NodeId],
         key: &'a IdempotencyKey,
         cancellation: &'a CancellationToken,
     ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>>;
@@ -399,6 +425,43 @@ impl Controller for NativeController {
             key,
             cancellation,
         ))
+    }
+
+    fn list_images<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ImageList, NativeClientError>> {
+        Box::pin(self.client.list_images(access, cancellation))
+    }
+
+    fn remove_image<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        image_id: &'a str,
+        nodes: &'a ImageNodes,
+        force: bool,
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
+        Box::pin(
+            self.client
+                .remove_image(access, image_id, nodes, force, key, cancellation),
+        )
+    }
+
+    fn pull_image<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        reference: &'a str,
+        nodes: &'a [NodeId],
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
+        Box::pin(
+            self.client
+                .pull_image(access, reference, nodes, key, cancellation),
+        )
     }
 
     fn get_operation<'a>(

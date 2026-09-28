@@ -105,13 +105,20 @@ function containerFromIpc(value: unknown): ContainerView {
 export function containerListFromIpc(value: unknown): ContainerListView {
     const data = exactRecord(value, ["items", "nodes", "snapshotAt"]);
     if (!Array.isArray(data.items) || data.items.length > 2000 || !Array.isArray(data.nodes) || !isTimestamp(data.snapshotAt)) throw "invalid_response";
-    const nodes = data.nodes.map((entry): NodeOutcomeView => {
-        const node = exactRecord(entry, ["nodeId", "status", "message"]);
-        if (typeof node.nodeId !== "string" || !NODE_OUTCOME_STATUSES.some((status) => status === node.status) || !isOptionalText(node.message))
-            throw "invalid_response";
-        return node as unknown as NodeOutcomeView;
-    });
-    return { items: data.items.map(containerFromIpc), nodes, snapshotAt: data.snapshotAt };
+    return { items: data.items.map(containerFromIpc), nodes: data.nodes.map(nodeOutcomeFromIpc), snapshotAt: data.snapshotAt };
+}
+
+/** One member's answer to a fan-out read. */
+export function nodeOutcomeFromIpc(value: unknown): NodeOutcomeView {
+    const node = exactRecord(value, ["nodeId", "status", "message"]);
+    if (
+        typeof node.nodeId !== "string" ||
+        !NODE_ID.test(node.nodeId) ||
+        !NODE_OUTCOME_STATUSES.some((status) => status === node.status) ||
+        !isOptionalText(node.message)
+    )
+        throw "invalid_response";
+    return node as unknown as NodeOutcomeView;
 }
 
 /** Stable row id: a container id is unique per node, not across the cluster. */

@@ -48,8 +48,9 @@ describe("AppSidebar", () => {
 
     it("renders routes that do not exist yet as disabled", async () => {
         renderSidebar("/");
-        expect(await screen.findByRole("link", { name: "Images" })).toHaveAttribute("aria-disabled", "true");
+        expect(await screen.findByRole("link", { name: "Volumes" })).toHaveAttribute("aria-disabled", "true");
         expect(screen.getByRole("link", { name: "Containers" })).not.toHaveAttribute("aria-disabled");
+        expect(screen.getByRole("link", { name: "Images" })).not.toHaveAttribute("aria-disabled");
     });
 
     it("shows badges only when non-zero", async () => {

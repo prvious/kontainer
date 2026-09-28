@@ -61,8 +61,22 @@ impl NativeClient {
         body: &impl Serialize,
         cancellation: &CancellationToken,
     ) -> Result<AdmittedOperation, NativeClientError> {
+        self.admit_with(Method::POST, access, path, key, body, cancellation)
+            .await
+    }
+
+    /// [`Self::admit`] for a mutation documented under another method, such as `DELETE`.
+    pub async fn admit_with(
+        &self,
+        method: Method,
+        access: &AccessCredential,
+        path: &str,
+        key: &IdempotencyKey,
+        body: &impl Serialize,
+        cancellation: &CancellationToken,
+    ) -> Result<AdmittedOperation, NativeClientError> {
         let url = self.endpoint(path)?;
-        let mut request = self.authorized_request(Method::POST, url, access)?;
+        let mut request = self.authorized_request(method, url, access)?;
         let payload =
             serde_json::to_vec(body).map_err(|_| NativeClientError::InvalidConfiguration)?;
         let key_value = header::HeaderValue::from_str(key.as_str())

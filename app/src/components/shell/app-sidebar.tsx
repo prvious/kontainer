@@ -34,7 +34,7 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
         items: [
             { label: "Overview", icon: LayoutDashboard, to: "/", exact: true },
             { label: "Containers", icon: Box, to: "/containers", badge: (badges) => count(badges.containers) },
-            { label: "Images", icon: Layers },
+            { label: "Images", icon: Layers, to: "/images" },
             { label: "Volumes", icon: HardDrive },
             { label: "Networks", icon: Network },
         ],

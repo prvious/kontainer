@@ -3,12 +3,14 @@ use std::sync::Arc;
 use kontainer_agent_proto::v1::{
     ContainerAction as ProtoContainerAction, ContainerActionRequest, ContainerActionResponse,
     ContainerState as ProtoContainerState, ContainerSummary as ProtoContainerSummary,
-    DescribeRequest, DescribeResponse, ListContainersRequest, ListContainersResponse,
-    node_agent_server::NodeAgent,
+    DescribeRequest, DescribeResponse, ImageSummary as ProtoImageSummary, ListContainersRequest,
+    ListContainersResponse, ListImagesRequest, ListImagesResponse, PullImageEvent,
+    PullImageRequest, RemoveImageRequest, RemoveImageResponse, node_agent_server::NodeAgent,
 };
 use kontainer_engine::{
     ContainerAction, ContainerActionOptions, ContainerEngine, ContainerPageRequest, ContainerState,
-    EngineError, EngineErrorKind, MAX_STOP_TIMEOUT_SECONDS, is_valid_container_id,
+    EngineError, EngineErrorKind, MAX_STOP_TIMEOUT_SECONDS, PullEvent, is_plausible_reference,
+    is_valid_container_id, is_valid_image_id,
 };
 use kontainer_rpc_auth::AuthenticatedPeerIdentity;
 use tokio_util::sync::CancellationToken;
@@ -50,8 +52,117 @@ impl NodeAgentService {
     }
 }
 
+fn require_controller<T>(request: &Request<T>) -> Result<(), Status> {
+    request
+        .extensions()
+        .get::<AuthenticatedPeerIdentity>()
+        .map(|_| ())
+        .ok_or_else(|| Status::unauthenticated("authenticated controller identity is required"))
+}
+
+pub type PullImageStream =
+    std::pin::Pin<Box<dyn futures_util::Stream<Item = Result<PullImageEvent, Status>> + Send>>;
+
 #[tonic::async_trait]
 impl NodeAgent for NodeAgentService {
+    type PullImageStream = PullImageStream;
+
+    async fn list_images(
+        &self,
+        request: Request<ListImagesRequest>,
+    ) -> Result<Response<ListImagesResponse>, Status> {
+        require_controller(&request)?;
+        let images = tokio::select! {
+            biased;
+            _ = self.cancellation.cancelled() => {
+                return Err(Status::cancelled("node agent is shutting down"));
+            }
+            images = self.engine.list_images(&self.cancellation) => images.map_err(|error| {
+                warn!(%error, "image listing failed");
+                engine_error_to_status(&error)
+            })?,
+        };
+        Ok(Response::new(ListImagesResponse {
+            images: images
+                .into_iter()
+                .map(|image| ProtoImageSummary {
+                    image_id: image.image_id,
+                    repo_tags: image.repo_tags,
+                    repo_digests: image.repo_digests,
+                    size_bytes: image.size_bytes,
+                    created_at_unix_seconds: image.created_at_seconds,
+                    used_by: image.used_by,
+                    dangling: image.dangling,
+                })
+                .collect(),
+        }))
+    }
+
+    async fn remove_image(
+        &self,
+        request: Request<RemoveImageRequest>,
+    ) -> Result<Response<RemoveImageResponse>, Status> {
+        require_controller(&request)?;
+        let inner = request.into_inner();
+        if !is_valid_image_id(&inner.image_id) {
+            return Err(Status::invalid_argument("invalid_image"));
+        }
+        let result = tokio::select! {
+            biased;
+            _ = self.cancellation.cancelled() => {
+                return Err(Status::cancelled("node agent is shutting down"));
+            }
+            result = self.engine.remove_image(&inner.image_id, inner.force, &self.cancellation) => result,
+        };
+        result.map_err(|error| {
+            warn!(%error, "image removal failed");
+            match error.kind() {
+                EngineErrorKind::Conflict => Status::failed_precondition("image_in_use"),
+                _ => action_error_to_status(&error),
+            }
+        })?;
+        Ok(Response::new(RemoveImageResponse {}))
+    }
+
+    async fn pull_image(
+        &self,
+        request: Request<PullImageRequest>,
+    ) -> Result<Response<Self::PullImageStream>, Status> {
+        use futures_util::StreamExt as _;
+
+        require_controller(&request)?;
+        let reference = request.into_inner().reference;
+        if !is_plausible_reference(&reference) {
+            return Err(Status::invalid_argument("invalid_reference"));
+        }
+        let stream = self
+            .engine
+            .pull_image(&reference, &self.cancellation)
+            .await
+            .map_err(|error| {
+                warn!(%error, "image pull could not start");
+                action_error_to_status(&error)
+            })?;
+        Ok(Response::new(Box::pin(stream.map(|event| {
+            Ok(match event {
+                PullEvent::Progress(progress) => PullImageEvent {
+                    layer_id: progress.layer_id,
+                    status: progress.status,
+                    current: progress.current,
+                    total: progress.total,
+                    error: None,
+                },
+                PullEvent::Failed(message) => PullImageEvent {
+                    layer_id: None,
+                    status: "failed".to_owned(),
+                    current: None,
+                    total: None,
+                    error: Some(message),
+                },
+            })
+        }))))
+    }
+
     async fn describe(
         &self,
         request: Request<DescribeRequest>,
@@ -476,6 +587,159 @@ mod tests {
         assert_eq!(seen[0].3, Some(5));
         assert!(seen[2].2, "force reaches the engine only when asked");
         assert!(!seen[4].2);
+    }
+
+    struct ImageEngine;
+
+    #[async_trait]
+    impl ContainerEngine for ImageEngine {
+        async fn is_available(&self) -> Result<bool, EngineError> {
+            Ok(true)
+        }
+
+        async fn list_images(
+            &self,
+            _: &CancellationToken,
+        ) -> Result<Vec<kontainer_engine::ImageSummary>, EngineError> {
+            Ok(vec![kontainer_engine::ImageSummary {
+                image_id: format!("sha256:{}", "a".repeat(64)),
+                repo_tags: vec!["nginx:1.27".to_owned()],
+                size_bytes: 42,
+                used_by: 3,
+                ..Default::default()
+            }])
+        }
+
+        async fn remove_image(
+            &self,
+            _image_id: &str,
+            force: bool,
+            _: &CancellationToken,
+        ) -> Result<(), EngineError> {
+            if force {
+                Ok(())
+            } else {
+                Err(EngineError::new(
+                    EngineErrorKind::Conflict,
+                    EngineOperation::RemoveImage,
+                ))
+            }
+        }
+
+        async fn pull_image(
+            &self,
+            reference: &str,
+            _: &CancellationToken,
+        ) -> Result<kontainer_engine::PullStream, EngineError> {
+            use kontainer_engine::{PullEvent, PullProgress};
+            let mut events = vec![PullEvent::Progress(PullProgress {
+                layer_id: Some("l1".to_owned()),
+                status: "Downloading".to_owned(),
+                current: Some(10),
+                total: Some(20),
+            })];
+            if reference.contains("private") {
+                events.push(PullEvent::Failed(
+                    "unauthorized: authentication required".to_owned(),
+                ));
+            } else {
+                events.push(PullEvent::Progress(PullProgress {
+                    layer_id: Some("l1".to_owned()),
+                    status: "Pull complete".to_owned(),
+                    ..PullProgress::default()
+                }));
+            }
+            Ok(Box::pin(futures_util::stream::iter(events)))
+        }
+    }
+
+    #[tokio::test]
+    async fn images_list_remove_and_pull_through_the_engine() {
+        use futures_util::StreamExt as _;
+        use kontainer_agent_proto::v1::{ListImagesRequest, PullImageRequest, RemoveImageRequest};
+
+        let service =
+            NodeAgentService::new("node-1", Arc::new(ImageEngine), CancellationToken::new());
+        let listed = service
+            .list_images(authenticated(ListImagesRequest {}))
+            .await
+            .unwrap()
+            .into_inner();
+        assert_eq!(listed.images.len(), 1);
+        assert_eq!(listed.images[0].used_by, 3);
+
+        let id = format!("sha256:{}", "a".repeat(64));
+        let in_use = service
+            .remove_image(authenticated(RemoveImageRequest {
+                image_id: id.clone(),
+                force: false,
+            }))
+            .await
+            .unwrap_err();
+        assert_eq!(
+            (in_use.code(), in_use.message()),
+            (tonic::Code::FailedPrecondition, "image_in_use")
+        );
+        assert!(
+            service
+                .remove_image(authenticated(RemoveImageRequest {
+                    image_id: id,
+                    force: true
+                }))
+                .await
+                .is_ok()
+        );
+        let invalid = service
+            .remove_image(authenticated(RemoveImageRequest {
+                image_id: "nginx".to_owned(),
+                force: true,
+            }))
+            .await
+            .unwrap_err();
+        assert_eq!(invalid.code(), tonic::Code::InvalidArgument);
+
+        let events: Vec<_> = service
+            .pull_image(authenticated(PullImageRequest {
+                reference: "alpine:3.20".to_owned(),
+            }))
+            .await
+            .unwrap()
+            .into_inner()
+            .collect()
+            .await;
+        let statuses: Vec<_> = events
+            .iter()
+            .map(|event| event.as_ref().unwrap().status.clone())
+            .collect();
+        assert_eq!(statuses, vec!["Downloading", "Pull complete"]);
+        assert_eq!(events[0].as_ref().unwrap().current, Some(10));
+
+        let failed: Vec<_> = service
+            .pull_image(authenticated(PullImageRequest {
+                reference: "ghcr.io/private/x:1".to_owned(),
+            }))
+            .await
+            .unwrap()
+            .into_inner()
+            .collect()
+            .await;
+        assert_eq!(
+            failed.last().unwrap().as_ref().unwrap().error.as_deref(),
+            Some("unauthorized: authentication required")
+        );
+        let rejected = service
+            .pull_image(authenticated(PullImageRequest {
+                reference: "has space".to_owned(),
+            }))
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(rejected.code(), tonic::Code::InvalidArgument);
+        let anonymous = service
+            .list_images(Request::new(ListImagesRequest {}))
+            .await
+            .unwrap_err();
+        assert_eq!(anonymous.code(), tonic::Code::Unauthenticated);
     }
 
     #[tokio::test]

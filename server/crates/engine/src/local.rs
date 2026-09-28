@@ -18,9 +18,11 @@ use crate::{
     ContainerPageRequest, ContainerState, ContainerStats, ContainerSummary, ContainerTimes,
     CpuCounters, DEFAULT_STOP_TIMEOUT_SECONDS, DiskUsage, DockerHost, EngineAccessScope,
     EngineApiVersion, EngineCapabilities, EngineDescription, EngineError, EngineErrorKind,
-    EngineOperation, NodeInfo, SERVICE_NAME_LABEL, STACK_NAMESPACE_LABEL, TASK_ID_LABEL,
-    UnsupportedCapabilityReason, bounded_label, canonical_display_name, cpu_percent,
-    format_page_token, is_valid_container_id, memory_used, parse_docker_time, truncate_status_text,
+    EngineOperation, ImageSummary, NodeInfo, PullEvent, PullProgress, PullStream,
+    SERVICE_NAME_LABEL, STACK_NAMESPACE_LABEL, TASK_ID_LABEL, UnsupportedCapabilityReason,
+    bounded_label, bounded_message, canonical_display_name, cpu_percent, format_page_token,
+    is_plausible_reference, is_valid_container_id, is_valid_image_id, memory_used,
+    parse_docker_time, truncate_status_text,
 };
 
 const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(10);
@@ -478,6 +480,118 @@ impl ContainerEngine for LocalDockerEngine {
         }
     }
 
+    async fn list_images(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> Result<Vec<ImageSummary>, EngineError> {
+        use bollard::query_parameters::{ListContainersOptionsBuilder, ListImagesOptionsBuilder};
+
+        let client = self.negotiate(cancellation).await?;
+        let images = self
+            .execute(
+                EngineOperation::ListImages,
+                cancellation,
+                client.list_images(Some(ListImagesOptionsBuilder::default().all(false).build())),
+            )
+            .await?;
+        let containers = self
+            .execute(
+                EngineOperation::ListImages,
+                cancellation,
+                client.list_containers(Some(
+                    ListContainersOptionsBuilder::new()
+                        .all(true)
+                        .size(false)
+                        .build(),
+                )),
+            )
+            .await?;
+        let mut used: HashMap<String, u32> = HashMap::new();
+        for container in containers {
+            if let Some(image_id) = container.image_id {
+                *used.entry(image_id).or_default() += 1;
+            }
+        }
+        Ok(images
+            .into_iter()
+            .filter(|image| is_valid_image_id(&image.id))
+            .map(|image| map_image(image, &used))
+            .collect())
+    }
+
+    async fn remove_image(
+        &self,
+        image_id: &str,
+        force: bool,
+        cancellation: &CancellationToken,
+    ) -> Result<(), EngineError> {
+        use bollard::query_parameters::RemoveImageOptionsBuilder;
+
+        if !is_valid_image_id(image_id) {
+            return Err(EngineError::new(
+                EngineErrorKind::InvalidInput,
+                EngineOperation::RemoveImage,
+            ));
+        }
+        let client = self.negotiate(cancellation).await?;
+        let options = RemoveImageOptionsBuilder::default()
+            .force(force)
+            .noprune(false)
+            .build();
+        self.execute(
+            EngineOperation::RemoveImage,
+            cancellation,
+            client.remove_image(image_id, Some(options), None),
+        )
+        .await
+        .map(|_| ())
+    }
+
+    async fn pull_image(
+        &self,
+        reference: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<PullStream, EngineError> {
+        use bollard::query_parameters::CreateImageOptionsBuilder;
+        use futures_util::StreamExt as _;
+
+        if !is_plausible_reference(reference) {
+            return Err(EngineError::new(
+                EngineErrorKind::InvalidInput,
+                EngineOperation::PullImage,
+            ));
+        }
+        let client = self.negotiate(cancellation).await?;
+        let reference = reference.to_owned();
+        let cancellation = cancellation.clone();
+        // The daemon stream borrows its client, so a task owns both and forwards typed events.
+        // It ends with the stream, when the receiver is dropped, or on cancellation.
+        let (sender, receiver) = tokio::sync::mpsc::channel(64);
+        tokio::spawn(async move {
+            let options = CreateImageOptionsBuilder::default()
+                .from_image(&reference)
+                .build();
+            let mut stream = client.create_image(Some(options), None, None);
+            loop {
+                let item = tokio::select! {
+                    biased;
+                    () = cancellation.cancelled() => break,
+                    item = stream.next() => item,
+                };
+                let Some(item) = item else { break };
+                let event = pull_event(item);
+                let failed = matches!(event, PullEvent::Failed(_));
+                if sender.send(event).await.is_err() || failed {
+                    break;
+                }
+            }
+        });
+        Ok(Box::pin(futures_util::stream::unfold(
+            receiver,
+            |mut receiver| async move { receiver.recv().await.map(|event| (event, receiver)) },
+        )))
+    }
+
     async fn disk_usage(&self, cancellation: &CancellationToken) -> Result<DiskUsage, EngineError> {
         let client = self.negotiate(cancellation).await?;
         let usage = self
@@ -488,6 +602,55 @@ impl ContainerEngine for LocalDockerEngine {
             )
             .await?;
         Ok(map_disk_usage(&usage))
+    }
+}
+
+fn map_image(image: bollard::models::ImageSummary, used: &HashMap<String, u32>) -> ImageSummary {
+    let repo_tags: Vec<String> = image
+        .repo_tags
+        .into_iter()
+        .filter(|tag| tag != "<none>:<none>")
+        .map(|tag| bounded_message(&tag))
+        .collect();
+    let repo_digests: Vec<String> = image
+        .repo_digests
+        .into_iter()
+        .filter(|digest| digest != "<none>@<none>")
+        .map(|digest| bounded_message(&digest))
+        .collect();
+    ImageSummary {
+        dangling: repo_tags.is_empty(),
+        used_by: used.get(&image.id).copied().unwrap_or(0),
+        image_id: image.id,
+        repo_tags,
+        repo_digests,
+        size_bytes: u64::try_from(image.size).unwrap_or(0),
+        created_at_seconds: image.created.max(0),
+    }
+}
+
+/// One daemon pull message as a typed event; errors carry the daemon's (registry's) own words.
+fn pull_event(item: Result<bollard::models::CreateImageInfo, BollardError>) -> PullEvent {
+    match item {
+        Ok(info) => {
+            if let Some(message) = info.error_detail.and_then(|detail| detail.message) {
+                return PullEvent::Failed(bounded_message(&message));
+            }
+            let detail = info.progress_detail.unwrap_or_default();
+            PullEvent::Progress(PullProgress {
+                layer_id: info.id.map(|id| crate::image::bounded_status(&id)),
+                status: crate::image::bounded_status(info.status.as_deref().unwrap_or_default()),
+                current: detail.current.and_then(|value| u64::try_from(value).ok()),
+                total: detail.total.and_then(|value| u64::try_from(value).ok()),
+            })
+        }
+        Err(
+            BollardError::DockerStreamError { error }
+            | BollardError::DockerResponseServerError { message: error, .. },
+        ) => PullEvent::Failed(bounded_message(&error)),
+        Err(_) => {
+            PullEvent::Failed("the Docker Engine connection failed during the pull".to_owned())
+        }
     }
 }
 
@@ -1313,6 +1476,78 @@ mod tests {
             EngineError::from_bollard(EngineOperation::ListContainers, &status(404)).kind(),
             EngineErrorKind::InvalidInput,
             "a stale cursor stays invalid pagination"
+        );
+    }
+
+    #[test]
+    fn images_count_their_containers_and_drop_placeholder_tags() {
+        let id = format!("sha256:{}", "a".repeat(64));
+        let used = [(id.clone(), 2)].into_iter().collect();
+        let mapped = super::map_image(
+            bollard::models::ImageSummary {
+                id: id.clone(),
+                repo_tags: vec!["nginx:1.27".to_owned()],
+                repo_digests: vec!["nginx@sha256:abc".to_owned()],
+                size: 42_000_000,
+                created: 1_700_000_000,
+                ..Default::default()
+            },
+            &used,
+        );
+        assert_eq!(mapped.used_by, 2);
+        assert!(!mapped.dangling);
+        assert_eq!(mapped.size_bytes, 42_000_000);
+        let dangling = super::map_image(
+            bollard::models::ImageSummary {
+                id: format!("sha256:{}", "b".repeat(64)),
+                repo_tags: vec!["<none>:<none>".to_owned()],
+                size: -1,
+                ..Default::default()
+            },
+            &used,
+        );
+        assert!(dangling.dangling && dangling.repo_tags.is_empty());
+        assert_eq!((dangling.used_by, dangling.size_bytes), (0, 0));
+    }
+
+    #[test]
+    fn pull_messages_become_typed_events_with_registry_errors_verbatim() {
+        use crate::PullEvent;
+        use bollard::models::{CreateImageInfo, ErrorDetail, ProgressDetail};
+        let progress = super::pull_event(Ok(CreateImageInfo {
+            id: Some("a1b2c3".to_owned()),
+            status: Some("Downloading".to_owned()),
+            progress_detail: Some(ProgressDetail {
+                current: Some(1024),
+                total: Some(4096),
+            }),
+            ..Default::default()
+        }));
+        match progress {
+            PullEvent::Progress(progress) => {
+                assert_eq!(progress.layer_id.as_deref(), Some("a1b2c3"));
+                assert_eq!((progress.current, progress.total), (Some(1024), Some(4096)));
+            }
+            PullEvent::Failed(message) => panic!("unexpected failure {message}"),
+        }
+        let failed = super::pull_event(Ok(CreateImageInfo {
+            error_detail: Some(ErrorDetail {
+                code: None,
+                message: Some("manifest for alpine:nope not found: manifest unknown".to_owned()),
+            }),
+            ..Default::default()
+        }));
+        assert_eq!(
+            failed,
+            PullEvent::Failed("manifest for alpine:nope not found: manifest unknown".to_owned())
+        );
+        let denied = super::pull_event(Err(bollard::errors::Error::DockerResponseServerError {
+            status_code: 404,
+            message: "pull access denied for private/repo".to_owned(),
+        }));
+        assert_eq!(
+            denied,
+            PullEvent::Failed("pull access denied for private/repo".to_owned())
         );
     }
 

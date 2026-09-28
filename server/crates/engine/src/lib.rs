@@ -7,6 +7,7 @@ mod capability;
 mod container;
 mod error;
 mod host;
+mod image;
 mod local;
 mod node;
 
@@ -24,6 +25,10 @@ pub use container::{
 };
 pub use error::{EngineError, EngineErrorKind, EngineOperation};
 pub use host::{DEFAULT_DOCKER_SOCKET, DockerHost, DockerHostParseError};
+pub use image::{
+    ImageSummary, PullEvent, PullProgress, PullStream, bounded_message, is_plausible_reference,
+    is_valid_image_id,
+};
 pub use local::{LocalDockerEngine, LocalEngineOptions};
 pub use node::{ContainerStats, CpuCounters, DiskUsage, NodeInfo, cpu_percent, memory_used};
 
@@ -106,6 +111,42 @@ pub trait ContainerEngine: Send + Sync {
         Err(EngineError::new(
             EngineErrorKind::UnsupportedCapability,
             EngineOperation::ContainerAction,
+        ))
+    }
+
+    /// Every image on the node with how many of its containers use it.
+    async fn list_images(
+        &self,
+        _cancellation: &CancellationToken,
+    ) -> Result<Vec<ImageSummary>, EngineError> {
+        Err(EngineError::new(
+            EngineErrorKind::UnsupportedCapability,
+            EngineOperation::ListImages,
+        ))
+    }
+
+    /// Remove one image; `force` also removes it while containers use it.
+    async fn remove_image(
+        &self,
+        _image_id: &str,
+        _force: bool,
+        _cancellation: &CancellationToken,
+    ) -> Result<(), EngineError> {
+        Err(EngineError::new(
+            EngineErrorKind::UnsupportedCapability,
+            EngineOperation::RemoveImage,
+        ))
+    }
+
+    /// Pull anonymously; the stream ends after the last progress message or one `Failed`.
+    async fn pull_image(
+        &self,
+        _reference: &str,
+        _cancellation: &CancellationToken,
+    ) -> Result<PullStream, EngineError> {
+        Err(EngineError::new(
+            EngineErrorKind::UnsupportedCapability,
+            EngineOperation::PullImage,
         ))
     }
 

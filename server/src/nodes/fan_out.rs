@@ -36,6 +36,7 @@ impl From<AgentClientError> for NodeFailure {
             AgentClientError::AlreadyInState => Self::Error("already_in_state"),
             AgentClientError::ContainerRunning => Self::Error("container_running"),
             AgentClientError::EngineError => Self::Error("engine_error"),
+            AgentClientError::ImageInUse => Self::Error("image_in_use"),
         }
     }
 }

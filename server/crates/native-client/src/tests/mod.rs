@@ -6,6 +6,7 @@
 
 mod auth;
 mod credentials;
+mod images;
 mod leakage;
 mod operations;
 mod password_auth;

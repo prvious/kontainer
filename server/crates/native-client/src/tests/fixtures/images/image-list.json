@@ -1,0 +1,30 @@
+{
+  "items": [
+    {
+      "imageId": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "repoTags": ["nginx:1.27", "nginx:latest"],
+      "repoDigests": ["nginx@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],
+      "sizeBytes": 192000000,
+      "createdAt": "2026-09-01T10:00:00.000Z",
+      "usedBy": 3,
+      "dangling": false,
+      "nodeIds": ["node-1", "worker-1"]
+    },
+    {
+      "imageId": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "repoTags": [],
+      "repoDigests": [],
+      "sizeBytes": 7800000,
+      "createdAt": "2026-08-20T08:30:00.000Z",
+      "usedBy": 0,
+      "dangling": true,
+      "nodeIds": ["node-1"]
+    }
+  ],
+  "nodes": [
+    { "nodeId": "node-1", "status": "ok" },
+    { "nodeId": "worker-1", "status": "ok" },
+    { "nodeId": "worker-2", "status": "unavailable" }
+  ],
+  "snapshotAt": "2026-09-28T09:00:00.000Z"
+}

@@ -17,6 +17,12 @@ service NodeAgent {
   // message is a stable code: NOT_FOUND `not_found`, FAILED_PRECONDITION
   // `already_in_state` or `container_running`, UNAVAILABLE `engine_error`.
   rpc ContainerAction(ContainerActionRequest) returns (ContainerActionResponse);
+  rpc ListImages(ListImagesRequest) returns (ListImagesResponse);
+  // Failure codes as for ContainerAction; an in-use image is FAILED_PRECONDITION `image_in_use`.
+  rpc RemoveImage(RemoveImageRequest) returns (RemoveImageResponse);
+  // Anonymous pull. Progress events until the pull ends; a failed pull ends with one event whose
+  // `error` is the registry's or daemon's own message.
+  rpc PullImage(PullImageRequest) returns (stream PullImageEvent);
 }
 
 message CheckInRequest {
@@ -146,3 +152,40 @@ message ListContainersResponse {
   string next_page_token = 2;
 }
 
+message ListImagesRequest {}
+
+message ImageSummary {
+  // `sha256:<64 hex>`.
+  string image_id = 1;
+  repeated string repo_tags = 2;
+  repeated string repo_digests = 3;
+  uint64 size_bytes = 4;
+  int64 created_at_unix_seconds = 5;
+  // Containers on this node (any state) created from this image.
+  uint32 used_by = 6;
+  bool dangling = 7;
+}
+
+message ListImagesResponse {
+  repeated ImageSummary images = 1;
+}
+
+message RemoveImageRequest {
+  string image_id = 1;
+  bool force = 2;
+}
+
+message RemoveImageResponse {}
+
+message PullImageRequest {
+  // A normalized reference with a tag or digest.
+  string reference = 1;
+}
+
+message PullImageEvent {
+  optional string layer_id = 1;
+  string status = 2;
+  optional uint64 current = 3;
+  optional uint64 total = 4;
+  optional string error = 5;
+}

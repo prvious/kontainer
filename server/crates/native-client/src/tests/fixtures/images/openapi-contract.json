@@ -1,0 +1,338 @@
+{
+  "paths": {
+    "/api/v1/images": {
+      "get": {
+        "operationId": "list_images",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageListResponse"
+                }
+              }
+            },
+            "description": "Images merged by id across answering nodes, one outcome per member"
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "Agent RPC not configured, persistence unavailable, or controller draining"
+          }
+        },
+        "security": [
+          {
+            "access_session": []
+          }
+        ],
+        "tags": [
+          "super::images"
+        ]
+      }
+    },
+    "/api/v1/images/pulls": {
+      "post": {
+        "operationId": "pull_image",
+        "parameters": [
+          {
+            "description": "16–64 printable ASCII characters, one per user gesture",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PullImageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmittedResponse"
+                }
+              }
+            },
+            "description": "Admitted as one `image.pull` operation; poll it for per-node progress"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageFieldErrorResponse"
+                }
+              }
+            },
+            "description": "`idempotency_key_required`, or `invalid_request` naming `reference` or `nodeIds`"
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "`idempotency_conflict`"
+          },
+          "503": {
+            "description": "Persistence unavailable or controller draining"
+          }
+        },
+        "security": [
+          {
+            "access_session": []
+          }
+        ],
+        "tags": [
+          "super::images"
+        ]
+      }
+    },
+    "/api/v1/images/{imageId}": {
+      "delete": {
+        "operationId": "remove_image",
+        "parameters": [
+          {
+            "description": "`sha256:<64 hex>`",
+            "in": "path",
+            "name": "imageId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "16–64 printable ASCII characters, one per user gesture",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoveImageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmittedResponse"
+                }
+              }
+            },
+            "description": "Admitted as one `image.remove` operation"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageFieldErrorResponse"
+                }
+              }
+            },
+            "description": "`idempotency_key_required` or `invalid_request` with the field"
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "`idempotency_conflict`"
+          },
+          "503": {
+            "description": "Persistence unavailable or controller draining"
+          }
+        },
+        "security": [
+          {
+            "access_session": []
+          }
+        ],
+        "tags": [
+          "super::images"
+        ]
+      }
+    }
+  },
+  "schemas": {
+    "ImageFieldErrorResponse": {
+      "description": "A 400 naming the field that failed.",
+      "properties": {
+        "error": {
+          "type": "string"
+        },
+        "fields": {
+          "type": "object"
+        }
+      },
+      "required": [
+        "error",
+        "fields"
+      ],
+      "type": "object"
+    },
+    "ImageListResponse": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/components/schemas/ImageResponse"
+          },
+          "type": "array"
+        },
+        "nodes": {
+          "items": {
+            "$ref": "#/components/schemas/NodeOutcomeResponse"
+          },
+          "type": "array"
+        },
+        "snapshotAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "items",
+        "nodes",
+        "snapshotAt"
+      ],
+      "type": "object"
+    },
+    "ImageResponse": {
+      "properties": {
+        "createdAt": {
+          "type": "string"
+        },
+        "dangling": {
+          "type": "boolean"
+        },
+        "imageId": {
+          "description": "`sha256:<64 hex>`.",
+          "type": "string"
+        },
+        "nodeIds": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "repoDigests": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "repoTags": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "sizeBytes": {
+          "description": "Counted once, however many nodes have it.",
+          "format": "int64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "usedBy": {
+          "description": "Containers using it, summed across nodes.",
+          "format": "int32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "imageId",
+        "repoTags",
+        "repoDigests",
+        "sizeBytes",
+        "createdAt",
+        "usedBy",
+        "dangling",
+        "nodeIds"
+      ],
+      "type": "object"
+    },
+    "PullImageRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "nodeIds": {
+          "description": "1–64 member nodes.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "reference": {
+          "description": "`[host[:port]/]name[:tag|@digest]`; `:latest` is added when neither is given.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "reference",
+        "nodeIds"
+      ],
+      "type": "object"
+    },
+    "RemoveImageRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "force": {
+          "description": "Remove even while containers use it.",
+          "type": "boolean"
+        },
+        "nodeIds": {
+          "description": "Node ids, or `\"all\"` for every member that has it.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "nodeIds"
+      ],
+      "type": "object"
+    }
+  },
+  "securitySchemes": {
+    "access_session": {
+      "bearerFormat": "opaque",
+      "scheme": "bearer",
+      "type": "http"
+    }
+  }
+}

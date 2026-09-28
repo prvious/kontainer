@@ -7,8 +7,9 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use kontainer_native_client::{
     AccessCredential, AdmittedOperation, ContainerAction, ContainerActionOptions, ContainerList,
-    ContainerTarget, ControllerSettings, IdempotencyKey, NativeClientError, NodeId, NodeList,
-    OperationEvent, OperationSnapshot, ProbeFailure, RefreshCredential, SampleSeries,
+    ContainerTarget, ControllerSettings, IdempotencyKey, ImageList, ImageNodes, NativeClientError,
+    NodeId, NodeList, OperationEvent, OperationSnapshot, ProbeFailure, RefreshCredential,
+    SampleSeries,
 };
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
@@ -376,6 +377,7 @@ pub(crate) struct Script {
     pub(crate) events: VecDeque<Result<Vec<OperationEvent>, NativeClientError>>,
     pub(crate) admissions: VecDeque<Result<AdmittedOperation, NativeClientError>>,
     pub(crate) containers: VecDeque<Result<ContainerList, NativeClientError>>,
+    pub(crate) images: VecDeque<Result<ImageList, NativeClientError>>,
 }
 
 pub(crate) struct FakeControllerFactory {
@@ -592,6 +594,88 @@ impl Controller for FakeController {
                 public_tag(access.expose()),
                 action.as_str(),
                 targets.len(),
+                key.as_str()
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .admissions
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn list_images<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ImageList, NativeClientError>> {
+        record(&self.log, format!("images:{}", public_tag(access.expose())));
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .images
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn remove_image<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        image_id: &'a str,
+        nodes: &'a ImageNodes,
+        force: bool,
+        key: &'a IdempotencyKey,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
+        let nodes = match nodes {
+            ImageNodes::All => "all".to_owned(),
+            ImageNodes::Only(nodes) => nodes
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(","),
+        };
+        record(
+            &self.log,
+            format!(
+                "remove_image:{}:{image_id}:{nodes}:{force}:{}",
+                public_tag(access.expose()),
+                key.as_str()
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .admissions
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn pull_image<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        reference: &'a str,
+        nodes: &'a [NodeId],
+        key: &'a IdempotencyKey,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
+        record(
+            &self.log,
+            format!(
+                "pull_image:{}:{reference}:{}:{}",
+                public_tag(access.expose()),
+                nodes
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(","),
                 key.as_str()
             ),
         );
