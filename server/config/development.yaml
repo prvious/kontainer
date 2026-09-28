@@ -42,10 +42,6 @@ settings:
       certificate_path: <%= get_env(name="AGENT_RPC_TLS_CERTIFICATE_PATH", default="../dev/pki/controller.pem") %>
       private_key_path: <%= get_env(name="AGENT_RPC_TLS_PRIVATE_KEY_PATH", default="../dev/pki/controller-key.pem") %>
       client_ca_path: <%= get_env(name="AGENT_RPC_TLS_CLIENT_CA_PATH", default="../dev/pki/agent-ca.pem") %>
-    client:
-      endpoint: <%= get_env(name="AGENT_CLIENT_ENDPOINT", default="https://127.0.0.1:50052") %>
-      server_name: <%= get_env(name="AGENT_CLIENT_SERVER_NAME", default="manager.agent.kontainer.internal") %>
-      node_id: <%= get_env(name="AGENT_CLIENT_NODE_ID", default="manager") %>
   # tcp:// is accepted only in development and test (ADR 0004).
   docker:
     host: <%= get_env(name="KONTAINER_DOCKER_HOST", default="unix:///var/run/docker.sock") %>

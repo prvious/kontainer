@@ -2,7 +2,8 @@ import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { AlertCircle, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
-import { useConfiguredNode, useContainerInventory } from "@/hooks/use-container-inventory";
+import { useContainerInventory } from "@/hooks/use-container-inventory";
+import { useNodes } from "@/hooks/use-nodes";
 import { inventoryErrorCode, type ContainerState, type InventoryErrorCode } from "@/types/inventory";
 import { PageHeader } from "@/components/page-header";
 import { Badge } from "@/components/ui/badge";
@@ -19,9 +20,10 @@ const errorMessages: Record<InventoryErrorCode, string> = {
     vault_write_failed: "The refreshed session could not be saved. Retry saving it.",
     local_state_failed: "Local session state could not be read or saved.",
     cleanup_uncertain: "Session cleanup needs attention before inventory can continue.",
-    invalid_node_id: "The configured node ID is invalid.",
+    invalid_node_id: "The node ID is invalid.",
     invalid_pagination: "This page is no longer available. Start again from page one.",
-    node_not_found: "The configured node changed or is no longer available.",
+    invalid_request: "The controller rejected the request.",
+    node_not_found: "The node left the cluster or is no longer available.",
     forbidden: "Your session cannot read this inventory.",
     controller_unavailable: "The controller is unavailable. Try again.",
     agent_unavailable: "The node agent is unavailable. Try again.",
@@ -138,22 +140,24 @@ function ContainerInventory({ profileId, nodeId }: { profileId: string; nodeId: 
     );
 }
 
+/** Until spec 07 fans out across nodes, the screen reads the first online member. */
 function ContainersPage() {
     const { session } = useAuth();
     const profileId = session?.profileId ?? null;
-    const discovery = useConfiguredNode(profileId);
-    if (!profileId || discovery.isPending) return <LoadingRows />;
-    if (discovery.error) return <ErrorPanel error={discovery.error} retry={() => void discovery.refetch()} />;
-    if (!discovery.data)
+    const nodes = useNodes();
+    if (!profileId || nodes.isPending) return <LoadingRows />;
+    if (nodes.error) return <ErrorPanel error={nodes.error} retry={() => void nodes.refetch()} />;
+    const node = nodes.data.items.find((item) => item.status === "online");
+    if (!node)
         return (
             <div className='flex flex-col gap-5'>
                 <PageHeader title='CONTAINERS' subtitle='Read-only inventory' />
                 <div className='rounded-md border border-border bg-card px-6 py-12 text-center font-mono text-2xs text-muted-foreground'>
-                    No node is configured on this controller.
+                    No node is online. Start an agent and it appears here within seconds.
                 </div>
             </div>
         );
-    return <ContainerInventory key={`${profileId}:${discovery.data}`} profileId={profileId} nodeId={discovery.data} />;
+    return <ContainerInventory key={`${profileId}:${node.id}`} profileId={profileId} nodeId={node.id} />;
 }
 
 export const Route = createFileRoute("/_authenticated/tasks/")({ component: ContainersPage });

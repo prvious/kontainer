@@ -1,0 +1,88 @@
+{
+    "commands": [
+        ["nodes", "list_nodes"],
+        ["nodes", "get_cluster_samples"],
+        ["nodes", "get_node_samples"],
+        ["settings", "get_settings"],
+        ["settings", "update_settings"]
+    ],
+    "nodeList": {
+        "items": [
+            {
+                "id": "manager",
+                "hostname": "manager",
+                "status": "online",
+                "swarmNodeId": "tj42rq5nzwf8",
+                "role": null,
+                "availability": null,
+                "agentVersion": "0.1.0",
+                "dockerVersion": "29.8.0",
+                "os": "Alpine Linux v3.22",
+                "arch": "aarch64",
+                "cpuCores": 4,
+                "memoryTotalBytes": 8589934592,
+                "agentStartedAt": "2026-09-28T11:58:00.000Z",
+                "firstSeenAt": "2026-09-28T11:58:01.000Z",
+                "lastCheckInAt": "2026-09-28T12:00:00.000Z",
+                "latestSample": {
+                    "sampledAt": "2026-09-28T12:00:00.000Z",
+                    "cpuPercent": 12.5,
+                    "memoryUsedBytes": 1073741824,
+                    "diskUsedBytes": 5368709120,
+                    "containersRunning": 5,
+                    "containersPaused": 0,
+                    "containersExited": 1,
+                    "netRxBytesPerSec": 2048.0,
+                    "netTxBytesPerSec": null
+                }
+            },
+            {
+                "id": "worker-2",
+                "hostname": "worker-2",
+                "status": "offline",
+                "swarmNodeId": null,
+                "role": null,
+                "availability": null,
+                "agentVersion": "0.1.0",
+                "dockerVersion": "29.8.0",
+                "os": "Alpine Linux v3.22",
+                "arch": "aarch64",
+                "cpuCores": 2,
+                "memoryTotalBytes": 4294967296,
+                "agentStartedAt": "2026-09-28T11:00:00.000Z",
+                "firstSeenAt": "2026-09-28T11:00:01.000Z",
+                "lastCheckInAt": "2026-09-28T11:30:00.000Z",
+                "latestSample": null
+            }
+        ],
+        "snapshotAt": "2026-09-28T12:00:02.000Z"
+    },
+    "clusterSamples": {
+        "window": "5m",
+        "bucket": "60s",
+        "points": [
+            {
+                "at": "2026-09-28T11:59:00.000Z",
+                "cpuPercent": null,
+                "memoryUsedBytes": null,
+                "diskUsedBytes": null,
+                "containersRunning": null,
+                "netRxBytesPerSec": null,
+                "netTxBytesPerSec": null,
+                "nodes": 0
+            },
+            {
+                "at": "2026-09-28T12:00:00.000Z",
+                "cpuPercent": 30.0,
+                "memoryUsedBytes": 1200.0,
+                "diskUsedBytes": 2000.0,
+                "containersRunning": 4.0,
+                "netRxBytesPerSec": 20.0,
+                "netTxBytesPerSec": null,
+                "nodes": 2
+            }
+        ],
+        "snapshotAt": "2026-09-28T12:00:30.000Z"
+    },
+    "settings": { "metricsRetentionDays": 7 }
+}

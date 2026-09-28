@@ -1,13 +1,13 @@
 #![forbid(unsafe_code)]
 
-//! Production controller-to-agent client for one statically configured node.
+//! Production controller-to-agent client for one node.
 //!
-//! This is the only production path that dials a node agent. It calls
-//! `Describe` with explicit connect and RPC deadlines, verifies the peer
+//! This is the only production path that dials a node agent. Membership
+//! (`nodes::agents`) builds one per node from its advertised address. It calls
+//! the agent with explicit connect and RPC deadlines, verifies the peer
 //! workload identity during TLS, cross-checks the reported node ID, and
 //! propagates caller and shutdown cancellation without spawning detached
-//! work. There is no discovery, retry, pooling, or channel management here;
-//! later membership work owns those concerns.
+//! work. There is no retry, pooling, or channel management here.
 
 use std::time::Duration;
 
@@ -16,7 +16,6 @@ use kontainer_agent_proto::v1::{
     node_agent_client::NodeAgentClient,
 };
 use kontainer_rpc_auth::{MutualTlsIdentityFiles, WorkloadIdentity};
-use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tonic::transport::{Channel, Endpoint};
 
@@ -378,11 +377,6 @@ impl AgentClient for NodeAgentClientConfig {
     }
 }
 
-/// Shared agent client stored in [`loco_rs::app::AppContext::shared_store`].
-/// Cloned per request; the inner client is the single static configuration.
-#[derive(Debug, Clone)]
-pub struct SharedAgentClient(pub Arc<dyn AgentClient>);
-
 /// Stable, redacted call failures. No endpoint, address, TLS, or daemon
 /// detail crosses this boundary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -667,6 +661,7 @@ mod tests {
             status: "Up 3s".to_owned(),
             created_at_unix_seconds: 1_700_000_000,
             node_id: "node-1".to_owned(),
+            ..ProtoSummary::default()
         };
         assert!(super::validate_summary(&valid, "node-1").is_ok());
         for mutate in [

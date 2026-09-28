@@ -40,10 +40,6 @@ settings:
       certificate_path: <%= get_env(name="AGENT_RPC_TLS_CERTIFICATE_PATH") %>
       private_key_path: <%= get_env(name="AGENT_RPC_TLS_PRIVATE_KEY_PATH") %>
       client_ca_path: <%= get_env(name="AGENT_RPC_TLS_CLIENT_CA_PATH") %>
-    client:
-      endpoint: <%= get_env(name="AGENT_CLIENT_ENDPOINT") %>
-      server_name: <%= get_env(name="AGENT_CLIENT_SERVER_NAME") %>
-      node_id: <%= get_env(name="AGENT_CLIENT_NODE_ID") %>
   # Must stay a unix:// socket; tcp:// fails startup outside development/test.
   docker:
     host: <%= get_env(name="KONTAINER_DOCKER_HOST", default="unix:///var/run/docker.sock") %>

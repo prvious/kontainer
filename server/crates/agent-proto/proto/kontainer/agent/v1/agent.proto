@@ -19,11 +19,42 @@ message CheckInRequest {
   string agent_id = 1;
   string agent_version = 2;
   string architecture = 3;
+  // host:port the controller dials for NodeAgent calls.
+  string advertise_address = 4;
+  string hostname = 5;
+  // From `docker info` Swarm.NodeID; empty when the node is not in a Swarm.
+  string swarm_node_id = 6;
+  string docker_version = 7;
+  string os = 8;
+  uint32 cpu_cores = 9;
+  uint64 memory_total_bytes = 10;
+  int64 agent_started_at_unix_ms = 11;
+  // Absent from agents that predate sampling; the check-in still counts.
+  NodeSample sample = 12;
+}
+
+// One resource sample for the node, taken just before the check-in. CPU and
+// memory are container-scoped sums (ADR 0003).
+message NodeSample {
+  int64 sampled_at_unix_ms = 1;
+  // 0-100 of the whole node.
+  double cpu_percent = 2;
+  uint64 memory_used_bytes = 3;
+  // Present on every twelfth sample only; the controller carries it forward.
+  optional uint64 disk_used_bytes = 4;
+  uint32 containers_running = 5;
+  uint32 containers_paused = 6;
+  uint32 containers_exited = 7;
+  // Absent on the first sample after start (no previous counters).
+  optional double net_rx_bytes_per_sec = 8;
+  optional double net_tx_bytes_per_sec = 9;
 }
 
 message CheckInResponse {
   string controller_version = 1;
   string protocol_package = 2;
+  // Seconds until the next check-in; zero means keep the current cadence.
+  uint32 check_in_interval_seconds = 3;
 }
 
 message DescribeRequest {}
@@ -68,6 +99,10 @@ message ContainerSummary {
   int64 created_at_unix_seconds = 6;
   // Provenance is always the serving agent's configured node ID.
   string node_id = 7;
+  // From the agent's last sample; absent for containers that are not running.
+  optional double cpu_percent = 8;
+  optional uint64 memory_used_bytes = 9;
+  optional uint64 memory_limit_bytes = 10;
 }
 
 message ListContainersResponse {

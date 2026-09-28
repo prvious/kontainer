@@ -6,8 +6,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use kontainer_native_client::{
-    AccessCredential, ContainerPage, ContainerPageRequest, NativeClientError, NodeId, ProbeFailure,
-    RefreshCredential,
+    AccessCredential, ContainerPage, ContainerPageRequest, ControllerSettings, NativeClientError,
+    NodeId, NodeList, ProbeFailure, RefreshCredential, SampleSeries,
 };
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
@@ -367,8 +367,10 @@ pub(crate) struct Script {
     pub(crate) probe: VecDeque<Result<(), ProbeFailure>>,
     pub(crate) refresh: VecDeque<Result<IssuedCredentials, SessionError>>,
     pub(crate) logout: VecDeque<Result<(), SessionError>>,
-    pub(crate) discover: VecDeque<Result<Option<NodeId>, NativeClientError>>,
-    pub(crate) discover_gate: Option<Arc<Notify>>,
+    pub(crate) nodes: VecDeque<Result<NodeList, NativeClientError>>,
+    pub(crate) nodes_gate: Option<Arc<Notify>>,
+    pub(crate) samples: VecDeque<Result<SampleSeries, NativeClientError>>,
+    pub(crate) settings: VecDeque<Result<ControllerSettings, NativeClientError>>,
     pub(crate) containers: VecDeque<Result<ContainerPage, NativeClientError>>,
 }
 
@@ -420,23 +422,20 @@ impl Controller for FakeController {
         &self.origin
     }
 
-    fn discover_node<'a>(
+    fn list_nodes<'a>(
         &'a self,
         access: &'a AccessCredential,
         _cancellation: &'a CancellationToken,
-    ) -> ControllerFuture<'a, Result<Option<NodeId>, NativeClientError>> {
-        record(
-            &self.log,
-            format!("discover:{}", public_tag(access.expose())),
-        );
+    ) -> ControllerFuture<'a, Result<NodeList, NativeClientError>> {
+        record(&self.log, format!("nodes:{}", public_tag(access.expose())));
         let (outcome, gate) = {
             let mut script = self.script.lock().unwrap();
             (
                 script
-                    .discover
+                    .nodes
                     .pop_front()
                     .unwrap_or(Err(NativeClientError::InvalidResponse)),
-                script.discover_gate.clone(),
+                script.nodes_gate.clone(),
             )
         };
         let log = self.log.clone();
@@ -444,9 +443,77 @@ impl Controller for FakeController {
             if let Some(gate) = gate {
                 gate.notified().await;
             }
-            record(&log, "discover_done");
+            record(&log, "nodes_done");
             outcome
         })
+    }
+
+    fn samples<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        node_id: Option<&'a NodeId>,
+        window: &'a str,
+        bucket: &'a str,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<SampleSeries, NativeClientError>> {
+        record(
+            &self.log,
+            format!(
+                "samples:{}:{}:{window}:{bucket}",
+                public_tag(access.expose()),
+                node_id.map_or_else(|| "cluster".to_owned(), ToString::to_string),
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .samples
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn get_settings<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ControllerSettings, NativeClientError>> {
+        record(
+            &self.log,
+            format!("get_settings:{}", public_tag(access.expose())),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .settings
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn update_settings<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        metrics_retention_days: u32,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ControllerSettings, NativeClientError>> {
+        record(
+            &self.log,
+            format!(
+                "update_settings:{}:{metrics_retention_days}",
+                public_tag(access.expose())
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .settings
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
     }
 
     fn list_containers<'a>(

@@ -39,6 +39,10 @@ use super::vault::CredentialVault;
 mod inventory;
 pub(crate) use inventory::{ContainerPageView, InventoryError};
 
+#[path = "manager_nodes.rs"]
+mod nodes;
+pub(crate) use nodes::{ControllerSettingsView, NodeListView, SampleSeriesView};
+
 /// The one published session plus whatever work is in flight.
 struct SessionSlots {
     active: Option<ActiveSession>,

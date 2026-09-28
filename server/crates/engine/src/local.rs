@@ -4,16 +4,21 @@ use async_trait::async_trait;
 use bollard::{
     API_DEFAULT_VERSION, Docker,
     errors::Error as BollardError,
-    models::{ContainerSummaryStateEnum, LocalNodeState, SwarmInfo},
+    models::{
+        ContainerCpuStats, ContainerStatsResponse, ContainerSummaryStateEnum, LocalNodeState,
+        SwarmInfo, SystemDataUsageResponse, SystemInfo,
+    },
 };
+use futures_util::StreamExt;
 use tokio::time;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
     CapabilityStatus, ContainerEngine, ContainerPage, ContainerPageRequest, ContainerState,
-    ContainerSummary, DockerHost, EngineAccessScope, EngineApiVersion, EngineCapabilities,
-    EngineDescription, EngineError, EngineErrorKind, EngineOperation, UnsupportedCapabilityReason,
-    canonical_display_name, format_page_token, is_valid_container_id, truncate_status_text,
+    ContainerStats, ContainerSummary, CpuCounters, DiskUsage, DockerHost, EngineAccessScope,
+    EngineApiVersion, EngineCapabilities, EngineDescription, EngineError, EngineErrorKind,
+    EngineOperation, NodeInfo, UnsupportedCapabilityReason, canonical_display_name, cpu_percent,
+    format_page_token, is_valid_container_id, memory_used, truncate_status_text,
 };
 
 const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(10);
@@ -260,6 +265,180 @@ impl ContainerEngine for LocalDockerEngine {
             })
         }
     }
+
+    async fn node_info(&self, cancellation: &CancellationToken) -> Result<NodeInfo, EngineError> {
+        let client = self.negotiate(cancellation).await?;
+        let info = self
+            .execute(EngineOperation::ReadSystemInfo, cancellation, client.info())
+            .await?;
+        Ok(map_node_info(info))
+    }
+
+    async fn running_container_ids(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> Result<Vec<String>, EngineError> {
+        use bollard::query_parameters::ListContainersOptionsBuilder;
+
+        let client = self.negotiate(cancellation).await?;
+        let filters = HashMap::from([("status".to_owned(), vec!["running".to_owned()])]);
+        let options = ListContainersOptionsBuilder::new()
+            .all(false)
+            .size(false)
+            .filters(&filters)
+            .build();
+        let summaries = self
+            .execute(
+                EngineOperation::ListContainers,
+                cancellation,
+                client.list_containers(Some(options)),
+            )
+            .await?;
+        Ok(summaries
+            .into_iter()
+            .filter_map(|summary| summary.id.filter(|id| is_valid_container_id(id)))
+            .collect())
+    }
+
+    async fn container_stats(
+        &self,
+        container_id: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<ContainerStats, EngineError> {
+        use bollard::query_parameters::StatsOptionsBuilder;
+
+        if !is_valid_container_id(container_id) {
+            return Err(EngineError::new(
+                EngineErrorKind::InvalidInput,
+                EngineOperation::ReadContainerStats,
+            ));
+        }
+        let client = self.negotiate(cancellation).await?;
+        // Not one-shot: the daemon waits for a second reading so `precpu_stats` is populated.
+        let options = StatsOptionsBuilder::default()
+            .stream(false)
+            .one_shot(false)
+            .build();
+        let mut stream = client.stats(container_id, Some(options));
+        let response = self
+            .execute(EngineOperation::ReadContainerStats, cancellation, async {
+                stream.next().await.transpose()
+            })
+            .await?
+            .ok_or_else(|| {
+                EngineError::new(
+                    EngineErrorKind::InvalidResponse,
+                    EngineOperation::ReadContainerStats,
+                )
+            })?;
+        Ok(map_container_stats(response))
+    }
+
+    async fn disk_usage(&self, cancellation: &CancellationToken) -> Result<DiskUsage, EngineError> {
+        let client = self.negotiate(cancellation).await?;
+        let usage = self
+            .execute(
+                EngineOperation::ReadDiskUsage,
+                cancellation,
+                client.df(None::<bollard::query_parameters::DataUsageOptions>),
+            )
+            .await?;
+        Ok(map_disk_usage(&usage))
+    }
+}
+
+fn map_node_info(info: SystemInfo) -> NodeInfo {
+    let count = |value: Option<i64>| {
+        value
+            .and_then(|value| u32::try_from(value).ok())
+            .unwrap_or(0)
+    };
+    NodeInfo {
+        hostname: info.name.unwrap_or_default(),
+        swarm_node_id: info
+            .swarm
+            .and_then(|swarm| swarm.node_id)
+            .filter(|id| !id.is_empty()),
+        docker_version: info.server_version.unwrap_or_default(),
+        os: info.operating_system.or(info.os_type).unwrap_or_default(),
+        architecture: info.architecture.unwrap_or_default(),
+        cpu_cores: count(info.ncpu),
+        memory_total_bytes: info
+            .mem_total
+            .and_then(|value| u64::try_from(value).ok())
+            .unwrap_or(0),
+        containers_running: count(info.containers_running),
+        containers_paused: count(info.containers_paused),
+        containers_stopped: count(info.containers_stopped),
+    }
+}
+
+fn cpu_counters(stats: Option<&ContainerCpuStats>) -> CpuCounters {
+    stats.map_or_else(CpuCounters::default, |stats| CpuCounters {
+        total_usage: stats
+            .cpu_usage
+            .as_ref()
+            .and_then(|usage| usage.total_usage)
+            .unwrap_or(0),
+        system_usage: stats.system_cpu_usage.unwrap_or(0),
+        online_cpus: stats.online_cpus.unwrap_or(0),
+    })
+}
+
+fn map_container_stats(response: ContainerStatsResponse) -> ContainerStats {
+    let memory = response.memory_stats.unwrap_or_default();
+    let (net_rx_bytes, net_tx_bytes) =
+        response
+            .networks
+            .unwrap_or_default()
+            .values()
+            .fold((0_u64, 0_u64), |(rx, tx), network| {
+                (
+                    rx.saturating_add(network.rx_bytes.unwrap_or(0)),
+                    tx.saturating_add(network.tx_bytes.unwrap_or(0)),
+                )
+            });
+    ContainerStats {
+        cpu_percent: cpu_percent(
+            cpu_counters(response.cpu_stats.as_ref()),
+            cpu_counters(response.precpu_stats.as_ref()),
+        ),
+        memory_used_bytes: memory
+            .usage
+            .map(|usage| memory_used(usage, &memory.stats.clone().unwrap_or_default())),
+        memory_limit_bytes: memory.limit.filter(|limit| *limit > 0),
+        net_rx_bytes,
+        net_tx_bytes,
+    }
+}
+
+fn map_disk_usage(usage: &SystemDataUsageResponse) -> DiskUsage {
+    let totals = [
+        usage
+            .image_usage
+            .as_ref()
+            .and_then(|usage| usage.total_size),
+        usage
+            .container_usage
+            .as_ref()
+            .and_then(|usage| usage.total_size),
+        usage
+            .volume_usage
+            .as_ref()
+            .and_then(|usage| usage.total_size),
+        usage
+            .build_cache_usage
+            .as_ref()
+            .and_then(|usage| usage.total_size),
+    ];
+    let reported: Vec<u64> = totals
+        .into_iter()
+        .flatten()
+        .filter_map(|size| u64::try_from(size).ok())
+        .collect();
+    DiskUsage {
+        total_bytes: (!reported.is_empty()).then(|| reported.iter().sum()),
+    }
 }
 
 fn parse_required_api_version(
@@ -382,7 +561,7 @@ mod tests {
 
     use super::{
         LocalDockerEngine, LocalEngineOptions, capabilities_from_swarm, map_container_state,
-        map_container_summary,
+        map_container_stats, map_container_summary, map_disk_usage, map_node_info,
     };
     use crate::{
         CapabilityStatus, ContainerEngine, ContainerPageRequest, ContainerState, EngineAccessScope,
@@ -885,6 +1064,117 @@ mod tests {
             .unwrap()
             .unwrap();
         std::fs::remove_file(socket_path).unwrap();
+    }
+
+    #[test]
+    fn stats_mapping_matches_docker_stats_math() {
+        use bollard::models::{
+            ContainerCpuStats, ContainerCpuUsage, ContainerMemoryStats, ContainerNetworkStats,
+            ContainerStatsResponse,
+        };
+
+        let cpu = |total_usage, system_cpu_usage| ContainerCpuStats {
+            cpu_usage: Some(ContainerCpuUsage {
+                total_usage: Some(total_usage),
+                ..Default::default()
+            }),
+            system_cpu_usage: Some(system_cpu_usage),
+            online_cpus: Some(2),
+            ..Default::default()
+        };
+        let network = |rx, tx| ContainerNetworkStats {
+            rx_bytes: Some(rx),
+            tx_bytes: Some(tx),
+            ..Default::default()
+        };
+        let response = ContainerStatsResponse {
+            cpu_stats: Some(cpu(3_000_000, 40_000_000)),
+            precpu_stats: Some(cpu(1_000_000, 20_000_000)),
+            memory_stats: Some(ContainerMemoryStats {
+                usage: Some(5000),
+                limit: Some(100_000),
+                stats: Some([("inactive_file".to_owned(), 1000)].into_iter().collect()),
+                ..Default::default()
+            }),
+            networks: Some(
+                [
+                    ("eth0".to_owned(), network(100, 10)),
+                    ("eth1".to_owned(), network(50, 5)),
+                ]
+                .into_iter()
+                .collect(),
+            ),
+            ..Default::default()
+        };
+
+        let stats = map_container_stats(response);
+        assert_eq!(stats.cpu_percent, Some(20.0));
+        assert_eq!(stats.memory_used_bytes, Some(4000));
+        assert_eq!(stats.memory_limit_bytes, Some(100_000));
+        assert_eq!((stats.net_rx_bytes, stats.net_tx_bytes), (150, 15));
+
+        let empty = map_container_stats(ContainerStatsResponse::default());
+        assert_eq!(empty.cpu_percent, None);
+        assert_eq!(empty.memory_used_bytes, None);
+        assert_eq!(empty.memory_limit_bytes, None);
+    }
+
+    #[test]
+    fn disk_usage_sums_reported_categories_and_is_absent_otherwise() {
+        use bollard::models::{
+            ContainersDiskUsage, ImagesDiskUsage, SystemDataUsageResponse, VolumesDiskUsage,
+        };
+
+        let usage = SystemDataUsageResponse {
+            image_usage: Some(ImagesDiskUsage {
+                total_size: Some(1000),
+                ..Default::default()
+            }),
+            container_usage: Some(ContainersDiskUsage {
+                total_size: Some(24),
+                ..Default::default()
+            }),
+            volume_usage: Some(VolumesDiskUsage::default()),
+            build_cache_usage: None,
+        };
+        assert_eq!(map_disk_usage(&usage).total_bytes, Some(1024));
+        assert_eq!(
+            map_disk_usage(&SystemDataUsageResponse::default()).total_bytes,
+            None
+        );
+    }
+
+    #[test]
+    fn node_info_keeps_counts_and_drops_an_empty_swarm_id() {
+        let info = bollard::models::SystemInfo {
+            name: Some("manager".to_owned()),
+            ncpu: Some(4),
+            mem_total: Some(8 << 30),
+            operating_system: Some("Alpine Linux".to_owned()),
+            architecture: Some("aarch64".to_owned()),
+            server_version: Some("29.8.0".to_owned()),
+            containers_running: Some(5),
+            containers_paused: Some(1),
+            containers_stopped: Some(2),
+            swarm: Some(SwarmInfo {
+                node_id: Some(String::new()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let node = map_node_info(info);
+        assert_eq!(node.hostname, "manager");
+        assert_eq!(node.cpu_cores, 4);
+        assert_eq!(node.memory_total_bytes, 8 << 30);
+        assert_eq!(
+            (
+                node.containers_running,
+                node.containers_paused,
+                node.containers_stopped
+            ),
+            (5, 1, 2)
+        );
+        assert_eq!(node.swarm_node_id, None);
     }
 
     fn test_engine(operation_timeout: Duration) -> LocalDockerEngine {

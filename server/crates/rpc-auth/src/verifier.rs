@@ -27,6 +27,9 @@ use crate::{WorkloadIdentity, valid_identity_segment};
 pub struct OutboundPeerVerifier {
     inner: Arc<WebPkiServerVerifier>,
     expected: WorkloadIdentity,
+    /// Accept any controller instance of the expected cluster. Agents dialing the controller
+    /// know its cluster but not which replica answers; the kind and cluster still must match.
+    any_controller_instance: bool,
 }
 
 impl OutboundPeerVerifier {
@@ -34,6 +37,26 @@ impl OutboundPeerVerifier {
     /// root. Fails when the CA bundle is missing, malformed, or empty, and
     /// when the expected identity contains an invalid segment.
     pub fn new(peer_ca_pem: &[u8], expected: WorkloadIdentity) -> Result<Self, VerifierBuildError> {
+        Self::build(peer_ca_pem, expected, false)
+    }
+
+    /// Build a verifier that accepts any controller instance of `cluster_id`.
+    pub fn for_controller_of(
+        peer_ca_pem: &[u8],
+        cluster_id: impl Into<String>,
+    ) -> Result<Self, VerifierBuildError> {
+        let expected = WorkloadIdentity::Controller {
+            cluster_id: cluster_id.into(),
+            instance_id: String::new(),
+        };
+        Self::build(peer_ca_pem, expected, true)
+    }
+
+    fn build(
+        peer_ca_pem: &[u8],
+        expected: WorkloadIdentity,
+        any_controller_instance: bool,
+    ) -> Result<Self, VerifierBuildError> {
         if !valid_identity_segment(expected.cluster_id()) {
             return Err(VerifierBuildError::InvalidIdentity);
         }
@@ -59,7 +82,15 @@ impl OutboundPeerVerifier {
             .build()
             .map_err(|_| VerifierBuildError::InvalidCa)?;
 
-        Ok(Self { inner, expected })
+        Ok(Self {
+            inner,
+            expected,
+            any_controller_instance,
+        })
+    }
+
+    fn accepts(&self, actual: &WorkloadIdentity) -> bool {
+        identity_accepted(&self.expected, self.any_controller_instance, actual)
     }
 
     /// Expected workload identity, for tests and diagnostics that must not
@@ -107,7 +138,7 @@ impl ServerCertVerifier for OutboundPeerVerifier {
             )
         })?;
 
-        if actual != self.expected {
+        if !self.accepts(&actual) {
             return Err(RustlsError::InvalidCertificate(
                 rustls::CertificateError::ApplicationVerificationFailure,
             ));
@@ -143,6 +174,19 @@ impl ServerCertVerifier for OutboundPeerVerifier {
     }
 }
 
+fn identity_accepted(
+    expected: &WorkloadIdentity,
+    any_controller_instance: bool,
+    actual: &WorkloadIdentity,
+) -> bool {
+    if any_controller_instance {
+        matches!(actual, WorkloadIdentity::Controller { cluster_id, .. }
+            if cluster_id == expected.cluster_id())
+    } else {
+        actual == expected
+    }
+}
+
 /// Fail-closed construction errors. Messages stay generic; file paths are
 /// added by the caller that owns the settings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -166,7 +210,7 @@ impl std::error::Error for VerifierBuildError {}
 
 #[cfg(test)]
 mod tests {
-    use super::{OutboundPeerVerifier, VerifierBuildError, WorkloadIdentity};
+    use super::{OutboundPeerVerifier, VerifierBuildError, WorkloadIdentity, identity_accepted};
 
     fn agent_identity() -> WorkloadIdentity {
         WorkloadIdentity::NodeAgent {
@@ -204,6 +248,49 @@ mod tests {
         );
         assert_eq!(
             OutboundPeerVerifier::new(b"secret-canary-invalid-pem", agent_identity()).unwrap_err(),
+            VerifierBuildError::InvalidCa
+        );
+    }
+
+    #[test]
+    fn controller_verifier_accepts_any_instance_of_its_cluster_only() {
+        let expected = WorkloadIdentity::Controller {
+            cluster_id: "cluster-1".to_owned(),
+            instance_id: String::new(),
+        };
+        let controller = |cluster: &str, instance: &str| WorkloadIdentity::Controller {
+            cluster_id: cluster.to_owned(),
+            instance_id: instance.to_owned(),
+        };
+        assert!(identity_accepted(
+            &expected,
+            true,
+            &controller("cluster-1", "dev")
+        ));
+        assert!(identity_accepted(
+            &expected,
+            true,
+            &controller("cluster-1", "replica-2")
+        ));
+        assert!(!identity_accepted(
+            &expected,
+            true,
+            &controller("cluster-2", "dev")
+        ));
+        assert!(!identity_accepted(&expected, true, &agent_identity()));
+        // Exact matching is unchanged for every other verifier.
+        assert!(!identity_accepted(
+            &expected,
+            false,
+            &controller("cluster-1", "dev")
+        ));
+
+        assert_eq!(
+            OutboundPeerVerifier::for_controller_of(b"not-a-ca", "cluster/other").unwrap_err(),
+            VerifierBuildError::InvalidIdentity
+        );
+        assert_eq!(
+            OutboundPeerVerifier::for_controller_of(b"", "cluster-1").unwrap_err(),
             VerifierBuildError::InvalidCa
         );
     }

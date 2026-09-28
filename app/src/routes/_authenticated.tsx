@@ -11,6 +11,8 @@ import { SidebarProvider } from "@/components/ui/sidebar";
 import { ActionButton } from "@/components/kit/action-button";
 import { useAuth } from "@/hooks/use-auth";
 import { useControllerHealth } from "@/hooks/session/use-controller-health";
+import { useNodes } from "@/hooks/use-nodes";
+import { clusterUsage, nodesDown } from "@/types/nodes";
 
 function ShellError() {
     return (
@@ -39,6 +41,7 @@ function AuthenticatedLayout() {
     const { session, expired, issue, retryCommit, retryRestore, logout } = useAuth();
     const router = useRouter();
     const health = useControllerHealth(Boolean(session) && !expired);
+    const nodes = useNodes();
 
     useEffect(() => {
         if (session) return;
@@ -79,12 +82,17 @@ function AuthenticatedLayout() {
             )}
             {/* While the session-expired dialog is up the page stays mounted but inert (02.S5). */}
             <SidebarProvider inert={expired || undefined} className='min-h-0 flex-1' style={{ "--sidebar-width": "220px" } as React.CSSProperties}>
-                <AppSidebar />
+                <AppSidebar badges={{ nodesDown: nodesDown(nodes.data?.items) }} />
                 <main className='min-w-0 flex-1 overflow-y-auto bg-background p-6'>
                     <Outlet />
                 </main>
             </SidebarProvider>
-            <StatusBar data={{ connection: health.data ? (health.data.status === "ready" ? "connected" : "reconnecting") : undefined }} />
+            <StatusBar
+                data={{
+                    ...clusterUsage(nodes.data?.items),
+                    connection: health.data ? (health.data.status === "ready" ? "connected" : "reconnecting") : undefined,
+                }}
+            />
             <SessionExpiredDialog />
         </div>
     );

@@ -383,19 +383,49 @@
         ]
       }
     },
-    "/api/v1/nodes/configured": {
+    "/api/v1/cluster/samples": {
       "get": {
         "tags": [
           "super::nodes"
         ],
-        "operationId": "configured_node",
+        "operationId": "cluster_samples",
+        "parameters": [
+          {
+            "name": "window",
+            "in": "query",
+            "description": "One of 5m, 15m, 1h, 24h, 7d",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "bucket",
+            "in": "query",
+            "description": "Bucket width such as 5s, 60s, 15m; at most 200 points",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "The one configured node, without contacting the agent",
+            "description": "Per bucket: mean CPU over contributing nodes, summed figures, and the contributor count",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ConfiguredNodeResponse"
+                  "$ref": "#/components/schemas/SampleSeriesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid window or bucket",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeErrorResponse"
                 }
               }
             }
@@ -404,7 +434,52 @@
             "description": "Missing, malformed, expired, or revoked access credential"
           },
           "503": {
-            "description": "Controller draining new work or session persistence unavailable"
+            "description": "Persistence unavailable or controller draining",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access_session": []
+          }
+        ]
+      }
+    },
+    "/api/v1/nodes": {
+      "get": {
+        "tags": [
+          "super::nodes"
+        ],
+        "operationId": "list_nodes",
+        "responses": {
+          "200": {
+            "description": "Every node that has checked in, with derived status and latest sample",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeListResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "503": {
+            "description": "Persistence unavailable or controller draining",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeErrorResponse"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -478,7 +553,7 @@
             "description": "Missing, malformed, expired, or revoked access credential"
           },
           "404": {
-            "description": "Unknown node; only the configured node exists",
+            "description": "Unknown node; only nodes that have checked in exist",
             "content": {
               "application/json": {
                 "schema": {
@@ -508,6 +583,93 @@
             }
           }
         }
+      }
+    },
+    "/api/v1/nodes/{nodeId}/samples": {
+      "get": {
+        "tags": [
+          "super::nodes"
+        ],
+        "operationId": "node_samples",
+        "parameters": [
+          {
+            "name": "nodeId",
+            "in": "path",
+            "description": "Node id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "window",
+            "in": "query",
+            "description": "One of 5m, 15m, 1h, 24h, 7d",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "bucket",
+            "in": "query",
+            "description": "Bucket width such as 5s, 60s, 15m; at most 200 points",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Averages per bucket; buckets without samples are null",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SampleSeriesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid window or bucket",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "404": {
+            "description": "Unknown node",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Persistence unavailable or controller draining",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access_session": []
+          }
+        ]
       }
     },
     "/api/v1/operations/{operation_id}": {
@@ -554,6 +716,110 @@
             "description": "Controller draining new work or session persistence unavailable; the body is either HealthResponse or a generic error"
           }
         }
+      }
+    },
+    "/api/v1/settings": {
+      "get": {
+        "tags": [
+          "super::settings"
+        ],
+        "operationId": "get_settings",
+        "responses": {
+          "200": {
+            "description": "Controller settings",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "503": {
+            "description": "Persistence unavailable or controller draining",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access_session": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "super::settings"
+        ],
+        "operationId": "update_settings",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingsPatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Settings after the change",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed body or unknown field",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "422": {
+            "description": "metricsRetentionDays outside 1–365",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Persistence unavailable or controller draining",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access_session": []
+          }
+        ]
       }
     },
     "/api/v1/status": {
@@ -719,14 +985,6 @@
           }
         }
       },
-      "AgentRpcState": {
-        "type": "string",
-        "enum": [
-          "up",
-          "down",
-          "timeout"
-        ]
-      },
       "BootstrapResponse": {
         "type": "object",
         "required": [
@@ -746,22 +1004,6 @@
         "properties": {
           "version": {
             "type": "string"
-          }
-        },
-        "additionalProperties": false
-      },
-      "ConfiguredNodeResponse": {
-        "type": "object",
-        "required": [
-          "nodeId"
-        ],
-        "properties": {
-          "nodeId": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The configured node ID, or null when no agent client is configured."
           }
         },
         "additionalProperties": false
@@ -871,12 +1113,10 @@
           "build",
           "migration",
           "database",
-          "agentRpc"
+          "nodesOnline",
+          "nodesTotal"
         ],
         "properties": {
-          "agentRpc": {
-            "$ref": "#/components/schemas/AgentRpcState"
-          },
           "build": {
             "$ref": "#/components/schemas/BuildResponse"
           },
@@ -885,6 +1125,24 @@
           },
           "migration": {
             "$ref": "#/components/schemas/MigrationState"
+          },
+          "nodesOnline": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Members checking in within 15 s; null when membership could not be read.",
+            "minimum": 0
+          },
+          "nodesTotal": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Every node that has ever checked in; null when membership could not be read.",
+            "minimum": 0
           }
         },
         "additionalProperties": false
@@ -976,6 +1234,196 @@
         "enum": [
           "current",
           "unknown"
+        ]
+      },
+      "NodeErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "NodeListResponse": {
+        "type": "object",
+        "required": [
+          "items",
+          "snapshotAt"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NodeResponse"
+            }
+          },
+          "snapshotAt": {
+            "type": "string"
+          }
+        }
+      },
+      "NodeResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "hostname",
+          "status",
+          "swarmNodeId",
+          "role",
+          "availability",
+          "agentVersion",
+          "dockerVersion",
+          "os",
+          "arch",
+          "cpuCores",
+          "memoryTotalBytes",
+          "agentStartedAt",
+          "firstSeenAt",
+          "lastCheckInAt",
+          "latestSample"
+        ],
+        "properties": {
+          "agentStartedAt": {
+            "type": "string"
+          },
+          "agentVersion": {
+            "type": "string"
+          },
+          "arch": {
+            "type": "string"
+          },
+          "availability": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cpuCores": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "dockerVersion": {
+            "type": "string"
+          },
+          "firstSeenAt": {
+            "type": "string"
+          },
+          "hostname": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string",
+            "description": "Node id from the agent's certificate identity."
+          },
+          "lastCheckInAt": {
+            "type": "string"
+          },
+          "latestSample": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/NodeSampleResponse"
+              }
+            ]
+          },
+          "memoryTotalBytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "os": {
+            "type": "string"
+          },
+          "role": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/NodeStatusResponse",
+            "description": "Derived from the last check-in: `online` within 15 s, `degraded` within 60 s."
+          },
+          "swarmNodeId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Swarm fields are null until Swarm inventory fills them."
+          }
+        }
+      },
+      "NodeSampleResponse": {
+        "type": "object",
+        "required": [
+          "sampledAt",
+          "cpuPercent",
+          "memoryUsedBytes",
+          "diskUsedBytes",
+          "containersRunning",
+          "containersPaused",
+          "containersExited",
+          "netRxBytesPerSec",
+          "netTxBytesPerSec"
+        ],
+        "properties": {
+          "containersExited": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "containersPaused": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "containersRunning": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "cpuPercent": {
+            "type": "number",
+            "format": "float",
+            "description": "0–100 of the node."
+          },
+          "diskUsedBytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "memoryUsedBytes": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "netRxBytesPerSec": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "netTxBytesPerSec": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "sampledAt": {
+            "type": "string"
+          }
+        }
+      },
+      "NodeStatusResponse": {
+        "type": "string",
+        "enum": [
+          "online",
+          "degraded",
+          "offline"
         ]
       },
       "OperationResponse": {
@@ -1138,6 +1586,100 @@
         },
         "additionalProperties": false
       },
+      "SamplePointResponse": {
+        "type": "object",
+        "required": [
+          "at",
+          "cpuPercent",
+          "memoryUsedBytes",
+          "diskUsedBytes",
+          "containersRunning",
+          "netRxBytesPerSec",
+          "netTxBytesPerSec",
+          "nodes"
+        ],
+        "properties": {
+          "at": {
+            "type": "string",
+            "description": "Bucket start."
+          },
+          "containersRunning": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "cpuPercent": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Null when no sample landed in the bucket, never 0."
+          },
+          "diskUsedBytes": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "memoryUsedBytes": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "netRxBytesPerSec": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "netTxBytesPerSec": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "nodes": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Nodes that contributed a sample to the bucket.",
+            "minimum": 0
+          }
+        }
+      },
+      "SampleSeriesResponse": {
+        "type": "object",
+        "required": [
+          "window",
+          "bucket",
+          "points",
+          "snapshotAt"
+        ],
+        "properties": {
+          "bucket": {
+            "type": "string"
+          },
+          "points": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SamplePointResponse"
+            }
+          },
+          "snapshotAt": {
+            "type": "string"
+          },
+          "window": {
+            "type": "string"
+          }
+        }
+      },
       "SessionTokenResponse": {
         "type": "object",
         "required": [
@@ -1158,6 +1700,32 @@
           },
           "refreshExpiresAt": {
             "type": "string"
+          }
+        }
+      },
+      "SettingsPatchRequest": {
+        "type": "object",
+        "properties": {
+          "metricsRetentionDays": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32"
+          }
+        },
+        "additionalProperties": false
+      },
+      "SettingsResponse": {
+        "type": "object",
+        "required": [
+          "metricsRetentionDays"
+        ],
+        "properties": {
+          "metricsRetentionDays": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Days of node samples kept, 1–365."
           }
         }
       },

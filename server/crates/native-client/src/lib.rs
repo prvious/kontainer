@@ -3,8 +3,9 @@
 //! UI-neutral Rust client for the Kontainer controller public API.
 //!
 //! This crate implements the controller contracts: password sign-in and owner
-//! registration, GitHub bootstrap login attempt/redemption, refresh and logout, the bounded node-container
-//! collection, and owner-scoped operation polling. It is the native
+//! registration, GitHub bootstrap login attempt/redemption, refresh and logout, node membership
+//! and samples, controller settings, the bounded node-container collection, and owner-scoped
+//! operation polling. It is the native
 //! networking boundary that Tauri (and any future native caller) reuses
 //! instead of the WebView.
 //!
@@ -34,6 +35,7 @@ mod error;
 mod nodes;
 mod operations;
 mod probe;
+mod settings;
 
 #[cfg(test)]
 mod tests;
@@ -49,5 +51,10 @@ pub use containers::{
 };
 pub use credentials::{AccessCredential, CredentialError, LoginVerifier, RefreshCredential};
 pub use error::{AccountFieldErrors, FieldProblem, NativeClientError, Traced};
+pub use nodes::{
+    MAX_SAMPLE_POINTS, NodeList, NodeSample, NodeStatus, NodeSummary, SAMPLE_WINDOWS, SamplePoint,
+    SampleSeries,
+};
 pub use operations::{OperationSnapshot, OperationState};
 pub use probe::ProbeFailure;
+pub use settings::{ControllerSettings, RETENTION_DAYS};

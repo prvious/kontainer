@@ -8,6 +8,13 @@ import { AuthContext } from "@/contexts/auth-context-value";
 import { Route as TasksRoute } from "@/routes/_authenticated/tasks/index";
 import type { AuthContextValue } from "@/contexts/auth-context-value";
 import fixture from "../fixtures/inventory-ipc.json";
+import nodesFixture from "../fixtures/nodes-ipc.json";
+
+/** The node list with `manager` renamed `node-1`, the id the inventory fixture uses. */
+const nodeList = {
+    ...nodesFixture.nodeList,
+    items: nodesFixture.nodeList.items.map((node) => (node.id === "manager" ? { ...node, id: "node-1" } : node)),
+};
 
 const profileId = "018f2e34-0000-7000-8000-0000000000bb";
 const reportInventoryCustodyError = vi.fn();
@@ -40,9 +47,9 @@ describe("read-only Containers screen", () => {
     });
 
     it("shows a loading state, discovers the node, then displays real container fields", async () => {
-        let resolveNode!: (value: string) => void;
+        let resolveNode!: (value: unknown) => void;
         vi.mocked(invoke).mockImplementation(async (command: string) => {
-            if (command === "get_configured_node")
+            if (command === "list_nodes")
                 return new Promise((resolve) => {
                     resolveNode = resolve;
                 });
@@ -51,7 +58,7 @@ describe("read-only Containers screen", () => {
         });
         renderPage();
         expect(await screen.findByLabelText("Loading containers")).toBeInTheDocument();
-        resolveNode("node-1");
+        resolveNode(nodeList);
         expect(await screen.findByText("web")).toBeInTheDocument();
         expect(screen.getByText("nginx:latest")).toBeInTheDocument();
         expect(screen.getByText("running")).toBeInTheDocument();
@@ -67,16 +74,22 @@ describe("read-only Containers screen", () => {
         expect(screen.queryByRole("button", { name: /logs|terminal|exec|remove/i })).not.toBeInTheDocument();
     });
 
-    it("shows a no-node state without calling inventory", async () => {
-        vi.mocked(invoke).mockResolvedValue(null);
+    it("shows a no-node state without calling inventory when nothing is online", async () => {
+        const offline = { ...nodeList, items: nodeList.items.map((node) => ({ ...node, status: "offline" })) };
+        vi.mocked(invoke).mockImplementation(async (command: string) => (command === "list_nodes" ? offline : null));
         renderPage();
-        expect(await screen.findByText("No node is configured on this controller.")).toBeInTheDocument();
-        expect(vi.mocked(invoke).mock.calls.map(([command]) => command)).toEqual(["get_configured_node"]);
+        expect(await screen.findByText("No node is online. Start an agent and it appears here within seconds.")).toBeInTheDocument();
+        expect(
+            vi
+                .mocked(invoke)
+                .mock.calls.map(([command]) => command)
+                .filter((command) => command !== "load_app_settings"),
+        ).toEqual(["list_nodes"]);
     });
 
     it("shows an empty page and advances and returns through opaque cursors", async () => {
         vi.mocked(invoke).mockImplementation(async (command: string, args?: unknown) => {
-            if (command === "get_configured_node") return "node-1";
+            if (command === "list_nodes") return nodeList;
             if (command === "list_container_inventory") {
                 const cursor = (args as { cursor: string | null }).cursor;
                 return cursor ? { items: [], nextCursor: null } : fixture.containerPage;
@@ -106,19 +119,19 @@ describe("read-only Containers screen", () => {
         ["relogin_required", "Your session expired or was revoked."],
     ])("shows the %s recovery state without raw error text", async (code, message) => {
         vi.mocked(invoke).mockImplementation(async (command: string) => {
-            if (command === "get_configured_node") return "node-1";
+            if (command === "list_nodes") return nodeList;
             if (command === "list_container_inventory") throw code;
             throw new Error("unexpected command");
         });
         renderPage();
         await waitFor(() => expect(screen.getByText((text) => text.startsWith(message))).toBeInTheDocument());
         expect(screen.queryByText("secret-canary")).not.toBeInTheDocument();
-        expect(invoke).toHaveBeenCalledTimes(2);
+        expect(vi.mocked(invoke).mock.calls.filter(([command]) => command !== "load_app_settings")).toHaveLength(2);
     });
 
     it("resets an invalid cursor to the first page", async () => {
         vi.mocked(invoke).mockImplementation(async (command: string, args?: unknown) => {
-            if (command === "get_configured_node") return "node-1";
+            if (command === "list_nodes") return nodeList;
             if (command === "list_container_inventory") {
                 if ((args as { cursor: string | null }).cursor) throw "invalid_pagination";
                 return fixture.containerPage;

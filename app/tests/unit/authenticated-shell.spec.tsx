@@ -9,6 +9,7 @@ import { AuthProvider } from "@/contexts/auth-context";
 import { useAuth } from "@/hooks/use-auth";
 import type { AuthContextValue } from "@/contexts/auth-context-value";
 import type { SessionView } from "@/types/session";
+import nodesFixture from "../fixtures/nodes-ipc.json";
 
 const session: SessionView = {
     profileId: "local-profile-id",
@@ -48,6 +49,8 @@ function mockCommands(overrides: Record<string, Handler> = {}, restored: Session
                 return { ownerExists: true };
             case "controller_health":
                 return { status: "ready" };
+            case "list_nodes":
+                return nodesFixture.nodeList;
             default:
                 return null;
         }
@@ -81,6 +84,17 @@ describe("authenticated shell", () => {
         expect(screen.getByText(session.email)).toBeInTheDocument();
     });
 
+    it("fills the status bar CPU and MEM and the sidebar DOWN badge from membership", async () => {
+        mockCommands();
+        renderApp();
+        // One online node sampled: 12.5 % CPU, 1 of 8 GB; worker-2 is offline.
+        await waitFor(() => expect(screen.getByText("CPU 13%")).toBeInTheDocument());
+        expect(screen.getByText("MEM 1/8G")).toBeInTheDocument();
+        expect(screen.getByText("Docker 29.8.0")).toBeInTheDocument();
+        expect(screen.getByTestId("nav-badge-nodes")).toHaveTextContent("1 DOWN");
+        expect(invoke).toHaveBeenCalledWith("list_nodes", { profileId: session.profileId });
+    });
+
     it("shows the controller health in the titlebar dot and the status bar", async () => {
         mockCommands({ controller_health: () => ({ status: "unreachable", diagnostic: "tcp" }) });
         renderApp();
@@ -89,7 +103,7 @@ describe("authenticated shell", () => {
     });
 
     it("keeps the page mounted under the session-expired dialog when a refresh is rejected", async () => {
-        mockCommands({ get_configured_node: () => "node-1", list_container_inventory: () => Promise.reject("relogin_required") });
+        mockCommands({ list_container_inventory: () => Promise.reject("relogin_required") });
         renderApp("/tasks");
         const dialog = await screen.findByRole("dialog");
         expect(within(dialog).getByText("Your session ended")).toBeInTheDocument();
@@ -102,7 +116,6 @@ describe("authenticated shell", () => {
     it("signs back in from the expired dialog and resumes the same page", async () => {
         let rejected = false;
         mockCommands({
-            get_configured_node: () => "node-1",
             list_container_inventory: () => {
                 if (!rejected) {
                     rejected = true;

@@ -26,6 +26,7 @@ export const INVENTORY_ERROR_CODES = [
     "cleanup_uncertain",
     "invalid_node_id",
     "invalid_pagination",
+    "invalid_request",
     "node_not_found",
     "forbidden",
     "controller_unavailable",
@@ -40,26 +41,21 @@ export function inventoryErrorCode(error: unknown): InventoryErrorCode {
     return INVENTORY_ERROR_CODES.find((code) => code === value) ?? "invalid_response";
 }
 
-function record(value: unknown, fields: string[]): Record<string, unknown> {
+/** An object with exactly `fields` as its keys, or `invalid_response`. */
+export function exactRecord(value: unknown, fields: string[]): Record<string, unknown> {
     if (typeof value !== "object" || value === null || Array.isArray(value)) throw "invalid_response";
     const data = value as Record<string, unknown>;
     if (Object.keys(data).sort().join("|") !== fields.slice().sort().join("|")) throw "invalid_response";
     return data;
 }
 
-export function configuredNodeFromIpc(value: unknown): string | null {
-    if (value === null) return null;
-    if (typeof value !== "string" || !/^(?!\.{1,2}$)[A-Za-z0-9._-]{1,128}$/.test(value)) throw "invalid_response";
-    return value;
-}
-
 export function containerPageFromIpc(value: unknown): ContainerPage {
-    const page = record(value, ["items", "nextCursor"]);
+    const page = exactRecord(value, ["items", "nextCursor"]);
     if (!Array.isArray(page.items) || page.items.length > 100 || (page.nextCursor !== null && typeof page.nextCursor !== "string")) {
         throw "invalid_response";
     }
     const items = page.items.map((value): ContainerItem => {
-        const item = record(value, ["containerId", "displayName", "imageReference", "state", "status", "createdAt", "nodeId"]);
+        const item = exactRecord(value, ["containerId", "displayName", "imageReference", "state", "status", "createdAt", "nodeId"]);
         if (
             typeof item.containerId !== "string" ||
             typeof item.displayName !== "string" ||

@@ -22,6 +22,8 @@ export KONTAINER_NODE_RPC_BINDING="127.0.0.1:$RPC_PORT"
 export KONTAINER_NODE_RPC_TLS_CERTIFICATE_PATH="$ROOT/dev/pki/node-$NODE.pem"
 export KONTAINER_NODE_RPC_TLS_PRIVATE_KEY_PATH="$ROOT/dev/pki/node-$NODE-key.pem"
 export KONTAINER_NODE_RPC_TLS_CLIENT_CA_PATH="$ROOT/dev/pki/agent-ca.pem"
+export KONTAINER_CONTROLLER_RPC_ENDPOINT="${KONTAINER_CONTROLLER_RPC_ENDPOINT:-https://127.0.0.1:50051}"
+export KONTAINER_CONTROLLER_SERVER_NAME="${KONTAINER_CONTROLLER_SERVER_NAME:-controller.kontainer.internal}"
 export RUST_LOG="${RUST_LOG:-info}"
 
 cargo build --quiet --manifest-path "$ROOT/server/Cargo.toml" -p kontainer-node-agent

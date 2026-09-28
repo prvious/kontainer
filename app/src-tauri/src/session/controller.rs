@@ -10,9 +10,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use kontainer_native_client::{
-    AccessCredential, AccountFieldErrors, ContainerPage, ContainerPageRequest, NativeClient,
-    NativeClientConfig, NativeClientError, NodeId, PasswordSession, ProbeFailure,
-    RefreshCredential, Traced,
+    AccessCredential, AccountFieldErrors, ContainerPage, ContainerPageRequest, ControllerSettings,
+    NativeClient, NativeClientConfig, NativeClientError, NodeId, NodeList, PasswordSession,
+    ProbeFailure, RefreshCredential, SampleSeries, Traced,
 };
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -85,11 +85,34 @@ pub(crate) trait Controller: Send + Sync + 'static {
         cancellation: &'a CancellationToken,
     ) -> ControllerFuture<'a, Result<(), SessionError>>;
 
-    fn discover_node<'a>(
+    fn list_nodes<'a>(
         &'a self,
         access: &'a AccessCredential,
         cancellation: &'a CancellationToken,
-    ) -> ControllerFuture<'a, Result<Option<NodeId>, NativeClientError>>;
+    ) -> ControllerFuture<'a, Result<NodeList, NativeClientError>>;
+
+    /// `node_id` `None` reads the cluster series.
+    fn samples<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        node_id: Option<&'a NodeId>,
+        window: &'a str,
+        bucket: &'a str,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<SampleSeries, NativeClientError>>;
+
+    fn get_settings<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ControllerSettings, NativeClientError>>;
+
+    fn update_settings<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        metrics_retention_days: u32,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ControllerSettings, NativeClientError>>;
 
     fn list_containers<'a>(
         &'a self,
@@ -231,12 +254,56 @@ impl Controller for NativeController {
         })
     }
 
-    fn discover_node<'a>(
+    fn list_nodes<'a>(
         &'a self,
         access: &'a AccessCredential,
         cancellation: &'a CancellationToken,
-    ) -> ControllerFuture<'a, Result<Option<NodeId>, NativeClientError>> {
-        Box::pin(self.client.discover_node(access, cancellation))
+    ) -> ControllerFuture<'a, Result<NodeList, NativeClientError>> {
+        Box::pin(self.client.list_nodes(access, cancellation))
+    }
+
+    fn samples<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        node_id: Option<&'a NodeId>,
+        window: &'a str,
+        bucket: &'a str,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<SampleSeries, NativeClientError>> {
+        Box::pin(async move {
+            match node_id {
+                Some(node_id) => {
+                    self.client
+                        .node_samples(access, node_id, window, bucket, cancellation)
+                        .await
+                }
+                None => {
+                    self.client
+                        .cluster_samples(access, window, bucket, cancellation)
+                        .await
+                }
+            }
+        })
+    }
+
+    fn get_settings<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ControllerSettings, NativeClientError>> {
+        Box::pin(self.client.get_settings(access, cancellation))
+    }
+
+    fn update_settings<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        metrics_retention_days: u32,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ControllerSettings, NativeClientError>> {
+        Box::pin(
+            self.client
+                .update_settings(access, metrics_retention_days, cancellation),
+        )
     }
 
     fn list_containers<'a>(

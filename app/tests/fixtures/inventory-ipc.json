@@ -1,6 +1,5 @@
 {
-    "commands": ["get_configured_node", "list_container_inventory"],
-    "configuredNode": "node-1",
+    "commands": ["list_container_inventory"],
     "containerPage": {
         "items": [
             {
@@ -24,6 +23,7 @@
         "cleanup_uncertain",
         "invalid_node_id",
         "invalid_pagination",
+        "invalid_request",
         "node_not_found",
         "forbidden",
         "controller_unavailable",

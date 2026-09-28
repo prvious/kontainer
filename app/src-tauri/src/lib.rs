@@ -28,8 +28,12 @@ pub fn run() {
             actions::session::session_forget_connection::session_forget_connection,
             actions::session::connection_probe::connection_probe,
             actions::session::controller_health::controller_health,
-            actions::inventory::get_configured_node::get_configured_node,
             actions::inventory::list_container_inventory::list_container_inventory,
+            actions::nodes::list_nodes::list_nodes,
+            actions::nodes::get_cluster_samples::get_cluster_samples,
+            actions::nodes::get_node_samples::get_node_samples,
+            actions::settings::get_settings::get_settings,
+            actions::settings::update_settings::update_settings,
             actions::app::close_splashscreen::close_splashscreen,
             actions::app::load_app_settings::load_app_settings,
             actions::app::save_app_settings::save_app_settings

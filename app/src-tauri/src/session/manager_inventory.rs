@@ -1,4 +1,7 @@
-//! Authenticated, read-only inventory through the session's Rust-held access credential.
+//! Authenticated controller reads through the session's Rust-held access credential.
+//!
+//! Every call runs through [`SessionManager::authenticated`]: one attempt, and on a 401 one
+//! refresh-then-retry of the same call before the session is invalidated.
 
 use kontainer_native_client::{
     AccessCredential, ContainerPage, ContainerPageRequest, NativeClientError, NodeId,
@@ -8,7 +11,10 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use super::{ActiveSession, SessionManager};
-use crate::session::{controller::Controller, errors::SessionError};
+use crate::session::{
+    controller::{Controller, ControllerFuture},
+    errors::SessionError,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -21,6 +27,7 @@ pub(crate) enum InventoryError {
     CleanupUncertain,
     InvalidNodeId,
     InvalidPagination,
+    InvalidRequest,
     NodeNotFound,
     Forbidden,
     ControllerUnavailable,
@@ -40,6 +47,7 @@ impl InventoryError {
         Self::CleanupUncertain,
         Self::InvalidNodeId,
         Self::InvalidPagination,
+        Self::InvalidRequest,
         Self::NodeNotFound,
         Self::Forbidden,
         Self::ControllerUnavailable,
@@ -71,6 +79,7 @@ impl From<NativeClientError> for InventoryError {
         match error {
             NativeClientError::InvalidNodeId => Self::InvalidNodeId,
             NativeClientError::InvalidPagination => Self::InvalidPagination,
+            NativeClientError::InvalidRequest => Self::InvalidRequest,
             NativeClientError::Unauthorized => Self::ReloginRequired,
             NativeClientError::Forbidden => Self::Forbidden,
             NativeClientError::NotFound => Self::NodeNotFound,
@@ -126,19 +135,6 @@ impl From<ContainerPage> for ContainerPageView {
     }
 }
 
-enum ReadKind {
-    Discover,
-    Containers {
-        node: NodeId,
-        page: ContainerPageRequest,
-    },
-}
-
-enum ReadResult {
-    Node(Option<NodeId>),
-    Page(ContainerPage),
-}
-
 /// An in-flight read temporarily owns access without cloning it. Cancellation
 /// restores an accepted credential; after a 401 it is discarded before rotation.
 struct ReadCustody<'a> {
@@ -157,35 +153,7 @@ impl Drop for ReadCustody<'_> {
     }
 }
 
-async fn read_once(
-    controller: &dyn Controller,
-    access: &AccessCredential,
-    kind: &ReadKind,
-    cancellation: &CancellationToken,
-) -> Result<ReadResult, NativeClientError> {
-    match kind {
-        ReadKind::Discover => controller
-            .discover_node(access, cancellation)
-            .await
-            .map(ReadResult::Node),
-        ReadKind::Containers { node, page } => controller
-            .list_containers(access, node, page, cancellation)
-            .await
-            .map(ReadResult::Page),
-    }
-}
-
 impl SessionManager {
-    pub(crate) async fn configured_node(
-        &self,
-        profile_id: Uuid,
-    ) -> Result<Option<String>, InventoryError> {
-        match self.read_inventory(profile_id, ReadKind::Discover).await? {
-            ReadResult::Node(node) => Ok(node.map(|node| node.to_string())),
-            ReadResult::Page(_) => unreachable!("discovery read returned a page"),
-        }
-    }
-
     pub(crate) async fn container_inventory(
         &self,
         profile_id: Uuid,
@@ -195,20 +163,35 @@ impl SessionManager {
     ) -> Result<ContainerPageView, InventoryError> {
         let node = NodeId::parse(node_id)?;
         let page = ContainerPageRequest { limit, cursor };
-        match self
-            .read_inventory(profile_id, ReadKind::Containers { node, page })
-            .await?
-        {
-            ReadResult::Page(page) => Ok(page.into()),
-            ReadResult::Node(_) => unreachable!("container read returned a node"),
-        }
+        let page: ContainerPage = self
+            .authenticated(
+                profile_id,
+                &(node, page),
+                |controller, access, cancellation, (node, page)| {
+                    controller.list_containers(access, node, page, cancellation)
+                },
+            )
+            .await?;
+        Ok(page.into())
     }
 
-    async fn read_inventory(
+    /// Run `call` with the active profile's access credential, rotating once on a 401. The call
+    /// borrows its inputs from `arguments` so the same call can repeat with the successor.
+    pub(crate) async fn authenticated<A, T, F>(
         &self,
         profile_id: Uuid,
-        kind: ReadKind,
-    ) -> Result<ReadResult, InventoryError> {
+        arguments: &A,
+        call: F,
+    ) -> Result<T, InventoryError>
+    where
+        A: ?Sized + Sync,
+        F: for<'a> Fn(
+            &'a dyn Controller,
+            &'a AccessCredential,
+            &'a CancellationToken,
+            &'a A,
+        ) -> ControllerFuture<'a, Result<T, NativeClientError>>,
+    {
         let _ops = self.ops.lock().await;
         if let Some(error) = self.custody_error() {
             return Err(error.into());
@@ -228,7 +211,13 @@ impl SessionManager {
             .for_origin(&active.view.origin)
             .map_err(InventoryError::from)?;
         let cancellation = CancellationToken::new();
-        let first = read_once(controller.as_ref(), &active.access, &kind, &cancellation).await;
+        let first = call(
+            controller.as_ref(),
+            &active.access,
+            &cancellation,
+            arguments,
+        )
+        .await;
         if !matches!(&first, Err(NativeClientError::Unauthorized)) {
             return first.map_err(InventoryError::from);
         }
@@ -249,7 +238,13 @@ impl SessionManager {
             .active
             .as_ref()
             .ok_or(InventoryError::LocalStateFailed)?;
-        let second = read_once(controller.as_ref(), &active.access, &kind, &cancellation).await;
+        let second = call(
+            controller.as_ref(),
+            &active.access,
+            &cancellation,
+            arguments,
+        )
+        .await;
         if !matches!(&second, Err(NativeClientError::Unauthorized)) {
             return second.map_err(InventoryError::from);
         }

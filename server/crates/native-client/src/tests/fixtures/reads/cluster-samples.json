@@ -1,0 +1,12 @@
+{
+  "window": "5m",
+  "bucket": "60s",
+  "points": [
+    {"at": "2026-09-28T11:56:00.000Z", "cpuPercent": null, "memoryUsedBytes": null, "diskUsedBytes": null, "containersRunning": null, "netRxBytesPerSec": null, "netTxBytesPerSec": null, "nodes": 0},
+    {"at": "2026-09-28T11:57:00.000Z", "cpuPercent": 30.0, "memoryUsedBytes": 1200.0, "diskUsedBytes": 2000.0, "containersRunning": 4.0, "netRxBytesPerSec": 20.0, "netTxBytesPerSec": null, "nodes": 2},
+    {"at": "2026-09-28T11:58:00.000Z", "cpuPercent": 31.5, "memoryUsedBytes": 1250.0, "diskUsedBytes": 2000.0, "containersRunning": 4.0, "netRxBytesPerSec": 25.0, "netTxBytesPerSec": 3.0, "nodes": 3},
+    {"at": "2026-09-28T11:59:00.000Z", "cpuPercent": 29.0, "memoryUsedBytes": 1190.0, "diskUsedBytes": 2000.0, "containersRunning": 4.0, "netRxBytesPerSec": 18.0, "netTxBytesPerSec": 2.0, "nodes": 3},
+    {"at": "2026-09-28T12:00:00.000Z", "cpuPercent": 28.0, "memoryUsedBytes": 1180.0, "diskUsedBytes": 2000.0, "containersRunning": 4.0, "netRxBytesPerSec": 17.0, "netTxBytesPerSec": 2.0, "nodes": 3}
+  ],
+  "snapshotAt": "2026-09-28T12:00:30.000Z"
+}

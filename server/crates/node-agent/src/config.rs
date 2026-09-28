@@ -37,14 +37,22 @@ pub struct AgentConfig {
     pub shutdown_grace: ShutdownGrace,
     pub environment: AgentEnvironment,
     pub docker_host: DockerHost,
+    /// `https://host:port` of the controller's agent RPC listener.
+    pub controller_rpc_endpoint: String,
+    /// DNS name the controller certificate must carry.
+    pub controller_server_name: String,
+    /// `host:port` the controller dials for `NodeAgent`; defaults to the binding.
+    pub advertise_address: String,
 }
 
 impl AgentConfig {
     pub fn from_environment() -> Result<Self, Box<dyn Error + Send + Sync>> {
+        let binding: SocketAddr =
+            environment_variable("KONTAINER_NODE_RPC_BINDING", "0.0.0.0:50052").parse()?;
         let config = Self {
             node_id: required_environment_variable("KONTAINER_NODE_ID")?,
             cluster_id: required_environment_variable("KONTAINER_CLUSTER_ID")?,
-            binding: environment_variable("KONTAINER_NODE_RPC_BINDING", "0.0.0.0:50052").parse()?,
+            binding,
             tls_files: MutualTlsIdentityFiles::new(
                 required_environment_variable("KONTAINER_NODE_RPC_TLS_CERTIFICATE_PATH")?,
                 required_environment_variable("KONTAINER_NODE_RPC_TLS_PRIVATE_KEY_PATH")?,
@@ -61,6 +69,19 @@ impl AgentConfig {
                     .map_err(|error| format!("KONTAINER_DOCKER_HOST: {error}"))?,
                 _ => DockerHost::default(),
             },
+            controller_rpc_endpoint: required_environment_variable(
+                "KONTAINER_CONTROLLER_RPC_ENDPOINT",
+            )?,
+            controller_server_name: required_environment_variable(
+                "KONTAINER_CONTROLLER_SERVER_NAME",
+            )?,
+            advertise_address: match env::var("KONTAINER_NODE_ADVERTISE_ADDRESS") {
+                Ok(value) if !value.trim().is_empty() => value.trim().to_owned(),
+                _ if binding.ip().is_unspecified() => {
+                    return Err("KONTAINER_NODE_ADVERTISE_ADDRESS is required when KONTAINER_NODE_RPC_BINDING listens on every address".into());
+                }
+                _ => binding.to_string(),
+            },
         };
         config.validate()?;
         Ok(config)
@@ -73,6 +94,18 @@ impl AgentConfig {
                     .into(),
             );
         }
+        let Some(authority) = self.controller_rpc_endpoint.strip_prefix("https://") else {
+            return Err("KONTAINER_CONTROLLER_RPC_ENDPOINT must be an https:// URL".into());
+        };
+        if !valid_host_port(authority.trim_end_matches('/')) {
+            return Err("KONTAINER_CONTROLLER_RPC_ENDPOINT must be https://host:port".into());
+        }
+        if !valid_dns_name(&self.controller_server_name) {
+            return Err("KONTAINER_CONTROLLER_SERVER_NAME must be a DNS name".into());
+        }
+        if !valid_host_port(&self.advertise_address) {
+            return Err("KONTAINER_NODE_ADVERTISE_ADDRESS must be host:port".into());
+        }
         for (name, value) in [
             ("KONTAINER_NODE_ID", self.node_id.as_str()),
             ("KONTAINER_CLUSTER_ID", self.cluster_id.as_str()),
@@ -83,6 +116,34 @@ impl AgentConfig {
         }
         Ok(())
     }
+}
+
+/// `host:port` with a non-empty host of DNS or IP characters and a non-zero port.
+fn valid_host_port(value: &str) -> bool {
+    let Some((host, port)) = value.rsplit_once(':') else {
+        return false;
+    };
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    !host.is_empty()
+        && host.len() <= 253
+        && host
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || ".-:".contains(character))
+        && port.parse::<u16>().is_ok_and(|port| port > 0)
+}
+
+fn valid_dns_name(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 253
+        && value.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label
+                    .chars()
+                    .all(|character| character.is_ascii_alphanumeric() || character == '-')
+        })
 }
 
 fn shutdown_grace_from_environment_with(
@@ -156,6 +217,9 @@ mod tests {
             shutdown_grace: ShutdownGrace::default(),
             environment: AgentEnvironment::Production,
             docker_host: DockerHost::default(),
+            controller_rpc_endpoint: "https://127.0.0.1:50051".to_owned(),
+            controller_server_name: "controller.kontainer.internal".to_owned(),
+            advertise_address: "127.0.0.1:50052".to_owned(),
         };
         assert!(config.validate().is_ok());
 
@@ -195,6 +259,9 @@ mod tests {
             shutdown_grace: ShutdownGrace::default(),
             environment: AgentEnvironment::Production,
             docker_host: "tcp://localhost:2375".parse().unwrap(),
+            controller_rpc_endpoint: "https://127.0.0.1:50051".to_owned(),
+            controller_server_name: "controller.kontainer.internal".to_owned(),
+            advertise_address: "127.0.0.1:50052".to_owned(),
         };
         assert_eq!(
             config.validate().unwrap_err().to_string(),
@@ -207,6 +274,48 @@ mod tests {
         config.environment = AgentEnvironment::Production;
         config.docker_host = "unix:///var/run/docker.sock".parse().unwrap();
         assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn controller_endpoint_server_name_and_advertise_address_are_validated() {
+        let valid = AgentConfig {
+            node_id: "manager".to_owned(),
+            cluster_id: "development".to_owned(),
+            binding: "127.0.0.1:50052".parse().unwrap(),
+            tls_files: MutualTlsIdentityFiles::new("cert.pem", "key.pem", "ca.pem"),
+            shutdown_grace: ShutdownGrace::default(),
+            environment: AgentEnvironment::Production,
+            docker_host: DockerHost::default(),
+            controller_rpc_endpoint: "https://controller.example:50051".to_owned(),
+            controller_server_name: "controller.kontainer.internal".to_owned(),
+            advertise_address: "10.0.0.5:50052".to_owned(),
+        };
+        assert!(valid.validate().is_ok());
+
+        for (endpoint, message) in [
+            ("http://127.0.0.1:50051", "must be an https:// URL"),
+            ("127.0.0.1:50051", "must be an https:// URL"),
+            ("https://127.0.0.1", "must be https://host:port"),
+            ("https://:50051", "must be https://host:port"),
+            ("https://host:0", "must be https://host:port"),
+        ] {
+            let mut config = valid.clone();
+            config.controller_rpc_endpoint = endpoint.to_owned();
+            assert!(
+                config.validate().unwrap_err().to_string().contains(message),
+                "{endpoint}"
+            );
+        }
+        for name in ["", "under_score.internal", "-leading.internal", "a..b"] {
+            let mut config = valid.clone();
+            config.controller_server_name = name.to_owned();
+            assert!(config.validate().is_err(), "{name}");
+        }
+        for address in ["", "10.0.0.5", "host:port", "bad host:1"] {
+            let mut config = valid.clone();
+            config.advertise_address = address.to_owned();
+            assert!(config.validate().is_err(), "{address}");
+        }
     }
 
     #[test]

@@ -6,6 +6,7 @@ pub mod nodes;
 pub mod operations;
 pub mod password_auth;
 pub mod sessions;
+pub mod settings;
 pub mod status;
 
 use loco_rs::controller::Routes;
@@ -33,6 +34,7 @@ pub fn protected_application_routes() -> Vec<Routes> {
         account::routes(),
         operations::routes(),
         nodes::routes(),
+        settings::routes(),
         containers::routes(),
     ]
 }

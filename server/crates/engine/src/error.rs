@@ -25,6 +25,8 @@ pub enum EngineOperation {
     ReadSystemInfo,
     Describe,
     ListContainers,
+    ReadContainerStats,
+    ReadDiskUsage,
 }
 
 impl fmt::Display for EngineOperation {
@@ -37,6 +39,8 @@ impl fmt::Display for EngineOperation {
             Self::ReadSystemInfo => "read system information",
             Self::Describe => "describe",
             Self::ListContainers => "list containers",
+            Self::ReadContainerStats => "read container stats",
+            Self::ReadDiskUsage => "read disk usage",
         };
         formatter.write_str(name)
     }

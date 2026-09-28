@@ -8,6 +8,7 @@ mod container;
 mod error;
 mod host;
 mod local;
+mod node;
 
 pub use capability::{
     CapabilityStatus, EngineAccessScope, EngineApiVersion, EngineApiVersionParseError,
@@ -22,6 +23,7 @@ pub use container::{
 pub use error::{EngineError, EngineErrorKind, EngineOperation};
 pub use host::{DEFAULT_DOCKER_SOCKET, DockerHost, DockerHostParseError};
 pub use local::{LocalDockerEngine, LocalEngineOptions};
+pub use node::{ContainerStats, CpuCounters, DiskUsage, NodeInfo, cpu_percent, memory_used};
 
 #[async_trait]
 pub trait ContainerEngine: Send + Sync {
@@ -45,6 +47,48 @@ pub trait ContainerEngine: Send + Sync {
         Err(EngineError::new(
             EngineErrorKind::UnsupportedCapability,
             EngineOperation::ListContainers,
+        ))
+    }
+
+    /// `docker info` for check-in.
+    async fn node_info(&self, _cancellation: &CancellationToken) -> Result<NodeInfo, EngineError> {
+        Err(EngineError::new(
+            EngineErrorKind::UnsupportedCapability,
+            EngineOperation::ReadSystemInfo,
+        ))
+    }
+
+    /// Ids of every running container.
+    async fn running_container_ids(
+        &self,
+        _cancellation: &CancellationToken,
+    ) -> Result<Vec<String>, EngineError> {
+        Err(EngineError::new(
+            EngineErrorKind::UnsupportedCapability,
+            EngineOperation::ListContainers,
+        ))
+    }
+
+    /// One stats reading (two samples a second apart, taken by the daemon).
+    async fn container_stats(
+        &self,
+        _container_id: &str,
+        _cancellation: &CancellationToken,
+    ) -> Result<ContainerStats, EngineError> {
+        Err(EngineError::new(
+            EngineErrorKind::UnsupportedCapability,
+            EngineOperation::ReadContainerStats,
+        ))
+    }
+
+    /// `docker system df`; expensive, so callers sample it sparingly.
+    async fn disk_usage(
+        &self,
+        _cancellation: &CancellationToken,
+    ) -> Result<DiskUsage, EngineError> {
+        Err(EngineError::new(
+            EngineErrorKind::UnsupportedCapability,
+            EngineOperation::ReadDiskUsage,
         ))
     }
 }

@@ -1,10 +1,11 @@
 #![forbid(unsafe_code)]
 
-use std::{env, error::Error, ffi::OsString, sync::Arc};
+use std::{env, error::Error, ffi::OsString, sync::Arc, time::SystemTime};
 
 use kontainer_engine::{ContainerEngine, LocalDockerEngine, LocalEngineOptions};
 use kontainer_node_agent::{
-    AgentConfig, AgentShutdown, NodeAgentService, serve_node_agent_rpc, supervise_node_agent_server,
+    AgentConfig, AgentFacts, AgentShutdown, CheckInTiming, ContainerStatsCache, MtlsControllerLink,
+    NodeAgentService, NodeSampler, run_check_in, serve_node_agent_rpc, supervise_node_agent_server,
 };
 use tokio::net::TcpListener;
 use tokio_util::task::TaskTracker;
@@ -29,7 +30,14 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .json()
         .init();
 
+    let started_at = SystemTime::now();
     let config = AgentConfig::from_environment()?;
+    let controller = Arc::new(MtlsControllerLink::new(
+        &config.controller_rpc_endpoint,
+        &config.controller_server_name,
+        &config.cluster_id,
+        &config.tls_files,
+    )?);
     let listener = TcpListener::bind(config.binding).await?;
     let shutdown = AgentShutdown::new(config.shutdown_grace);
     let connections = TaskTracker::new();
@@ -47,7 +55,24 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
             tracing::warn!(docker.host = %config.docker_host, "docker ping failed");
         }
     }
-    let service = NodeAgentService::new(config.node_id, engine, shutdown.force());
+    let stats = ContainerStatsCache::default();
+    let facts = AgentFacts {
+        node_id: config.node_id.clone(),
+        advertise_address: config.advertise_address.clone(),
+        agent_started_at_unix_ms: started_at
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX))
+            .unwrap_or(0),
+    };
+    // Tracked with in-flight requests: draining cancels the loop and the grace deadline joins it.
+    requests.spawn(run_check_in(
+        controller,
+        NodeSampler::new(engine.clone(), stats.clone()),
+        facts,
+        CheckInTiming::default(),
+        shutdown.draining(),
+    ));
+    let service = NodeAgentService::new(config.node_id, engine, shutdown.force()).with_stats(stats);
     let server = serve_node_agent_rpc(
         listener,
         config.cluster_id,

@@ -13,11 +13,14 @@ use tokio_util::sync::CancellationToken;
 use tonic::{Request, Response, Status};
 use tracing::warn;
 
+use crate::sampling::ContainerStatsCache;
+
 #[derive(Clone)]
 pub struct NodeAgentService {
     node_id: String,
     engine: Arc<dyn ContainerEngine>,
     cancellation: CancellationToken,
+    stats: ContainerStatsCache,
 }
 
 impl NodeAgentService {
@@ -31,7 +34,15 @@ impl NodeAgentService {
             node_id: node_id.into(),
             engine,
             cancellation,
+            stats: ContainerStatsCache::default(),
         }
+    }
+
+    /// Serve container CPU and memory from the sampler's last tick.
+    #[must_use]
+    pub fn with_stats(mut self, stats: ContainerStatsCache) -> Self {
+        self.stats = stats;
+        self
     }
 }
 
@@ -104,14 +115,20 @@ impl NodeAgent for NodeAgentService {
             containers: page
                 .containers
                 .into_iter()
-                .map(|container| ProtoContainerSummary {
-                    container_id: container.container_id,
-                    display_name: container.display_name,
-                    image_reference: container.image_reference,
-                    state: domain_state_to_proto(container.state) as i32,
-                    status: container.status,
-                    created_at_unix_seconds: container.created_at_seconds,
-                    node_id: node_id.clone(),
+                .map(|container| {
+                    let stats = self.stats.get(&container.container_id).unwrap_or_default();
+                    ProtoContainerSummary {
+                        state: domain_state_to_proto(container.state) as i32,
+                        container_id: container.container_id,
+                        display_name: container.display_name,
+                        image_reference: container.image_reference,
+                        status: container.status,
+                        created_at_unix_seconds: container.created_at_seconds,
+                        node_id: node_id.clone(),
+                        cpu_percent: stats.cpu_percent,
+                        memory_used_bytes: stats.memory_used_bytes,
+                        memory_limit_bytes: stats.memory_limit_bytes,
+                    }
                 })
                 .collect(),
             next_page_token: page.next_page_token.unwrap_or_default(),

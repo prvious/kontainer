@@ -18,8 +18,8 @@ use kontainer_agent_proto::{
         controller_intake_client::ControllerIntakeClient, node_agent_client::NodeAgentClient,
     },
 };
-use kontainer_controller::rpc::serve_controller_rpc;
 use kontainer_controller::rpc::{AgentClientError, NodeAgentClientConfig};
+use kontainer_controller::rpc::{ControllerIntakeService, serve_controller_rpc};
 use kontainer_controller::server::{
     BoundAgentRpcServer, BoundHttpServer, ControllerShutdown, HttpTransport,
     supervise_controller_servers,
@@ -860,6 +860,7 @@ async fn valid_controller_and_agent_complete_both_versioned_rpc_exchanges() {
             agent_id: NODE_ID.to_owned(),
             agent_version: "0.1.0-test".to_owned(),
             architecture: std::env::consts::ARCH.to_owned(),
+            ..CheckInRequest::default()
         })
         .await
         .unwrap()
@@ -1290,6 +1291,7 @@ async fn shared_shutdown_joins_controller_http_and_rpc_tasks() {
                 listener: rpc_listener,
                 cluster_id: CLUSTER_ID.to_owned(),
                 tls_files,
+                intake: ControllerIntakeService::default(),
             }),
             task_cancellation,
         )
@@ -1360,6 +1362,7 @@ async fn runtime_http_task_failure_drains_and_joins_the_rpc_sibling() {
                 listener: rpc_listener,
                 cluster_id: CLUSTER_ID.to_owned(),
                 tls_files,
+                intake: ControllerIntakeService::default(),
             }),
             task_shutdown,
         )
@@ -1436,6 +1439,7 @@ async fn rpc_startup_failure_cancels_and_joins_the_http_server() {
                 listener: rpc_listener,
                 cluster_id: CLUSTER_ID.to_owned(),
                 tls_files: MutualTlsIdentityFiles::new(&missing_file, &missing_file, &missing_file),
+                intake: ControllerIntakeService::default(),
             }),
             cancellation.clone(),
         ),
@@ -1478,6 +1482,7 @@ async fn invalid_tls_fails_before_rpc_polling_or_http_admission() {
             rpc_listener,
             CLUSTER_ID.to_owned(),
             files.clone(),
+            ControllerIntakeService::default(),
             CancellationToken::new(),
             CancellationToken::new(),
             TaskTracker::new(),
@@ -1543,6 +1548,7 @@ async fn invalid_tls_fails_before_rpc_polling_or_http_admission() {
                     listener: rpc_listener,
                     cluster_id: CLUSTER_ID.to_owned(),
                     tls_files: files,
+                    intake: ControllerIntakeService::default(),
                 }),
                 cancellation.clone(),
             ),
@@ -1569,6 +1575,7 @@ async fn start_controller(pki: &TestPki) -> RunningServer {
             listener,
             CLUSTER_ID.to_owned(),
             tls_files,
+            ControllerIntakeService::default(),
             task_cancellation.clone(),
             task_cancellation,
             TaskTracker::new(),
@@ -1710,5 +1717,6 @@ fn check_in_request(agent_id: &str) -> CheckInRequest {
         agent_id: agent_id.to_owned(),
         agent_version: "0.1.0-test".to_owned(),
         architecture: std::env::consts::ARCH.to_owned(),
+        ..CheckInRequest::default()
     }
 }

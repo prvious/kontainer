@@ -2,9 +2,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke } from "@tauri-apps/api/core";
 import { useAuth } from "@/hooks/use-auth";
 import { useQueriesPaused } from "@/hooks/use-queries-paused";
-import { configuredNodeFromIpc, containerPageFromIpc, inventoryErrorCode, type InventoryErrorCode } from "@/types/inventory";
+import { nodesQueries } from "@/hooks/use-nodes";
+import { containerPageFromIpc, inventoryErrorCode, type InventoryErrorCode } from "@/types/inventory";
 
-export const configuredNodeKey = (profileId: string | null) => ["configured-node", profileId] as const;
 export const containerInventoryKey = (profileId: string | null, nodeId: string | null, cursor: string | null, limit: number) =>
     ["container-inventory", profileId, nodeId, cursor, limit] as const;
 
@@ -12,24 +12,6 @@ function reportError(profileId: string, error: unknown, report: ((profileId: str
     const code = inventoryErrorCode(error);
     report?.(profileId, code);
     return code;
-}
-
-export function useConfiguredNode(profileId: string | null) {
-    const { reportInventoryCustodyError } = useAuth();
-    const paused = useQueriesPaused();
-    return useQuery({
-        queryKey: configuredNodeKey(profileId),
-        enabled: profileId !== null && !paused,
-        retry: false,
-        queryFn: async () => {
-            if (!profileId) throw "unauthenticated";
-            try {
-                return configuredNodeFromIpc(await invoke<unknown>("get_configured_node", { profileId }));
-            } catch (error) {
-                throw reportError(profileId, error, reportInventoryCustodyError);
-            }
-        },
-    });
 }
 
 export function useContainerInventory(profileId: string, nodeId: string, cursor: string | null, limit: number) {
@@ -45,7 +27,7 @@ export function useContainerInventory(profileId: string, nodeId: string, cursor:
                 return containerPageFromIpc(await invoke<unknown>("list_container_inventory", { profileId, nodeId, cursor, limit }));
             } catch (error) {
                 const code = reportError(profileId, error, reportInventoryCustodyError);
-                if (code === "node_not_found") await queryClient.invalidateQueries({ queryKey: configuredNodeKey(profileId) });
+                if (code === "node_not_found") await queryClient.invalidateQueries({ queryKey: nodesQueries.all(profileId) });
                 throw code;
             }
         },

@@ -113,6 +113,16 @@ impl AuthenticatedPeerIdentity {
         })
     }
 
+    /// Test-only node agent identity, for the same reason as [`Self::new_for_tests`].
+    #[doc(hidden)]
+    #[must_use]
+    pub fn agent_for_tests(node_id: &str) -> Self {
+        Self(WorkloadIdentity::NodeAgent {
+            cluster_id: "test-cluster".to_owned(),
+            node_id: node_id.to_owned(),
+        })
+    }
+
     #[must_use]
     pub fn workload(&self) -> &WorkloadIdentity {
         &self.0

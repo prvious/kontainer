@@ -71,7 +71,11 @@ impl Modify for AccessSessionSecurity {
         show,
         deep::show,
         super::operations::show,
-        super::nodes::configured,
+        super::nodes::index,
+        super::nodes::samples,
+        super::nodes::cluster_samples,
+        super::settings::show,
+        super::settings::update,
         super::containers::index,
         super::sessions::refresh,
         super::sessions::logout_current,
@@ -92,14 +96,21 @@ impl Modify for AccessSessionSecurity {
         deep::BuildResponse,
         deep::MigrationState,
         deep::DatabaseState,
-        deep::AgentRpcState,
         OperationResponse,
         OperationStateResponse,
         ContainerPageResponse,
         ContainerItemResponse,
         ContainerStateResponse,
         ContainerErrorResponse,
-        super::nodes::ConfiguredNodeResponse,
+        super::nodes::NodeListResponse,
+        super::nodes::NodeResponse,
+        super::nodes::NodeStatusResponse,
+        super::nodes::NodeSampleResponse,
+        super::nodes::SampleSeriesResponse,
+        super::nodes::SamplePointResponse,
+        super::nodes::NodeErrorResponse,
+        super::settings::SettingsResponse,
+        super::settings::SettingsPatchRequest,
         super::sessions::RefreshRequest,
         super::sessions::SessionTokenResponse,
         super::password_auth::BootstrapResponse,
@@ -214,10 +225,16 @@ mod tests {
             .collect();
         assert_eq!(
             fields,
-            BTreeSet::from(["build", "migration", "database", "agentRpc"])
+            BTreeSet::from([
+                "build",
+                "migration",
+                "database",
+                "nodesOnline",
+                "nodesTotal"
+            ])
         );
         assert_eq!(response["additionalProperties"], false);
-        assert_eq!(response["required"].as_array().unwrap().len(), 4);
+        assert_eq!(response["required"].as_array().unwrap().len(), 5);
         let build = &schemas["BuildResponse"];
         assert_eq!(build["additionalProperties"], false);
         assert_eq!(build["properties"].as_object().unwrap().len(), 1);
@@ -230,29 +247,39 @@ mod tests {
             schemas["DatabaseState"]["enum"],
             serde_json::json!(["reachable", "unreachable", "timeout"])
         );
-        assert_eq!(
-            schemas["AgentRpcState"]["enum"],
-            serde_json::json!(["up", "down", "timeout"])
-        );
     }
 
     #[test]
-    fn configured_node_openapi_has_one_closed_field() {
+    fn membership_metrics_and_settings_routes_are_documented() {
         let document = serde_json::to_value(ApiDoc::openapi()).unwrap();
-        let route = &document["paths"]["/api/v1/nodes/configured"]["get"];
-        assert_eq!(route["operationId"], "configured_node");
+        for (path, method, operation) in [
+            ("/api/v1/nodes", "get", "list_nodes"),
+            ("/api/v1/nodes/{nodeId}/samples", "get", "node_samples"),
+            ("/api/v1/cluster/samples", "get", "cluster_samples"),
+            ("/api/v1/settings", "get", "get_settings"),
+            ("/api/v1/settings", "patch", "update_settings"),
+        ] {
+            let route = &document["paths"][path][method];
+            assert_eq!(route["operationId"], operation, "{path}");
+            assert_eq!(
+                route["security"],
+                serde_json::json!([{"access_session": []}])
+            );
+            assert!(route["responses"]["401"].is_object(), "{path}");
+        }
+        assert!(document["paths"]["/api/v1/nodes/configured"].is_null());
+        let schemas = &document["components"]["schemas"];
         assert_eq!(
-            route["security"],
-            serde_json::json!([{"access_session": []}])
+            schemas["NodeStatusResponse"]["enum"],
+            serde_json::json!(["online", "degraded", "offline"])
         );
-        assert!(route["responses"]["200"].is_object());
-        assert!(route["responses"]["401"].is_object());
-        assert!(route["responses"]["503"].is_object());
-        let response = &document["components"]["schemas"]["ConfiguredNodeResponse"];
-        assert_eq!(response["additionalProperties"], false);
-        assert_eq!(response["properties"].as_object().unwrap().len(), 1);
-        assert!(response["properties"]["nodeId"].is_object());
-        assert_eq!(response["required"], serde_json::json!(["nodeId"]));
+        let point = schemas["SamplePointResponse"]["required"]
+            .as_array()
+            .unwrap();
+        assert!(
+            point.contains(&serde_json::json!("cpuPercent")),
+            "nullable, not optional"
+        );
     }
 
     #[test]

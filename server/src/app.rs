@@ -82,6 +82,7 @@ impl Hooks for App {
 
     fn register_tasks(tasks: &mut Tasks) {
         tasks.register(crate::tasks::reset_password::ResetPassword);
+        tasks.register(crate::tasks::prune_samples::PruneSamples);
     }
 
     async fn truncate(_ctx: &AppContext) -> Result<()> {

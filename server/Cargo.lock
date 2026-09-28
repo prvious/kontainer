@@ -2709,6 +2709,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bollard",
+ "futures-util",
  "tokio",
  "tokio-util",
 ]
@@ -2743,6 +2744,7 @@ name = "kontainer-node-agent"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "futures-util",
  "kontainer-agent-proto",
  "kontainer-engine",
  "kontainer-lifecycle",

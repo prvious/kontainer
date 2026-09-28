@@ -1,4 +1,4 @@
-//! Container inventory and operation polling contracts.
+//! Node membership, samples, settings, container inventory, and operation polling contracts.
 
 use std::collections::BTreeSet;
 
@@ -17,6 +17,7 @@ use crate::containers::{
 };
 use crate::credentials::AccessCredential;
 use crate::error::NativeClientError;
+use crate::nodes::{NodeListBody, NodeStatus, SampleSeriesBody};
 use crate::operations::{OperationBody, OperationState};
 
 const CONTAINER_PAGE: &str = include_str!("fixtures/reads/container-page.json");
@@ -25,6 +26,8 @@ const CONTAINER_PAGE_FOREIGN_NODE: &str =
     include_str!("fixtures/reads/container-page-foreign-node.json");
 const CONTAINER_PAGE_BAD_CURSOR: &str =
     include_str!("fixtures/reads/container-page-bad-cursor.json");
+const NODES: &str = include_str!("fixtures/reads/nodes.json");
+const CLUSTER_SAMPLES: &str = include_str!("fixtures/reads/cluster-samples.json");
 const OPERATION: &str = include_str!("fixtures/reads/operation.json");
 const OPERATION_UNCERTAIN: &str = include_str!("fixtures/reads/operation-uncertain.json");
 const OPERATION_INCONSISTENT: &str = include_str!("fixtures/reads/operation-inconsistent.json");
@@ -44,39 +47,38 @@ fn node() -> NodeId {
 }
 
 #[tokio::test]
-async fn configured_node_discovery_is_strict_and_authenticated() {
+async fn node_membership_is_strict_and_authenticated() {
     let server = TestServer::plain(vec![
-        respond(200, r#"{"nodeId":"node-1"}"#),
-        respond(200, r#"{"nodeId":null}"#),
+        respond(200, NODES),
         respond(401, r#"{"error":"unauthorized"}"#),
     ])
     .await;
     let client = plain_client(&server);
+    let list = client
+        .list_nodes(&access(), &CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(list.items.len(), 2);
+    let manager = &list.items[0];
+    assert_eq!(manager.id, NodeId::parse("manager").unwrap());
+    assert_eq!(manager.status, NodeStatus::Online);
+    assert_eq!(manager.cpu_cores, 4);
+    let sample = manager.latest_sample.unwrap();
+    assert_eq!(sample.cpu_percent, 12.5);
+    assert_eq!(sample.disk_used_bytes, Some(5 << 30));
+    assert_eq!(sample.net_tx_bytes_per_sec, None);
+    assert_eq!(list.items[1].status, NodeStatus::Offline);
+    assert!(list.items[1].latest_sample.is_none());
     assert_eq!(
         client
-            .discover_node(&access(), &CancellationToken::new())
-            .await
-            .unwrap(),
-        Some(node())
-    );
-    assert_eq!(
-        client
-            .discover_node(&access(), &CancellationToken::new())
-            .await
-            .unwrap(),
-        None
-    );
-    assert_eq!(
-        client
-            .discover_node(&access(), &CancellationToken::new())
+            .list_nodes(&access(), &CancellationToken::new())
             .await
             .err(),
         Some(NativeClientError::Unauthorized)
     );
-    assert_eq!(server.request_count(), 3);
     for request in server.requests() {
         assert_eq!(request.method, "GET");
-        assert_eq!(request.target, "/api/v1/nodes/configured");
+        assert_eq!(request.target, "/api/v1/nodes");
         assert!(
             request
                 .header("authorization")
@@ -86,20 +88,162 @@ async fn configured_node_discovery_is_strict_and_authenticated() {
         assert!(!request.target.contains(ACCESS_CANARY));
     }
 
-    for body in [
-        r#"{"nodeId":"node-1","secret":"canary"}"#,
-        r#"{"nodeId":"../bad"}"#,
-        r#"{}"#,
-    ] {
-        let server = TestServer::plain(vec![respond(200, body)]).await;
+    let valid: serde_json::Value = serde_json::from_str(NODES).unwrap();
+    let mut extra = valid.clone();
+    extra["items"][0]["secret"] = json!("canary");
+    let mut bad_id = valid.clone();
+    bad_id["items"][0]["id"] = json!("../bad");
+    let mut bad_time = valid.clone();
+    bad_time["items"][0]["lastCheckInAt"] = json!("2026-09-28T12:00:00Z");
+    let mut bad_status = valid.clone();
+    bad_status["items"][0]["status"] = json!("unknown");
+    let mut negative_cpu = valid;
+    negative_cpu["items"][0]["latestSample"]["cpuPercent"] = json!(-1.0);
+    for body in [extra, bad_id, bad_time, bad_status, negative_cpu] {
+        let server = TestServer::plain(vec![respond(200, &body.to_string())]).await;
         assert_eq!(
             plain_client(&server)
-                .discover_node(&access(), &CancellationToken::new())
+                .list_nodes(&access(), &CancellationToken::new())
                 .await
                 .err(),
-            Some(NativeClientError::InvalidResponse)
+            Some(NativeClientError::InvalidResponse),
+            "{body}"
         );
     }
+}
+
+#[tokio::test]
+async fn sample_series_keep_null_buckets_and_validate_ranges_locally() {
+    let server = TestServer::plain(vec![
+        respond(200, CLUSTER_SAMPLES),
+        respond(
+            200,
+            &CLUSTER_SAMPLES.replace(r#""window": "5m""#, r#""window": "1h""#),
+        ),
+        respond(404, r#"{"error":"not_found"}"#),
+    ])
+    .await;
+    let client = plain_client(&server);
+    let series = client
+        .cluster_samples(&access(), "5m", "60s", &CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(series.points.len(), 5);
+    assert_eq!(series.points[0].cpu_percent, None, "a gap stays null");
+    assert_eq!(series.points[0].nodes, 0);
+    assert_eq!(series.points[1].cpu_percent, Some(30.0));
+    assert_eq!(series.points[1].nodes, 2);
+    assert_eq!(
+        client
+            .node_samples(&access(), &node(), "5m", "60s", &CancellationToken::new())
+            .await
+            .err(),
+        Some(NativeClientError::InvalidResponse),
+        "a series for another window is rejected"
+    );
+    assert_eq!(
+        client
+            .node_samples(&access(), &node(), "1h", "60s", &CancellationToken::new())
+            .await
+            .err(),
+        Some(NativeClientError::NotFound)
+    );
+    let targets: Vec<_> = server.requests().into_iter().map(|r| r.target).collect();
+    assert_eq!(
+        targets,
+        vec![
+            "/api/v1/cluster/samples?window=5m&bucket=60s",
+            "/api/v1/nodes/node-1/samples?window=5m&bucket=60s",
+            "/api/v1/nodes/node-1/samples?window=1h&bucket=60s",
+        ]
+    );
+
+    for (window, bucket) in [
+        ("2h", "60s"),
+        ("1h", "0s"),
+        ("1h", "60"),
+        ("1h", "1d"),
+        ("1h", ""),
+    ] {
+        assert_eq!(
+            client
+                .cluster_samples(&access(), window, bucket, &CancellationToken::new())
+                .await
+                .err(),
+            Some(NativeClientError::InvalidRequest),
+            "{window}/{bucket}"
+        );
+    }
+    assert_eq!(server.request_count(), 3, "local validation sends nothing");
+
+    let mut unordered: serde_json::Value = serde_json::from_str(CLUSTER_SAMPLES).unwrap();
+    unordered["points"].as_array_mut().unwrap().swap(0, 1);
+    let server = TestServer::plain(vec![respond(200, &unordered.to_string())]).await;
+    assert_eq!(
+        plain_client(&server)
+            .cluster_samples(&access(), "5m", "60s", &CancellationToken::new())
+            .await
+            .err(),
+        Some(NativeClientError::InvalidResponse)
+    );
+}
+
+#[tokio::test]
+async fn settings_read_and_patch_retention_with_bounds() {
+    let server = TestServer::plain(vec![
+        respond(200, r#"{"metricsRetentionDays":7}"#),
+        respond(200, r#"{"metricsRetentionDays":30}"#),
+        respond(422, r#"{"error":"retention_out_of_range"}"#),
+        respond(200, r#"{"metricsRetentionDays":0}"#),
+    ])
+    .await;
+    let client = plain_client(&server);
+    assert_eq!(
+        client
+            .get_settings(&access(), &CancellationToken::new())
+            .await
+            .unwrap()
+            .metrics_retention_days,
+        7
+    );
+    assert_eq!(
+        client
+            .update_settings(&access(), 30, &CancellationToken::new())
+            .await
+            .unwrap()
+            .metrics_retention_days,
+        30
+    );
+    assert_eq!(
+        client
+            .update_settings(&access(), 30, &CancellationToken::new())
+            .await
+            .err(),
+        Some(NativeClientError::InvalidRequest)
+    );
+    assert_eq!(
+        client
+            .get_settings(&access(), &CancellationToken::new())
+            .await
+            .err(),
+        Some(NativeClientError::InvalidResponse),
+        "out-of-range values from the controller are rejected"
+    );
+    for days in [0, 366] {
+        assert_eq!(
+            client
+                .update_settings(&access(), days, &CancellationToken::new())
+                .await
+                .err(),
+            Some(NativeClientError::InvalidRequest)
+        );
+    }
+    let requests = server.requests();
+    assert_eq!(requests.len(), 4);
+    assert_eq!(requests[1].method, "PATCH");
+    assert_eq!(requests[1].target, "/api/v1/settings");
+    assert_eq!(requests[1].header("content-type"), Some("application/json"));
+    assert_eq!(requests[1].body, r#"{"metricsRetentionDays":30}"#);
 }
 
 #[tokio::test]
@@ -561,17 +705,31 @@ fn default_limits_are_the_documented_bounds() {
 }
 
 /// Paths covered by the client's read surface, with their documented method.
-const READ_OPENAPI_PATHS: [(&str, &str); 2] = [
+const READ_OPENAPI_PATHS: [(&str, &str); 7] = [
+    ("/api/v1/nodes", "get"),
+    ("/api/v1/nodes/{nodeId}/samples", "get"),
+    ("/api/v1/cluster/samples", "get"),
+    ("/api/v1/settings", "get"),
+    ("/api/v1/settings", "patch"),
     ("/api/v1/nodes/{nodeId}/containers", "get"),
     ("/api/v1/operations/{operation_id}", "get"),
 ];
-const READ_OPENAPI_SCHEMAS: [&str; 6] = [
+const READ_OPENAPI_SCHEMAS: [&str; 15] = [
+    "NodeListResponse",
+    "NodeResponse",
+    "NodeStatusResponse",
+    "NodeSampleResponse",
+    "SampleSeriesResponse",
+    "SamplePointResponse",
+    "SettingsResponse",
+    "SettingsPatchRequest",
     "ContainerErrorResponse",
     "ContainerItemResponse",
     "ContainerPageResponse",
     "ContainerStateResponse",
     "OperationResponse",
     "OperationStateResponse",
+    "NodeErrorResponse",
 ];
 const CONTAINER_STATES: [&str; 9] = [
     "unknown",
@@ -647,6 +805,55 @@ fn openapi_reads_contract_matches_the_checked_artifact() {
         "OperationResponse",
         round_trip_keys::<OperationBody>(OPERATION),
     );
+    assert_schema_fields(
+        &document,
+        "NodeListResponse",
+        round_trip_keys::<NodeListBody>(NODES),
+    );
+    let nodes: serde_json::Value = serde_json::from_str(NODES).unwrap();
+    assert_schema_fields(
+        &document,
+        "NodeResponse",
+        nodes["items"][0]
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect(),
+    );
+    assert_schema_fields(
+        &document,
+        "NodeSampleResponse",
+        nodes["items"][0]["latestSample"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect(),
+    );
+    assert_schema_fields(
+        &document,
+        "SampleSeriesResponse",
+        round_trip_keys::<SampleSeriesBody>(CLUSTER_SAMPLES),
+    );
+    let series: serde_json::Value = serde_json::from_str(CLUSTER_SAMPLES).unwrap();
+    assert_schema_fields(
+        &document,
+        "SamplePointResponse",
+        series["points"][0]
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect(),
+    );
+    assert_eq!(
+        document["components"]["schemas"]["NodeStatusResponse"]["enum"],
+        json!(["online", "degraded", "offline"])
+    );
+    for name in ["online", "degraded", "offline"] {
+        assert!(serde_json::from_value::<NodeStatus>(json!(name)).is_ok());
+    }
 
     let security = &document["components"]["securitySchemes"]["access_session"];
     assert_eq!(security["type"], "http");

@@ -1,9 +1,10 @@
 #![forbid(unsafe_code)]
 
-//! Bounded public container collection for the single configured node.
+//! Bounded public container collection for one member node.
 //!
-//! The `{nodeId}` path segment can never steer the RPC: it is compared
-//! exactly with the statically configured node ID before any outbound call.
+//! The `{nodeId}` path segment selects a membership row; the address and
+//! expected mTLS identity come from that row, never from the request. An
+//! unknown node returns 404 before any outbound call.
 //! Pagination is validated locally against the #82 bounds; malformed values
 //! return `400 invalid_pagination` without touching the agent. Successful
 //! pages preserve the agent's deterministic order and opaque cursor.
@@ -21,9 +22,11 @@ use utoipa::ToSchema;
 
 use crate::{
     auth::domain::PrincipalContext,
-    rpc::{
-        AgentClientError, AgentContainerState, SharedAgentClient, client::is_valid_container_id,
+    nodes::{
+        agents::{NodeEndpoint, SharedAgentDirectory},
+        entities::node,
     },
+    rpc::{AgentClientError, AgentContainerState, client::is_valid_container_id},
 };
 
 pub(crate) const DEFAULT_CONTAINER_LIMIT: u32 = 50;
@@ -227,7 +230,7 @@ pub(crate) fn is_valid_cursor(token: &str) -> bool {
         (status = 200, description = "One bounded page preserving agent order; live collections are best-effort", body = ContainerPageResponse),
         (status = 400, description = "Invalid pagination; no agent call was made", body = ContainerErrorResponse),
         (status = 401, description = "Missing, malformed, expired, or revoked access credential"),
-        (status = 404, description = "Unknown node; only the configured node exists", body = ContainerErrorResponse),
+        (status = 404, description = "Unknown node; only nodes that have checked in exist", body = ContainerErrorResponse),
         (status = 503, description = "Agent unavailable or response invalid; no transport or daemon detail", body = ContainerErrorResponse),
         (status = 504, description = "Agent deadline expired", body = ContainerErrorResponse)
     )
@@ -238,16 +241,27 @@ pub(crate) async fn index(
     Path(node_id): Path<String>,
     RawQuery(query): RawQuery,
 ) -> Response {
-    let Some(client) = context.shared_store.get::<SharedAgentClient>() else {
+    use sea_orm::EntityTrait;
+
+    let Some(directory) = context.shared_store.get::<SharedAgentDirectory>() else {
         return agent_unavailable();
     };
-    // The URL node selects nothing: it must equal the static configuration
-    // exactly, otherwise no RPC leaves the controller.
-    if node_id != client.0.node_id() {
-        return not_found();
-    }
+    // The URL node only selects a membership row; no RPC leaves the
+    // controller for a node that has never checked in.
+    let member = match node::Entity::find_by_id(node_id).one(&context.db).await {
+        Ok(Some(member)) => member,
+        Ok(None) => return not_found(),
+        Err(_) => return agent_unavailable(),
+    };
     let Ok((limit, cursor)) = parse_pagination(query.as_deref()) else {
         return invalid_pagination();
+    };
+    let client = match directory.0.client(&NodeEndpoint {
+        node_id: member.id,
+        advertise_address: member.advertise_address,
+    }) {
+        Ok(client) => client,
+        Err(error) => return map_agent_error(error),
     };
     let Some(shutdown) = context
         .shared_store
@@ -258,7 +272,7 @@ pub(crate) async fn index(
 
     // Directly await the RPC: dropping the HTTP request drops this future,
     // so cancellation joins the in-flight call without detached work.
-    let page = match client.0.list_containers(limit, cursor, &shutdown.0).await {
+    let page = match client.list_containers(limit, cursor, &shutdown.0).await {
         Ok(page) => page,
         Err(error) => return map_agent_error(error),
     };
@@ -573,6 +587,54 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
+    struct FakeDirectory(std::sync::Arc<FakeAgent>);
+
+    impl crate::nodes::agents::AgentDirectory for FakeDirectory {
+        fn client(
+            &self,
+            node: &crate::nodes::agents::NodeEndpoint,
+        ) -> Result<std::sync::Arc<dyn crate::rpc::AgentClient>, AgentClientError> {
+            assert_eq!(node.node_id, self.0.node_id, "only member nodes are dialed");
+            assert_eq!(node.advertise_address, "127.0.0.1:50052");
+            Ok(self.0.clone())
+        }
+    }
+
+    async fn insert_member(
+        connection: &sea_orm::DatabaseConnection,
+        node_id: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        use sea_orm::{ActiveValue::Set, EntityTrait, sea_query::OnConflict};
+        let now = chrono::Utc::now();
+        crate::nodes::entities::node::Entity::insert(crate::nodes::entities::node::ActiveModel {
+            id: Set(node_id.to_owned()),
+            cluster_id: Set("test".to_owned()),
+            hostname: Set(node_id.to_owned()),
+            swarm_node_id: Set(None),
+            advertise_address: Set("127.0.0.1:50052".to_owned()),
+            agent_version: Set("test".to_owned()),
+            docker_version: Set("test".to_owned()),
+            os: Set("linux".to_owned()),
+            arch: Set("aarch64".to_owned()),
+            cpu_cores: Set(4),
+            memory_total_bytes: Set(8 << 30),
+            agent_started_at: Set(now),
+            first_seen_at: Set(now),
+            last_check_in_at: Set(now),
+            created_at: Set(now),
+            updated_at: Set(now),
+        })
+        .on_conflict(
+            OnConflict::column(crate::nodes::entities::node::Column::Id)
+                .do_nothing()
+                .to_owned(),
+        )
+        .exec_without_returning(connection)
+        .await?;
+        Ok(())
+    }
+
     fn fake_page() -> AgentContainerPage {
         let first_id = "a".repeat(64);
         AgentContainerPage {
@@ -652,9 +714,12 @@ mod tests {
             .get::<tokio_util::sync::CancellationToken>()
             .unwrap();
         let agent = std::sync::Arc::new(agent);
-        context.shared_store.insert(crate::rpc::SharedAgentClient(
-            agent.clone() as std::sync::Arc<dyn crate::rpc::AgentClient>
-        ));
+        insert_member(connection, "node-1").await?;
+        context
+            .shared_store
+            .insert(crate::nodes::agents::SharedAgentDirectory(
+                std::sync::Arc::new(FakeDirectory(agent.clone())),
+            ));
         let router = crate::app::App::routes(&context)
             .to_router::<crate::app::App>(context, axum::Router::new())?;
         Ok((router, shutdown, agent))
@@ -681,8 +746,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn postgres_containers_serve_the_configured_node_only()
-    -> Result<(), Box<dyn std::error::Error>> {
+    async fn postgres_containers_serve_member_nodes_only() -> Result<(), Box<dyn std::error::Error>>
+    {
         use axum::{
             body::{Body, to_bytes},
             http::{Request, StatusCode, header},
