@@ -1,132 +1,72 @@
+import { useState } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, act } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { createMemoryHistory, createRootRouteWithContext, createRoute, createRouter, redirect, RouterProvider } from "@tanstack/react-router";
+import { createMemoryHistory, createRootRouteWithContext, createRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { AuthProvider } from "@/contexts/auth-context";
 import { useAuth } from "@/hooks/use-auth";
 import type { AuthContextValue } from "@/contexts/auth-context-value";
-import type { CheckAuthResponse, ParsedToken } from "@/types/auth";
+import type { SessionView } from "@/types/session";
 
-const mockParsedToken: ParsedToken = {
-    userId: "123",
-    expiresAt: 9999999999,
+const session: SessionView = {
+    profileId: "local-profile-id",
+    origin: "https://controller.example/",
+    clusterId: "cluster-id",
+    principalId: "principal-id",
+    githubLogin: "jane",
+    label: "Production",
+    accessExpiresAtUnixMs: 2_000_000_000_000,
 };
 
-const mockCheckAuthResponse: CheckAuthResponse = {
-    user: {
-        id: "123",
-        name: "Jane Doe",
-        email: "jane@example.com",
-        avatarUrl: "https://example.com/avatar.png",
-        provider: "github",
-    },
-    status: "ok",
-};
-
-function LoginComponent() {
-    const { login } = useAuth();
-    return (
-        <div>
-            <span data-testid='location'>login</span>
-            <button onClick={() => login("http://localhost:3000")}>Login</button>
-        </div>
-    );
-}
-
-function HomeComponent() {
-    return <span data-testid='location'>home</span>;
-}
-
-function DashboardComponent() {
-    return <span data-testid='location'>dashboard</span>;
-}
-
-// Create a test router with beforeLoad redirect (matches real login route)
 const rootRoute = createRootRouteWithContext<{ auth: AuthContextValue }>()({});
-
-const indexRoute = createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/",
-    component: HomeComponent,
-});
-
+const indexRoute = createRoute({ getParentRoute: () => rootRoute, path: "/", component: () => <span data-testid='location'>home</span> });
+const dashboardRoute = createRoute({ getParentRoute: () => rootRoute, path: "/dashboard", component: () => <span data-testid='location'>dashboard</span> });
 const loginRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/login",
-    component: LoginComponent,
-    validateSearch: (search: Record<string, unknown>) => ({
-        redirect: (search.redirect as string) || undefined,
-    }),
-    beforeLoad: ({ context, search }) => {
-        if (context.auth.user) {
-            throw redirect({ to: search.redirect || "/" });
-        }
+    validateSearch: (search: Record<string, unknown>) => ({ redirect: typeof search.redirect === "string" ? search.redirect : undefined }),
+    component: function Login() {
+        const { login } = useAuth();
+        const navigate = loginRoute.useNavigate();
+        const { redirect } = loginRoute.useSearch();
+        return (
+            <button
+                onClick={() => {
+                    void login(session.origin).then(() => navigate({ to: redirect || "/" }));
+                }}
+            >
+                Login
+            </button>
+        );
     },
 });
-
-const dashboardRoute = createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/dashboard",
-    component: DashboardComponent,
-});
-
 const routeTree = rootRoute.addChildren([indexRoute, loginRoute, dashboardRoute]);
 
 function TestApp({ initialPath }: { initialPath: string }) {
     const auth = useAuth();
-    const testRouter = createRouter({
-        routeTree,
-        context: { auth },
-        history: createMemoryHistory({ initialEntries: [initialPath] }),
-    });
-    return <RouterProvider router={testRouter} />;
+    const [router] = useState(() => createRouter({ routeTree, context: { auth }, history: createMemoryHistory({ initialEntries: [initialPath] }) }));
+    return <RouterProvider router={router} context={{ auth }} />;
 }
 
 describe("Redirect After Login", () => {
-    let tokenCallback: ((event: { payload: { token: string } }) => void) | null = null;
-
     beforeEach(() => {
         vi.clearAllMocks();
-        tokenCallback = null;
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        vi.mocked(listen).mockImplementation(async (event: string, handler: any) => {
-            if (event === "auth://token") tokenCallback = handler;
-            return () => {};
-        });
-
-        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === "load_profiles") return { profiles: [], activeProfileId: null };
-            if (cmd === "parse_auth_token") return mockParsedToken;
-            if (cmd === "check_auth") return mockCheckAuthResponse;
-            if (cmd === "save_profile") return undefined;
-            if (cmd === "auth_listen") {
-                tokenCallback?.({ payload: { token: "fake.jwt.token" } });
-                return undefined;
-            }
-            return undefined;
+        vi.mocked(invoke).mockImplementation(async (command: string) => {
+            if (command === "session_restore") return null;
+            if (command === "session_login") return session;
+            return null;
         });
     });
 
-    it("navigates to redirect param after authentication", async () => {
+    it("navigates to redirect param after custody login", async () => {
         render(
             <AuthProvider>
                 <TestApp initialPath='/login?redirect=/dashboard' />
             </AuthProvider>,
         );
-        await act(async () => {});
-
-        // Should be on login page
-        expect(screen.getByTestId("location")).toHaveTextContent("login");
-
-        // Initiate login — auth_listen delivers token via event
-        await act(async () => {
-            screen.getByText("Login").click();
-        });
-
-        // Should redirect to /dashboard via beforeLoad guard
-        expect(screen.getByTestId("location")).toHaveTextContent("dashboard");
+        await userEvent.setup().click(await screen.findByRole("button", { name: "Login" }));
+        await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("dashboard"));
     });
 
     it("navigates to / when no redirect param", async () => {
@@ -135,17 +75,7 @@ describe("Redirect After Login", () => {
                 <TestApp initialPath='/login' />
             </AuthProvider>,
         );
-        await act(async () => {});
-
-        // Should be on login page
-        expect(screen.getByTestId("location")).toHaveTextContent("login");
-
-        // Initiate login
-        await act(async () => {
-            screen.getByText("Login").click();
-        });
-
-        // Should redirect to / via beforeLoad guard
-        expect(screen.getByTestId("location")).toHaveTextContent("home");
+        await userEvent.setup().click(await screen.findByRole("button", { name: "Login" }));
+        await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("home"));
     });
 });

@@ -1,15 +1,19 @@
 import { createContext } from "react";
 import type { AuthState } from "@/types/auth";
 import type { ConnectionProfile } from "@/types/connection";
+import type { SessionErrorCode, SessionView } from "@/types/session";
 
 export interface AuthContextValue extends AuthState {
+    session: SessionView | null;
+    issue: SessionErrorCode | null;
     profiles: ConnectionProfile[];
     activeProfileId: string | null;
-    login: (agentUrl: string, label?: string, provider?: string) => Promise<void>;
+    login: (origin: string, label?: string) => Promise<void>;
     logout: () => Promise<void>;
-    switchProfile: (profileId: string) => Promise<void>;
-    removeProfile: (profileId: string) => Promise<void>;
-    updateProfile: (profileId: string, updates: Partial<Pick<ConnectionProfile, "label" | "agentUrl">>) => Promise<void>;
+    retryCommit: () => Promise<void>;
+    retryRestore: () => Promise<void>;
+    cancelLogin: () => Promise<void>;
+    clearIssue: () => void;
 }
 
 export const AuthContext = createContext<AuthContextValue | null>(null);

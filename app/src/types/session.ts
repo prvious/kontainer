@@ -45,3 +45,44 @@ export const SESSION_ERROR_CODES = [
 ] as const;
 
 export type SessionErrorCode = (typeof SESSION_ERROR_CODES)[number];
+
+export function sessionErrorCode(error: unknown): SessionErrorCode {
+    const value = typeof error === "string" ? error : error instanceof Error ? error.message : "";
+    return SESSION_ERROR_CODES.find((code) => code === value) ?? "invalid_response";
+}
+
+function record(value: unknown): Record<string, unknown> {
+    if (typeof value !== "object" || value === null || Array.isArray(value)) throw "invalid_response";
+    return value as Record<string, unknown>;
+}
+
+/** Project native output onto the public view before it enters the query cache. */
+export function sessionViewFromIpc(value: unknown): SessionView {
+    const data = record(value);
+    if (
+        typeof data.profileId !== "string" ||
+        typeof data.origin !== "string" ||
+        typeof data.clusterId !== "string" ||
+        typeof data.principalId !== "string" ||
+        typeof data.githubLogin !== "string" ||
+        (data.label !== null && typeof data.label !== "string") ||
+        typeof data.accessExpiresAtUnixMs !== "number" ||
+        !Number.isFinite(data.accessExpiresAtUnixMs)
+    )
+        throw "invalid_response";
+    return {
+        profileId: data.profileId,
+        origin: data.origin,
+        clusterId: data.clusterId,
+        principalId: data.principalId,
+        githubLogin: data.githubLogin,
+        label: data.label,
+        accessExpiresAtUnixMs: data.accessExpiresAtUnixMs,
+    };
+}
+
+export function loginHintFromIpc(value: unknown): LoginHint {
+    const data = record(value);
+    if (typeof data.origin !== "string" || (data.label !== null && typeof data.label !== "string")) throw "invalid_response";
+    return { origin: data.origin, label: data.label };
+}

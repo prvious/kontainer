@@ -15,8 +15,8 @@
 //!
 //! No custody command accepts or returns a credential: they take an origin and
 //! optional label, return [`models::SessionView`], and fail with closed
-//! [`errors::SessionError`] codes. (The pre-custody `actions::auth` path is
-//! still registered until the React cutover removes it.)
+//! [`errors::SessionError`] codes. The pre-custody auth commands are not
+//! registered with Tauri.
 
 pub(crate) mod browser;
 pub(crate) mod controller;

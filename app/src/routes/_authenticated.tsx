@@ -1,28 +1,22 @@
-import { Outlet, createFileRoute, redirect, useRouter } from "@tanstack/react-router";
-import { SidebarNav } from "@/components/sidebar-nav";
-import { DashboardHeader } from "@/components/dashboard-header";
-import { StatusBar } from "@/components/status-bar";
+import { useEffect } from "react";
+import { Link, Outlet, createFileRoute, redirect, useLocation, useRouter } from "@tanstack/react-router";
 import { AccentLine } from "@/components/accent-line";
-import { TerminalProvider } from "@/contexts/terminal-context";
-import { CommandPaletteProvider } from "@/contexts/command-palette-context";
-import { CommandPalette } from "@/components/command-palette";
+import { ClusterSwitcher } from "@/components/cluster-switcher";
+import { Logo } from "@/components/logo";
+import { SessionIssue } from "@/components/session-issue";
 import { useAuth } from "@/hooks/use-auth";
-import { useAgentStatus } from "@/hooks/use-agent-status";
 
-function ShellError({ error }: { error: Error }) {
+function ShellError() {
     return (
         <div className='flex h-screen items-center justify-center bg-background text-foreground'>
             <div className='max-w-md text-center'>
                 <p className='font-mono text-sm text-muted-foreground'>Something went wrong.</p>
-                <p className='mt-2 font-mono text-xs text-muted-foreground/60'>{error.message}</p>
-                <div className='mt-4 flex items-center justify-center gap-2'>
-                    <button
-                        className='rounded border border-border px-3 py-1.5 font-mono text-xs text-foreground transition-colors hover:bg-bg-elevated'
-                        onClick={() => window.location.reload()}
-                    >
-                        Reload
-                    </button>
-                </div>
+                <button
+                    className='mt-4 rounded border border-border px-3 py-1.5 font-mono text-xs text-foreground transition-colors hover:bg-bg-elevated'
+                    onClick={() => window.location.reload()}
+                >
+                    Reload
+                </button>
             </div>
         </div>
     );
@@ -30,11 +24,8 @@ function ShellError({ error }: { error: Error }) {
 
 export const Route = createFileRoute("/_authenticated")({
     beforeLoad: ({ context, location }) => {
-        if (!context.auth.user) {
-            throw redirect({
-                to: "/login",
-                search: { redirect: location.href },
-            });
+        if (!context.auth.session) {
+            throw redirect({ to: "/login", search: { redirect: location.href } });
         }
     },
     component: AuthenticatedLayout,
@@ -42,29 +33,72 @@ export const Route = createFileRoute("/_authenticated")({
 });
 
 function AuthenticatedLayout() {
-    const { agentUrl, token, logout } = useAuth();
+    const { session, issue, retryCommit, retryRestore, logout } = useAuth();
     const router = useRouter();
+    const pathname = useLocation({ select: (location) => location.pathname });
+    const settingsOpen = pathname === "/settings" || pathname === "/settings/";
 
-    useAgentStatus(agentUrl, token, () => {
-        logout().then(() => router.navigate({ to: "/login", search: { redirect: undefined } }));
-    });
+    useEffect(() => {
+        if (session) return;
+        void router
+            .invalidate()
+            .then(() => router.navigate({ to: "/login", search: { redirect: undefined } }))
+            .catch(() => {});
+    }, [session, router]);
+
+    async function retryLogout() {
+        try {
+            await logout();
+        } catch {
+            // The provider keeps the new closed error code visible.
+        }
+    }
+
+    if (!session) return null;
 
     return (
-        <TerminalProvider>
-            <CommandPaletteProvider>
-                <div className='flex h-screen flex-col overflow-hidden bg-background'>
-                    <AccentLine />
-                    <DashboardHeader />
-                    <div className='flex flex-1 overflow-hidden'>
-                        <SidebarNav />
-                        <main className='flex-1 overflow-y-auto'>
-                            <Outlet />
-                        </main>
-                    </div>
-                    <StatusBar />
+        <div className='flex h-screen flex-col bg-background'>
+            <AccentLine />
+            <header data-tauri-drag-region className='flex h-[38px] shrink-0 items-center justify-between border-b border-border bg-titlebar-bg/90 px-4'>
+                <Link to='/' aria-label='Home'>
+                    <Logo />
+                </Link>
+                <div className='flex items-center gap-5'>
+                    <Link to='/settings' className='font-mono text-xs text-muted-foreground hover:text-foreground'>
+                        Settings
+                    </Link>
+                    <ClusterSwitcher variant='titlebar' />
                 </div>
-                <CommandPalette />
-            </CommandPaletteProvider>
-        </TerminalProvider>
+            </header>
+            {issue && (
+                <SessionIssue
+                    code={issue}
+                    onRetryCommit={() => {
+                        void retryCommit().catch(() => {});
+                    }}
+                    onRetryRestore={() => {
+                        void retryRestore().catch(() => {});
+                    }}
+                    onLogout={() => {
+                        void retryLogout();
+                    }}
+                />
+            )}
+            {settingsOpen ? (
+                <main className='flex-1 overflow-y-auto'>
+                    <Outlet />
+                </main>
+            ) : (
+                <main className='flex flex-1 items-center justify-center p-6'>
+                    <div className='w-full max-w-md space-y-4 border border-border bg-card p-6'>
+                        <h1 className='text-xl font-semibold'>Connected</h1>
+                        <p className='text-sm text-muted-foreground'>
+                            Signed in as {session.githubLogin} to {session.origin}
+                        </p>
+                        <p className='text-sm text-muted-foreground'>Cluster resources are temporarily unavailable.</p>
+                    </div>
+                </main>
+            )}
+        </div>
     );
 }

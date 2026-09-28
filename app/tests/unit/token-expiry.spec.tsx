@@ -1,103 +1,54 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, act } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import { AuthProvider } from "@/contexts/auth-context";
 import { useAuth } from "@/hooks/use-auth";
-import type { StoredProfiles } from "@/types/connection";
+import type { SessionView } from "@/types/session";
+
+const session: SessionView = {
+    profileId: "local-profile-id",
+    origin: "https://controller.example/",
+    clusterId: "cluster-id",
+    principalId: "principal-id",
+    githubLogin: "jane",
+    label: "Production",
+    accessExpiresAtUnixMs: 2_000_000_000_000,
+};
 
 function TestConsumer() {
-    const { user, isLoading } = useAuth();
+    const { session: active, isLoading } = useAuth();
     return (
         <div>
-            <span data-testid='user'>{user ? user.name : "none"}</span>
-            <span data-testid='isLoading'>{isLoading ? "true" : "false"}</span>
+            <span data-testid='profile'>{active?.profileId ?? "none"}</span>
+            <span data-testid='loading'>{String(isLoading)}</span>
         </div>
     );
 }
 
-describe("Token Expiry on Mount", () => {
+describe("Session Restore Authority", () => {
     beforeEach(() => {
         vi.clearAllMocks();
     });
 
-    function renderWithProvider() {
-        return render(
+    it("shows no session when Rust rejects expired credentials", async () => {
+        vi.mocked(invoke).mockResolvedValue(null);
+        render(
             <AuthProvider>
                 <TestConsumer />
             </AuthProvider>,
         );
-    }
-
-    it("does not restore a session with an expired token on mount", async () => {
-        const nowSec = Math.floor(Date.now() / 1000);
-        const expiredProfiles: StoredProfiles = {
-            profiles: [
-                {
-                    id: "p1",
-                    label: "Default",
-                    agentUrl: "http://localhost:3000",
-                    userId: "123",
-                    userName: "Jane Doe",
-                    userEmail: "jane@example.com",
-                    userAvatarUrl: "https://example.com/avatar.png",
-                    userProvider: "github",
-                    token: "expired.jwt.token",
-                    expiresAt: nowSec - 60,
-                },
-            ],
-            activeProfileId: "p1",
-        };
-
-        const emptyProfiles: StoredProfiles = {
-            profiles: [],
-            activeProfileId: null,
-        };
-
-        let deleted = false;
-        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === "load_profiles") return deleted ? emptyProfiles : expiredProfiles;
-            if (cmd === "delete_profile") {
-                deleted = true;
-                return undefined;
-            }
-            return undefined;
-        });
-
-        renderWithProvider();
-        await act(async () => {});
-
-        expect(screen.getByTestId("user")).toHaveTextContent("none");
-        expect(invoke).toHaveBeenCalledWith("delete_profile", { profileId: "p1" });
+        await waitFor(() => expect(screen.getByTestId("loading")).toHaveTextContent("false"));
+        expect(screen.getByTestId("profile")).toHaveTextContent("none");
+        expect(invoke).toHaveBeenCalledWith("session_restore", undefined);
     });
 
-    it("restores a session with a valid token on mount", async () => {
-        const nowSec = Math.floor(Date.now() / 1000);
-        const validProfiles: StoredProfiles = {
-            profiles: [
-                {
-                    id: "p1",
-                    label: "Default",
-                    agentUrl: "http://localhost:3000",
-                    userId: "123",
-                    userName: "Jane Doe",
-                    userEmail: "jane@example.com",
-                    userAvatarUrl: "https://example.com/avatar.png",
-                    userProvider: "github",
-                    token: "valid.jwt.token",
-                    expiresAt: nowSec + 99999,
-                },
-            ],
-            activeProfileId: "p1",
-        };
-
-        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === "load_profiles") return validProfiles;
-            return undefined;
-        });
-
-        renderWithProvider();
-        await act(async () => {});
-
-        expect(screen.getByTestId("user")).toHaveTextContent("Jane Doe");
+    it("shows the non-secret session view when Rust restores valid credentials", async () => {
+        vi.mocked(invoke).mockResolvedValue(session);
+        render(
+            <AuthProvider>
+                <TestConsumer />
+            </AuthProvider>,
+        );
+        await waitFor(() => expect(screen.getByTestId("profile")).toHaveTextContent("local-profile-id"));
     });
 });

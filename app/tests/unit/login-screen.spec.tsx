@@ -1,259 +1,184 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, act, waitFor } from "@testing-library/react";
+import { useState } from "react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { createMemoryHistory, createRootRouteWithContext, createRoute, createRouter, RouterProvider } from "@tanstack/react-router";
 import { AuthProvider } from "@/contexts/auth-context";
 import { LoginScreen } from "@/components/login-screen";
+import { SessionIssue } from "@/components/session-issue";
 import { useAuth } from "@/hooks/use-auth";
 import type { AuthContextValue } from "@/contexts/auth-context-value";
+import { SESSION_ERROR_CODES, type SessionView } from "@/types/session";
 
-// Create a minimal test router that includes the /login route
+const session: SessionView = {
+    profileId: "9e91e40b-09d0-44b8-9e1b-329455b25617",
+    origin: "https://controller.example/",
+    clusterId: "cluster-1",
+    principalId: "0a749bf5-21a9-43ba-81b4-7065cddbb30f",
+    githubLogin: "jane",
+    label: "Production",
+    accessExpiresAtUnixMs: 2_000_000_000_000,
+};
+
 const rootRoute = createRootRouteWithContext<{ auth: AuthContextValue }>()({});
-
 const loginRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: "/login",
     component: LoginScreen,
-    validateSearch: (search: Record<string, unknown>) => ({
-        redirect: (search.redirect as string) || undefined,
-    }),
+    validateSearch: (search: Record<string, unknown>) => ({ redirect: typeof search.redirect === "string" ? search.redirect : undefined }),
 });
-
-const indexRoute = createRoute({
-    getParentRoute: () => rootRoute,
-    path: "/",
-    component: () => <div>Home</div>,
-});
-
+const indexRoute = createRoute({ getParentRoute: () => rootRoute, path: "/", component: () => <div>Home</div> });
 const routeTree = rootRoute.addChildren([indexRoute, loginRoute]);
 
 function TestWrapper() {
     const auth = useAuth();
-    const testRouter = createRouter({
-        routeTree,
-        context: { auth },
-        history: createMemoryHistory({ initialEntries: ["/login"] }),
-    });
-    return <RouterProvider router={testRouter} />;
+    const [router] = useState(() =>
+        createRouter({
+            routeTree,
+            context: { auth },
+            history: createMemoryHistory({ initialEntries: ["/login"] }),
+        }),
+    );
+    return <RouterProvider router={router} context={{ auth }} />;
 }
 
-describe("LoginScreen", () => {
+async function renderLoginScreen() {
+    const result = render(
+        <AuthProvider>
+            <TestWrapper />
+        </AuthProvider>,
+    );
+    await waitFor(() => expect(screen.getByRole("button", { name: /connect with github/i })).toBeInTheDocument());
+    return result;
+}
+
+describe("LoginScreen custody cutover", () => {
     beforeEach(() => {
         vi.clearAllMocks();
-
-        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === "load_profiles") return { profiles: [], activeProfileId: null };
-            if (cmd === "ping_agent") return { app: "dev.kontainer.app", status: "ok" };
+        vi.mocked(invoke).mockImplementation(async (command: string) => {
+            if (command === "session_restore" || command === "session_login_hint") return null;
+            if (command === "session_login") return session;
             return undefined;
         });
     });
 
-    async function renderLoginScreen() {
-        const result = render(
-            <AuthProvider>
-                <TestWrapper />
-            </AuthProvider>,
-        );
-        await act(async () => {});
-        return result;
-    }
-
-    it("renders the title and description", async () => {
+    it("renders the title and controller description", async () => {
         await renderLoginScreen();
         expect(screen.getByText("kontainer")).toBeInTheDocument();
-        expect(screen.getByText("Connect to your infrastructure agent")).toBeInTheDocument();
+        expect(screen.getByText("Connect to your controller")).toBeInTheDocument();
     });
 
-    it("renders the cluster URL input with default value", async () => {
+    it("renders the development controller URL by default", async () => {
         await renderLoginScreen();
-        const input = screen.getByPlaceholderText("https://agent.kontainer.dev");
-        expect(input).toBeInTheDocument();
-        expect(input).toHaveValue("http://localhost:3000");
+        expect(screen.getByPlaceholderText("https://controller.example")).toHaveValue("http://127.0.0.1:5150");
     });
 
-    it("renders the connect button", async () => {
+    it("renders the Connect with GitHub button", async () => {
         await renderLoginScreen();
-        expect(screen.getByRole("button", { name: /connect with github/i })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /connect with github/i })).toBeEnabled();
     });
 
-    it("pings the agent on submit", async () => {
+    it("loads the non-secret login hint", async () => {
+        vi.mocked(invoke).mockImplementation(async (command: string) => {
+            if (command === "session_login_hint") return { origin: "https://saved.example/", label: "Saved" };
+            return null;
+        });
+        await renderLoginScreen();
+        await waitFor(() => expect(screen.getByPlaceholderText("https://controller.example")).toHaveValue("https://saved.example/"));
+    });
+
+    it("sends only origin and label to session_login", async () => {
         await renderLoginScreen();
         const user = userEvent.setup();
-
-        const button = screen.getByRole("button", { name: /connect with github/i });
-        await user.click(button);
-
-        expect(invoke).toHaveBeenCalledWith("ping_agent", { url: "http://localhost:3000" });
-    });
-
-    it("shows authenticate with divider always", async () => {
-        await renderLoginScreen();
-        expect(screen.getByText("authenticate with")).toBeInTheDocument();
-    });
-
-    it("shows Connect with GitHub button always", async () => {
-        await renderLoginScreen();
-        expect(screen.getByRole("button", { name: /connect with github/i })).toBeInTheDocument();
-    });
-
-    it("shows GitHub button without needing to ping first", async () => {
-        await renderLoginScreen();
-        expect(screen.getByRole("button", { name: /connect with github/i })).toBeInTheDocument();
-    });
-
-    it("calls auth_listen when Connect with GitHub is clicked", async () => {
-        // Capture event callbacks
-        let sessionIdCallback: ((event: { payload: { sessionId: string } }) => void) | null = null;
-        let tokenCallback: ((event: { payload: { token: string } }) => void) | null = null;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        vi.mocked(listen).mockImplementation(async (event: string, handler: any) => {
-            if (event === "auth://session-id") sessionIdCallback = handler;
-            if (event === "auth://token") tokenCallback = handler;
-            return () => {};
-        });
-
-        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === "load_profiles") return { profiles: [], activeProfileId: null };
-            if (cmd === "ping_agent") return { app: "dev.kontainer.app", status: "ok" };
-            if (cmd === "auth_listen") {
-                // Background task delivers session ID
-                sessionIdCallback?.({ payload: { sessionId: "test-session" } });
-                return undefined;
-            }
-            return undefined;
-        });
-
-        await renderLoginScreen();
-        const user = userEvent.setup();
-
-        // Single click triggers ping then OAuth
-        const button = screen.getByRole("button", { name: /connect with github/i });
-        await user.click(button);
-
-        // auth_listen should be called
-        expect(invoke).toHaveBeenCalledWith("auth_listen", { url: "http://localhost:3000" });
-
-        // session ID event fires synchronously in invoke mock -> opens browser
-        expect(openUrl).toHaveBeenCalledWith("http://localhost:3000/auth/github?session=test-session");
-
-        // Clean up: deliver token so login() resolves
-        await act(async () => {
-            tokenCallback?.({ payload: { token: "fake-jwt" } });
-        });
-    });
-
-    it("shows error when ping fails", async () => {
-        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === "load_profiles") return { profiles: [], activeProfileId: null };
-            if (cmd === "ping_agent") throw "Could not reach agent at http://localhost:3000";
-            return undefined;
-        });
-
-        await renderLoginScreen();
-        const user = userEvent.setup();
-
-        const button = screen.getByRole("button", { name: /connect with github/i });
-        await user.click(button);
-
-        expect(screen.getByText(/could not reach agent/i)).toBeInTheDocument();
-    });
-
-    it("clears error message when URL changes", async () => {
-        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === "load_profiles") return { profiles: [], activeProfileId: null };
-            if (cmd === "ping_agent") throw "Could not reach agent";
-            return undefined;
-        });
-
-        await renderLoginScreen();
-        const user = userEvent.setup();
-
-        // Trigger an error first
-        const button = screen.getByRole("button", { name: /connect with github/i });
-        await user.click(button);
-
-        expect(screen.getByText(/could not reach agent/i)).toBeInTheDocument();
-
-        // Change URL — error should clear
-        const input = screen.getByPlaceholderText("https://agent.kontainer.dev");
-        await user.type(input, "/new");
-
-        expect(screen.queryByText(/could not reach agent/i)).not.toBeInTheDocument();
-    });
-
-    it("strips trailing slashes from agent URL", async () => {
-        await renderLoginScreen();
-        const user = userEvent.setup();
-
-        const input = screen.getByPlaceholderText("https://agent.kontainer.dev");
+        const input = screen.getByPlaceholderText("https://controller.example");
         await user.clear(input);
-        await user.type(input, "http://myserver:9090///");
-
-        const button = screen.getByRole("button", { name: /connect with github/i });
-        await user.click(button);
-
-        expect(invoke).toHaveBeenCalledWith("ping_agent", { url: "http://myserver:9090" });
+        await user.type(input, "https://controller.example");
+        await user.click(screen.getByRole("button", { name: /connect with github/i }));
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith("session_login", { origin: "https://controller.example", label: null }));
     });
 
-    it("disables button while connecting and shows connecting text", async () => {
-        let resolvePing: () => void;
-        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === "load_profiles") return { profiles: [], activeProfileId: null };
-            if (cmd === "ping_agent") {
-                return new Promise((resolve) => {
-                    resolvePing = () => resolve({ app: "dev.kontainer.app", status: "ok" });
-                });
-            }
-            return undefined;
-        });
+    it("never calls the old agent ping or browser token listener", async () => {
+        await renderLoginScreen();
+        await userEvent.setup().click(screen.getByRole("button", { name: /connect with github/i }));
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith("session_login", expect.anything()));
+        expect(vi.mocked(invoke).mock.calls.some(([command]) => ["ping_agent", "auth_listen", "parse_auth_token"].includes(command))).toBe(false);
+    });
 
+    it("uses the hint label in session_login", async () => {
+        vi.mocked(invoke).mockImplementation(async (command: string) => {
+            if (command === "session_login_hint") return { origin: "https://saved.example/", label: "Saved" };
+            if (command === "session_login") return session;
+            return null;
+        });
+        await renderLoginScreen();
+        await waitFor(() => expect(screen.getByPlaceholderText("https://controller.example")).toHaveValue("https://saved.example/"));
+        await userEvent.setup().click(screen.getByRole("button", { name: /connect with github/i }));
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith("session_login", { origin: "https://saved.example/", label: "Saved" }));
+    });
+
+    it("trims surrounding whitespace from the origin", async () => {
         await renderLoginScreen();
         const user = userEvent.setup();
+        const input = screen.getByPlaceholderText("https://controller.example");
+        await user.clear(input);
+        await user.type(input, "  https://controller.example/  ");
+        await user.click(screen.getByRole("button", { name: /connect with github/i }));
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith("session_login", { origin: "https://controller.example/", label: null }));
+    });
 
-        const button = screen.getByRole("button", { name: /connect with github/i });
-        await user.click(button);
+    it("shows native browser progress while login is pending", async () => {
+        vi.mocked(invoke).mockImplementation(async (command: string) => {
+            if (command === "session_login") return new Promise(() => {});
+            return null;
+        });
+        await renderLoginScreen();
+        await userEvent.setup().click(screen.getByRole("button", { name: /connect with github/i }));
+        await waitFor(() => expect(screen.getByText("Authenticating...")).toBeInTheDocument());
+    });
 
-        expect(screen.getByText(/connecting/i)).toBeInTheDocument();
+    it("cancels through session_cancel_login", async () => {
+        vi.mocked(invoke).mockImplementation(async (command: string) => {
+            if (command === "session_login") return new Promise(() => {});
+            return null;
+        });
+        await renderLoginScreen();
+        await userEvent.setup().click(screen.getByRole("button", { name: /connect with github/i }));
+        await userEvent.setup().click(await screen.findByRole("button", { name: "Cancel" }));
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith("session_cancel_login", undefined));
+    });
 
+    it("shows a closed error message instead of native error text", async () => {
+        vi.mocked(invoke).mockImplementation(async (command: string) => {
+            if (command === "session_login") throw "secret native error canary";
+            return null;
+        });
+        await renderLoginScreen();
+        await userEvent.setup().click(screen.getByRole("button", { name: /connect with github/i }));
+        await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("invalid response"));
+        expect(document.body.textContent).not.toContain("secret native error canary");
+    });
+
+    it("offers commit retry for vault_write_failed", async () => {
+        vi.mocked(invoke).mockImplementation(async (command: string) => {
+            if (command === "session_login") throw "vault_write_failed";
+            if (command === "session_retry_commit") return session;
+            return null;
+        });
+        await renderLoginScreen();
+        await userEvent.setup().click(screen.getByRole("button", { name: /connect with github/i }));
+        await waitFor(() => expect(screen.getByRole("button", { name: "Retry saving session" })).toBeInTheDocument());
         await act(async () => {
-            resolvePing!();
+            screen.getByRole("button", { name: "Retry saving session" }).click();
         });
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith("session_retry_commit", undefined));
     });
 
-    it("shows error when saved connection fails to switch", async () => {
-        const testProfile = {
-            id: "profile-1",
-            label: "My Cluster",
-            agentUrl: "http://cluster.example.com",
-            userId: "u1",
-            userName: "Test User",
-            userEmail: "test@example.com",
-            userAvatarUrl: "",
-            userProvider: "github",
-            token: "jwt-abc",
-            expiresAt: Math.floor(Date.now() / 1000) + 3600,
-        };
-
-        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === "load_profiles") return { profiles: [testProfile], activeProfileId: null };
-            if (cmd === "set_active_profile") throw new Error("Profile switch failed");
-            return undefined;
-        });
-
-        await renderLoginScreen();
-
-        // The saved connection should appear
-        expect(screen.getByText("My Cluster")).toBeInTheDocument();
-
-        const user = userEvent.setup();
-        await user.click(screen.getByText("My Cluster"));
-
-        // Should show error message instead of navigating
-        await waitFor(() => {
-            expect(screen.getByText(/profile switch failed/i)).toBeInTheDocument();
-        });
+    it("renders every custody failure as an explicit message", () => {
+        for (const code of SESSION_ERROR_CODES) {
+            const { unmount } = render(<SessionIssue code={code} />);
+            expect(screen.getByRole("alert").textContent?.trim().length).toBeGreaterThan(0);
+            unmount();
+        }
     });
 });

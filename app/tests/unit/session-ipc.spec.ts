@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import fixtureSource from "../fixtures/session-ipc.json?raw";
-import { SESSION_ERROR_CODES, type LoginHint, type SessionView } from "@/types/session";
+import { SESSION_ERROR_CODES, loginHintFromIpc, sessionViewFromIpc, type LoginHint, type SessionView } from "@/types/session";
 
 interface SessionIpcFixture {
     commands: string[];
@@ -52,5 +52,15 @@ describe("session IPC contract fixture", () => {
             "session_logout",
             "session_login_hint",
         ]);
+    });
+
+    it("drops unexpected native fields before they can enter React state", () => {
+        expect(sessionViewFromIpc({ ...fixture.sessionView, accessToken: "credential-canary", refreshToken: "refresh-canary" })).toEqual(fixture.sessionView);
+        expect(loginHintFromIpc({ ...fixture.loginHint, verifier: "verifier-canary" })).toEqual(fixture.loginHint);
+    });
+
+    it("rejects malformed native output with a closed code", () => {
+        expect(() => sessionViewFromIpc({ ...fixture.sessionView, profileId: null })).toThrow("invalid_response");
+        expect(() => loginHintFromIpc({ ...fixture.loginHint, label: 123 })).toThrow("invalid_response");
     });
 });
