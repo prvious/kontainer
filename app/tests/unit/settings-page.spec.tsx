@@ -176,9 +176,21 @@ describe("Settings page", () => {
         expect(within(screen.getByRole("region", { name: "Agent" })).getByText("v0.1.0")).toBeInTheDocument();
         expect(screen.getByRole("textbox", { name: "Signed in as" })).toHaveValue("Owner · owner@example.com");
         expect(screen.getByRole("textbox", { name: "Uptime" })).not.toHaveValue("—");
-        expect(screen.getByRole("button", { name: "Integrations hub" })).toHaveAttribute("data-restricted", "true");
+        expect(screen.getByRole("button", { name: "Integrations hub" })).not.toHaveAttribute("data-restricted");
         expect(screen.queryByRole("region", { name: "Pending changes" })).not.toBeInTheDocument();
         expect(screen.getByText("AGENT v0.1.0")).toBeInTheDocument();
+    });
+
+    it("opens the integrations hub, then GitHub, from the Integrations row", async () => {
+        const { router } = renderPage();
+        const user = userEvent.setup();
+        await user.click(await screen.findByRole("button", { name: "Integrations hub" }));
+        await waitFor(() => expect(router().state.location.pathname).toBe("/settings/integrations"));
+        const breadcrumb = () => within(screen.getByRole("navigation", { name: "Breadcrumb" }));
+        expect(breadcrumb().getByRole("link", { name: "Settings" })).toHaveAttribute("href", "/settings");
+        await user.click(screen.getByRole("link", { name: "GitHub (not connected)" }));
+        expect(await screen.findByRole("heading", { name: "GITHUB INTEGRATION" })).toBeInTheDocument();
+        expect(breadcrumb().getByRole("link", { name: "Integrations" })).toHaveAttribute("href", "/settings/integrations");
     });
 
     it("stages edits with counts and notes, validates on blur, and discards everything", async () => {

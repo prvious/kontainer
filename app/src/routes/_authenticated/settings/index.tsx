@@ -89,6 +89,7 @@ function Uptime({ id, startedAt }: { id: string; startedAt: string | undefined }
 }
 
 function SettingsPage() {
+    const navigate = Route.useNavigate();
     const { session } = useAuth();
     const appSettings = useAppSettings();
     const controllerSettings = useControllerSettings();
@@ -351,7 +352,7 @@ function SettingsPage() {
                         id='setting-integrations'
                         variant='outline'
                         icon={ExternalLink}
-                        restricted={{ title: "Integrations aren't available yet", reason: "The integrations hub arrives in a later build." }}
+                        onClick={() => void navigate({ to: "/settings/integrations" })}
                     >
                         OPEN
                     </ActionButton>

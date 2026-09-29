@@ -65,3 +65,4 @@ What becomes easier, what becomes harder, what must be revisited and when.
 | [0025](./0025-log-streams.md) | Service log streams: protocol, transport, reconnects, and the viewer | accepted |
 | [0026](./0026-exec-sessions.md) | Exec sessions: protocol, agent RPC, relay, and the terminal | accepted |
 | [0027](./0027-staged-settings.md) | Staged Settings, the controller status, and switching agents | accepted |
+| [0028](./0028-integrations-placeholders.md) | Integrations hub and GitHub page as placeholders, and a kit breadcrumb | accepted |

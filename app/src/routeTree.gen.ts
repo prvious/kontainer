@@ -22,6 +22,8 @@ import { Route as AuthenticatedLogsIndexRouteImport } from './routes/_authentica
 import { Route as AuthenticatedImagesIndexRouteImport } from './routes/_authenticated/images/index'
 import { Route as AuthenticatedExecIndexRouteImport } from './routes/_authenticated/exec/index'
 import { Route as AuthenticatedContainersIndexRouteImport } from './routes/_authenticated/containers/index'
+import { Route as AuthenticatedSettingsIntegrationsIndexRouteImport } from './routes/_authenticated/settings/integrations/index'
+import { Route as AuthenticatedSettingsIntegrationsGithubRouteImport } from './routes/_authenticated/settings/integrations/github'
 
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
@@ -94,6 +96,18 @@ const AuthenticatedContainersIndexRoute =
     path: '/containers/',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
+const AuthenticatedSettingsIntegrationsIndexRoute =
+  AuthenticatedSettingsIntegrationsIndexRouteImport.update({
+    id: '/settings/integrations/',
+    path: '/settings/integrations/',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
+const AuthenticatedSettingsIntegrationsGithubRoute =
+  AuthenticatedSettingsIntegrationsGithubRouteImport.update({
+    id: '/settings/integrations/github',
+    path: '/settings/integrations/github',
+    getParentRoute: () => AuthenticatedRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AuthenticatedIndexRoute
@@ -108,6 +122,8 @@ export interface FileRoutesByFullPath {
   '/settings/': typeof AuthenticatedSettingsIndexRoute
   '/stacks/': typeof AuthenticatedStacksIndexRoute
   '/volumes/': typeof AuthenticatedVolumesIndexRoute
+  '/settings/integrations/github': typeof AuthenticatedSettingsIntegrationsGithubRoute
+  '/settings/integrations/': typeof AuthenticatedSettingsIntegrationsIndexRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
@@ -122,6 +138,8 @@ export interface FileRoutesByTo {
   '/settings': typeof AuthenticatedSettingsIndexRoute
   '/stacks': typeof AuthenticatedStacksIndexRoute
   '/volumes': typeof AuthenticatedVolumesIndexRoute
+  '/settings/integrations/github': typeof AuthenticatedSettingsIntegrationsGithubRoute
+  '/settings/integrations': typeof AuthenticatedSettingsIntegrationsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -138,6 +156,8 @@ export interface FileRoutesById {
   '/_authenticated/settings/': typeof AuthenticatedSettingsIndexRoute
   '/_authenticated/stacks/': typeof AuthenticatedStacksIndexRoute
   '/_authenticated/volumes/': typeof AuthenticatedVolumesIndexRoute
+  '/_authenticated/settings/integrations/github': typeof AuthenticatedSettingsIntegrationsGithubRoute
+  '/_authenticated/settings/integrations/': typeof AuthenticatedSettingsIntegrationsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -154,6 +174,8 @@ export interface FileRouteTypes {
     | '/settings/'
     | '/stacks/'
     | '/volumes/'
+    | '/settings/integrations/github'
+    | '/settings/integrations/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
@@ -168,6 +190,8 @@ export interface FileRouteTypes {
     | '/settings'
     | '/stacks'
     | '/volumes'
+    | '/settings/integrations/github'
+    | '/settings/integrations'
   id:
     | '__root__'
     | '/_authenticated'
@@ -183,6 +207,8 @@ export interface FileRouteTypes {
     | '/_authenticated/settings/'
     | '/_authenticated/stacks/'
     | '/_authenticated/volumes/'
+    | '/_authenticated/settings/integrations/github'
+    | '/_authenticated/settings/integrations/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -283,6 +309,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedContainersIndexRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/settings/integrations/': {
+      id: '/_authenticated/settings/integrations/'
+      path: '/settings/integrations'
+      fullPath: '/settings/integrations/'
+      preLoaderRoute: typeof AuthenticatedSettingsIntegrationsIndexRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
+    '/_authenticated/settings/integrations/github': {
+      id: '/_authenticated/settings/integrations/github'
+      path: '/settings/integrations/github'
+      fullPath: '/settings/integrations/github'
+      preLoaderRoute: typeof AuthenticatedSettingsIntegrationsGithubRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
   }
 }
 
@@ -298,6 +338,8 @@ interface AuthenticatedRouteChildren {
   AuthenticatedSettingsIndexRoute: typeof AuthenticatedSettingsIndexRoute
   AuthenticatedStacksIndexRoute: typeof AuthenticatedStacksIndexRoute
   AuthenticatedVolumesIndexRoute: typeof AuthenticatedVolumesIndexRoute
+  AuthenticatedSettingsIntegrationsGithubRoute: typeof AuthenticatedSettingsIntegrationsGithubRoute
+  AuthenticatedSettingsIntegrationsIndexRoute: typeof AuthenticatedSettingsIntegrationsIndexRoute
 }
 
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
@@ -312,6 +354,10 @@ const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedSettingsIndexRoute: AuthenticatedSettingsIndexRoute,
   AuthenticatedStacksIndexRoute: AuthenticatedStacksIndexRoute,
   AuthenticatedVolumesIndexRoute: AuthenticatedVolumesIndexRoute,
+  AuthenticatedSettingsIntegrationsGithubRoute:
+    AuthenticatedSettingsIntegrationsGithubRoute,
+  AuthenticatedSettingsIntegrationsIndexRoute:
+    AuthenticatedSettingsIntegrationsIndexRoute,
 }
 
 const AuthenticatedRouteWithChildren = AuthenticatedRoute._addFileChildren(
