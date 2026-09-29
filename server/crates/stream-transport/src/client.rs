@@ -1,4 +1,7 @@
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{
+    SinkExt, StreamExt,
+    stream::{SplitSink, SplitStream},
+};
 use kontainer_stream_protocol::{StreamFrame, StreamProtocolError, WEBSOCKET_SUBPROTOCOL};
 use tokio::{net::TcpStream, time};
 use tokio_tungstenite::{
@@ -173,6 +176,22 @@ impl NativeStreamClient {
         self.close_with_handshake(StreamClose::NORMAL).await;
     }
 
+    /// Separate halves so one task can read while another writes, as a terminal does.
+    #[must_use]
+    pub fn split(self) -> (NativeStreamSender, NativeStreamReceiver) {
+        let (sink, stream) = self.socket.split();
+        (
+            NativeStreamSender {
+                sink,
+                limits: self.limits,
+            },
+            NativeStreamReceiver {
+                stream,
+                limits: self.limits,
+            },
+        )
+    }
+
     async fn close_with_handshake(&mut self, close: StreamClose) {
         let message = Message::Close(Some(CloseFrame {
             code: CloseCode::from(close.code),
@@ -190,6 +209,81 @@ impl NativeStreamClient {
             }
         })
         .await;
+    }
+}
+
+/// The writing half of a split client.
+pub struct NativeStreamSender {
+    sink: SplitSink<NativeSocket, Message>,
+    limits: StreamLimits,
+}
+
+impl NativeStreamSender {
+    pub async fn send_frame(
+        &mut self,
+        frame: &StreamFrame,
+        cancellation: &CancellationToken,
+    ) -> Result<(), StreamClientError> {
+        let encoded = frame.encode();
+        if encoded.len() > self.limits.maximum_frame_bytes() {
+            return Err(StreamClientError::FrameTooLarge);
+        }
+        tokio::select! {
+            biased;
+            () = cancellation.cancelled() => Err(StreamClientError::Cancelled),
+            result = self.sink.send(Message::Binary(encoded.into())) => {
+                result.map_err(|_| StreamClientError::TransportFailure)
+            }
+        }
+    }
+
+    /// Send a normal close; the receiving half sees the peer's answer.
+    pub async fn close(&mut self) {
+        let message = Message::Close(Some(CloseFrame {
+            code: CloseCode::from(StreamClose::NORMAL.code),
+            reason: StreamClose::NORMAL.reason.into(),
+        }));
+        let _ = time::timeout(self.limits.shutdown_grace(), self.sink.send(message)).await;
+    }
+}
+
+/// The reading half of a split client. It cannot answer a bad frame with a close itself, so it
+/// reports it and the owner closes through the sender.
+pub struct NativeStreamReceiver {
+    stream: SplitStream<NativeSocket>,
+    limits: StreamLimits,
+}
+
+impl NativeStreamReceiver {
+    pub async fn receive_frame(
+        &mut self,
+        cancellation: &CancellationToken,
+    ) -> Result<StreamFrame, StreamClientError> {
+        loop {
+            let message = tokio::select! {
+                biased;
+                () = cancellation.cancelled() => return Err(StreamClientError::Cancelled),
+                message = self.stream.next() => message,
+            };
+            match message {
+                Some(Ok(Message::Binary(bytes))) => {
+                    if bytes.len() > self.limits.maximum_frame_bytes() {
+                        return Err(StreamClientError::FrameTooLarge);
+                    }
+                    return StreamFrame::decode(&bytes).map_err(StreamClientError::Protocol);
+                }
+                Some(Ok(Message::Close(frame))) => {
+                    let (code, reason) = frame
+                        .map(|frame| (u16::from(frame.code), frame.reason.to_string()))
+                        .unwrap_or((1005, String::new()));
+                    return Err(StreamClientError::Closed { code, reason });
+                }
+                Some(Ok(Message::Text(_))) => return Err(StreamClientError::UnexpectedTextFrame),
+                Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_))) => {}
+                Some(Err(_)) => return Err(StreamClientError::TransportFailure),
+                None => return Err(StreamClientError::ConnectionEnded),
+            }
+        }
     }
 }
 

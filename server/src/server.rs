@@ -308,9 +308,10 @@ pub async fn serve(router: Router, ctx: &AppContext, params: &ServeParams) -> Re
         .run(shutdown.draining()),
     );
 
-    // Log streams close with 1001 when the drain starts; upgraded connections are not HTTP
+    // Log and exec streams close with 1001 when the drain starts; upgraded connections are not HTTP
     // requests the servers track.
     let log_streams = ctx.shared_store.get::<crate::logs::LogStreams>();
+    let exec_streams = ctx.shared_store.get::<crate::exec::ExecStreams>();
     let draining = shutdown.draining();
     let streams = tokio::spawn(async move {
         draining.cancelled().await;
@@ -318,6 +319,11 @@ pub async fn serve(router: Router, ctx: &AppContext, params: &ServeParams) -> Re
             && let Err(error) = streams.server.shutdown().await
         {
             tracing::warn!(?error, "log streams did not close within the grace");
+        }
+        if let Some(streams) = exec_streams
+            && let Err(error) = streams.server.shutdown().await
+        {
+            tracing::warn!(?error, "exec sessions did not close within the grace");
         }
     });
 

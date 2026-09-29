@@ -6,6 +6,7 @@ use tokio_util::sync::CancellationToken;
 mod capability;
 mod container;
 mod error;
+mod exec;
 mod host;
 mod image;
 mod local;
@@ -28,6 +29,7 @@ pub use container::{
     parse_docker_time, parse_page_token, truncate_status_text,
 };
 pub use error::{EngineError, EngineErrorKind, EngineOperation};
+pub use exec::{ExecAttachment, ExecInput, ExecOutput, ExecStatus, is_missing_shell_status};
 pub use host::{DEFAULT_DOCKER_SOCKET, DockerHost, DockerHostParseError};
 pub use image::{
     ImageSummary, PullEvent, PullProgress, PullStream, bounded_message, is_plausible_reference,
@@ -340,6 +342,56 @@ pub trait ContainerEngine: Send + Sync {
         Err(EngineError::new(
             EngineErrorKind::UnsupportedCapability,
             EngineOperation::ReadSwarm,
+        ))
+    }
+
+    /// Create a TTY exec of `command` in a running container; returns its id.
+    async fn exec_create(
+        &self,
+        _container_id: &str,
+        _command: &[String],
+        _env: &[String],
+        _cancellation: &CancellationToken,
+    ) -> Result<String, EngineError> {
+        Err(EngineError::new(
+            EngineErrorKind::UnsupportedCapability,
+            EngineOperation::Exec,
+        ))
+    }
+
+    /// Start a created exec attached: its input and output bytes.
+    async fn exec_start(
+        &self,
+        _exec_id: &str,
+        _cancellation: &CancellationToken,
+    ) -> Result<ExecAttachment, EngineError> {
+        Err(EngineError::new(
+            EngineErrorKind::UnsupportedCapability,
+            EngineOperation::Exec,
+        ))
+    }
+
+    async fn exec_resize(
+        &self,
+        _exec_id: &str,
+        _cols: u16,
+        _rows: u16,
+        _cancellation: &CancellationToken,
+    ) -> Result<(), EngineError> {
+        Err(EngineError::new(
+            EngineErrorKind::UnsupportedCapability,
+            EngineOperation::Exec,
+        ))
+    }
+
+    async fn exec_inspect(
+        &self,
+        _exec_id: &str,
+        _cancellation: &CancellationToken,
+    ) -> Result<ExecStatus, EngineError> {
+        Err(EngineError::new(
+            EngineErrorKind::UnsupportedCapability,
+            EngineOperation::Exec,
         ))
     }
 

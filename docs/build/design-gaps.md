@@ -30,7 +30,7 @@ Node ids refer to `docs/design.pen`. Open the file with the Pencil MCP using its
 | G8 | Remove volume confirmation | Volumes page `jigga` row action | Adjusted to Docker's rules (spec 09, ADR 0019): Docker refuses to remove a mounted volume even with force, so an attached volume's trash is disabled with a Tooltip Rich listing its containers; an unattached volume opens a Confirm Dialog with its name typed to confirm (the data is not recoverable). | Built |
 | G9 | Stack detail (services grouped by stack) | Stack rows `twXyi` | No detail page. The row menu's Show services filters the Services page by `?stack=` (spec 12). | Built |
 | G10 | Log stream picker ("New Stream") | Logs page `ZkgXL` header button and "+" tab | shadcn Command dialog listing services with search; choosing one opens its tab, or focuses the tab it already has (spec 15). | Built (interim) |
-| G11 | Exec target picker ("+" tab) and custom-shell retry | Exec page `f8D6u`; state `p1V0Po` mentions retry with a custom shell | Command list of running containers grouped by node; custom shell is a text field in the Error State block. | Missing |
+| G11 | Exec target picker ("+" tab) and custom-shell retry | Exec page `f8D6u`; state `p1V0Po` mentions retry with a custom shell | Command list of running containers grouped by node; custom shell is a text field in the Error State block. Built as a shadcn Command dialog behind `+` and NEW SHELL, and a shell field with RETRY on `shell_not_found` (spec 16). | Built (interim) |
 | G12 | Registry credentials for private pulls | State `D9mu7` says registry errors show "the fix (credentials)" | No credentials UI. Pull errors show the registry message verbatim; private registries unsupported this pass. | Missing, deferred |
 | G13 | Titlebar search and notifications panels | Titlebar `iHwhS` right side icons | Icons hidden. Command palette deleted. | Missing, deferred |
 | G14 | Settings entry point for Integrations | Traefik breadcrumb `lXH8d` says Settings › Integrations, but Settings `8wGs5` has no Integrations section | Add an "INTEGRATIONS" section header at the bottom of Settings with one row linking to the hub `r9tns`. | Missing |
@@ -44,7 +44,7 @@ Node ids refer to `docs/design.pen`. Open the file with the Pencil MCP using its
 | G22 | Settings "Auth provider" value | `8wGs5` shows GitHub | Read-only row showing "Password". Design updated in this pass. | Designed |
 | G23 | GitHub integration page in the deferred state | `kx4iP` shows a fully connected integration | Page renders every section as skeleton with a single Alert: "GitHub connects when deployments arrive." | Designed, deferred |
 | G24 | Certificate expiry surfaces (RENEW NOW on a manager card) | State `SedYE` (04.S5) | Not rendered; no certificate lifecycle exists yet. Node cards show only the degraded and down notes (spec 13). | Designed, deferred |
-| G25 | Exec connection line shows PID and TTY | Exec `f8D6u` footer | Docker's exec API does not expose them; the line shows the container name and session count only. | Missing, deferred |
+| G25 | Exec connection line shows PID and TTY | Exec `f8D6u` footer | Docker's exec API does not expose them; the line shows the container name and session count only (spec 16, ADR 0026). | Missing, deferred |
 | G26 | Theme setting row (system / light / dark) | Settings `8wGs5` has no appearance row | A "Theme" select as the first APPLICATION row, styled like the other rows. | Missing |
 
 ## Added in this pass

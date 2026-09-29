@@ -205,6 +205,7 @@ function OverviewPage() {
                 onAction={(row, action) => run(row, action)}
                 onRemove={setRemoving}
                 onLogs={(row) => void navigate({ to: "/logs", search: { service: row.serviceName ?? undefined } })}
+                onExec={(row) => void navigate({ to: "/exec", search: { node: row.nodeId, container: row.containerId } })}
                 countLabel={matching.length > shown.length ? `${shown.length} OF ${matching.length}` : String(matching.length)}
                 isFirstLoad={containers.isPending}
                 isRefetching={containers.isFetching && !containers.isPending}

@@ -22,6 +22,7 @@
 
 pub(crate) mod controller;
 pub(crate) mod errors;
+pub(crate) mod exec_sessions;
 pub(crate) mod legacy;
 pub(crate) mod log_streams;
 pub(crate) mod manager;

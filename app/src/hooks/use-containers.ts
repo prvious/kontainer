@@ -3,6 +3,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { useQueriesPaused } from "@/hooks/use-queries-paused";
 import { authenticatedInvoke } from "@/hooks/authenticated-invoke";
+import type { OperationView } from "@/types/operations";
 import { useStartOperation, type WithIdempotencyKey } from "@/hooks/use-operations";
 import { containerListFromIpc, containerRowId, type ContainerAction, type ContainerListView, type ContainerView } from "@/types/containers";
 import { DEFAULT_APP_SETTINGS } from "@/types/settings";
@@ -68,7 +69,7 @@ export interface ContainerActionVariables extends WithIdempotencyKey {
 }
 
 /** One lifecycle action, tracked under the containers scope. */
-export function useContainerAction() {
+export function useContainerAction(onSettled?: (view: OperationView, variables: ContainerActionVariables) => void) {
     const { session } = useAuth();
     const profileId = session?.profileId ?? "";
     return useStartOperation<ContainerActionVariables>({
@@ -80,6 +81,7 @@ export function useContainerAction() {
         targets: (variables) => [containerRowId(variables)],
         invalidate: [containersKey(profileId)],
         args: ({ nodeId, containerId, action, options, idempotencyKey }) => ({ nodeId, containerId, action, options, idempotencyKey }),
+        onSettled,
     });
 }
 

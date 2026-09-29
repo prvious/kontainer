@@ -184,9 +184,7 @@ impl LogMessage {
                     message: end.message,
                 })
             }
-            StreamFrameKind::Data | StreamFrameKind::Acknowledgement => {
-                return Err(LogPayloadError::NotALogFrame);
-            }
+            _ => return Err(LogPayloadError::NotALogFrame),
         })
     }
 }

@@ -234,6 +234,7 @@ function ContainersPage() {
                     onAction={(row, containerAction) => run(row, containerAction)}
                     onRemove={setRemoving}
                     onLogs={(row) => void navigate({ to: "/logs", search: { service: row.serviceName ?? undefined } })}
+                    onExec={(row) => void navigate({ to: "/exec", search: { node: row.nodeId, container: row.containerId } })}
                     countLabel={filtered.length === rows.length && !search.q ? String(rows.length) : `${filtered.length} OF ${rows.length}`}
                     isFirstLoad={containers.isPending}
                     isRefetching={containers.isFetching && !containers.isPending}

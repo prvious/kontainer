@@ -5,8 +5,13 @@ use prost::Message;
 pub const PROTOCOL_VERSION: u32 = 1;
 pub const WEBSOCKET_SUBPROTOCOL: &str = "kontainer.stream.v1";
 
+mod exec;
 mod logs;
 
+pub use exec::{
+    ExecError, ExecExit, ExecMessage, ExecOpen, ExecPayloadError, ExecResize, ExecStarted,
+    MAX_EXEC_DIMENSION,
+};
 pub use logs::{
     DEFAULT_LOG_TAIL, LogEnd, LogEndReason, LogGap, LogLine, LogMessage, LogPayloadError,
     LogStreamKind, LogsOpen, MAX_LOG_TAIL,
@@ -25,6 +30,14 @@ pub enum StreamFrameKind {
     LogLine,
     LogGap,
     LogEnd,
+    ExecOpen,
+    ExecInput,
+    ExecResize,
+    ExecClose,
+    ExecStarted,
+    ExecOutput,
+    ExecExit,
+    ExecError,
 }
 
 impl StreamFrameKind {
@@ -37,6 +50,14 @@ impl StreamFrameKind {
             Self::LogLine => wire::FrameKind::LogLine,
             Self::LogGap => wire::FrameKind::LogGap,
             Self::LogEnd => wire::FrameKind::LogEnd,
+            Self::ExecOpen => wire::FrameKind::ExecOpen,
+            Self::ExecInput => wire::FrameKind::ExecInput,
+            Self::ExecResize => wire::FrameKind::ExecResize,
+            Self::ExecClose => wire::FrameKind::ExecClose,
+            Self::ExecStarted => wire::FrameKind::ExecStarted,
+            Self::ExecOutput => wire::FrameKind::ExecOutput,
+            Self::ExecExit => wire::FrameKind::ExecExit,
+            Self::ExecError => wire::FrameKind::ExecError,
         }
     }
 
@@ -50,6 +71,14 @@ impl StreamFrameKind {
             wire::FrameKind::LogLine => Self::LogLine,
             wire::FrameKind::LogGap => Self::LogGap,
             wire::FrameKind::LogEnd => Self::LogEnd,
+            wire::FrameKind::ExecOpen => Self::ExecOpen,
+            wire::FrameKind::ExecInput => Self::ExecInput,
+            wire::FrameKind::ExecResize => Self::ExecResize,
+            wire::FrameKind::ExecClose => Self::ExecClose,
+            wire::FrameKind::ExecStarted => Self::ExecStarted,
+            wire::FrameKind::ExecOutput => Self::ExecOutput,
+            wire::FrameKind::ExecExit => Self::ExecExit,
+            wire::FrameKind::ExecError => Self::ExecError,
         })
     }
 }

@@ -2440,6 +2440,57 @@
         ]
       }
     },
+    "/api/v1/ws/exec": {
+      "get": {
+        "tags": [
+          "super::exec"
+        ],
+        "operationId": "exec_stream",
+        "responses": {
+          "101": {
+            "description": "Upgraded to the `kontainer.stream.v1` subprotocol. The client sends one `ExecOpen`, then `ExecInput`, `ExecResize`, and `ExecClose`; the server answers `ExecStarted` or one `ExecError`, then `ExecOutput` and one `ExecExit`. An expired credential closes with 4401."
+          },
+          "400": {
+            "description": "`invalid_request`: not a WebSocket upgrade, or without the stream subprotocol",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential; refused before the upgrade"
+          },
+          "429": {
+            "description": "`limit_reached`: this session already has four exec sessions open",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`unavailable` while the controller drains",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access_session": []
+          }
+        ]
+      }
+    },
     "/api/v1/ws/logs": {
       "get": {
         "tags": [

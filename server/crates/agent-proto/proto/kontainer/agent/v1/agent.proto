@@ -40,6 +40,11 @@ service NodeAgent {
   // A local network with endpoints is refused as a result: `in_use_by` names the containers.
   // Built-ins are INVALID_ARGUMENT `builtin_network`.
   rpc RemoveNetwork(RemoveNetworkRequest) returns (RemoveNetworkResponse);
+  // An interactive TTY shell in one local container. The first client frame is `open`; then
+  // input, resizes, and a close. The agent answers `started` (or one `error`), output, and one
+  // `exit` whose code is absent when unknown. Error codes: `target_not_running`,
+  // `shell_not_found`, `invalid_request`, `engine_error`.
+  rpc Exec(stream ExecClientFrame) returns (stream ExecServerFrame);
 }
 
 message CheckInRequest {
@@ -301,4 +306,51 @@ message RemoveNetworkRequest {
 
 message RemoveNetworkResponse {
   repeated string in_use_by = 1;
+}
+
+message ExecClientFrame {
+  oneof frame {
+    ExecOpenRequest open = 1;
+    bytes input = 2;
+    ExecResizeRequest resize = 3;
+    ExecCloseRequest close = 4;
+  }
+}
+
+// Without `shell` the agent tries `/bin/bash -l`, then `/bin/sh`; a given shell is used as is.
+message ExecOpenRequest {
+  string container_id = 1;
+  optional string shell = 2;
+  uint32 cols = 3;
+  uint32 rows = 4;
+}
+
+message ExecResizeRequest {
+  uint32 cols = 1;
+  uint32 rows = 2;
+}
+
+message ExecCloseRequest {}
+
+message ExecServerFrame {
+  oneof frame {
+    ExecStartedEvent started = 1;
+    bytes output = 2;
+    ExecExitEvent exit = 3;
+    ExecErrorEvent error = 4;
+  }
+}
+
+message ExecStartedEvent {
+  string exec_id = 1;
+  string shell = 2;
+}
+
+message ExecExitEvent {
+  optional int64 code = 1;
+}
+
+message ExecErrorEvent {
+  string code = 1;
+  string message = 2;
 }

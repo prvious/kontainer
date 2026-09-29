@@ -54,6 +54,7 @@ pub enum EngineOperation {
     UpdateService,
     ReadSwarm,
     ReadServiceLogs,
+    Exec,
 }
 
 impl fmt::Display for EngineOperation {
@@ -85,6 +86,7 @@ impl fmt::Display for EngineOperation {
             Self::UpdateService => "update service",
             Self::ReadSwarm => "read swarm state",
             Self::ReadServiceLogs => "read service logs",
+            Self::Exec => "exec",
         };
         formatter.write_str(name)
     }

@@ -1,6 +1,7 @@
 use tauri::State;
 
 use crate::session::errors::SessionError;
+use crate::session::exec_sessions::ExecSessions;
 use crate::session::log_streams::LogStreams;
 use crate::session::manager::SessionManager;
 use crate::session::models::ConnectionSummary;
@@ -21,10 +22,12 @@ use crate::session::models::ConnectionSummary;
 pub async fn session_logout(
     state: State<'_, SessionManager>,
     streams: State<'_, LogStreams>,
+    shells: State<'_, ExecSessions>,
     summary: Option<ConnectionSummary>,
 ) -> Result<(), SessionError> {
-    // No stream outlives the session it was opened with.
+    // No stream or shell outlives the session it was opened with.
     streams.cancel_all();
+    shells.cancel_all();
     if let (Some(summary), Some(origin)) = (summary, state.active_origin()) {
         // Best effort: a summary that cannot be cached never blocks sign-out.
         let _ = state.record_summary(&origin, summary);

@@ -24,6 +24,10 @@ use kontainer_agent_proto::v1::{
     CreateVolumeRequest, ListVolumesRequest, RemoveVolumeRequest,
     VolumeSummary as ProtoVolumeSummary,
 };
+use kontainer_agent_proto::v1::{
+    ExecClientFrame, ExecCloseRequest, ExecOpenRequest, ExecResizeRequest, exec_client_frame,
+    exec_server_frame,
+};
 use kontainer_rpc_auth::{MutualTlsIdentityFiles, WorkloadIdentity};
 use tokio_util::sync::CancellationToken;
 use tonic::transport::{Channel, Endpoint};
@@ -426,6 +430,64 @@ impl NodeAgentClientConfig {
     }
 
     /// Start an anonymous pull on this node; events end with the pull or one failure.
+    /// Open a TTY shell on the agent. `input` carries what follows the open; the stream ends
+    /// after the exit or an error, or when the connection drops.
+    pub async fn exec(
+        &self,
+        open: AgentExecOpen,
+        input: tokio::sync::mpsc::Receiver<AgentExecInput>,
+        cancellation: &CancellationToken,
+    ) -> Result<AgentExecStream, AgentClientError> {
+        use futures_util::StreamExt as _;
+
+        let channel = self
+            .channel_with_timeout(cancellation, EXEC_DEADLINE)
+            .await?;
+        let mut client = NodeAgentClient::new(channel);
+        let first = ExecClientFrame {
+            frame: Some(exec_client_frame::Frame::Open(ExecOpenRequest {
+                container_id: open.container_id,
+                shell: open.shell,
+                cols: open.cols,
+                rows: open.rows,
+            })),
+        };
+        let outbound = futures_util::stream::once(std::future::ready(first))
+            .chain(tokio_stream::wrappers::ReceiverStream::new(input).map(exec_frame));
+        let mut request = tonic::Request::new(outbound);
+        request.set_timeout(EXEC_DEADLINE);
+        let streaming = tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => return Err(AgentClientError::Cancelled),
+            result = tokio::time::timeout(self.rpc_timeout + ACTION_ALLOWANCE, client.exec(request)) => match result {
+                Ok(Ok(response)) => response.into_inner(),
+                Ok(Err(status)) => return Err(map_action_status(&status)),
+                Err(_) => return Err(AgentClientError::TimedOut),
+            }
+        };
+        Ok(Box::pin(futures_util::stream::unfold(
+            Some(streaming),
+            |state| async move {
+                let mut streaming = state?;
+                loop {
+                    match streaming.message().await {
+                        Ok(Some(message)) => {
+                            if let Some(frame) = message.frame {
+                                let event = exec_event(frame);
+                                let last = matches!(
+                                    event,
+                                    AgentExecEvent::Exit { .. } | AgentExecEvent::Error { .. }
+                                );
+                                return Some((event, (!last).then_some(streaming)));
+                            }
+                        }
+                        Ok(None) | Err(_) => return None,
+                    }
+                }
+            },
+        )))
+    }
+
     pub async fn pull_image(
         &self,
         reference: &str,
@@ -789,6 +851,85 @@ pub enum AgentPullEvent {
 pub type AgentPullStream =
     std::pin::Pin<Box<dyn futures_util::Stream<Item = AgentPullEvent> + Send>>;
 
+/// A shell to open on the agent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentExecOpen {
+    pub container_id: String,
+    pub shell: Option<String>,
+    pub cols: u32,
+    pub rows: u32,
+}
+
+/// What the controller relays to the agent after the open.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentExecInput {
+    Input(Vec<u8>),
+    Resize { cols: u32, rows: u32 },
+    Close,
+}
+
+/// What the agent reports, controller-owned.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentExecEvent {
+    Started {
+        exec_id: String,
+        shell: String,
+    },
+    Output(Vec<u8>),
+    /// `None` when the agent doesn't know the exit status.
+    Exit {
+        code: Option<i64>,
+    },
+    Error {
+        code: String,
+        message: String,
+    },
+}
+
+/// Ends after `Exit` or `Error`, or when the agent connection drops.
+pub type AgentExecStream =
+    std::pin::Pin<Box<dyn futures_util::Stream<Item = AgentExecEvent> + Send>>;
+
+const MAX_EXEC_TEXT: usize = 512;
+
+fn bounded(mut text: String, limit: usize) -> String {
+    if text.len() > limit {
+        let mut end = limit;
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        text.truncate(end);
+    }
+    text
+}
+
+fn exec_event(frame: exec_server_frame::Frame) -> AgentExecEvent {
+    match frame {
+        exec_server_frame::Frame::Started(started) => AgentExecEvent::Started {
+            exec_id: bounded(started.exec_id, 128),
+            shell: bounded(started.shell, 256),
+        },
+        exec_server_frame::Frame::Output(bytes) => AgentExecEvent::Output(bytes),
+        exec_server_frame::Frame::Exit(exit) => AgentExecEvent::Exit { code: exit.code },
+        exec_server_frame::Frame::Error(error) => AgentExecEvent::Error {
+            code: bounded(error.code, 64),
+            message: bounded(error.message, MAX_EXEC_TEXT),
+        },
+    }
+}
+
+fn exec_frame(input: AgentExecInput) -> ExecClientFrame {
+    ExecClientFrame {
+        frame: Some(match input {
+            AgentExecInput::Input(bytes) => exec_client_frame::Frame::Input(bytes),
+            AgentExecInput::Resize { cols, rows } => {
+                exec_client_frame::Frame::Resize(ExecResizeRequest { cols, rows })
+            }
+            AgentExecInput::Close => exec_client_frame::Frame::Close(ExecCloseRequest {}),
+        }),
+    }
+}
+
 /// One network as one node sees it, controller-owned.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct AgentNetwork {
@@ -1042,6 +1183,15 @@ pub trait AgentClient: std::fmt::Debug + Send + Sync {
         Err(AgentClientError::Unavailable)
     }
 
+    async fn exec(
+        &self,
+        _open: AgentExecOpen,
+        _input: tokio::sync::mpsc::Receiver<AgentExecInput>,
+        _cancellation: &CancellationToken,
+    ) -> Result<AgentExecStream, AgentClientError> {
+        Err(AgentClientError::Unavailable)
+    }
+
     async fn list_volumes(
         &self,
         _cancellation: &CancellationToken,
@@ -1101,6 +1251,15 @@ pub trait AgentClient: std::fmt::Debug + Send + Sync {
 
 #[async_trait::async_trait]
 impl AgentClient for NodeAgentClientConfig {
+    async fn exec(
+        &self,
+        open: AgentExecOpen,
+        input: tokio::sync::mpsc::Receiver<AgentExecInput>,
+        cancellation: &CancellationToken,
+    ) -> Result<AgentExecStream, AgentClientError> {
+        NodeAgentClientConfig::exec(self, open, input, cancellation).await
+    }
+
     async fn describe(
         &self,
         cancellation: &CancellationToken,
@@ -1387,6 +1546,8 @@ fn map_action_status(status: &tonic::Status) -> AgentClientError {
 const ACTION_ALLOWANCE: Duration = Duration::from_secs(20);
 /// A pull stream may run as long as the `image.pull` operation.
 const PULL_DEADLINE: Duration = Duration::from_secs(10 * 60);
+/// An exec stream lives as long as the session may (8 h), plus a minute.
+const EXEC_DEADLINE: Duration = Duration::from_secs(8 * 60 * 60 + 60);
 const MAX_IMAGES_PER_NODE: usize = 2_000;
 const MAX_VOLUMES_PER_NODE: usize = 2_000;
 const MAX_CONTAINER_NETWORKS: usize = 16;

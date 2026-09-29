@@ -18,7 +18,7 @@ use kontainer_native_client::{
 };
 use kontainer_native_client::{AttachedContainer, NetworkId, NetworkList, NetworkSpec};
 use kontainer_native_client::{ClusterSummary, StackList, StackName, StackRemovalPlan};
-use kontainer_native_client::{LogOpenRequest, LogReceiver};
+use kontainer_native_client::{ExecConnection, ExecOpenRequest, LogOpenRequest, LogReceiver};
 use kontainer_native_client::{ServiceAction, ServiceDetail, ServiceId, ServiceList};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
@@ -110,6 +110,14 @@ pub(crate) trait Controller: Send + Sync + 'static {
         request: &'a LogOpenRequest,
         cancellation: &'a CancellationToken,
     ) -> ControllerFuture<'a, Result<Box<dyn LogReceiver>, NativeClientError>>;
+
+    /// Upgrade to a shell in one container; the credential is only needed for the upgrade.
+    fn connect_exec<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        request: &'a ExecOpenRequest,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ExecConnection, NativeClientError>>;
 
     /// `node_id` `None` reads the cluster series.
     fn samples<'a>(
@@ -473,6 +481,15 @@ impl Controller for NativeController {
         cancellation: &'a CancellationToken,
     ) -> ControllerFuture<'a, Result<Box<dyn LogReceiver>, NativeClientError>> {
         Box::pin(self.client.connect_logs(access, request, cancellation))
+    }
+
+    fn connect_exec<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        request: &'a ExecOpenRequest,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ExecConnection, NativeClientError>> {
+        Box::pin(self.client.connect_exec(access, request, cancellation))
     }
 
     fn samples<'a>(

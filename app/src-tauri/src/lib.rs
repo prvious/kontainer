@@ -16,13 +16,17 @@ pub fn run() {
             let manager = session::initialize(app.handle())?;
             app.manage(manager);
             app.manage(session::log_streams::LogStreams::default());
+            app.manage(session::exec_sessions::ExecSessions::default());
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Log streams belong to the window that opened them.
+            // Log streams and shells belong to the window that opened them.
             if let tauri::WindowEvent::Destroyed = event {
                 window
                     .state::<session::log_streams::LogStreams>()
+                    .cancel_all();
+                window
+                    .state::<session::exec_sessions::ExecSessions>()
                     .cancel_all();
             }
         })
@@ -62,6 +66,10 @@ pub fn run() {
             actions::logs::logs_open::logs_open,
             actions::logs::logs_close::logs_close,
             actions::logs::logs_retry_now::logs_retry_now,
+            actions::exec::exec_open::exec_open,
+            actions::exec::exec_write::exec_write,
+            actions::exec::exec_resize::exec_resize,
+            actions::exec::exec_close::exec_close,
             actions::nodes::get_cluster_summary::get_cluster_summary,
             actions::nodes::get_cluster_samples::get_cluster_samples,
             actions::nodes::get_node_samples::get_node_samples,

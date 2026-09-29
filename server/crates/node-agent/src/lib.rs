@@ -3,6 +3,7 @@
 pub mod check_in;
 pub mod config;
 pub mod container_times;
+pub mod exec;
 pub mod rpc;
 pub mod sampling;
 pub mod server;

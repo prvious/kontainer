@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use kontainer_agent_proto::v1::ExecClientFrame;
 use kontainer_agent_proto::v1::{
     ContainerAction as ProtoContainerAction, ContainerActionRequest, ContainerActionResponse,
     ContainerState as ProtoContainerState, ContainerSummary as ProtoContainerSummary,
@@ -107,6 +108,21 @@ pub type PullImageStream =
 #[tonic::async_trait]
 impl NodeAgent for NodeAgentService {
     type PullImageStream = PullImageStream;
+    type ExecStream = crate::exec::ExecStream;
+
+    async fn exec(
+        &self,
+        request: Request<tonic::Streaming<ExecClientFrame>>,
+    ) -> Result<Response<Self::ExecStream>, Status> {
+        require_controller(&request)?;
+        crate::exec::open(
+            self.engine.clone(),
+            request.into_inner(),
+            self.cancellation.child_token(),
+        )
+        .await
+        .map(Response::new)
+    }
 
     async fn list_images(
         &self,

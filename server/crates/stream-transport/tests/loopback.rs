@@ -864,3 +864,47 @@ async fn a_per_connection_application_sees_the_bearer_sent_on_upgrade() {
     http_shutdown.cancel();
     http_task.await.unwrap();
 }
+
+#[tokio::test]
+async fn a_split_client_reads_and_writes_at_once_and_closes_cleanly() {
+    let running =
+        LoopbackServer::start(StreamLimits::default(), Arc::new(AcknowledgingApplication)).await;
+    let cancellation = CancellationToken::new();
+    let client =
+        NativeStreamClient::connect(&running.endpoint, StreamLimits::default(), &cancellation)
+            .await
+            .unwrap();
+    let (mut sender, mut receiver) = client.split();
+    let reader = tokio::spawn(async move {
+        let mut sequences = Vec::new();
+        loop {
+            match receiver.receive_frame(&CancellationToken::new()).await {
+                Ok(frame) => sequences.push(frame.sequence),
+                Err(error) => return (sequences, error),
+            }
+        }
+    });
+    for sequence in 1..=3 {
+        sender
+            .send_frame(&StreamFrame::data(sequence, b"x".to_vec()), &cancellation)
+            .await
+            .unwrap();
+    }
+    wait_for_active_sessions(&running.server, 1).await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    sender.close().await;
+    let (sequences, ended) = time::timeout(Duration::from_secs(2), reader)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(sequences, vec![1, 2, 3]);
+    assert!(
+        matches!(
+            ended,
+            StreamClientError::Closed { .. } | StreamClientError::ConnectionEnded
+        ),
+        "{ended:?}"
+    );
+    wait_for_drained_session(&running.server).await;
+    running.finish().await;
+}

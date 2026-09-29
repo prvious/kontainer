@@ -1,6 +1,7 @@
 pub mod account;
 pub mod admission;
 pub mod containers;
+pub mod exec;
 pub mod github_login;
 pub mod health;
 pub mod images;
@@ -49,5 +50,6 @@ pub fn protected_application_routes() -> Vec<Routes> {
         services::routes(),
         stacks::routes(),
         logs::routes(),
+        exec::routes(),
     ]
 }

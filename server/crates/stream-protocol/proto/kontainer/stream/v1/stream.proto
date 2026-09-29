@@ -23,6 +23,16 @@ enum FrameKind {
   FRAME_KIND_LOG_LINE = 5;
   FRAME_KIND_LOG_GAP = 6;
   FRAME_KIND_LOG_END = 7;
+  // Client to server: ExecOpen first, then input, resizes, and a close.
+  FRAME_KIND_EXEC_OPEN = 8;
+  FRAME_KIND_EXEC_INPUT = 9;
+  FRAME_KIND_EXEC_RESIZE = 10;
+  FRAME_KIND_EXEC_CLOSE = 11;
+  // Server to client.
+  FRAME_KIND_EXEC_STARTED = 12;
+  FRAME_KIND_EXEC_OUTPUT = 13;
+  FRAME_KIND_EXEC_EXIT = 14;
+  FRAME_KIND_EXEC_ERROR = 15;
 }
 
 // Follow one service's logs. `tail` defaults to 500 and is at most 5000.
@@ -65,4 +75,47 @@ message LogEnd {
   LogEndReason reason = 1;
   string code = 2;
   string message = 3;
+}
+
+// A shell in one container; without `shell` the node tries bash, then sh.
+message ExecOpen {
+  string node_id = 1;
+  string container_id = 2;
+  optional string shell = 3;
+  uint32 cols = 4;
+  uint32 rows = 5;
+}
+
+message ExecInput {
+  bytes bytes = 1;
+}
+
+message ExecResize {
+  uint32 cols = 1;
+  uint32 rows = 2;
+}
+
+message ExecClose {}
+
+message ExecStarted {
+  string exec_id = 1;
+  string shell = 2;
+}
+
+message ExecOutput {
+  bytes bytes = 1;
+}
+
+// `code` is absent when the exit status is unknown. `reason` says why the session ended:
+// `exited`, `idle_timeout`, `max_duration`, or `connection_lost`.
+message ExecExit {
+  optional int64 code = 1;
+  string reason = 2;
+}
+
+// `target_not_running`, `shell_not_found`, `node_unavailable`, `limit_reached`,
+// `session_expired`, or `invalid_request`.
+message ExecError {
+  string code = 1;
+  string message = 2;
 }

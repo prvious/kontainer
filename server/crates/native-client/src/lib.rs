@@ -25,7 +25,7 @@
 //!   failure under the original deadline.
 //!
 //! This crate has no Tauri, WebView, controller, Docker, or database
-//! dependency. The log stream is the one exception to "spawns no work": its
+//! dependency. The log and exec streams are the one exception to "spawns no work": its
 //! WebSocket is the transport crate's, framed with the stream protocol's
 //! protobuf messages, and [`LogFollower`] is driven by the caller's task
 //! (ADR 0006, ADR 0025).
@@ -35,6 +35,7 @@ mod client;
 mod containers;
 mod credentials;
 mod error;
+mod exec;
 mod images;
 mod logs;
 mod networks;
@@ -61,6 +62,10 @@ pub use containers::{
 };
 pub use credentials::{AccessCredential, CredentialError, LoginVerifier, RefreshCredential};
 pub use error::{AccountFieldErrors, FieldProblem, NativeClientError, Traced};
+pub use exec::{
+    ExecClosedReason, ExecConnection, ExecEvent, ExecEventFuture, ExecEventSource, ExecInputFrame,
+    ExecInputSink, ExecOpenRequest, ExecSendFuture, MAX_EXEC_INPUT,
+};
 pub use images::{
     ImageItem, ImageList, ImageNodes, MAX_IMAGE_REFERENCE_LEN, MAX_IMAGE_TARGET_NODES, MAX_IMAGES,
 };

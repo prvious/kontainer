@@ -69,6 +69,9 @@ pub(crate) use nodes::{
     ClusterSummaryView, ControllerSettingsView, NodeListView, SampleSeriesView,
 };
 
+#[path = "manager_exec.rs"]
+mod exec;
+
 #[path = "manager_logs.rs"]
 mod logs;
 pub(crate) use logs::log_connect_error;

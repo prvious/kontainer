@@ -6,6 +6,7 @@
 
 mod auth;
 mod credentials;
+mod exec;
 mod images;
 mod leakage;
 mod logs;

@@ -64,6 +64,7 @@ impl Hooks for App {
         crate::server::init_shared_auth_state(&ctx)?;
         crate::server::init_docker_state(&ctx)?;
         crate::logs::init_log_streams(&ctx)?;
+        crate::exec::init_exec_streams(&ctx)?;
         Ok(ctx)
     }
 

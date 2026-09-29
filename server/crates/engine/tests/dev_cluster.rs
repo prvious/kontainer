@@ -260,6 +260,94 @@ async fn dev_cluster_network_lifecycle_on_the_manager_and_a_worker() {
     assert!(!seed_detail.endpoints.is_empty());
 }
 
+/// A TTY shell in a running alpine-based seed container on the manager: `echo ok` comes back,
+/// `exit` reports 0, and a shell that doesn't exist ends with 126 or 127.
+#[tokio::test]
+async fn dev_cluster_exec_runs_a_tty_shell_and_reports_its_exit() {
+    use futures_util::StreamExt as _;
+    use kontainer_engine::{ContainerPageRequest, is_missing_shell_status};
+
+    let manager = engine(dev_host(
+        "KONTAINER_TEST_DEV_MANAGER_HOST",
+        "tcp://localhost:2375",
+    ));
+    let cancellation = CancellationToken::new();
+    let page = manager
+        .list_containers(ContainerPageRequest::new(200, "").unwrap(), &cancellation)
+        .await
+        .unwrap();
+    let alpine = page
+        .containers
+        .iter()
+        .find(|container| {
+            container.image_reference.contains("alpine")
+                && container.state == kontainer_engine::ContainerState::Running
+        })
+        .expect("a running alpine-based seed container on the manager");
+    let env = vec!["TERM=xterm-256color".to_owned()];
+
+    let exec = manager
+        .exec_create(
+            &alpine.container_id,
+            &["/bin/sh".to_owned()],
+            &env,
+            &cancellation,
+        )
+        .await
+        .unwrap();
+    let mut attached = manager.exec_start(&exec, &cancellation).await.unwrap();
+    manager
+        .exec_resize(&exec, 100, 30, &cancellation)
+        .await
+        .unwrap();
+    attached.input.write(b"echo o''k\r").await.unwrap();
+    let mut seen = Vec::new();
+    let found = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while let Some(Ok(bytes)) = attached.output.next().await {
+            seen.extend_from_slice(&bytes);
+            if String::from_utf8_lossy(&seen).contains("ok\r\n") {
+                return true;
+            }
+        }
+        false
+    })
+    .await
+    .unwrap_or(false);
+    assert!(found, "{:?}", String::from_utf8_lossy(&seen));
+    attached.input.write(b"exit\r").await.unwrap();
+    while attached.output.next().await.is_some() {}
+    let mut status = manager.exec_inspect(&exec, &cancellation).await.unwrap();
+    for _ in 0..20 {
+        if !status.running {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        status = manager.exec_inspect(&exec, &cancellation).await.unwrap();
+    }
+    assert_eq!(status.exit_code, Some(0));
+
+    let missing = manager
+        .exec_create(
+            &alpine.container_id,
+            &["/no/such/shell".to_owned()],
+            &env,
+            &cancellation,
+        )
+        .await
+        .unwrap();
+    let mut attached = manager.exec_start(&missing, &cancellation).await.unwrap();
+    while attached.output.next().await.is_some() {}
+    let mut status = manager.exec_inspect(&missing, &cancellation).await.unwrap();
+    for _ in 0..20 {
+        if !status.running {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        status = manager.exec_inspect(&missing, &cancellation).await.unwrap();
+    }
+    assert!(is_missing_shell_status(status.exit_code), "{status:?}");
+}
+
 /// A seed service's logs through the manager: history with task and node ids, no follow.
 #[tokio::test]
 async fn dev_cluster_service_logs_carry_task_and_node_ids() {

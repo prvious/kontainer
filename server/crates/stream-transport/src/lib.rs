@@ -7,7 +7,7 @@ mod limits;
 mod server;
 
 pub use application::{OutboundFrameError, OutboundSender, StreamApplication};
-pub use client::{NativeStreamClient, StreamClientError};
+pub use client::{NativeStreamClient, NativeStreamReceiver, NativeStreamSender, StreamClientError};
 pub use close::StreamClose;
 pub use limits::{StreamLimitError, StreamLimits};
 pub use server::{

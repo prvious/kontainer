@@ -16,6 +16,10 @@ use kontainer_native_client::{
 };
 use kontainer_native_client::{ClusterSummary, StackList, StackName, StackRemovalPlan};
 use kontainer_native_client::{
+    ExecConnection, ExecEvent, ExecEventFuture, ExecEventSource, ExecInputFrame, ExecInputSink,
+    ExecOpenRequest, ExecSendFuture,
+};
+use kontainer_native_client::{
     LogDisconnect, LogFrame, LogFrameFuture, LogOpenRequest, LogReceiver,
 };
 use kontainer_native_client::{ServiceAction, ServiceDetail, ServiceId, ServiceList};
@@ -397,6 +401,42 @@ pub(crate) struct Script {
     /// Each log connect takes the next entry: the frames that connection yields, or a refusal.
     pub(crate) log_connections:
         VecDeque<Result<Vec<Result<LogFrame, LogDisconnect>>, NativeClientError>>,
+    /// Each exec connect takes the next entry: the events that session yields, or a refusal.
+    pub(crate) exec_connections: VecDeque<Result<Vec<ExecEvent>, NativeClientError>>,
+    /// What every exec session was sent, in order.
+    pub(crate) exec_inputs: Arc<Mutex<Vec<ExecInputFrame>>>,
+}
+
+/// Records what a session was sent.
+pub(crate) struct RecordedExecInput(pub(crate) Arc<Mutex<Vec<ExecInputFrame>>>);
+
+impl ExecInputSink for RecordedExecInput {
+    fn send<'a>(
+        &'a mut self,
+        frame: ExecInputFrame,
+        _: &'a CancellationToken,
+    ) -> ExecSendFuture<'a> {
+        self.0.lock().unwrap().push(frame);
+        Box::pin(async { Ok(()) })
+    }
+}
+
+/// Yields scripted events, then waits for cancellation.
+pub(crate) struct ScriptedExecEvents(pub(crate) VecDeque<ExecEvent>);
+
+impl ExecEventSource for ScriptedExecEvents {
+    fn next_event<'a>(&'a mut self, cancellation: &'a CancellationToken) -> ExecEventFuture<'a> {
+        let next = self.0.pop_front();
+        Box::pin(async move {
+            match next {
+                Some(event) => Some(event),
+                None => {
+                    cancellation.cancelled().await;
+                    None
+                }
+            }
+        })
+    }
 }
 
 /// Yields scripted frames, then reports the connection dropped.
@@ -534,6 +574,41 @@ impl Controller for FakeController {
             .pop_front()
             .unwrap_or(Err(NativeClientError::Unavailable))
             .map(|frames| Box::new(ScriptedLogReceiver(frames.into())) as Box<dyn LogReceiver>);
+        Box::pin(async move { outcome })
+    }
+
+    fn connect_exec<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        request: &'a ExecOpenRequest,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ExecConnection, NativeClientError>> {
+        record(
+            &self.log,
+            format!(
+                "exec:{}:{}:{}:{:?}:{}x{}",
+                public_tag(access.expose()),
+                request.node_id,
+                &request.container_id[..8],
+                request.shell,
+                request.cols,
+                request.rows
+            ),
+        );
+        let (outcome, inputs) = {
+            let mut script = self.script.lock().unwrap();
+            (
+                script
+                    .exec_connections
+                    .pop_front()
+                    .unwrap_or(Err(NativeClientError::Unavailable)),
+                script.exec_inputs.clone(),
+            )
+        };
+        let outcome = outcome.map(|events| ExecConnection {
+            input: Box::new(RecordedExecInput(inputs)),
+            events: Box::new(ScriptedExecEvents(events.into())),
+        });
         Box::pin(async move { outcome })
     }
 

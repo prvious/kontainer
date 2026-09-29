@@ -17,13 +17,16 @@ use kontainer_stream_transport::{
 };
 use loco_rs::{Result, app::AppContext};
 
-use crate::logs::domain::{LIVENESS_INTERVAL, LogConnections};
+use crate::{
+    logs::domain::{LIVENESS_INTERVAL, MAX_LOG_CONNECTIONS_PER_SESSION},
+    stream_slots::SessionSlots,
+};
 
 /// The log stream server and its per-session connection counts, in the shared store.
 #[derive(Clone)]
 pub struct LogStreams {
     pub server: StreamServer,
-    pub connections: LogConnections,
+    pub connections: SessionSlots,
     /// How often a following stream checks the manager; tests shorten it.
     pub liveness: Duration,
 }
@@ -54,7 +57,7 @@ fn log_limits() -> StreamLimits {
 pub fn init_log_streams(ctx: &AppContext) -> Result<()> {
     ctx.shared_store.insert(LogStreams {
         server: StreamServer::new(log_limits(), Arc::new(NoSession)),
-        connections: LogConnections::default(),
+        connections: SessionSlots::new(MAX_LOG_CONNECTIONS_PER_SESSION),
         liveness: LIVENESS_INTERVAL,
     });
     Ok(())

@@ -14,8 +14,7 @@ use kontainer_stream_transport::{
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    auth::domain::ValidatedSession,
-    logs::{domain::LogConnectionGuard, stream::LogStream},
+    auth::domain::ValidatedSession, logs::stream::LogStream, stream_slots::SessionSlot,
     swarm::engine::ManagerEngine,
 };
 
@@ -27,7 +26,7 @@ pub struct LogsSession {
     liveness: Duration,
     shutdown: CancellationToken,
     follow: Mutex<Option<(String, CancellationToken)>>,
-    _slot: LogConnectionGuard,
+    _slot: SessionSlot,
 }
 
 impl LogsSession {
@@ -37,7 +36,7 @@ impl LogsSession {
         session: ValidatedSession,
         liveness: Duration,
         shutdown: CancellationToken,
-        slot: LogConnectionGuard,
+        slot: SessionSlot,
     ) -> Self {
         Self {
             manager,

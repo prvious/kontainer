@@ -24,6 +24,7 @@ use crate::{
     is_plausible_reference, is_valid_container_id, is_valid_image_id, memory_used,
     parse_docker_time, truncate_status_text,
 };
+use crate::{ExecAttachment, ExecInput, ExecStatus};
 use crate::{LogSource, ServiceLogRequest, ServiceLogStream, parse_service_log_line};
 use crate::{
     MAX_NETWORK_ENDPOINTS, MAX_VOLUME_USERS, NetworkCreate, NetworkDetail, NetworkEndpoint,
@@ -818,6 +819,150 @@ impl ContainerEngine for LocalDockerEngine {
             control_available: swarm.control_available.unwrap_or(false),
             managers: count(swarm.managers),
             nodes: count(swarm.nodes),
+        })
+    }
+
+    async fn exec_create(
+        &self,
+        container_id: &str,
+        command: &[String],
+        env: &[String],
+        cancellation: &CancellationToken,
+    ) -> Result<String, EngineError> {
+        use bollard::exec::CreateExecOptions;
+
+        if !is_valid_container_id(container_id) || command.is_empty() {
+            return Err(EngineError::new(
+                EngineErrorKind::InvalidInput,
+                EngineOperation::Exec,
+            ));
+        }
+        let client = self.negotiate(cancellation).await?;
+        let created = self
+            .execute(
+                EngineOperation::Exec,
+                cancellation,
+                client.create_exec(
+                    container_id,
+                    CreateExecOptions {
+                        attach_stdin: Some(true),
+                        attach_stdout: Some(true),
+                        attach_stderr: Some(true),
+                        tty: Some(true),
+                        env: Some(env.to_vec()),
+                        cmd: Some(command.to_vec()),
+                        ..CreateExecOptions::default()
+                    },
+                ),
+            )
+            .await?;
+        Ok(created.id)
+    }
+
+    async fn exec_start(
+        &self,
+        exec_id: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<ExecAttachment, EngineError> {
+        use bollard::exec::{StartExecOptions, StartExecResults};
+        use futures_util::StreamExt as _;
+
+        if !is_valid_container_id(exec_id) {
+            return Err(EngineError::new(
+                EngineErrorKind::InvalidInput,
+                EngineOperation::Exec,
+            ));
+        }
+        let client = self.negotiate(cancellation).await?;
+        let started = self
+            .execute(
+                EngineOperation::Exec,
+                cancellation,
+                client.start_exec(
+                    exec_id,
+                    Some(StartExecOptions {
+                        detach: false,
+                        tty: true,
+                        output_capacity: Some(64 * 1024),
+                    }),
+                ),
+            )
+            .await?;
+        let StartExecResults::Attached { output, input } = started else {
+            return Err(EngineError::new(
+                EngineErrorKind::DaemonRejected,
+                EngineOperation::Exec,
+            ));
+        };
+        // With a TTY the daemon sends raw bytes; whichever variant carries them, pass them on.
+        let output = output.map(|item| match item {
+            Ok(
+                bollard::container::LogOutput::StdOut { message }
+                | bollard::container::LogOutput::StdErr { message }
+                | bollard::container::LogOutput::Console { message }
+                | bollard::container::LogOutput::StdIn { message },
+            ) => Ok(message.to_vec()),
+            Err(error) => Err(EngineError::from_bollard(EngineOperation::Exec, &error)),
+        });
+        Ok(ExecAttachment {
+            output: Box::pin(output),
+            input: ExecInput::new(input),
+        })
+    }
+
+    async fn exec_resize(
+        &self,
+        exec_id: &str,
+        cols: u16,
+        rows: u16,
+        cancellation: &CancellationToken,
+    ) -> Result<(), EngineError> {
+        use bollard::exec::ResizeExecOptions;
+
+        if !is_valid_container_id(exec_id) || cols == 0 || rows == 0 {
+            return Err(EngineError::new(
+                EngineErrorKind::InvalidInput,
+                EngineOperation::Exec,
+            ));
+        }
+        let client = self.negotiate(cancellation).await?;
+        self.execute(
+            EngineOperation::Exec,
+            cancellation,
+            client.resize_exec(
+                exec_id,
+                ResizeExecOptions {
+                    height: rows,
+                    width: cols,
+                },
+            ),
+        )
+        .await
+    }
+
+    async fn exec_inspect(
+        &self,
+        exec_id: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<ExecStatus, EngineError> {
+        if !is_valid_container_id(exec_id) {
+            return Err(EngineError::new(
+                EngineErrorKind::InvalidInput,
+                EngineOperation::Exec,
+            ));
+        }
+        let client = self.negotiate(cancellation).await?;
+        let inspected = self
+            .execute(
+                EngineOperation::Exec,
+                cancellation,
+                client.inspect_exec(exec_id),
+            )
+            .await?;
+        let running = inspected.running.unwrap_or(false);
+        Ok(ExecStatus {
+            running,
+            exit_code: if running { None } else { inspected.exit_code },
         })
     }
 

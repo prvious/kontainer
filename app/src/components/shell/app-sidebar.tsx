@@ -1,7 +1,6 @@
 import { Link, type LinkProps } from "@tanstack/react-router";
 import { Activity, Box, FileStack, HardDrive, Layers, LayoutDashboard, Network, ScrollText, Server, Settings, Terminal, type LucideIcon } from "lucide-react";
 import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupLabel, SidebarMenu, SidebarMenuItem } from "@/components/ui/sidebar";
-import { LabelTooltip } from "@/components/kit/tooltips";
 import { cn } from "@/lib/utils";
 
 export interface SidebarBadges {
@@ -20,8 +19,7 @@ export interface AgentInfo {
 interface NavItem {
     label: string;
     icon: LucideIcon;
-    /** Routes land spec by spec; an item without one renders disabled until its page exists. */
-    to?: LinkProps["to"];
+    to: LinkProps["to"];
     exact?: boolean;
     badge?: (badges: SidebarBadges) => string | null;
 }
@@ -50,7 +48,7 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
     {
         label: "// SYSTEM",
         items: [
-            { label: "Exec", icon: Terminal },
+            { label: "Exec", icon: Terminal, to: "/exec" },
             { label: "Logs", icon: ScrollText, to: "/logs" },
             { label: "Settings", icon: Settings, to: "/settings" },
         ],
@@ -78,15 +76,6 @@ function NavLink({ item, badges }: { item: NavItem; badges: SidebarBadges }) {
             )}
         </>
     );
-    if (!item.to) {
-        return (
-            <LabelTooltip label='Not built yet' side='right'>
-                <span role='link' aria-disabled='true' className={cn(itemClass, "cursor-not-allowed opacity-50 hover:bg-transparent")}>
-                    {content}
-                </span>
-            </LabelTooltip>
-        );
-    }
     return (
         <Link to={item.to} activeOptions={{ exact: item.exact ?? false }} className={cn(itemClass, activeClass)}>
             {content}

@@ -20,6 +20,7 @@ import { Route as AuthenticatedNodesIndexRouteImport } from './routes/_authentic
 import { Route as AuthenticatedNetworksIndexRouteImport } from './routes/_authenticated/networks/index'
 import { Route as AuthenticatedLogsIndexRouteImport } from './routes/_authenticated/logs/index'
 import { Route as AuthenticatedImagesIndexRouteImport } from './routes/_authenticated/images/index'
+import { Route as AuthenticatedExecIndexRouteImport } from './routes/_authenticated/exec/index'
 import { Route as AuthenticatedContainersIndexRouteImport } from './routes/_authenticated/containers/index'
 
 const LoginRoute = LoginRouteImport.update({
@@ -82,6 +83,11 @@ const AuthenticatedImagesIndexRoute =
     path: '/images/',
     getParentRoute: () => AuthenticatedRoute,
   } as any)
+const AuthenticatedExecIndexRoute = AuthenticatedExecIndexRouteImport.update({
+  id: '/exec/',
+  path: '/exec/',
+  getParentRoute: () => AuthenticatedRoute,
+} as any)
 const AuthenticatedContainersIndexRoute =
   AuthenticatedContainersIndexRouteImport.update({
     id: '/containers/',
@@ -93,6 +99,7 @@ export interface FileRoutesByFullPath {
   '/': typeof AuthenticatedIndexRoute
   '/login': typeof LoginRoute
   '/containers/': typeof AuthenticatedContainersIndexRoute
+  '/exec/': typeof AuthenticatedExecIndexRoute
   '/images/': typeof AuthenticatedImagesIndexRoute
   '/logs/': typeof AuthenticatedLogsIndexRoute
   '/networks/': typeof AuthenticatedNetworksIndexRoute
@@ -106,6 +113,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/': typeof AuthenticatedIndexRoute
   '/containers': typeof AuthenticatedContainersIndexRoute
+  '/exec': typeof AuthenticatedExecIndexRoute
   '/images': typeof AuthenticatedImagesIndexRoute
   '/logs': typeof AuthenticatedLogsIndexRoute
   '/networks': typeof AuthenticatedNetworksIndexRoute
@@ -121,6 +129,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/_authenticated/': typeof AuthenticatedIndexRoute
   '/_authenticated/containers/': typeof AuthenticatedContainersIndexRoute
+  '/_authenticated/exec/': typeof AuthenticatedExecIndexRoute
   '/_authenticated/images/': typeof AuthenticatedImagesIndexRoute
   '/_authenticated/logs/': typeof AuthenticatedLogsIndexRoute
   '/_authenticated/networks/': typeof AuthenticatedNetworksIndexRoute
@@ -136,6 +145,7 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/containers/'
+    | '/exec/'
     | '/images/'
     | '/logs/'
     | '/networks/'
@@ -149,6 +159,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/'
     | '/containers'
+    | '/exec'
     | '/images'
     | '/logs'
     | '/networks'
@@ -163,6 +174,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/_authenticated/'
     | '/_authenticated/containers/'
+    | '/_authenticated/exec/'
     | '/_authenticated/images/'
     | '/_authenticated/logs/'
     | '/_authenticated/networks/'
@@ -257,6 +269,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedImagesIndexRouteImport
       parentRoute: typeof AuthenticatedRoute
     }
+    '/_authenticated/exec/': {
+      id: '/_authenticated/exec/'
+      path: '/exec'
+      fullPath: '/exec/'
+      preLoaderRoute: typeof AuthenticatedExecIndexRouteImport
+      parentRoute: typeof AuthenticatedRoute
+    }
     '/_authenticated/containers/': {
       id: '/_authenticated/containers/'
       path: '/containers'
@@ -270,6 +289,7 @@ declare module '@tanstack/react-router' {
 interface AuthenticatedRouteChildren {
   AuthenticatedIndexRoute: typeof AuthenticatedIndexRoute
   AuthenticatedContainersIndexRoute: typeof AuthenticatedContainersIndexRoute
+  AuthenticatedExecIndexRoute: typeof AuthenticatedExecIndexRoute
   AuthenticatedImagesIndexRoute: typeof AuthenticatedImagesIndexRoute
   AuthenticatedLogsIndexRoute: typeof AuthenticatedLogsIndexRoute
   AuthenticatedNetworksIndexRoute: typeof AuthenticatedNetworksIndexRoute
@@ -283,6 +303,7 @@ interface AuthenticatedRouteChildren {
 const AuthenticatedRouteChildren: AuthenticatedRouteChildren = {
   AuthenticatedIndexRoute: AuthenticatedIndexRoute,
   AuthenticatedContainersIndexRoute: AuthenticatedContainersIndexRoute,
+  AuthenticatedExecIndexRoute: AuthenticatedExecIndexRoute,
   AuthenticatedImagesIndexRoute: AuthenticatedImagesIndexRoute,
   AuthenticatedLogsIndexRoute: AuthenticatedLogsIndexRoute,
   AuthenticatedNetworksIndexRoute: AuthenticatedNetworksIndexRoute,

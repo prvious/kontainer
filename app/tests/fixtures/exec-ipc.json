@@ -1,0 +1,16 @@
+{
+    "commands": [
+        ["exec", "exec_open"],
+        ["exec", "exec_write"],
+        ["exec", "exec_resize"],
+        ["exec", "exec_close"]
+    ],
+    "events": [
+        { "type": "started", "shell": "/bin/sh" },
+        { "type": "output", "data": "b2sNCg==" },
+        { "type": "exit", "code": 0, "reason": "exited" },
+        { "type": "exit", "code": null, "reason": "idle_timeout" },
+        { "type": "error", "code": "shell_not_found", "message": "No shell at /bin/zsh in this container." },
+        { "type": "closed", "reason": "connection_lost" }
+    ]
+}

@@ -46,15 +46,11 @@ describe("AppSidebar", () => {
         expect(screen.getByRole("link", { name: "Overview" })).not.toHaveAttribute("data-status", "active");
     });
 
-    it("renders routes that do not exist yet as disabled", async () => {
+    it("links every item to its page now that each one is built", async () => {
         renderSidebar("/");
-        expect(await screen.findByRole("link", { name: "Exec" })).toHaveAttribute("aria-disabled", "true");
-        expect(screen.getByRole("link", { name: "Nodes" })).not.toHaveAttribute("aria-disabled");
-        expect(screen.getByRole("link", { name: "Stacks" })).not.toHaveAttribute("aria-disabled");
-        expect(screen.getByRole("link", { name: "Networks" })).not.toHaveAttribute("aria-disabled");
-        expect(screen.getByRole("link", { name: "Containers" })).not.toHaveAttribute("aria-disabled");
-        expect(screen.getByRole("link", { name: "Images" })).not.toHaveAttribute("aria-disabled");
-        expect(screen.getByRole("link", { name: "Volumes" })).not.toHaveAttribute("aria-disabled");
+        expect(await screen.findByRole("link", { name: "Exec" })).toHaveAttribute("href", "/exec");
+        expect(screen.getByRole("link", { name: "Logs" })).toHaveAttribute("href", "/logs");
+        for (const link of screen.getAllByRole("link")) expect(link).not.toHaveAttribute("aria-disabled");
     });
 
     it("shows badges only when non-zero", async () => {

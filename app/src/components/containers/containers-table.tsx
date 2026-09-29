@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
 
 type Row = ContainerRow & Record<string, unknown>;
 
-const EXEC_LATER = { title: "Exec isn't available yet", reason: "Opening a shell in a container arrives with the Exec screen." };
+const NOT_RUNNING = { title: "Container isn't running", reason: "Exec opens a shell in a running container. Start it first." };
 const STALE = { title: "Node didn't answer", reason: "This row is the last thing the node reported. Actions return when it checks in again." };
 
 export interface ContainersTableProps {
@@ -38,6 +38,8 @@ export interface ContainersTableProps {
     onRemove: (row: ContainerRow) => void;
     /** Opens the log stream of the row's service; rows without one have no logs to follow. */
     onLogs?: (row: ContainerRow) => void;
+    /** Opens a shell in the row's container on the Exec screen; running rows only. */
+    onExec?: (row: ContainerRow) => void;
     countLabel: string;
     isFirstLoad: boolean;
     isRefetching: boolean;
@@ -50,10 +52,15 @@ function rowActions(
     onAction: ContainersTableProps["onAction"],
     onRemove: ContainersTableProps["onRemove"],
     onLogs: ContainersTableProps["onLogs"],
+    onExec: ContainersTableProps["onExec"],
 ) {
     const stale = row.stale;
     const disabled = stale ? { disabled: true, disabledReason: STALE } : {};
-    const actions: RowIconAction[] = [{ label: "Exec", icon: Terminal, onClick: () => {}, disabled: true, disabledReason: stale ? STALE : EXEC_LATER }];
+    const execBlocked = stale ? STALE : row.state !== "running" ? NOT_RUNNING : undefined;
+    const exec = () => onExec?.(row);
+    const actions: RowIconAction[] = [
+        { label: "Exec", icon: Terminal, onClick: exec, mutates: true, disabled: execBlocked !== undefined || !onExec, disabledReason: execBlocked },
+    ];
     if (row.state === "running") actions.push({ label: "Pause", icon: Pause, onClick: () => onAction(row, "pause"), mutates: true, ...disabled });
     else if (row.state === "paused") actions.push({ label: "Unpause", icon: Play, onClick: () => onAction(row, "unpause"), mutates: true, ...disabled });
     else actions.push({ label: "Restart", icon: RotateCw, onClick: () => onAction(row, "restart"), mutates: true, ...disabled });
@@ -61,7 +68,7 @@ function rowActions(
     const live = row.state === "running" || row.state === "paused" || row.state === "restarting";
     const menu: RowMenuItem[] = [
         { label: row.serviceName ? "Logs" : "Logs (no service)", onClick: () => onLogs?.(row), disabled: !row.serviceName || !onLogs },
-        { label: "Exec", onClick: () => {}, disabled: true },
+        { label: "Exec", onClick: exec, disabled: execBlocked !== undefined || !onExec, mutates: true },
         { label: "Restart", onClick: () => onAction(row, "restart"), disabled: stale, separatorBefore: true, mutates: true },
         live
             ? { label: "Stop", onClick: () => onAction(row, "stop"), disabled: stale, mutates: true }
@@ -149,7 +156,7 @@ export function ContainersTable(props: ContainersTableProps) {
             rowSelection={props.selection}
             onRowSelectionChange={props.onSelectionChange}
             headerRight={props.headerRight}
-            rowActions={(row) => rowActions(row, props.onAction, props.onRemove, props.onLogs)}
+            rowActions={(row) => rowActions(row, props.onAction, props.onRemove, props.onLogs, props.onExec)}
             rowClassName={(row) =>
                 cn((props.pending.has(containerRowId(row)) || props.dimmed) && "opacity-50 transition-opacity", row.stale && "text-muted-foreground")
             }

@@ -1,15 +1,9 @@
-//! Log streaming rules in the controller's own terms: limits, validation, truncation, and the
-//! per-session connection count.
+//! Log streaming rules in the controller's own terms: limits, validation, and truncation.
 
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::time::Duration;
 
 use kontainer_engine::{ServiceLogRequest, is_valid_swarm_id};
 use kontainer_stream_protocol::{DEFAULT_LOG_TAIL, LogsOpen, MAX_LOG_TAIL};
-use uuid::Uuid;
 
 /// Open log connections one access session may hold; the next is refused `limit_reached`.
 pub const MAX_LOG_CONNECTIONS_PER_SESSION: usize = 8;
@@ -56,71 +50,16 @@ pub fn truncate_line(mut text: String) -> (String, bool) {
     (text, true)
 }
 
-/// Open log connections per access-session family.
-#[derive(Clone, Default)]
-pub struct LogConnections(Arc<Mutex<HashMap<Uuid, usize>>>);
-
-impl LogConnections {
-    /// A slot for one more connection of `family`, or `None` at the limit.
-    #[must_use]
-    pub fn try_acquire(&self, family: Uuid) -> Option<LogConnectionGuard> {
-        let mut open = self
-            .0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let count = open.entry(family).or_insert(0);
-        if *count >= MAX_LOG_CONNECTIONS_PER_SESSION {
-            return None;
-        }
-        *count += 1;
-        Some(LogConnectionGuard {
-            connections: self.clone(),
-            family,
-        })
-    }
-
-    #[must_use]
-    pub fn open(&self, family: Uuid) -> usize {
-        self.0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get(&family)
-            .copied()
-            .unwrap_or(0)
-    }
-}
-
-/// Releases its connection slot when the connection ends.
-pub struct LogConnectionGuard {
-    connections: LogConnections,
-    family: Uuid,
-}
-
-impl Drop for LogConnectionGuard {
-    fn drop(&mut self) {
-        let mut open = self
-            .connections
-            .0
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if let Some(count) = open.get_mut(&self.family) {
-            *count -= 1;
-            if *count == 0 {
-                open.remove(&self.family);
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use kontainer_stream_protocol::LogsOpen;
     use uuid::Uuid;
 
     use super::{
-        LogConnections, MAX_LINE_BYTES, MAX_LOG_CONNECTIONS_PER_SESSION, OpenRejection,
-        truncate_line, validate_open,
+        MAX_LINE_BYTES, MAX_LOG_CONNECTIONS_PER_SESSION, OpenRejection, truncate_line,
+        validate_open,
     };
+    use crate::stream_slots::SessionSlots;
 
     const SERVICE: &str = "eb6ymskrt4ij70dco3menddxl";
 
@@ -166,7 +105,7 @@ mod tests {
 
     #[test]
     fn a_session_holds_eight_connections_and_frees_them_as_they_end() {
-        let connections = LogConnections::default();
+        let connections = SessionSlots::new(MAX_LOG_CONNECTIONS_PER_SESSION);
         let family = Uuid::now_v7();
         let guards: Vec<_> = (0..MAX_LOG_CONNECTIONS_PER_SESSION)
             .map(|_| connections.try_acquire(family).unwrap())
