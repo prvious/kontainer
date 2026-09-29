@@ -95,7 +95,9 @@ export function ImagesTable(props: ImagesTableProps) {
             search={props.search}
             sorting={props.sorting}
             onSortingChange={props.onSortingChange}
-            rowActions={(row) => <RowActions label={imageLabel(row)} actions={[{ label: "Delete", icon: Trash2, onClick: () => props.onDelete(row) }]} />}
+            rowActions={(row) => (
+                <RowActions label={imageLabel(row)} actions={[{ label: "Delete", icon: Trash2, onClick: () => props.onDelete(row), mutates: true }]} />
+            )}
             rowClassName={(row) => cn(props.pending.has(row.imageId) && "opacity-50 transition-opacity")}
             countLabel={props.countLabel}
             headerRight={props.headerRight}

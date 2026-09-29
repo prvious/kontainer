@@ -70,11 +70,13 @@ function renderApp(initialPath = "/") {
 describe("authenticated shell", () => {
     beforeEach(() => vi.clearAllMocks());
 
-    it("renders the outlet for every authenticated route, starting from the root redirect", async () => {
+    it("lands on the Cluster Overview and renders other routes in the outlet", async () => {
         mockCommands();
         renderApp();
+        await waitFor(() => expect(screen.getByRole("heading", { name: "CLUSTER OVERVIEW", level: 1 })).toBeInTheDocument());
+        expect(screen.getByRole("link", { name: "Overview" })).toHaveAttribute("data-status", "active");
+        await userEvent.setup().click(screen.getByRole("link", { name: /Containers/ }));
         await waitFor(() => expect(screen.getByRole("heading", { name: "CONTAINERS", level: 1 })).toBeInTheDocument());
-        expect(screen.getByRole("link", { name: /Containers/ })).toHaveAttribute("data-status", "active");
     });
 
     it("keeps local settings available from the shell", async () => {
@@ -98,11 +100,14 @@ describe("authenticated shell", () => {
         expect(invoke).toHaveBeenCalledWith("list_nodes", { profileId: session.profileId });
     });
 
-    it("shows the controller health in the titlebar dot and the status bar", async () => {
+    it("turns the titlebar dot red on a failed probe and the status bar to RECONNECTING after three", async () => {
         mockCommands({ controller_health: () => ({ status: "unreachable", diagnostic: "tcp" }) });
         renderApp();
-        await waitFor(() => expect(screen.getByText("RECONNECTING")).toBeInTheDocument());
-        expect(screen.getByTestId("controller-health-dot")).toHaveAttribute("data-tone", "destructive");
+        await waitFor(() => expect(screen.getByTestId("controller-health-dot")).toHaveAttribute("data-tone", "destructive"));
+        expect(screen.queryByText("RECONNECTING")).not.toBeInTheDocument();
+        // Two retries, 1 s apart, before the probe query errors.
+        await waitFor(() => expect(screen.getByText("RECONNECTING")).toBeInTheDocument(), { timeout: 4000 });
+        expect(vi.mocked(invoke).mock.calls.filter(([command]) => command === "controller_health")).toHaveLength(3);
     });
 
     it("keeps the page mounted under the session-expired dialog when a refresh is rejected", async () => {
@@ -160,7 +165,7 @@ describe("authenticated shell", () => {
         await user.type(await screen.findByLabelText("Email"), "jane@example.com");
         await user.type(screen.getByLabelText("Password"), "correct horse battery");
         await user.click(screen.getByRole("button", { name: /Sign in/ }));
-        await waitFor(() => expect(screen.getByRole("heading", { name: "CONTAINERS", level: 1 })).toBeInTheDocument());
+        await waitFor(() => expect(screen.getByRole("heading", { name: "CLUSTER OVERVIEW", level: 1 })).toBeInTheDocument());
         expect(invoke).toHaveBeenCalledWith("session_login", {
             origin: "http://127.0.0.1:5150",
             email: "jane@example.com",

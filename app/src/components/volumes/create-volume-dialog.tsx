@@ -241,7 +241,7 @@ function CreateVolumeBody({
                 <ActionButton type='button' variant='secondary' className='h-7.75 px-3.5 text-2xs' onClick={onClose}>
                     CANCEL
                 </ActionButton>
-                <ActionButton type='submit' variant='primary' className='h-7.75 px-3.5 text-2xs' icon={Plus} disabled={invalid} pending={pending}>
+                <ActionButton type='submit' variant='primary' className='h-7.75 px-3.5 text-2xs' icon={Plus} disabled={invalid} pending={pending} mutates>
                     CREATE VOLUME
                 </ActionButton>
             </div>

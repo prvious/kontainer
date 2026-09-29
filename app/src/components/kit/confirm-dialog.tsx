@@ -3,6 +3,7 @@ import { Trash2, TriangleAlert, type LucideIcon } from "lucide-react";
 import { AlertDialog, AlertDialogContent, AlertDialogDescription, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { ActionButton } from "@/components/kit/action-button";
+import { useConnectivity } from "@/hooks/use-connectivity";
 import { cn } from "@/lib/utils";
 
 export interface ConfirmDialogProps {
@@ -57,12 +58,13 @@ function ConfirmDialogBody({
     const inputId = useId();
     const [typed, setTyped] = useState("");
     const matches = confirmationText === undefined || typed === confirmationText;
+    const { reachable } = useConnectivity();
 
     return (
         <form
             onSubmit={(event) => {
                 event.preventDefault();
-                if (matches && !pending) onConfirm();
+                if (matches && !pending && reachable) onConfirm();
             }}
         >
             <div className='flex gap-3.5 px-5 pt-5'>
@@ -117,6 +119,7 @@ function ConfirmDialogBody({
                     icon={confirmIcon}
                     disabled={!matches}
                     pending={pending}
+                    mutates
                 >
                     {confirmLabel}
                 </ActionButton>

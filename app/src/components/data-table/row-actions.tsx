@@ -2,6 +2,8 @@ import type { LucideIcon } from "lucide-react";
 import { EllipsisVertical } from "lucide-react";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { LabelTooltip, TooltipRich } from "@/components/kit/tooltips";
+import { PAUSED_OFFLINE } from "@/contexts/connectivity-context-value";
+import { useConnectivity } from "@/hooks/use-connectivity";
 import { cn } from "@/lib/utils";
 
 export interface RowIconAction {
@@ -11,6 +13,8 @@ export interface RowIconAction {
     disabled?: boolean;
     /** Why the action is unavailable; shown as a Tooltip Rich instead of the plain label. */
     disabledReason?: { title: string; reason: string };
+    /** Changes cluster state: disabled while the controller is unreachable. */
+    mutates?: boolean;
 }
 
 export interface RowMenuItem {
@@ -19,10 +23,25 @@ export interface RowMenuItem {
     disabled?: boolean;
     destructive?: boolean;
     separatorBefore?: boolean;
+    /** Changes cluster state: disabled while the controller is unreachable. */
+    mutates?: boolean;
 }
 
 /** RowActions `KPhXT` / Table Actions `Ulm5I`: icon buttons with 400 ms label tooltips, then a `⋮` menu. */
-export function RowActions({ label, actions = [], menu = [] }: { label: string; actions?: RowIconAction[]; menu?: RowMenuItem[] }) {
+export function RowActions({
+    label,
+    actions: declaredActions = [],
+    menu: declaredMenu = [],
+}: {
+    label: string;
+    actions?: RowIconAction[];
+    menu?: RowMenuItem[];
+}) {
+    const { reachable } = useConnectivity();
+    const offline = (entry: { mutates?: boolean; disabled?: boolean }) => !reachable && entry.mutates === true && !entry.disabled;
+    const actions = declaredActions.map((action) => (offline(action) ? { ...action, disabled: true, disabledReason: PAUSED_OFFLINE } : action));
+    const menu = declaredMenu.map((item) => (offline(item) ? { ...item, disabled: true } : item));
+    const paused = !reachable && declaredMenu.some((item) => item.mutates);
     return (
         <div className='flex items-center justify-end gap-2'>
             {actions.map((action) => {
@@ -63,6 +82,7 @@ export function RowActions({ label, actions = [], menu = [] }: { label: string; 
                         </DropdownMenuTrigger>
                     </LabelTooltip>
                     <DropdownMenuContent align='end' className='min-w-40'>
+                        {paused && <p className='max-w-56 px-1.5 py-1 font-mono text-3xs leading-normal text-warning'>{PAUSED_OFFLINE.title}</p>}
                         {menu.map((item) => (
                             <MenuEntry key={item.label} item={item} />
                         ))}

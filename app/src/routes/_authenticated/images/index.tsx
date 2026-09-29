@@ -95,7 +95,7 @@ function ImagesPage() {
                 <ActionButton variant='outline' icon={RefreshCw} pending={images.isFetching} onClick={() => void images.refetch()}>
                     REFRESH
                 </ActionButton>
-                <ActionButton variant='primary' icon={Download} pending={pulling} onClick={() => setPullOpen(true)}>
+                <ActionButton variant='primary' icon={Download} pending={pulling} mutates onClick={() => setPullOpen(true)}>
                     {pulling ? "PULLING…" : "PULL IMAGE"}
                 </ActionButton>
             </PageHeader>

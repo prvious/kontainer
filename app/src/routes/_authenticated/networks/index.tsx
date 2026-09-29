@@ -115,7 +115,7 @@ function NetworksPage() {
                 <ActionButton variant='outline' icon={RefreshCw} pending={networks.isFetching} onClick={() => void networks.refetch()}>
                     REFRESH
                 </ActionButton>
-                <ActionButton variant='primary' icon={Plus} onClick={() => setCreateOpen(true)}>
+                <ActionButton variant='primary' icon={Plus} mutates onClick={() => setCreateOpen(true)}>
                     CREATE NETWORK
                 </ActionButton>
             </PageHeader>

@@ -3,6 +3,8 @@ import { cva } from "class-variance-authority";
 import { Loader2, Lock, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TooltipRich } from "@/components/kit/tooltips";
+import { PAUSED_OFFLINE } from "@/contexts/connectivity-context-value";
+import { useConnectivity } from "@/hooks/use-connectivity";
 import { cn } from "@/lib/utils";
 
 /**
@@ -40,9 +42,24 @@ export interface ActionButtonProps extends Omit<ComponentProps<typeof Button>, "
     pending?: boolean;
     /** Shown with a lock and a Tooltip Rich explaining why the action is unavailable. */
     restricted?: { title: string; reason: string };
+    /** Changes cluster state: restricted while the controller is unreachable (03.S2). */
+    mutates?: boolean;
 }
 
-export function ActionButton({ variant, size, icon: Icon, pending = false, restricted, className, children, onClick, ...props }: ActionButtonProps) {
+export function ActionButton({
+    variant,
+    size,
+    icon: Icon,
+    pending = false,
+    restricted: declared,
+    mutates = false,
+    className,
+    children,
+    onClick,
+    ...props
+}: ActionButtonProps) {
+    const { reachable } = useConnectivity();
+    const restricted = declared ?? (mutates && !reachable ? PAUSED_OFFLINE : undefined);
     const LeadingIcon = restricted ? Lock : pending ? Loader2 : Icon;
     const blocked = pending || restricted !== undefined;
     const button = (

@@ -10,9 +10,10 @@ import { Titlebar } from "@/components/shell/titlebar";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { ActionButton } from "@/components/kit/action-button";
 import { useAuth } from "@/hooks/use-auth";
-import { useControllerHealth } from "@/hooks/session/use-controller-health";
+import { useConnectivity } from "@/hooks/use-connectivity";
 import { useClusterSummary, useNodes } from "@/hooks/use-nodes";
 import { useContainers } from "@/hooks/use-containers";
+import { ConnectivityProvider } from "@/contexts/connectivity-context";
 import { OperationsProvider } from "@/contexts/operations-context";
 import { clusterUsage, nodesDown } from "@/types/nodes";
 
@@ -40,9 +41,18 @@ export const Route = createFileRoute("/_authenticated")({
 });
 
 function AuthenticatedLayout() {
+    const { session, expired } = useAuth();
+    return (
+        <ConnectivityProvider enabled={Boolean(session) && !expired}>
+            <AuthenticatedShell />
+        </ConnectivityProvider>
+    );
+}
+
+function AuthenticatedShell() {
     const { session, expired, issue, retryCommit, retryRestore, logout } = useAuth();
     const router = useRouter();
-    const health = useControllerHealth(Boolean(session) && !expired);
+    const { probe, reachable } = useConnectivity();
     const nodes = useNodes();
     const summary = useClusterSummary();
     const containers = useContainers();
@@ -70,7 +80,7 @@ function AuthenticatedLayout() {
         <OperationsProvider>
             <div className='flex h-screen flex-col overflow-hidden bg-background'>
                 <AccentLine />
-                <Titlebar center={<ClusterSwitcher health={health.data} />} />
+                <Titlebar center={<ClusterSwitcher health={probe} />} />
                 {issue && issue !== "relogin_required" && (
                     <SessionIssue
                         code={issue}
@@ -95,7 +105,7 @@ function AuthenticatedLayout() {
                 <StatusBar
                     data={{
                         ...clusterUsage(summary.data, nodes.data?.items),
-                        connection: health.data ? (health.data.status === "ready" ? "connected" : "reconnecting") : undefined,
+                        connection: probe ? (reachable ? "connected" : "reconnecting") : undefined,
                     }}
                 />
                 <SessionExpiredDialog />

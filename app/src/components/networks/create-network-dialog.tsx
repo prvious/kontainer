@@ -225,6 +225,7 @@ function CreateNetworkBody({
                     icon={Plus}
                     disabled={invalid}
                     pending={create.isPending || waiting}
+                    mutates
                 >
                     CREATE NETWORK
                 </ActionButton>

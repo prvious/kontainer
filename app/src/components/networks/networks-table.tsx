@@ -36,7 +36,7 @@ function Actions({ row, onRemove }: { row: NetworkView; onRemove: (network: Netw
     if (row.builtin)
         return <RowActions label={row.name} actions={[{ label: "Remove", icon: Trash2, onClick: () => {}, disabled: true, disabledReason: BUILTIN }]} />;
     if (row.containers > 0) return <RemoveBlockedPopover network={row} />;
-    return <RowActions label={row.name} actions={[{ label: "Remove", icon: Trash2, onClick: () => onRemove(row) }]} />;
+    return <RowActions label={row.name} actions={[{ label: "Remove", icon: Trash2, onClick: () => onRemove(row), mutates: true }]} />;
 }
 
 /** ALL NETWORKS: NAME, ID, DRIVER, SCOPE, SUBNET, CONTAINERS, CREATED, and the trash. */

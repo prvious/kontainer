@@ -130,7 +130,7 @@ function VolumesPage() {
                 <ActionButton variant='outline' icon={RefreshCw} pending={volumes.isFetching} onClick={() => void volumes.refetch()}>
                     REFRESH
                 </ActionButton>
-                <ActionButton variant='primary' icon={Plus} onClick={() => setCreateOpen(true)}>
+                <ActionButton variant='primary' icon={Plus} mutates onClick={() => setCreateOpen(true)}>
                     CREATE VOLUME
                 </ActionButton>
             </PageHeader>

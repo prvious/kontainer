@@ -216,6 +216,7 @@ function PullImageBody({ nodes, onClose }: { nodes: NodeSummary[]; onClose: () =
                                 className='h-7.75 px-3.5 text-2xs'
                                 pending={pull.isPending}
                                 disabled={selected.length === 0 || trimmed === ""}
+                                mutates
                             >
                                 PULL
                             </ActionButton>
@@ -258,7 +259,7 @@ function NodeProgressRow({ row, retrying, onRetry }: { row: NodeProgress; retryi
                         <span className='break-words'>{row.error}</span>
                         <span className='block text-muted-foreground'>{PRIVATE_REGISTRY_HINT}</span>
                     </p>
-                    <ActionButton type='button' variant='outline' size='sm' icon={RotateCw} pending={retrying} onClick={onRetry}>
+                    <ActionButton type='button' variant='outline' size='sm' icon={RotateCw} pending={retrying} mutates onClick={onRetry}>
                         RETRY
                     </ActionButton>
                 </div>

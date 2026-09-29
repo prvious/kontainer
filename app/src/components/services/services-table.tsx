@@ -114,9 +114,9 @@ export function ServicesTable(props: ServicesTableProps) {
     function menu(row: ServiceView): RowMenuItem[] {
         const blocked = !props.writable || props.statusOf(row) === "scaling";
         return [
-            { label: "Scale", onClick: () => props.onEdit(row.id), disabled: blocked || row.mode !== "replicated" },
-            { label: "Restart", onClick: () => props.onRestart(row), disabled: blocked },
-            { label: "Rollback", onClick: () => props.onRollback(row), disabled: blocked },
+            { label: "Scale", onClick: () => props.onEdit(row.id), disabled: blocked || row.mode !== "replicated", mutates: true },
+            { label: "Restart", onClick: () => props.onRestart(row), disabled: blocked, mutates: true },
+            { label: "Rollback", onClick: () => props.onRollback(row), disabled: blocked, mutates: true },
             { label: "Logs (not built yet)", onClick: () => {}, disabled: true, separatorBefore: true },
         ];
     }

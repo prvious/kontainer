@@ -16,13 +16,20 @@ const EXEC_LATER = { title: "Exec isn't available yet", reason: "Opening a shell
 const STALE = { title: "Node didn't answer", reason: "This row is the last thing the node reported. Actions return when it checks in again." };
 
 export interface ContainersTableProps {
+    /** Section title; the Containers page's ALL CONTAINERS by default. */
+    title?: string;
     rows: ContainerRow[];
     snapshotAt: string;
     search: string;
     sorting: SortingState;
     onSortingChange: (sorting: SortingState) => void;
-    selection: RowSelectionState;
-    onSelectionChange: (selection: RowSelectionState) => void;
+    /** Omit both for a table without bulk selection. */
+    selection?: RowSelectionState;
+    onSelectionChange?: (selection: RowSelectionState) => void;
+    /** Right side of the section header (search box, filter button). */
+    headerRight?: ReactNode;
+    /** Cached rows shown while the controller is unreachable. */
+    dimmed?: boolean;
     /** Rows a bulk operation failed on, with the failure code. */
     failures: Map<string, string>;
     /** Rows an in-flight operation acts on. */
@@ -40,22 +47,22 @@ function rowActions(row: ContainerRow, onAction: ContainersTableProps["onAction"
     const stale = row.stale;
     const disabled = stale ? { disabled: true, disabledReason: STALE } : {};
     const actions: RowIconAction[] = [{ label: "Exec", icon: Terminal, onClick: () => {}, disabled: true, disabledReason: stale ? STALE : EXEC_LATER }];
-    if (row.state === "running") actions.push({ label: "Pause", icon: Pause, onClick: () => onAction(row, "pause"), ...disabled });
-    else if (row.state === "paused") actions.push({ label: "Unpause", icon: Play, onClick: () => onAction(row, "unpause"), ...disabled });
-    else actions.push({ label: "Restart", icon: RotateCw, onClick: () => onAction(row, "restart"), ...disabled });
+    if (row.state === "running") actions.push({ label: "Pause", icon: Pause, onClick: () => onAction(row, "pause"), mutates: true, ...disabled });
+    else if (row.state === "paused") actions.push({ label: "Unpause", icon: Play, onClick: () => onAction(row, "unpause"), mutates: true, ...disabled });
+    else actions.push({ label: "Restart", icon: RotateCw, onClick: () => onAction(row, "restart"), mutates: true, ...disabled });
 
     const live = row.state === "running" || row.state === "paused" || row.state === "restarting";
     const menu: RowMenuItem[] = [
         { label: row.serviceName ? "Logs" : "Logs (no service)", onClick: () => {}, disabled: true },
         { label: "Exec", onClick: () => {}, disabled: true },
-        { label: "Restart", onClick: () => onAction(row, "restart"), disabled: stale, separatorBefore: true },
+        { label: "Restart", onClick: () => onAction(row, "restart"), disabled: stale, separatorBefore: true, mutates: true },
         live
-            ? { label: "Stop", onClick: () => onAction(row, "stop"), disabled: stale }
-            : { label: "Start", onClick: () => onAction(row, "start"), disabled: stale },
+            ? { label: "Stop", onClick: () => onAction(row, "stop"), disabled: stale, mutates: true }
+            : { label: "Start", onClick: () => onAction(row, "start"), disabled: stale, mutates: true },
         row.state === "paused"
-            ? { label: "Unpause", onClick: () => onAction(row, "unpause"), disabled: stale }
-            : { label: "Pause", onClick: () => onAction(row, "pause"), disabled: stale || row.state !== "running" },
-        { label: "Remove", onClick: () => onRemove(row), disabled: stale, destructive: true, separatorBefore: true },
+            ? { label: "Unpause", onClick: () => onAction(row, "unpause"), disabled: stale, mutates: true }
+            : { label: "Pause", onClick: () => onAction(row, "pause"), disabled: stale || row.state !== "running", mutates: true },
+        { label: "Remove", onClick: () => onRemove(row), disabled: stale, destructive: true, separatorBefore: true, mutates: true },
     ];
     return <RowActions label={row.name} actions={actions} menu={menu} />;
 }
@@ -125,7 +132,7 @@ export function ContainersTable(props: ContainersTableProps) {
 
     return (
         <DataTable<Row>
-            title='ALL CONTAINERS'
+            title={props.title ?? "ALL CONTAINERS"}
             data={props.rows as Row[]}
             columns={columns}
             getRowId={(row) => containerRowId(row)}
@@ -134,8 +141,11 @@ export function ContainersTable(props: ContainersTableProps) {
             onSortingChange={props.onSortingChange}
             rowSelection={props.selection}
             onRowSelectionChange={props.onSelectionChange}
+            headerRight={props.headerRight}
             rowActions={(row) => rowActions(row, props.onAction, props.onRemove)}
-            rowClassName={(row) => cn(props.pending.has(containerRowId(row)) && "opacity-50 transition-opacity", row.stale && "text-muted-foreground")}
+            rowClassName={(row) =>
+                cn((props.pending.has(containerRowId(row)) || props.dimmed) && "opacity-50 transition-opacity", row.stale && "text-muted-foreground")
+            }
             countLabel={props.countLabel}
             isFirstLoad={props.isFirstLoad}
             isRefetching={props.isRefetching}

@@ -113,7 +113,7 @@ export function VolumesTable(props: VolumesTableProps) {
                                       reason: usersReason(row),
                                   },
                               }
-                            : { label: "Remove", icon: Trash2, onClick: () => props.onRemove(row) },
+                            : { label: "Remove", icon: Trash2, onClick: () => props.onRemove(row), mutates: true },
                     ]}
                 />
             )}

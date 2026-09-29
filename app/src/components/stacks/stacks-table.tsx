@@ -99,6 +99,7 @@ export function StacksTable(props: StacksTableProps) {
                             destructive: true,
                             separatorBefore: true,
                             disabled: !props.writable || props.pending.has(row.name),
+                            mutates: true,
                         },
                     ]}
                 />

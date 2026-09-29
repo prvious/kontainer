@@ -24,7 +24,9 @@ import {
     sortingFor,
     type ContainerSearch,
 } from "@/components/containers/container-search";
-import { useContainerAction, useContainers, useContainersBulkAction, type ContainerRow } from "@/hooks/use-containers";
+import { useContainers, useContainersBulkAction, type ContainerRow } from "@/hooks/use-containers";
+import { RemoveContainerDialog } from "@/components/containers/remove-container-dialog";
+import { useRunContainerAction } from "@/components/containers/use-run-container-action";
 import { useTrackedOperations, isSettled } from "@/hooks/use-operation";
 import { withIdempotencyKey } from "@/hooks/use-operations";
 import { clockTime } from "@/lib/time";
@@ -54,7 +56,7 @@ function ContainersPage() {
     const search = Route.useSearch();
     const navigate = Route.useNavigate();
     const containers = useContainers();
-    const action = useContainerAction();
+    const run = useRunContainerAction();
     const bulk = useContainersBulkAction();
     const tracked = useTrackedOperations("containers");
     const [selection, setSelection] = useState<RowSelectionState>({});
@@ -84,13 +86,6 @@ function ContainersPage() {
 
     function setSearch(next: ContainerSearch) {
         void navigate({ search: next, replace: true });
-    }
-
-    function start(row: ContainerRow, containerAction: ContainerAction, options: { force?: boolean } | null = null) {
-        action.mutate(withIdempotencyKey({ nodeId: row.nodeId, containerId: row.containerId, action: containerAction, options, name: row.name }), {
-            onError: (code) =>
-                notify.error(`Couldn't ${containerAction} ${row.name}`, { code: String(code), message: "The controller did not accept the action." }),
-        });
     }
 
     function startBulk(bulkAction: ContainerAction) {
@@ -194,6 +189,7 @@ function ContainersPage() {
                                 variant={entry.action === "remove" ? "destructive" : "outline"}
                                 size='sm'
                                 icon={entry.icon}
+                                mutates
                                 pending={bulk.isPending && bulk.variables?.action === entry.action}
                                 onClick={() => (entry.action === "stop" || entry.action === "remove" ? setConfirmBulk(entry.action) : startBulk(entry.action))}
                             >
@@ -235,7 +231,7 @@ function ContainersPage() {
                     onSelectionChange={setSelection}
                     failures={failures}
                     pending={pending}
-                    onAction={(row, containerAction) => start(row, containerAction)}
+                    onAction={(row, containerAction) => run(row, containerAction)}
                     onRemove={setRemoving}
                     countLabel={filtered.length === rows.length && !search.q ? String(rows.length) : `${filtered.length} OF ${rows.length}`}
                     isFirstLoad={containers.isPending}
@@ -245,22 +241,7 @@ function ContainersPage() {
                 />
             </div>
 
-            <ConfirmDialog
-                open={removing !== null}
-                onOpenChange={(open) => !open && setRemoving(null)}
-                title={`Remove ${removing?.name ?? "container"}?`}
-                description={
-                    removing?.state === "running"
-                        ? "It is running. Removing kills it first and deletes its writable layer. This cannot be undone."
-                        : "Its writable layer is deleted. This cannot be undone."
-                }
-                confirmationText={removing?.state === "running" ? removing.name : undefined}
-                confirmLabel='REMOVE'
-                onConfirm={() => {
-                    if (removing) start(removing, "remove", removing.state === "running" ? { force: true } : null);
-                    setRemoving(null);
-                }}
-            />
+            <RemoveContainerDialog row={removing} onClose={() => setRemoving(null)} />
             <ConfirmDialog
                 open={confirmBulk !== null}
                 onOpenChange={(open) => !open && setConfirmBulk(null)}
