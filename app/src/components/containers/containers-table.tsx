@@ -36,6 +36,8 @@ export interface ContainersTableProps {
     pending: Set<string>;
     onAction: (row: ContainerRow, action: ContainerAction) => void;
     onRemove: (row: ContainerRow) => void;
+    /** Opens the log stream of the row's service; rows without one have no logs to follow. */
+    onLogs?: (row: ContainerRow) => void;
     countLabel: string;
     isFirstLoad: boolean;
     isRefetching: boolean;
@@ -43,7 +45,12 @@ export interface ContainersTableProps {
     errorState?: ReactNode;
 }
 
-function rowActions(row: ContainerRow, onAction: ContainersTableProps["onAction"], onRemove: ContainersTableProps["onRemove"]) {
+function rowActions(
+    row: ContainerRow,
+    onAction: ContainersTableProps["onAction"],
+    onRemove: ContainersTableProps["onRemove"],
+    onLogs: ContainersTableProps["onLogs"],
+) {
     const stale = row.stale;
     const disabled = stale ? { disabled: true, disabledReason: STALE } : {};
     const actions: RowIconAction[] = [{ label: "Exec", icon: Terminal, onClick: () => {}, disabled: true, disabledReason: stale ? STALE : EXEC_LATER }];
@@ -53,7 +60,7 @@ function rowActions(row: ContainerRow, onAction: ContainersTableProps["onAction"
 
     const live = row.state === "running" || row.state === "paused" || row.state === "restarting";
     const menu: RowMenuItem[] = [
-        { label: row.serviceName ? "Logs" : "Logs (no service)", onClick: () => {}, disabled: true },
+        { label: row.serviceName ? "Logs" : "Logs (no service)", onClick: () => onLogs?.(row), disabled: !row.serviceName || !onLogs },
         { label: "Exec", onClick: () => {}, disabled: true },
         { label: "Restart", onClick: () => onAction(row, "restart"), disabled: stale, separatorBefore: true, mutates: true },
         live
@@ -142,7 +149,7 @@ export function ContainersTable(props: ContainersTableProps) {
             rowSelection={props.selection}
             onRowSelectionChange={props.onSelectionChange}
             headerRight={props.headerRight}
-            rowActions={(row) => rowActions(row, props.onAction, props.onRemove)}
+            rowActions={(row) => rowActions(row, props.onAction, props.onRemove, props.onLogs)}
             rowClassName={(row) =>
                 cn((props.pending.has(containerRowId(row)) || props.dimmed) && "opacity-50 transition-opacity", row.stale && "text-muted-foreground")
             }

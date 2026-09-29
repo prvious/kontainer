@@ -21,6 +21,7 @@
         "quorum_unavailable",
         "not_a_manager",
         "version_conflict",
+        "limit_reached",
         "invalid_response"
     ]
 }

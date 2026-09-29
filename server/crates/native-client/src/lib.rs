@@ -24,8 +24,11 @@
 //!   operation GETs repeat once after a classified pre-response transient
 //!   failure under the original deadline.
 //!
-//! This crate has no Tauri, WebView, controller, Docker, database, or
-//! protobuf dependency.
+//! This crate has no Tauri, WebView, controller, Docker, or database
+//! dependency. The log stream is the one exception to "spawns no work": its
+//! WebSocket is the transport crate's, framed with the stream protocol's
+//! protobuf messages, and [`LogFollower`] is driven by the caller's task
+//! (ADR 0006, ADR 0025).
 
 mod auth;
 mod client;
@@ -33,6 +36,7 @@ mod containers;
 mod credentials;
 mod error;
 mod images;
+mod logs;
 mod networks;
 mod nodes;
 mod operations;
@@ -59,6 +63,12 @@ pub use credentials::{AccessCredential, CredentialError, LoginVerifier, RefreshC
 pub use error::{AccountFieldErrors, FieldProblem, NativeClientError, Traced};
 pub use images::{
     ImageItem, ImageList, ImageNodes, MAX_IMAGE_REFERENCE_LEN, MAX_IMAGE_TARGET_NODES, MAX_IMAGES,
+};
+pub use logs::{
+    ACCESS_EXPIRED_CLOSE, FIRST_RECONNECT_DELAY, LogConnectError, LogConnectFuture, LogConnector,
+    LogDisconnect, LogEndKind, LogEvent, LogFollower, LogFrame, LogFrameFuture, LogLineItem,
+    LogOpenRequest, LogReceiver, LogStream, MAX_RECONNECT_DELAY, Overlap, RECONNECT_OVERLAP_MS,
+    reconnect_delay,
 };
 pub use networks::{
     AttachedContainer, MAX_NETWORKS, ManagerStatus, NetworkId, NetworkItem, NetworkList,

@@ -147,8 +147,10 @@ fn native_client_stores_only_transport_configuration() {
         origin,
         http: _,
         limits,
+        custom_trust,
     } = client;
     assert_eq!(origin.as_str(), "https://controller.example/");
+    assert!(!custom_trust, "the default trusts the public roots");
     assert!(limits.json_body_limit > 0);
     assert!(limits.collection_body_limit > 0);
     assert!(!limits.request_deadline.is_zero());

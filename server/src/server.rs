@@ -308,6 +308,19 @@ pub async fn serve(router: Router, ctx: &AppContext, params: &ServeParams) -> Re
         .run(shutdown.draining()),
     );
 
+    // Log streams close with 1001 when the drain starts; upgraded connections are not HTTP
+    // requests the servers track.
+    let log_streams = ctx.shared_store.get::<crate::logs::LogStreams>();
+    let draining = shutdown.draining();
+    let streams = tokio::spawn(async move {
+        draining.cancelled().await;
+        if let Some(streams) = log_streams
+            && let Err(error) = streams.server.shutdown().await
+        {
+            tracing::warn!(?error, "log streams did not close within the grace");
+        }
+    });
+
     let result = tokio::select! {
         result = &mut servers => result,
         _ = shutdown_signal() => {
@@ -316,6 +329,9 @@ pub async fn serve(router: Router, ctx: &AppContext, params: &ServeParams) -> Re
         }
     };
     shutdown.begin_drain();
+    if let Err(error) = streams.await {
+        tracing::error!(%error, "log stream shutdown task failed");
+    }
     if let Err(error) = pruner.await {
         tracing::error!(%error, "sample pruning task failed");
     }

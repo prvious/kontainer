@@ -99,6 +99,8 @@ pub async fn require_access_session(
             return service_unavailable();
         }
     };
+    // Streams also need the family (per-session limits) and the access expiry.
+    request.extensions_mut().insert(session);
     request
         .extensions_mut()
         .insert(PrincipalContext::from(session));

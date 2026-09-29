@@ -205,6 +205,7 @@ function ServicesPage() {
                     onScale={submitScale}
                     onRestart={(service) => setConfirming({ kind: "restart", service })}
                     onRollback={(service) => setConfirming({ kind: "rollback", service })}
+                    onLogs={(service) => void navigate({ to: "/logs", search: { service: service.id } })}
                     writable={writable}
                     countLabel={errorCode ? "—" : filtered.length === rows.length && !search.q ? String(rows.length) : `${filtered.length} OF ${rows.length}`}
                     isFirstLoad={services.isPending}

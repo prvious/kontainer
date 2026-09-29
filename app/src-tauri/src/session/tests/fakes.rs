@@ -15,6 +15,9 @@ use kontainer_native_client::{
     AttachedContainer, NetworkId, NetworkList, NetworkPlacement, NetworkSpec,
 };
 use kontainer_native_client::{ClusterSummary, StackList, StackName, StackRemovalPlan};
+use kontainer_native_client::{
+    LogDisconnect, LogFrame, LogFrameFuture, LogOpenRequest, LogReceiver,
+};
 use kontainer_native_client::{ServiceAction, ServiceDetail, ServiceId, ServiceList};
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
@@ -391,6 +394,27 @@ pub(crate) struct Script {
     pub(crate) stacks: VecDeque<Result<StackList, NativeClientError>>,
     pub(crate) plans: VecDeque<Result<StackRemovalPlan, NativeClientError>>,
     pub(crate) summaries: VecDeque<Result<ClusterSummary, NativeClientError>>,
+    /// Each log connect takes the next entry: the frames that connection yields, or a refusal.
+    pub(crate) log_connections:
+        VecDeque<Result<Vec<Result<LogFrame, LogDisconnect>>, NativeClientError>>,
+}
+
+/// Yields scripted frames, then reports the connection dropped.
+pub(crate) struct ScriptedLogReceiver(pub(crate) VecDeque<Result<LogFrame, LogDisconnect>>);
+
+impl LogReceiver for ScriptedLogReceiver {
+    fn next_frame<'a>(&'a mut self, cancellation: &'a CancellationToken) -> LogFrameFuture<'a> {
+        let next = self.0.pop_front();
+        Box::pin(async move {
+            match next {
+                Some(frame) => frame,
+                None => {
+                    cancellation.cancelled().await;
+                    Err(LogDisconnect::Cancelled)
+                }
+            }
+        })
+    }
 }
 
 pub(crate) struct FakeControllerFactory {
@@ -483,6 +507,33 @@ impl Controller for FakeController {
             .summaries
             .pop_front()
             .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn connect_logs<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        request: &'a LogOpenRequest,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<Box<dyn LogReceiver>, NativeClientError>> {
+        record(
+            &self.log,
+            format!(
+                "logs:{}:{}:{:?}:{}",
+                public_tag(access.expose()),
+                request.service_id.as_str(),
+                request.since_unix_ms,
+                request.tail
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .log_connections
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::Unavailable))
+            .map(|frames| Box::new(ScriptedLogReceiver(frames.into())) as Box<dyn LogReceiver>);
         Box::pin(async move { outcome })
     }
 

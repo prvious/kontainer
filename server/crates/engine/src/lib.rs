@@ -12,6 +12,7 @@ mod local;
 mod network;
 mod node;
 mod service;
+mod service_log;
 mod volume;
 
 pub use capability::{
@@ -42,6 +43,9 @@ pub use node::{ContainerStats, CpuCounters, DiskUsage, NodeInfo, cpu_percent, me
 pub use service::{
     ServiceMode, ServiceSummary, SwarmAvailability, SwarmNode, SwarmNodeState, SwarmRole,
     SwarmStatus, TaskSummary, image_without_digest, is_valid_swarm_id,
+};
+pub use service_log::{
+    LogSource, ServiceLogLine, ServiceLogRequest, ServiceLogStream, parse_service_log_line,
 };
 pub use volume::{
     MAX_VOLUME_LABELS, MAX_VOLUME_NAME_LEN, MAX_VOLUME_USERS, VolumeCreate, VolumeSummary,
@@ -336,6 +340,19 @@ pub trait ContainerEngine: Send + Sync {
         Err(EngineError::new(
             EngineErrorKind::UnsupportedCapability,
             EngineOperation::ReadSwarm,
+        ))
+    }
+
+    /// A service's logs from every task, through the manager.
+    async fn service_logs(
+        &self,
+        _service_id: &str,
+        _request: ServiceLogRequest,
+        _cancellation: &CancellationToken,
+    ) -> Result<ServiceLogStream, EngineError> {
+        Err(EngineError::new(
+            EngineErrorKind::UnsupportedCapability,
+            EngineOperation::ReadServiceLogs,
         ))
     }
 

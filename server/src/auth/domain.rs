@@ -83,6 +83,8 @@ pub struct CorruptSessionState(String);
 pub struct ValidatedSession {
     pub principal_id: Uuid,
     pub family_id: Uuid,
+    /// When the presented access credential stops being valid; long-lived streams close then.
+    pub access_expires_at: DateTime<Utc>,
 }
 
 /// Authenticated principal derived from live persisted session state.

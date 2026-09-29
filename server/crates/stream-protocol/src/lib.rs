@@ -5,6 +5,13 @@ use prost::Message;
 pub const PROTOCOL_VERSION: u32 = 1;
 pub const WEBSOCKET_SUBPROTOCOL: &str = "kontainer.stream.v1";
 
+mod logs;
+
+pub use logs::{
+    DEFAULT_LOG_TAIL, LogEnd, LogEndReason, LogGap, LogLine, LogMessage, LogPayloadError,
+    LogStreamKind, LogsOpen, MAX_LOG_TAIL,
+};
+
 mod wire {
     include!(concat!(env!("OUT_DIR"), "/kontainer.stream.v1.rs"));
 }
@@ -13,6 +20,38 @@ mod wire {
 pub enum StreamFrameKind {
     Data,
     Acknowledgement,
+    LogsOpen,
+    LogsClose,
+    LogLine,
+    LogGap,
+    LogEnd,
+}
+
+impl StreamFrameKind {
+    fn to_wire(self) -> wire::FrameKind {
+        match self {
+            Self::Data => wire::FrameKind::Data,
+            Self::Acknowledgement => wire::FrameKind::Acknowledgement,
+            Self::LogsOpen => wire::FrameKind::LogsOpen,
+            Self::LogsClose => wire::FrameKind::LogsClose,
+            Self::LogLine => wire::FrameKind::LogLine,
+            Self::LogGap => wire::FrameKind::LogGap,
+            Self::LogEnd => wire::FrameKind::LogEnd,
+        }
+    }
+
+    fn from_wire(kind: wire::FrameKind) -> Option<Self> {
+        Some(match kind {
+            wire::FrameKind::Unspecified => return None,
+            wire::FrameKind::Data => Self::Data,
+            wire::FrameKind::Acknowledgement => Self::Acknowledgement,
+            wire::FrameKind::LogsOpen => Self::LogsOpen,
+            wire::FrameKind::LogsClose => Self::LogsClose,
+            wire::FrameKind::LogLine => Self::LogLine,
+            wire::FrameKind::LogGap => Self::LogGap,
+            wire::FrameKind::LogEnd => Self::LogEnd,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,10 +85,7 @@ impl StreamFrame {
         wire::StreamEnvelope {
             protocol_version: PROTOCOL_VERSION,
             sequence: self.sequence,
-            kind: match self.kind {
-                StreamFrameKind::Data => wire::FrameKind::Data.into(),
-                StreamFrameKind::Acknowledgement => wire::FrameKind::Acknowledgement.into(),
-            },
+            kind: self.kind.to_wire().into(),
             payload: self.payload.clone(),
         }
         .encode_to_vec()
@@ -65,13 +101,10 @@ impl StreamFrame {
             ));
         }
 
-        let kind = match wire::FrameKind::try_from(envelope.kind) {
-            Ok(wire::FrameKind::Data) => StreamFrameKind::Data,
-            Ok(wire::FrameKind::Acknowledgement) => StreamFrameKind::Acknowledgement,
-            Ok(wire::FrameKind::Unspecified) | Err(_) => {
-                return Err(StreamProtocolError::UnknownFrameKind(envelope.kind));
-            }
-        };
+        let kind = wire::FrameKind::try_from(envelope.kind)
+            .ok()
+            .and_then(StreamFrameKind::from_wire)
+            .ok_or(StreamProtocolError::UnknownFrameKind(envelope.kind))?;
 
         Ok(Self {
             sequence: envelope.sequence,

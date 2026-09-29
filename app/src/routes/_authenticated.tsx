@@ -14,6 +14,8 @@ import { useConnectivity } from "@/hooks/use-connectivity";
 import { useClusterSummary, useNodes } from "@/hooks/use-nodes";
 import { useContainers } from "@/hooks/use-containers";
 import { ConnectivityProvider } from "@/contexts/connectivity-context";
+import { LogStreamsProvider } from "@/contexts/log-streams-context";
+import { useOpenLogTabs } from "@/hooks/use-log-tabs";
 import { OperationsProvider } from "@/contexts/operations-context";
 import { clusterUsage, nodesDown } from "@/types/nodes";
 
@@ -44,7 +46,9 @@ function AuthenticatedLayout() {
     const { session, expired } = useAuth();
     return (
         <ConnectivityProvider enabled={Boolean(session) && !expired}>
-            <AuthenticatedShell />
+            <LogStreamsProvider>
+                <AuthenticatedShell />
+            </LogStreamsProvider>
         </ConnectivityProvider>
     );
 }
@@ -53,6 +57,7 @@ function AuthenticatedShell() {
     const { session, expired, issue, retryCommit, retryRestore, logout } = useAuth();
     const router = useRouter();
     const { probe, reachable } = useConnectivity();
+    const logStreams = useOpenLogTabs();
     const nodes = useNodes();
     const summary = useClusterSummary();
     const containers = useContainers();
@@ -105,6 +110,7 @@ function AuthenticatedShell() {
                 <StatusBar
                     data={{
                         ...clusterUsage(summary.data, nodes.data?.items),
+                        logStreams,
                         connection: probe ? (reachable ? "connected" : "reconnecting") : undefined,
                     }}
                 />

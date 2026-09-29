@@ -193,7 +193,12 @@ describe("Services page", () => {
             }),
         );
         await user.click(within(rowFor("webapp_web")).getByRole("button", { name: /More actions/ }));
-        expect(await screen.findByRole("menuitem", { name: "Logs (not built yet)" })).toHaveAttribute("aria-disabled", "true");
+        await user.click(await screen.findByRole("menuitem", { name: "Logs" }));
+        // The Logs page opens the service's stream and drops the parameter.
+        await waitFor(() =>
+            expect(invoke).toHaveBeenCalledWith("logs_open", expect.objectContaining({ profileId: session.profileId, serviceId: WEB, tail: 500 })),
+        );
+        expect(await screen.findByRole("heading", { name: "LOGS", level: 1 })).toBeInTheDocument();
     });
 
     it("shows quorum loss as an error state with a countdown and pauses writes", async () => {

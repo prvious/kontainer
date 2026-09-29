@@ -4,6 +4,13 @@ import { vi } from "vitest";
 // Mock @tauri-apps/api/core
 vi.mock("@tauri-apps/api/core", () => ({
     invoke: vi.fn(),
+    // Tests take the channel from the invoke arguments and call `onmessage` to push events.
+    Channel: class {
+        onmessage: (message: unknown) => void = () => {};
+        constructor(onmessage?: (message: unknown) => void) {
+            if (onmessage) this.onmessage = onmessage;
+        }
+    },
 }));
 
 // Mock @tauri-apps/api/app

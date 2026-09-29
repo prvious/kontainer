@@ -260,6 +260,48 @@ async fn dev_cluster_network_lifecycle_on_the_manager_and_a_worker() {
     assert!(!seed_detail.endpoints.is_empty());
 }
 
+/// A seed service's logs through the manager: history with task and node ids, no follow.
+#[tokio::test]
+async fn dev_cluster_service_logs_carry_task_and_node_ids() {
+    use futures_util::StreamExt as _;
+    use kontainer_engine::ServiceLogRequest;
+
+    let manager = engine(dev_host(
+        "KONTAINER_TEST_DEV_MANAGER_HOST",
+        "tcp://localhost:2375",
+    ));
+    let cancellation = CancellationToken::new();
+    let services = manager.list_services(&cancellation).await.unwrap();
+    let web = services
+        .iter()
+        .find(|service| service.name == "webapp_web")
+        .unwrap();
+    let request = ServiceLogRequest {
+        since_unix_ms: None,
+        tail: 5,
+        follow: false,
+    };
+    let lines: Vec<_> = manager
+        .service_logs(&web.id, request, &cancellation)
+        .await
+        .unwrap()
+        .collect()
+        .await;
+    assert!(!lines.is_empty(), "whoami logs its start-up");
+    for line in lines {
+        let line = line.unwrap();
+        assert_eq!(line.node_id.len(), 25, "{line:?}");
+        assert_eq!(line.task_id.len(), 25, "{line:?}");
+        assert!(line.timestamp_unix_ms > 1_700_000_000_000);
+    }
+    assert!(
+        manager
+            .service_logs("not-a-service", request, &cancellation)
+            .await
+            .is_err()
+    );
+}
+
 /// Swarm members on the manager: one leader manager and two ready workers with resources.
 #[tokio::test]
 async fn dev_cluster_swarm_nodes_have_one_leader_and_two_workers() {

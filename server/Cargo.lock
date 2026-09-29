@@ -2678,6 +2678,8 @@ dependencies = [
  "kontainer-lifecycle",
  "kontainer-node-agent",
  "kontainer-rpc-auth",
+ "kontainer-stream-protocol",
+ "kontainer-stream-transport",
  "loco-rs",
  "migration",
  "rcgen",
@@ -2722,8 +2724,12 @@ version = "0.1.0"
 name = "kontainer-native-client"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "axum",
  "base64 0.22.1",
  "chrono",
+ "kontainer-stream-protocol",
+ "kontainer-stream-transport",
  "rcgen",
  "reqwest",
  "rustls",

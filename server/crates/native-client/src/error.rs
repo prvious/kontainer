@@ -139,6 +139,10 @@ pub enum NativeClientError {
     /// The object changed since the version the request was based on (`409 version_conflict`).
     #[error("the object changed since it was read")]
     VersionConflict,
+
+    /// This session already holds as many streams as the controller allows.
+    #[error("too many streams are open for this session")]
+    LimitReached,
     /// Email or password is incorrect (`401 invalid_credentials`); unknown
     /// emails and wrong passwords are indistinguishable.
     #[error("email or password is incorrect")]

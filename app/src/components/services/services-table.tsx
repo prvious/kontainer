@@ -34,6 +34,8 @@ export interface ServicesTableProps {
     onScale: (service: ServiceView, replicas: number) => void;
     onRestart: (service: ServiceView) => void;
     onRollback: (service: ServiceView) => void;
+    /** Opens the service's log stream. */
+    onLogs: (service: ServiceView) => void;
     /** False while the manager can't take writes. */
     writable: boolean;
     countLabel: string;
@@ -117,7 +119,7 @@ export function ServicesTable(props: ServicesTableProps) {
             { label: "Scale", onClick: () => props.onEdit(row.id), disabled: blocked || row.mode !== "replicated", mutates: true },
             { label: "Restart", onClick: () => props.onRestart(row), disabled: blocked, mutates: true },
             { label: "Rollback", onClick: () => props.onRollback(row), disabled: blocked, mutates: true },
-            { label: "Logs (not built yet)", onClick: () => {}, disabled: true, separatorBefore: true },
+            { label: "Logs", onClick: () => props.onLogs(row), separatorBefore: true },
         ];
     }
 

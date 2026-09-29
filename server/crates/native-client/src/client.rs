@@ -94,6 +94,8 @@ pub struct NativeClient {
     pub(crate) origin: Url,
     pub(crate) http: Client,
     pub(crate) limits: Limits,
+    /// WebSockets verify with the public roots only, so a custom bundle refuses them.
+    pub(crate) custom_trust: bool,
 }
 
 /// Bounded-call policy copied out of the configuration.
@@ -147,6 +149,7 @@ impl NativeClient {
         Ok(Self {
             origin,
             http,
+            custom_trust: matches!(config.trust, TrustPolicy::PemBundle(_)),
             limits: Limits {
                 request_deadline: config.request_deadline,
                 json_body_limit: config.json_body_limit,

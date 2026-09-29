@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use kontainer_stream_protocol::StreamFrame;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, mpsc, watch};
 
-use crate::StreamLimits;
+use crate::{StreamClose, StreamLimits};
 
 #[async_trait]
 pub trait StreamApplication: Send + Sync + 'static {
@@ -20,9 +20,38 @@ pub struct OutboundSender {
     sender: mpsc::Sender<QueuedFrame>,
     byte_budget: Arc<Semaphore>,
     maximum_frame_bytes: usize,
+    signal: watch::Sender<SessionSignal>,
+}
+
+/// What the session writer does next.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SessionSignal {
+    Running,
+    Close(StreamClose),
+    /// Close after the frames already queued are written; the application asked for it.
+    Finish(StreamClose),
+    PeerClosed,
 }
 
 impl OutboundSender {
+    /// Resolves once the session's writer has stopped, so a producer can stop too.
+    pub async fn closed(&self) {
+        self.sender.closed().await;
+    }
+
+    /// Close the session with `close` after the frames already queued are written. Later
+    /// frames are refused; a close already under way wins.
+    pub fn close(&self, close: StreamClose) {
+        self.signal.send_if_modified(|current| {
+            if *current == SessionSignal::Running {
+                *current = SessionSignal::Finish(close);
+                true
+            } else {
+                false
+            }
+        });
+    }
+
     pub fn try_send(&self, frame: StreamFrame) -> Result<(), OutboundFrameError> {
         let encoded = frame.encode();
         if encoded.len() > self.maximum_frame_bytes {
@@ -62,6 +91,7 @@ pub(crate) struct QueuedFrame {
 
 pub(crate) fn outbound_queue(
     limits: StreamLimits,
+    signal: watch::Sender<SessionSignal>,
 ) -> (OutboundSender, mpsc::Receiver<QueuedFrame>) {
     let (sender, receiver) = mpsc::channel(limits.maximum_queued_frames());
     (
@@ -69,6 +99,7 @@ pub(crate) fn outbound_queue(
             sender,
             byte_budget: Arc::new(Semaphore::new(limits.maximum_queued_bytes())),
             maximum_frame_bytes: limits.maximum_frame_bytes(),
+            signal,
         },
         receiver,
     )
@@ -80,13 +111,16 @@ mod tests {
 
     use kontainer_stream_protocol::StreamFrame;
 
-    use super::{OutboundFrameError, outbound_queue};
-    use crate::StreamLimits;
+    use tokio::sync::watch;
+
+    use super::{OutboundFrameError, SessionSignal, outbound_queue};
+    use crate::{StreamClose, StreamLimits};
 
     #[test]
     fn item_limit_rejects_overload_while_byte_capacity_remains() {
         let limits = StreamLimits::new(256, 1, 1024, 1, Duration::from_secs(1)).unwrap();
-        let (outbound, _receiver) = outbound_queue(limits);
+        let (outbound, _receiver) =
+            outbound_queue(limits, watch::channel(SessionSignal::Running).0);
 
         outbound
             .try_send(StreamFrame::acknowledgement(1, vec![0; 80]))
@@ -100,7 +134,8 @@ mod tests {
     #[test]
     fn byte_limit_rejects_overload_while_item_capacity_remains() {
         let limits = StreamLimits::new(256, 4, 128, 1, Duration::from_secs(1)).unwrap();
-        let (outbound, _receiver) = outbound_queue(limits);
+        let (outbound, _receiver) =
+            outbound_queue(limits, watch::channel(SessionSignal::Running).0);
 
         outbound
             .try_send(StreamFrame::acknowledgement(1, vec![0; 80]))
@@ -108,6 +143,31 @@ mod tests {
         assert_eq!(
             outbound.try_send(StreamFrame::acknowledgement(2, vec![0; 80])),
             Err(OutboundFrameError::QueueOverloaded)
+        );
+    }
+
+    #[test]
+    fn an_application_close_finishes_once_and_never_overrides_an_earlier_close() {
+        let limits = StreamLimits::default();
+        let (signal, watcher) = watch::channel(SessionSignal::Running);
+        let (outbound, _receiver) = outbound_queue(limits, signal.clone());
+        outbound.close(StreamClose::new(4401, "access expired"));
+        assert_eq!(
+            *watcher.borrow(),
+            SessionSignal::Finish(StreamClose::new(4401, "access expired"))
+        );
+        outbound.close(StreamClose::NORMAL);
+        assert_eq!(
+            *watcher.borrow(),
+            SessionSignal::Finish(StreamClose::new(4401, "access expired"))
+        );
+
+        let (signal, watcher) = watch::channel(SessionSignal::Close(StreamClose::SLOW_CONSUMER));
+        let (outbound, _receiver) = outbound_queue(limits, signal);
+        outbound.close(StreamClose::NORMAL);
+        assert_eq!(
+            *watcher.borrow(),
+            SessionSignal::Close(StreamClose::SLOW_CONSUMER)
         );
     }
 }

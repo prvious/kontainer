@@ -23,6 +23,7 @@
 pub(crate) mod controller;
 pub(crate) mod errors;
 pub(crate) mod legacy;
+pub(crate) mod log_streams;
 pub(crate) mod manager;
 pub(crate) mod metadata;
 pub(crate) mod models;

@@ -20,6 +20,7 @@ export const INVENTORY_ERROR_CODES = [
     "quorum_unavailable",
     "not_a_manager",
     "version_conflict",
+    "limit_reached",
     "invalid_response",
 ] as const;
 export type InventoryErrorCode = (typeof INVENTORY_ERROR_CODES)[number];

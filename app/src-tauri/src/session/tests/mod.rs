@@ -7,6 +7,7 @@ mod inventory;
 mod ipc;
 mod login;
 mod logout;
+mod logs;
 mod networks;
 mod operations;
 mod restore;

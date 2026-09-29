@@ -51,7 +51,7 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
         label: "// SYSTEM",
         items: [
             { label: "Exec", icon: Terminal },
-            { label: "Logs", icon: ScrollText },
+            { label: "Logs", icon: ScrollText, to: "/logs" },
             { label: "Settings", icon: Settings, to: "/settings" },
         ],
     },

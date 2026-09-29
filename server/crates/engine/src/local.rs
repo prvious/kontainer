@@ -24,6 +24,7 @@ use crate::{
     is_plausible_reference, is_valid_container_id, is_valid_image_id, memory_used,
     parse_docker_time, truncate_status_text,
 };
+use crate::{LogSource, ServiceLogRequest, ServiceLogStream, parse_service_log_line};
 use crate::{
     MAX_NETWORK_ENDPOINTS, MAX_VOLUME_USERS, NetworkCreate, NetworkDetail, NetworkEndpoint,
     NetworkSummary, VolumeCreate, VolumeSummary, are_valid_volume_labels, is_builtin_network,
@@ -820,6 +821,73 @@ impl ContainerEngine for LocalDockerEngine {
         })
     }
 
+    async fn service_logs(
+        &self,
+        service_id: &str,
+        request: ServiceLogRequest,
+        cancellation: &CancellationToken,
+    ) -> Result<ServiceLogStream, EngineError> {
+        use bollard::{container::LogOutput, query_parameters::LogsOptionsBuilder};
+        use futures_util::StreamExt as _;
+
+        const OPERATION: EngineOperation = EngineOperation::ReadServiceLogs;
+        if !is_valid_swarm_id(service_id) {
+            return Err(EngineError::new(EngineErrorKind::InvalidInput, OPERATION));
+        }
+        // Bollard's options have no `details`, and Swarm puts each line's task and node there.
+        let client = self
+            .negotiate(cancellation)
+            .await?
+            .with_request_modifier(with_log_details);
+        let since = request.since_unix_ms.map_or(0, |ms| {
+            i32::try_from(ms.div_euclid(1000)).unwrap_or(i32::MAX)
+        });
+        let options = LogsOptionsBuilder::default()
+            .follow(request.follow)
+            .stdout(true)
+            .stderr(true)
+            .timestamps(true)
+            .since(since)
+            .tail(&request.tail.to_string())
+            .build();
+        let service_id = service_id.to_owned();
+        let cancellation = cancellation.clone();
+        // The daemon stream borrows its client, so a task owns both and forwards typed lines.
+        // It ends with the stream, when the receiver is dropped, or on cancellation.
+        let (sender, receiver) = tokio::sync::mpsc::channel(256);
+        tokio::spawn(async move {
+            let mut stream = client.service_logs(&service_id, Some(options));
+            loop {
+                let item = tokio::select! {
+                    biased;
+                    () = cancellation.cancelled() => break,
+                    () = sender.closed() => break,
+                    item = stream.next() => item,
+                };
+                let line = match item {
+                    None => break,
+                    Some(Ok(LogOutput::StdOut { message } | LogOutput::Console { message })) => {
+                        parse_service_log_line(LogSource::Stdout, &message).map(Ok)
+                    }
+                    Some(Ok(LogOutput::StdErr { message })) => {
+                        parse_service_log_line(LogSource::Stderr, &message).map(Ok)
+                    }
+                    Some(Ok(LogOutput::StdIn { .. })) => None,
+                    Some(Err(error)) => Some(Err(EngineError::from_bollard(OPERATION, &error))),
+                };
+                let Some(line) = line else { continue };
+                let failed = line.is_err();
+                if sender.send(line).await.is_err() || failed {
+                    break;
+                }
+            }
+        });
+        Ok(Box::pin(futures_util::stream::unfold(
+            receiver,
+            |mut receiver| async move { receiver.recv().await.map(|line| (line, receiver)) },
+        )))
+    }
+
     async fn list_swarm_nodes(
         &self,
         cancellation: &CancellationToken,
@@ -1382,6 +1450,25 @@ fn map_task(task: bollard::models::Task) -> Option<TaskSummary> {
     })
 }
 
+/// Ask a service-logs request for `details` as well, which Bollard's options can't express.
+fn with_log_details(mut request: bollard::BollardRequest) -> bollard::BollardRequest {
+    let uri = request.uri();
+    if uri.path().contains("/services/") && uri.path().ends_with("/logs") {
+        let with_details = match uri.query() {
+            Some(query) => format!("{}?{query}&details=1", uri.path()),
+            None => format!("{}?details=1", uri.path()),
+        };
+        let rebuilt = match (uri.scheme_str(), uri.authority()) {
+            (Some(scheme), Some(authority)) => format!("{scheme}://{authority}{with_details}"),
+            _ => with_details,
+        };
+        if let Ok(parsed) = rebuilt.parse() {
+            *request.uri_mut() = parsed;
+        }
+    }
+    request
+}
+
 fn map_swarm_node(node: bollard::models::Node) -> Option<SwarmNode> {
     use bollard::models::{NodeSpecAvailabilityEnum, NodeSpecRoleEnum, NodeState, Reachability};
 
@@ -1697,6 +1784,28 @@ mod tests {
         EngineErrorKind, EngineOperation, SwarmAvailability, SwarmNode, SwarmNodeState, SwarmRole,
         UnsupportedCapabilityReason,
     };
+
+    #[test]
+    fn service_log_requests_ask_for_details_and_nothing_else_changes() {
+        let request = |uri: &str| {
+            let mut request = bollard::BollardRequest::new(bollard::body_full(Default::default()));
+            *request.uri_mut() = uri.parse().unwrap();
+            super::with_log_details(request).uri().to_string()
+        };
+        assert_eq!(
+            request("http://localhost:2375/v1.47/services/abc/logs?stdout=true&tail=500"),
+            "http://localhost:2375/v1.47/services/abc/logs?stdout=true&tail=500&details=1"
+        );
+        assert_eq!(
+            request("/services/abc/logs"),
+            "/services/abc/logs?details=1"
+        );
+        assert_eq!(
+            request("http://localhost:2375/v1.47/containers/abc/logs?stdout=true"),
+            "http://localhost:2375/v1.47/containers/abc/logs?stdout=true",
+            "container logs are left alone"
+        );
+    }
 
     #[test]
     fn swarm_nodes_map_role_leadership_state_and_resources() {

@@ -2,9 +2,9 @@ syntax = "proto3";
 
 package kontainer.stream.v1;
 
-// StreamEnvelope is the shared public framing boundary. Product-specific log
-// and exec payload messages will extend this contract additively after their
-// state machines are implemented.
+// StreamEnvelope is the shared public framing boundary. Each product frame
+// kind carries exactly one payload message below; kinds and messages are
+// only ever added.
 message StreamEnvelope {
   uint32 protocol_version = 1;
   uint64 sequence = 2;
@@ -16,4 +16,53 @@ enum FrameKind {
   FRAME_KIND_UNSPECIFIED = 0;
   FRAME_KIND_DATA = 1;
   FRAME_KIND_ACKNOWLEDGEMENT = 2;
+  // Client to server: LogsOpen, then optionally LogsClose.
+  FRAME_KIND_LOGS_OPEN = 3;
+  FRAME_KIND_LOGS_CLOSE = 4;
+  // Server to client.
+  FRAME_KIND_LOG_LINE = 5;
+  FRAME_KIND_LOG_GAP = 6;
+  FRAME_KIND_LOG_END = 7;
+}
+
+// Follow one service's logs. `tail` defaults to 500 and is at most 5000.
+message LogsOpen {
+  string service_id = 1;
+  optional int64 since_unix_ms = 2;
+  optional uint32 tail = 3;
+}
+
+message LogsClose {}
+
+enum LogStreamKind {
+  LOG_STREAM_KIND_UNSPECIFIED = 0;
+  LOG_STREAM_KIND_STDOUT = 1;
+  LOG_STREAM_KIND_STDERR = 2;
+}
+
+message LogLine {
+  uint64 seq = 1;
+  int64 ts_unix_ms = 2;
+  LogStreamKind stream = 3;
+  string task_id = 4;
+  string node_id = 5;
+  string line = 6;
+  bool truncated = 7;
+}
+
+// Lines dropped because the client fell behind.
+message LogGap {
+  uint64 dropped = 1;
+}
+
+enum LogEndReason {
+  LOG_END_REASON_UNSPECIFIED = 0;
+  LOG_END_REASON_SERVICE_REMOVED = 1;
+  LOG_END_REASON_ERROR = 2;
+}
+
+message LogEnd {
+  LogEndReason reason = 1;
+  string code = 2;
+  string message = 3;
 }

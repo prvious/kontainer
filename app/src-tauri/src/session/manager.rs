@@ -69,6 +69,10 @@ pub(crate) use nodes::{
     ClusterSummaryView, ControllerSettingsView, NodeListView, SampleSeriesView,
 };
 
+#[path = "manager_logs.rs"]
+mod logs;
+pub(crate) use logs::log_connect_error;
+
 #[path = "manager_operations.rs"]
 mod operations;
 pub(crate) use operations::{AdmittedView, OperationEventView, OperationView};

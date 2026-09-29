@@ -37,6 +37,7 @@ pub(crate) enum InventoryError {
     QuorumUnavailable,
     NotAManager,
     VersionConflict,
+    LimitReached,
     InvalidResponse,
 }
 
@@ -63,6 +64,7 @@ impl InventoryError {
         Self::QuorumUnavailable,
         Self::NotAManager,
         Self::VersionConflict,
+        Self::LimitReached,
         Self::InvalidResponse,
     ];
 }
@@ -100,6 +102,7 @@ impl From<NativeClientError> for InventoryError {
             NativeClientError::QuorumUnavailable { .. } => Self::QuorumUnavailable,
             NativeClientError::NotAManager => Self::NotAManager,
             NativeClientError::VersionConflict => Self::VersionConflict,
+            NativeClientError::LimitReached => Self::LimitReached,
             NativeClientError::Unavailable
             | NativeClientError::DeadlineExceeded
             | NativeClientError::ServiceUnavailable

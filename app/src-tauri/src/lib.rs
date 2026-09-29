@@ -15,7 +15,16 @@ pub fn run() {
             // keeps the app from starting.
             let manager = session::initialize(app.handle())?;
             app.manage(manager);
+            app.manage(session::log_streams::LogStreams::default());
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            // Log streams belong to the window that opened them.
+            if let tauri::WindowEvent::Destroyed = event {
+                window
+                    .state::<session::log_streams::LogStreams>()
+                    .cancel_all();
+            }
         })
         .invoke_handler(tauri::generate_handler![
             actions::session::session_bootstrap::session_bootstrap,
@@ -50,6 +59,9 @@ pub fn run() {
             actions::stacks::get_stack_removal_plan::get_stack_removal_plan,
             actions::stacks::remove_stack::remove_stack,
             actions::nodes::list_nodes::list_nodes,
+            actions::logs::logs_open::logs_open,
+            actions::logs::logs_close::logs_close,
+            actions::logs::logs_retry_now::logs_retry_now,
             actions::nodes::get_cluster_summary::get_cluster_summary,
             actions::nodes::get_cluster_samples::get_cluster_samples,
             actions::nodes::get_node_samples::get_node_samples,

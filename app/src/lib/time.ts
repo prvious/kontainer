@@ -23,3 +23,10 @@ export function shortDuration(totalSeconds: number): string {
     const hours = Math.floor(minutes / 60);
     return minutes % 60 === 0 ? `${hours}h` : `${hours}h ${minutes % 60}m`;
 }
+
+/** `HH:mm:ss.SSS` in local time, for log lines. */
+export function logTime(ms: number): string {
+    const date = new Date(ms);
+    const pad = (value: number, width = 2) => String(value).padStart(width, "0");
+    return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.${pad(date.getMilliseconds(), 3)}`;
+}

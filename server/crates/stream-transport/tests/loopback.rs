@@ -749,3 +749,118 @@ async fn invalid_upgrade(
             }
         })
 }
+
+/// Answers every frame, then closes the session itself with a custom code.
+struct FinishingApplication;
+
+#[async_trait]
+impl StreamApplication for FinishingApplication {
+    async fn handle(
+        &self,
+        frame: StreamFrame,
+        outbound: &OutboundSender,
+    ) -> Result<(), OutboundFrameError> {
+        outbound.try_send(StreamFrame::acknowledgement(frame.sequence, frame.payload))?;
+        outbound.close(StreamClose::new(4401, "access expired"));
+        Ok(())
+    }
+}
+
+/// A per-connection application that echoes the bearer the upgrade request carried.
+struct BearerEchoApplication {
+    bearer: Vec<u8>,
+}
+
+#[async_trait]
+impl StreamApplication for BearerEchoApplication {
+    async fn handle(
+        &self,
+        frame: StreamFrame,
+        outbound: &OutboundSender,
+    ) -> Result<(), OutboundFrameError> {
+        outbound.try_send(StreamFrame::acknowledgement(
+            frame.sequence,
+            self.bearer.clone(),
+        ))
+    }
+}
+
+async fn per_connection_upgrade(
+    State(server): State<StreamServer>,
+    headers: axum::http::HeaderMap,
+    websocket: WebSocketUpgrade,
+) -> Response {
+    let bearer = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .map(|value| value.as_bytes().to_vec())
+        .unwrap_or_default();
+    match server.admit(&websocket) {
+        Ok(admission) => {
+            admission.upgrade_with(websocket, Arc::new(BearerEchoApplication { bearer }))
+        }
+        Err(_) => StatusCode::SERVICE_UNAVAILABLE.into_response(),
+    }
+}
+
+#[tokio::test]
+async fn an_application_close_flushes_queued_frames_before_its_close_code() {
+    let running =
+        LoopbackServer::start(StreamLimits::default(), Arc::new(FinishingApplication)).await;
+    let cancellation = CancellationToken::new();
+    let mut client =
+        NativeStreamClient::connect(&running.endpoint, StreamLimits::default(), &cancellation)
+            .await
+            .unwrap();
+    client
+        .send_frame(&StreamFrame::data(3, b"last".to_vec()), &cancellation)
+        .await
+        .unwrap();
+    let answer = client.receive_frame(&cancellation).await.unwrap();
+    assert_eq!(answer.payload, b"last", "the queued frame arrives first");
+    assert_eq!(
+        client.receive_frame(&cancellation).await,
+        Err(StreamClientError::Closed {
+            code: 4401,
+            reason: "access expired".to_owned()
+        })
+    );
+    wait_for_drained_session(&running.server).await;
+    running.finish().await;
+}
+
+#[tokio::test]
+async fn a_per_connection_application_sees_the_bearer_sent_on_upgrade() {
+    let server = StreamServer::new(StreamLimits::default(), Arc::new(SilentApplication));
+    let router = Router::new()
+        .route("/stream", get(per_connection_upgrade))
+        .with_state(server.clone());
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let http_shutdown = CancellationToken::new();
+    let shutdown = http_shutdown.clone();
+    let http_task = tokio::spawn(async move {
+        axum::serve(listener, router)
+            .with_graceful_shutdown(shutdown.cancelled_owned())
+            .await
+            .unwrap();
+    });
+    let cancellation = CancellationToken::new();
+    let mut client = NativeStreamClient::connect_with_bearer(
+        &format!("ws://{address}/stream"),
+        Some("kta_fixture"),
+        StreamLimits::default(),
+        &cancellation,
+    )
+    .await
+    .unwrap();
+    let answer = client
+        .round_trip(&StreamFrame::data(1, Vec::new()), &cancellation)
+        .await
+        .unwrap();
+    assert_eq!(answer.payload, b"Bearer kta_fixture");
+    client.close().await;
+    wait_for_drained_session(&server).await;
+    server.shutdown().await.unwrap();
+    http_shutdown.cancel();
+    http_task.await.unwrap();
+}

@@ -94,6 +94,8 @@ kontainer-agent-proto = { path = "crates/agent-proto" }
 kontainer-engine = { path = "crates/engine" }
 kontainer-lifecycle = { path = "crates/lifecycle" }
 kontainer-rpc-auth = { path = "crates/rpc-auth" }
+kontainer-stream-protocol = { path = "crates/stream-protocol" }
+kontainer-stream-transport = { path = "crates/stream-transport" }
 futures-util.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true

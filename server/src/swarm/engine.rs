@@ -8,8 +8,8 @@ use std::{sync::Arc, time::Duration};
 use async_trait::async_trait;
 use kontainer_engine::{
     CapabilityStatus, ContainerEngine, DockerHost, EngineErrorKind, LocalDockerEngine,
-    LocalEngineOptions, NetworkCreate, NetworkDetail, NetworkSummary, ServiceSummary, SwarmNode,
-    SwarmStatus, TaskSummary,
+    LocalEngineOptions, NetworkCreate, NetworkDetail, NetworkSummary, ServiceLogRequest,
+    ServiceLogStream, ServiceSummary, SwarmNode, SwarmStatus, TaskSummary,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -154,6 +154,16 @@ pub trait ManagerEngine: Send + Sync {
     ) -> Result<Vec<SwarmNode>, ManagerError> {
         Err(ManagerError::Unavailable)
     }
+
+    /// A service's logs from every task; errors mid-stream arrive as items.
+    async fn service_logs(
+        &self,
+        _service_id: &str,
+        _request: ServiceLogRequest,
+        _cancellation: &CancellationToken,
+    ) -> Result<ServiceLogStream, ManagerError> {
+        Err(ManagerError::Unavailable)
+    }
 }
 
 /// The manager engine routes and executors use, when the configured host is a manager.
@@ -272,6 +282,18 @@ impl ManagerEngine for DockerManagerEngine {
         cancellation: &CancellationToken,
     ) -> Result<Vec<SwarmNode>, ManagerError> {
         Ok(self.0.list_swarm_nodes(cancellation).await?)
+    }
+
+    async fn service_logs(
+        &self,
+        service_id: &str,
+        request: ServiceLogRequest,
+        cancellation: &CancellationToken,
+    ) -> Result<ServiceLogStream, ManagerError> {
+        Ok(self
+            .0
+            .service_logs(service_id, request, cancellation)
+            .await?)
     }
 }
 

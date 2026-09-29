@@ -62,3 +62,4 @@ What becomes easier, what becomes harder, what must be revisited and when.
 | [0022](./0022-stacks-from-labels.md) | Stacks from service labels, and stack removal | accepted |
 | [0023](./0023-nodes-joined-with-swarm.md) | Nodes joined with Swarm, and the cluster summary | accepted |
 | [0024](./0024-overview-and-connectivity.md) | The Overview, controller reachability, and paused changes | accepted |
+| [0025](./0025-log-streams.md) | Service log streams: protocol, transport, reconnects, and the viewer | accepted |

@@ -2440,6 +2440,57 @@
         ]
       }
     },
+    "/api/v1/ws/logs": {
+      "get": {
+        "tags": [
+          "super::logs"
+        ],
+        "operationId": "logs_stream",
+        "responses": {
+          "101": {
+            "description": "Upgraded to the `kontainer.stream.v1` subprotocol. The client sends one `LogsOpen`; the server answers with `LogLine`, `LogGap`, and a final `LogEnd`, and closes with 4401 when the access credential expires."
+          },
+          "400": {
+            "description": "`invalid_request`: not a WebSocket upgrade, or without the stream subprotocol",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential; refused before the upgrade"
+          },
+          "429": {
+            "description": "`limit_reached`: this session already has eight log connections open",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "`manager_unavailable` when the Swarm manager doesn't answer, `not_a_manager`, or `unavailable` while the controller drains",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "access_session": []
+          }
+        ]
+      }
+    },
     "/health/live": {
       "get": {
         "tags": [

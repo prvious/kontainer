@@ -6,7 +6,10 @@ use tokio_tungstenite::{
     tungstenite::{
         Message,
         client::IntoClientRequest,
-        http::{HeaderValue, header::SEC_WEBSOCKET_PROTOCOL},
+        http::{
+            HeaderValue,
+            header::{AUTHORIZATION, SEC_WEBSOCKET_PROTOCOL},
+        },
         protocol::{CloseFrame, WebSocketConfig, frame::coding::CloseCode},
     },
 };
@@ -27,9 +30,26 @@ impl NativeStreamClient {
         limits: StreamLimits,
         cancellation: &CancellationToken,
     ) -> Result<Self, StreamClientError> {
+        Self::connect_with_bearer(endpoint, None, limits, cancellation).await
+    }
+
+    /// Connect sending `Authorization: Bearer <credential>` on the upgrade request. The
+    /// credential never appears in errors.
+    pub async fn connect_with_bearer(
+        endpoint: &str,
+        bearer: Option<&str>,
+        limits: StreamLimits,
+        cancellation: &CancellationToken,
+    ) -> Result<Self, StreamClientError> {
         let mut request = endpoint
             .into_client_request()
             .map_err(|_| StreamClientError::InvalidEndpoint)?;
+        if let Some(bearer) = bearer {
+            let mut value = HeaderValue::from_str(&format!("Bearer {bearer}"))
+                .map_err(|_| StreamClientError::InvalidEndpoint)?;
+            value.set_sensitive(true);
+            request.headers_mut().insert(AUTHORIZATION, value);
+        }
         request.headers_mut().insert(
             SEC_WEBSOCKET_PROTOCOL,
             HeaderValue::from_static(WEBSOCKET_SUBPROTOCOL),

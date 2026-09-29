@@ -79,6 +79,7 @@ impl Modify for AccessSessionSecurity {
         super::nodes::samples,
         super::nodes::cluster_samples,
         super::nodes::cluster_summary,
+        super::logs::stream,
         super::settings::show,
         super::settings::update,
         super::containers::index,

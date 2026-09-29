@@ -8,6 +8,7 @@ mod auth;
 mod credentials;
 mod images;
 mod leakage;
+mod logs;
 mod networks;
 mod operations;
 mod password_auth;
