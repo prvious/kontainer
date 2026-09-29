@@ -270,6 +270,47 @@ async fn sample_series_keep_null_buckets_and_validate_ranges_locally() {
 }
 
 #[tokio::test]
+async fn status_reads_the_version_log_level_and_start_time_and_refuses_junk() {
+    let body = |extra: &str| {
+        format!(
+            r#"{{"status":"ok","version":"0.1.0","architecture":"aarch64","logLevel":"info","startedAt":"2026-09-28T12:00:00.250Z"{extra}}}"#
+        )
+    };
+    let server = TestServer::plain(vec![
+        respond(200, &body("")),
+        respond(200, &body(r#","secret":"canary""#)),
+        respond(
+            200,
+            r#"{"status":"ok","version":"0.1.0","architecture":"aarch64","logLevel":"in\nfo","startedAt":"2026-09-28T12:00:00Z"}"#,
+        ),
+    ])
+    .await;
+    let client = plain_client(&server);
+    let status = client
+        .get_status(&access(), &CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(status.version, "0.1.0");
+    assert_eq!(status.log_level, "info");
+    assert_eq!(
+        status
+            .started_at
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        "2026-09-28T12:00:00.250Z"
+    );
+    for _ in 0..2 {
+        assert_eq!(
+            client
+                .get_status(&access(), &CancellationToken::new())
+                .await
+                .err(),
+            Some(NativeClientError::InvalidResponse)
+        );
+    }
+    assert_eq!(server.requests()[0].target, "/api/v1/status");
+}
+
+#[tokio::test]
 async fn settings_read_and_patch_retention_with_bounds() {
     let server = TestServer::plain(vec![
         respond(200, r#"{"metricsRetentionDays":7}"#),

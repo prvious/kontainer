@@ -43,6 +43,7 @@ function TestConsumer() {
             <span data-testid='issue'>{auth.issue ?? "none"}</span>
             <span data-testid='loading'>{String(auth.isLoading)}</span>
             <span data-testid='expired'>{String(auth.expired)}</span>
+            <span data-testid='next-origin'>{auth.nextOrigin ?? "none"}</span>
             <button
                 onClick={() => {
                     void auth
@@ -58,6 +59,13 @@ function TestConsumer() {
                 }}
             >
                 Logout
+            </button>
+            <button
+                onClick={() => {
+                    void auth.logout(undefined, "https://agent-eu.example.com").catch(() => {});
+                }}
+            >
+                Switch agent
             </button>
             <button
                 onClick={() => {
@@ -178,6 +186,21 @@ describe("AuthProvider custody", () => {
         });
         await waitFor(() => expect(screen.getByTestId("session")).toHaveTextContent("none"));
         expect(invoke).toHaveBeenCalledWith("session_logout", { summary: null });
+    });
+
+    it("remembers the agent a switching sign-out is headed for, and forgets it on a plain one", async () => {
+        vi.mocked(invoke).mockImplementation(async (command: string) => (command === "session_restore" ? session : undefined));
+        renderAuth();
+        await restored();
+        await act(async () => {
+            screen.getByText("Switch agent").click();
+        });
+        await waitFor(() => expect(screen.getByTestId("session")).toHaveTextContent("none"));
+        expect(screen.getByTestId("next-origin")).toHaveTextContent("https://agent-eu.example.com");
+        await act(async () => {
+            screen.getByText("Logout").click();
+        });
+        await waitFor(() => expect(screen.getByTestId("next-origin")).toHaveTextContent("none"));
     });
 
     it("keeps the held session visible when revocation fails", async () => {

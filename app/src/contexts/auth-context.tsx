@@ -30,6 +30,7 @@ function SessionAuthProvider({ children }: { children: React.ReactNode }) {
     const retryCommitCommand = useSessionRetryCommit();
     const [actionError, setActionError] = useState<SessionErrorCode | null>(null);
     const [expired, setExpired] = useState(false);
+    const [nextOrigin, setNextOrigin] = useState<string | null>(null);
 
     const session = restore.data ?? null;
     const issue = actionError ?? (restore.error ? sessionErrorCode(restore.error) : null);
@@ -97,10 +98,11 @@ function SessionAuthProvider({ children }: { children: React.ReactNode }) {
     );
 
     const logout = useCallback(
-        async (summary?: ConnectionSummary) => {
+        async (summary?: ConnectionSummary, next?: string) => {
             setActionError(null);
             try {
                 await logoutCommand.mutateAsync(summary);
+                setNextOrigin(next ?? null);
                 publishSession(null);
             } catch (error) {
                 const code = sessionErrorCode(error);
@@ -148,6 +150,7 @@ function SessionAuthProvider({ children }: { children: React.ReactNode }) {
                 login,
                 register,
                 logout,
+                nextOrigin,
                 retryCommit,
                 retryRestore,
                 clearIssue: () => setActionError(null),

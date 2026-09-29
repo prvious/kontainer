@@ -83,9 +83,9 @@ describe("authenticated shell", () => {
         mockCommands();
         renderApp();
         await userEvent.setup().click(await screen.findByRole("link", { name: "Settings" }));
-        await waitFor(() => expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument());
-        expect(screen.getByText(session.origin)).toBeInTheDocument();
-        expect(screen.getByText(session.email)).toBeInTheDocument();
+        await waitFor(() => expect(screen.getByRole("heading", { name: "SETTINGS" })).toBeInTheDocument());
+        expect(await screen.findByDisplayValue(session.origin)).toBeInTheDocument();
+        expect(screen.getByDisplayValue(`${session.displayName} · ${session.email}`)).toBeInTheDocument();
     });
 
     it("fills the status bar CPU and MEM and the sidebar DOWN badge from the cluster summary", async () => {

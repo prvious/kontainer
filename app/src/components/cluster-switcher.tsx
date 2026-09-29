@@ -1,11 +1,10 @@
 import { ChevronDown, LogOut, Plus, Server } from "lucide-react";
-import { useNavigate } from "@tanstack/react-router";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { LabelBadge, StatusDot, type Tone } from "@/components/kit/badges";
 import { TooltipRich } from "@/components/kit/tooltips";
-import { notify } from "@/components/kit/notify";
 import { connectionHost } from "@/components/connect/connect-rules";
 import { useAuth } from "@/hooks/use-auth";
+import { useSwitchAgent } from "@/hooks/use-switch-agent";
 import { useConnectionProbes, useSessionConnections } from "@/hooks/session/use-session-connections";
 import { relativeTime } from "@/lib/time";
 import { useNow } from "@/hooks/use-now";
@@ -40,7 +39,6 @@ function subtitle(connection: SavedConnection): string {
  */
 export function ClusterSwitcher({ health }: { health?: ProbeView | null }) {
     const { session, logout } = useAuth();
-    const navigate = useNavigate();
     const connections = useSessionConnections();
     const rows = connections.data ?? [];
     const probes = useConnectionProbes(rows.filter((connection) => connection.origin !== session?.origin).map((connection) => connection.origin));
@@ -48,15 +46,7 @@ export function ClusterSwitcher({ health }: { health?: ProbeView | null }) {
     const dot: Tone = health === undefined || health === null ? "neutral" : health.status === "ready" ? "success" : "destructive";
     const now = useNow();
 
-    async function leaveFor(origin: string) {
-        try {
-            await logout();
-        } catch (code) {
-            notify.error("Couldn't sign out", { code: String(code), message: "You're still signed in to the current agent." });
-            return;
-        }
-        void navigate({ to: "/login", search: { redirect: undefined, origin } });
-    }
+    const leaveFor = useSwitchAgent();
 
     return (
         <DropdownMenu>

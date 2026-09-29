@@ -41,14 +41,12 @@ vi.mock("@tauri-apps/plugin-opener", () => ({
 vi.mock("@/hooks/use-settings", () => ({
     useSettings: vi.fn(() => ({
         refreshInterval: 5000,
-        setRefreshInterval: vi.fn(),
         terminalDefaults: {
             shell: "",
             fontSize: 13,
             fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, Monaco, 'Courier New', monospace",
             scrollback: 1000,
         },
-        setTerminalDefaults: vi.fn(),
         isLoading: false,
     })),
 }));

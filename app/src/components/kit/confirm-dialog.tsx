@@ -22,6 +22,11 @@ export interface ConfirmDialogProps {
     icon?: LucideIcon;
     /** The operation is running: the confirm button shows its pending state. */
     pending?: boolean;
+    /**
+     * Confirms a change to cluster state, so it pauses while the controller is unreachable. False
+     * for choices that stay on this device, such as leaving a page with unsaved edits.
+     */
+    mutates?: boolean;
     onConfirm: () => void;
     children?: ReactNode;
 }
@@ -52,13 +57,15 @@ function ConfirmDialogBody({
     tone = "destructive",
     icon: Icon = tone === "destructive" ? Trash2 : TriangleAlert,
     pending = false,
+    mutates = true,
     onConfirm,
     children,
 }: ConfirmDialogProps) {
     const inputId = useId();
     const [typed, setTyped] = useState("");
     const matches = confirmationText === undefined || typed === confirmationText;
-    const { reachable } = useConnectivity();
+    const { reachable: controllerReachable } = useConnectivity();
+    const reachable = controllerReachable || !mutates;
 
     return (
         <form
@@ -119,7 +126,7 @@ function ConfirmDialogBody({
                     icon={confirmIcon}
                     disabled={!matches}
                     pending={pending}
-                    mutates
+                    mutates={mutates}
                 >
                     {confirmLabel}
                 </ActionButton>

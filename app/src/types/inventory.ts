@@ -37,3 +37,12 @@ export function exactRecord(value: unknown, fields: string[]): Record<string, un
     if (Object.keys(data).sort().join("|") !== fields.slice().sort().join("|")) throw "invalid_response";
     return data;
 }
+
+/** True when the text holds a control character (C0 or DEL), which no label or path may carry. */
+export function hasControlCharacter(value: string): boolean {
+    for (const character of value) {
+        const code = character.charCodeAt(0);
+        if (code < 0x20 || code === 0x7f) return true;
+    }
+    return false;
+}

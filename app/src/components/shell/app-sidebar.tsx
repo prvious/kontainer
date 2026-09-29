@@ -1,6 +1,8 @@
 import { Link, type LinkProps } from "@tanstack/react-router";
 import { Activity, Box, FileStack, HardDrive, Layers, LayoutDashboard, Network, ScrollText, Server, Settings, Terminal, type LucideIcon } from "lucide-react";
 import { Sidebar, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupLabel, SidebarMenu, SidebarMenuItem } from "@/components/ui/sidebar";
+import { uptime } from "@/components/containers/container-format";
+import { useNow } from "@/hooks/use-now";
 import { cn } from "@/lib/utils";
 
 export interface SidebarBadges {
@@ -12,8 +14,8 @@ export interface SidebarBadges {
 
 export interface AgentInfo {
     version: string;
-    /** Human uptime such as "14d 7h 23m"; omitted until the controller reports its start time. */
-    uptime?: string;
+    /** When the controller started (RFC 3339); uptime counts from it. */
+    startedAt?: string;
 }
 
 interface NavItem {
@@ -25,6 +27,12 @@ interface NavItem {
 }
 
 const count = (value: number | undefined) => (value ? String(value) : null);
+
+/** The Agent Info box's uptime line, on the shared one-second clock. */
+function AgentUptime({ startedAt }: { startedAt?: string }) {
+    const now = useNow();
+    return <span className='font-medium text-muted-foreground'>uptime: {startedAt ? uptime((now - Date.parse(startedAt)) / 1_000) : "—"}</span>;
+}
 
 const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
     {
@@ -110,7 +118,7 @@ export function AppSidebar({ badges = {}, agent }: { badges?: SidebarBadges; age
                 {section(system)}
                 <div className='mx-2 mt-1.5 flex flex-col gap-1 rounded-md border border-sidebar-border bg-muted px-3 py-2.5 font-mono text-3xs tracking-[0.5px]'>
                     <span className='font-bold text-sidebar-foreground'>AGENT {agent ? `v${agent.version}` : "—"}</span>
-                    <span className='font-medium text-muted-foreground'>uptime: {agent?.uptime ?? "—"}</span>
+                    <AgentUptime startedAt={agent?.startedAt} />
                 </div>
             </SidebarFooter>
         </Sidebar>

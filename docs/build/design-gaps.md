@@ -33,7 +33,7 @@ Node ids refer to `docs/design.pen`. Open the file with the Pencil MCP using its
 | G11 | Exec target picker ("+" tab) and custom-shell retry | Exec page `f8D6u`; state `p1V0Po` mentions retry with a custom shell | Command list of running containers grouped by node; custom shell is a text field in the Error State block. Built as a shadcn Command dialog behind `+` and NEW SHELL, and a shell field with RETRY on `shell_not_found` (spec 16). | Built (interim) |
 | G12 | Registry credentials for private pulls | State `D9mu7` says registry errors show "the fix (credentials)" | No credentials UI. Pull errors show the registry message verbatim; private registries unsupported this pass. | Missing, deferred |
 | G13 | Titlebar search and notifications panels | Titlebar `iHwhS` right side icons | Icons hidden. Command palette deleted. | Missing, deferred |
-| G14 | Settings entry point for Integrations | Traefik breadcrumb `lXH8d` says Settings › Integrations, but Settings `8wGs5` has no Integrations section | Add an "INTEGRATIONS" section header at the bottom of Settings with one row linking to the hub `r9tns`. | Missing |
+| G14 | Settings entry point for Integrations | Traefik breadcrumb `lXH8d` says Settings › Integrations, but Settings `8wGs5` has no Integrations section | Add an "INTEGRATIONS" section header at the bottom of Settings with one row linking to the hub `r9tns`. Built as the last Settings section with an OPEN button; restricted until the hub lands in spec 18 (ADR 0027). | Built (interim) |
 | G15 | Integrations hub GitHub card in the not-connected state | `r9tns` GitHub card shows CONNECTED | Mirror the Discord card pattern: NOT CONNECTED badge, disabled CONNECT with tooltip "Arrives with deployments". | Missing |
 | G16 | Deployments and Vault navigation placement | Sidebar `YJkf8` has no entries; Deployments screens override the Services item with a rocket icon | No nav entries. Sections deferred entirely. | Missing, deferred |
 | G17 | Add-node enrollment flow end to end | State `MjblZ` draws the dialog; controller enrollment isn't built | ADD NODE is disabled with a "Not built yet" tooltip, in the header and the empty state; the dialog isn't built (spec 13). Dev cluster uses static certificates from `dev/`. | Deferred (button built) |
@@ -41,11 +41,11 @@ Node ids refer to `docs/design.pen`. Open the file with the Pencil MCP using its
 | G19 | "Load more history" control for logs | State `f3Rq5` caption mentions a way to load more history | The no-match Empty State's LOAD PREVIOUS HOUR reopens the stream with `since = now − 1h` and a 5,000-line tail (spec 15). | Built (interim) |
 | G20 | Narrow window layout | All screens are 1440 × 900 | Minimum window 1100 × 700; tables scroll horizontally inside their card; sidebar stays fixed. | Missing |
 | G21 | Session expired dialog copy after password auth | State `ME9dW` button reads SIGN IN WITH GITHUB | Button text becomes SIGN IN and opens the password form in place. Design updated in this pass. | Designed |
-| G22 | Settings "Auth provider" value | `8wGs5` shows GitHub | Read-only row showing "Password". Design updated in this pass. | Designed |
+| G22 | Settings "Auth provider" value | `8wGs5` shows GitHub | Read-only row showing "Password". Design updated in this pass. Built read-only (spec 17). | Built |
 | G23 | GitHub integration page in the deferred state | `kx4iP` shows a fully connected integration | Page renders every section as skeleton with a single Alert: "GitHub connects when deployments arrive." | Designed, deferred |
 | G24 | Certificate expiry surfaces (RENEW NOW on a manager card) | State `SedYE` (04.S5) | Not rendered; no certificate lifecycle exists yet. Node cards show only the degraded and down notes (spec 13). | Designed, deferred |
 | G25 | Exec connection line shows PID and TTY | Exec `f8D6u` footer | Docker's exec API does not expose them; the line shows the container name and session count only (spec 16, ADR 0026). | Missing, deferred |
-| G26 | Theme setting row (system / light / dark) | Settings `8wGs5` has no appearance row | A "Theme" select as the first APPLICATION row, styled like the other rows. | Missing |
+| G26 | Theme setting row (system / light / dark) | Settings `8wGs5` has no appearance row | A "Theme" select as the first APPLICATION row, styled like the other rows. Built; the choice applies when saved (spec 17). | Built |
 
 ## Added in this pass
 

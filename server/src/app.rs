@@ -61,6 +61,7 @@ impl Hooks for App {
 
     async fn after_context(ctx: AppContext) -> Result<AppContext> {
         crate::server::init_shutdown_state(&ctx)?;
+        crate::server::init_runtime_state(&ctx)?;
         crate::server::init_shared_auth_state(&ctx)?;
         crate::server::init_docker_state(&ctx)?;
         crate::logs::init_log_streams(&ctx)?;

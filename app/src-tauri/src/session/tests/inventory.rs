@@ -7,9 +7,9 @@ use std::{
 
 use kontainer_native_client::{
     AdmittedOperation, AgentStatus, ClusterSummary, ContainerItem, ContainerList, ContainerState,
-    ControllerSettings, NativeClientError, NodeAvailability, NodeHealth, NodeId, NodeList,
-    NodeOutcome, NodeOutcomeStatus, NodeRole, NodeSample, NodeSummary, QuorumState, SamplePoint,
-    SampleSeries, SwarmNodeStatus,
+    ControllerSettings, ControllerStatus, NativeClientError, NodeAvailability, NodeHealth, NodeId,
+    NodeList, NodeOutcome, NodeOutcomeStatus, NodeRole, NodeSample, NodeSummary, QuorumState,
+    SamplePoint, SampleSeries, SwarmNodeStatus,
 };
 use tokio::sync::Notify;
 
@@ -385,6 +385,15 @@ async fn reads_use_only_the_active_profile_and_serialize_their_views() {
         .push_back(Ok(ControllerSettings {
             metrics_retention_days: 30,
         }));
+    harness
+        .controllers
+        .script()
+        .statuses
+        .push_back(Ok(ControllerStatus {
+            version: "0.1.0".to_owned(),
+            log_level: "info".to_owned(),
+            started_at: "2026-09-28T12:00:00.250Z".parse().unwrap(),
+        }));
 
     assert_eq!(
         node_ids(harness.manager.nodes(view.profile_id).await.unwrap()),
@@ -434,6 +443,17 @@ async fn reads_use_only_the_active_profile_and_serialize_their_views() {
         serde_json::to_value(updated).unwrap()["metricsRetentionDays"],
         30
     );
+    let status = harness
+        .manager
+        .controller_status(view.profile_id)
+        .await
+        .unwrap();
+    let nodes_fixture: serde_json::Value = serde_json::from_str(NODES_FIXTURE).unwrap();
+    assert_eq!(
+        serde_json::to_value(status).unwrap(),
+        nodes_fixture["status"]
+    );
+    assert_eq!(harness.count("get_status:"), 1);
 
     assert_eq!(harness.count("nodes:"), 1);
     assert_eq!(harness.count("summary:"), 1);

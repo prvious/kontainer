@@ -4,9 +4,9 @@
 //! keeps both sides in sync.
 
 use kontainer_native_client::{
-    AgentStatus, ClusterSummary, ControllerSettings, NodeAvailability, NodeHealth, NodeId,
-    NodeList, NodeRole, NodeSample, NodeSummary, QuorumState, SamplePoint, SampleSeries,
-    SwarmNodeStatus,
+    AgentStatus, ClusterSummary, ControllerSettings, ControllerStatus, NodeAvailability,
+    NodeHealth, NodeId, NodeList, NodeRole, NodeSample, NodeSummary, QuorumState, SamplePoint,
+    SampleSeries, SwarmNodeStatus,
 };
 use serde::Serialize;
 use uuid::Uuid;
@@ -109,6 +109,25 @@ struct SamplePointView {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ControllerSettingsView {
     metrics_retention_days: u32,
+}
+
+/// The controller's version, log filter, and start time, for the sidebar and Settings.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ControllerStatusView {
+    version: String,
+    log_level: String,
+    started_at: String,
+}
+
+impl From<ControllerStatus> for ControllerStatusView {
+    fn from(status: ControllerStatus) -> Self {
+        Self {
+            version: status.version,
+            log_level: status.log_level,
+            started_at: timestamp!(status.started_at),
+        }
+    }
 }
 
 impl From<NodeSample> for NodeSampleView {
@@ -261,6 +280,18 @@ impl SessionManager {
             )
             .await?;
         Ok(series.into())
+    }
+
+    pub(crate) async fn controller_status(
+        &self,
+        profile_id: Uuid,
+    ) -> Result<ControllerStatusView, InventoryError> {
+        let status = self
+            .authenticated(profile_id, &(), |controller, access, cancellation, ()| {
+                controller.get_status(access, cancellation)
+            })
+            .await?;
+        Ok(status.into())
     }
 
     pub(crate) async fn controller_settings(

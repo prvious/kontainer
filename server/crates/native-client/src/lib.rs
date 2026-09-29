@@ -45,6 +45,7 @@ mod probe;
 mod services;
 mod settings;
 mod stacks;
+mod status;
 mod volumes;
 
 #[cfg(test)]
@@ -95,6 +96,7 @@ pub use services::{
 };
 pub use settings::{ControllerSettings, RETENTION_DAYS};
 pub use stacks::{StackItem, StackList, StackName, StackRemovalPlan, StackStatus};
+pub use status::ControllerStatus;
 pub use volumes::{
     LOCAL_VOLUME_DRIVER, MAX_VOLUME_LABELS, MAX_VOLUMES, VolumeItem, VolumeList, VolumeName,
     VolumeQuery, VolumeSpec,

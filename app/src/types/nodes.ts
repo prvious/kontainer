@@ -4,7 +4,7 @@
  * Mirrors `app/src-tauri/src/session/manager_nodes.rs`; the shared fixture at
  * `app/tests/fixtures/nodes-ipc.json` keeps both sides in sync.
  */
-import { exactRecord } from "@/types/inventory";
+import { exactRecord, hasControlCharacter } from "@/types/inventory";
 
 /** The agent side; `no-agent` for a Swarm member that never checked in. */
 export const AGENT_STATUSES = ["online", "degraded", "offline", "no-agent"] as const;
@@ -107,6 +107,14 @@ export type SampleWindow = (typeof SAMPLE_WINDOWS)[number];
 
 export interface ControllerSettings {
     metricsRetentionDays: number;
+}
+
+/** `/api/v1/status` for the sidebar Agent Info box and Settings. Mirrors `ControllerStatusView`. */
+export interface ControllerStatusView {
+    version: string;
+    /** The controller's tracing filter: a level such as `info`, or a `RUST_LOG` value. */
+    logLevel: string;
+    startedAt: string;
 }
 
 const isCount = (value: unknown): value is number => typeof value === "number" && Number.isInteger(value) && value >= 0;
@@ -280,6 +288,15 @@ export function controllerSettingsFromIpc(value: unknown): ControllerSettings {
     const data = exactRecord(value, ["metricsRetentionDays"]);
     if (!isCount(data.metricsRetentionDays) || data.metricsRetentionDays < 1 || data.metricsRetentionDays > 365) throw "invalid_response";
     return { metricsRetentionDays: data.metricsRetentionDays };
+}
+
+const isPrintable = (value: unknown, limit: number): value is string =>
+    typeof value === "string" && value.length > 0 && value.length <= limit && !hasControlCharacter(value);
+
+export function controllerStatusFromIpc(value: unknown): ControllerStatusView {
+    const data = exactRecord(value, ["version", "logLevel", "startedAt"]);
+    if (!isPrintable(data.version, 64) || !isPrintable(data.logLevel, 512) || !isTimestamp(data.startedAt)) throw "invalid_response";
+    return { version: data.version, logLevel: data.logLevel, startedAt: data.startedAt };
 }
 
 /** Status bar figures from the cluster summary; the Docker version comes from the first online node. */

@@ -9,6 +9,7 @@ use super::containers::{
 };
 use super::operations::{OperationResponse, OperationStateResponse};
 use crate::auth::domain::PrincipalContext;
+use crate::server::ControllerRuntime;
 
 mod deep;
 
@@ -18,14 +19,22 @@ pub struct StatusResponse {
     pub status: &'static str,
     pub version: &'static str,
     pub architecture: &'static str,
+    /// The tracing filter the controller logs with (`RUST_LOG`, else the configured level).
+    pub log_level: String,
+    /// When this controller process started, RFC 3339 in UTC.
+    pub started_at: String,
 }
 
 impl StatusResponse {
-    fn current() -> Self {
+    fn current(runtime: &ControllerRuntime) -> Self {
         Self {
             status: "ok",
             version: env!("CARGO_PKG_VERSION"),
             architecture: std::env::consts::ARCH,
+            log_level: runtime.log_level.clone(),
+            started_at: runtime
+                .started_at
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
         }
     }
 }
@@ -40,8 +49,12 @@ impl StatusResponse {
         (status = 503, description = "Controller draining new work or session persistence unavailable; the body is either HealthResponse or a generic error")
     )
 )]
-async fn show(_principal: PrincipalContext) -> Result<Response> {
-    format::json(StatusResponse::current())
+async fn show(_principal: PrincipalContext, State(ctx): State<AppContext>) -> Result<Response> {
+    let runtime = ctx
+        .shared_store
+        .get::<ControllerRuntime>()
+        .ok_or(Error::InternalServerError)?;
+    format::json(StatusResponse::current(&runtime))
 }
 
 #[allow(dead_code)]
@@ -220,14 +233,41 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::{ApiDoc, OPENAPI_ARTIFACT, OpenApi, StatusResponse};
+    use crate::server::{ControllerRuntime, effective_log_level};
 
     #[test]
     fn status_reports_the_current_controller_build() {
-        let response = StatusResponse::current();
+        let started_at = chrono::DateTime::parse_from_rfc3339("2026-09-28T12:00:00.250Z")
+            .unwrap()
+            .to_utc();
+        let response = StatusResponse::current(&ControllerRuntime {
+            started_at,
+            log_level: "info".to_owned(),
+        });
 
         assert_eq!(response.status, "ok");
         assert_eq!(response.version, env!("CARGO_PKG_VERSION"));
         assert!(!response.architecture.is_empty());
+        assert_eq!(response.log_level, "info");
+        assert_eq!(response.started_at, "2026-09-28T12:00:00.250Z");
+    }
+
+    #[test]
+    fn the_log_level_follows_rust_log_then_the_override_then_the_level() {
+        assert_eq!(effective_log_level(None, None, "info"), "info");
+        assert_eq!(
+            effective_log_level(None, Some("kontainer=trace"), "info"),
+            "kontainer=trace"
+        );
+        assert_eq!(
+            effective_log_level(
+                Some("warn,tower_http=debug"),
+                Some("kontainer=trace"),
+                "info"
+            ),
+            "warn,tower_http=debug"
+        );
+        assert_eq!(effective_log_level(Some("  "), None, "debug"), "debug");
     }
 
     #[test]

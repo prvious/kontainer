@@ -74,6 +74,7 @@ pub fn run() {
             actions::nodes::get_cluster_samples::get_cluster_samples,
             actions::nodes::get_node_samples::get_node_samples,
             actions::settings::get_settings::get_settings,
+            actions::settings::get_status::get_status,
             actions::settings::update_settings::update_settings,
             actions::operations::get_operation::get_operation,
             actions::operations::list_operation_events::list_operation_events,

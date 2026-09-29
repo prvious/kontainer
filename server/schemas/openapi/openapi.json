@@ -4450,11 +4450,21 @@
         "required": [
           "status",
           "version",
-          "architecture"
+          "architecture",
+          "logLevel",
+          "startedAt"
         ],
         "properties": {
           "architecture": {
             "type": "string"
+          },
+          "logLevel": {
+            "type": "string",
+            "description": "The tracing filter the controller logs with (`RUST_LOG`, else the configured level)."
+          },
+          "startedAt": {
+            "type": "string",
+            "description": "When this controller process started, RFC 3339 in UTC."
           },
           "status": {
             "type": "string"

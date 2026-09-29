@@ -3,7 +3,14 @@ import { useAuth } from "@/hooks/use-auth";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { useQueriesPaused } from "@/hooks/use-queries-paused";
 import { authenticatedInvoke, type ReportCustodyError as Report } from "@/hooks/authenticated-invoke";
-import { clusterSummaryFromIpc, controllerSettingsFromIpc, nodeListFromIpc, sampleSeriesFromIpc, type SampleWindow } from "@/types/nodes";
+import {
+    clusterSummaryFromIpc,
+    controllerSettingsFromIpc,
+    controllerStatusFromIpc,
+    nodeListFromIpc,
+    sampleSeriesFromIpc,
+    type SampleWindow,
+} from "@/types/nodes";
 import { DEFAULT_APP_SETTINGS } from "@/types/settings";
 
 /** `node` is a node id, or `"cluster"` for the cluster-wide series. */
@@ -80,6 +87,23 @@ export function useSamples(scope: SampleScope, window: SampleWindow, bucket: str
         refetchInterval: interval,
         retry: false,
         placeholderData: keepPreviousData,
+    });
+}
+
+export const controllerStatusKey = (profileId: string) => ["controller-status", profileId] as const;
+
+/** The controller's version, log filter, and start time; they change only when it restarts. */
+export function useControllerStatus() {
+    const { session, reportInventoryCustodyError } = useAuth();
+    const paused = useQueriesPaused();
+    const profileId = session?.profileId ?? "";
+    return useQuery({
+        queryKey: controllerStatusKey(profileId),
+        queryFn: () => authenticatedInvoke("get_status", profileId, {}, controllerStatusFromIpc, reportInventoryCustodyError),
+        enabled: Boolean(session) && !paused,
+        staleTime: 60_000,
+        refetchInterval: 60_000,
+        retry: false,
     });
 }
 

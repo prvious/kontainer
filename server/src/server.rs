@@ -149,6 +149,43 @@ pub fn init_shutdown_state(ctx: &AppContext) -> Result<()> {
 #[derive(Clone)]
 pub struct ForceCancellation(pub CancellationToken);
 
+/// When this controller started and the tracing filter it logs with, fixed at boot for
+/// `/api/v1/status`.
+#[derive(Clone, Debug)]
+pub struct ControllerRuntime {
+    pub started_at: chrono::DateTime<chrono::Utc>,
+    pub log_level: String,
+}
+
+pub fn init_runtime_state(ctx: &AppContext) -> Result<()> {
+    let logger = &ctx.config.logger;
+    ctx.shared_store.insert(ControllerRuntime {
+        started_at: chrono::Utc::now(),
+        log_level: effective_log_level(
+            std::env::var("RUST_LOG").ok().as_deref(),
+            logger.override_filter.as_deref(),
+            &logger.level.to_string(),
+        ),
+    });
+    Ok(())
+}
+
+/// The filter Loco applies, in its order: `RUST_LOG`, then the configured `override_filter`,
+/// then the configured level. Blank values don't count.
+pub fn effective_log_level(
+    rust_log: Option<&str>,
+    override_filter: Option<&str>,
+    level: &str,
+) -> String {
+    [rust_log, override_filter]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .find(|filter| !filter.is_empty())
+        .unwrap_or(level)
+        .to_owned()
+}
+
 /// Struct shape (not a tagged enum): serde's `deny_unknown_fields` is not
 /// honored for internally tagged enums, so the mode/bundle consistency is
 /// enforced by [`PublicHttpSettings::validate`] instead.

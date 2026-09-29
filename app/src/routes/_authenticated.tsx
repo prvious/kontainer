@@ -11,7 +11,7 @@ import { SidebarProvider } from "@/components/ui/sidebar";
 import { ActionButton } from "@/components/kit/action-button";
 import { useAuth } from "@/hooks/use-auth";
 import { useConnectivity } from "@/hooks/use-connectivity";
-import { useClusterSummary, useNodes } from "@/hooks/use-nodes";
+import { useClusterSummary, useControllerStatus, useNodes } from "@/hooks/use-nodes";
 import { useContainers } from "@/hooks/use-containers";
 import { ConnectivityProvider } from "@/contexts/connectivity-context";
 import { LogStreamsProvider } from "@/contexts/log-streams-context";
@@ -58,22 +58,25 @@ function AuthenticatedLayout() {
 }
 
 function AuthenticatedShell() {
-    const { session, expired, issue, retryCommit, retryRestore, logout } = useAuth();
+    const { session, expired, issue, retryCommit, retryRestore, logout, nextOrigin } = useAuth();
     const router = useRouter();
     const { probe, reachable } = useConnectivity();
     const logStreams = useOpenLogTabs();
     const terminals = useOpenShells();
     const nodes = useNodes();
     const summary = useClusterSummary();
+    const controllerStatus = useControllerStatus();
     const containers = useContainers();
 
+    // Signed out: leave for Connect, filled with the next agent when this was a switch. A switch
+    // can't navigate there itself, because until this render the router still sees the session.
     useEffect(() => {
         if (session) return;
         void router
             .invalidate()
-            .then(() => router.navigate({ to: "/login", search: { redirect: undefined } }))
+            .then(() => router.navigate({ to: "/login", search: { redirect: undefined, origin: nextOrigin ?? undefined } }))
             .catch(() => {});
-    }, [session, router]);
+    }, [session, router, nextOrigin]);
 
     async function retryLogout() {
         try {
@@ -107,7 +110,10 @@ function AuthenticatedShell() {
                 )}
                 {/* While the session-expired dialog is up the page stays mounted but inert (02.S5). */}
                 <SidebarProvider inert={expired || undefined} className='min-h-0 flex-1' style={{ "--sidebar-width": "220px" } as React.CSSProperties}>
-                    <AppSidebar badges={{ nodesDown: nodesDown(summary.data), containers: containers.data?.items.filter((row) => !row.stale).length }} />
+                    <AppSidebar
+                        badges={{ nodesDown: nodesDown(summary.data), containers: containers.data?.items.filter((row) => !row.stale).length }}
+                        agent={controllerStatus.data && { version: controllerStatus.data.version, startedAt: controllerStatus.data.startedAt }}
+                    />
                     <main className='min-w-0 flex-1 overflow-y-auto bg-background p-6'>
                         <Outlet />
                     </main>

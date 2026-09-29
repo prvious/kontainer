@@ -28,7 +28,10 @@ export interface AuthContextValue {
     login: (input: SignInInput) => Promise<void>;
     /** Rejects with a `LoginFailure`. */
     register: (input: RegisterInput) => Promise<void>;
-    logout: (summary?: ConnectionSummary) => Promise<void>;
+    /** `nextOrigin` is the agent Connect opens with once signed out (switching agents). */
+    logout: (summary?: ConnectionSummary, nextOrigin?: string) => Promise<void>;
+    /** Set by a sign-out that switches agents; the signed-out redirect fills Connect with it. */
+    nextOrigin?: string | null;
     retryCommit: () => Promise<void>;
     retryRestore: () => Promise<void>;
     clearIssue: () => void;

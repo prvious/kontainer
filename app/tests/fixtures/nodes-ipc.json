@@ -5,6 +5,7 @@
         ["nodes", "get_cluster_samples"],
         ["nodes", "get_node_samples"],
         ["settings", "get_settings"],
+        ["settings", "get_status"],
         ["settings", "update_settings"]
     ],
     "nodeList": {
@@ -131,5 +132,10 @@
     },
     "settings": {
         "metricsRetentionDays": 7
+    },
+    "status": {
+        "version": "0.1.0",
+        "logLevel": "info",
+        "startedAt": "2026-09-28T12:00:00.250Z"
     }
 }

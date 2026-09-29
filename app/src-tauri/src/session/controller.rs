@@ -11,10 +11,10 @@ use std::time::Duration;
 
 use kontainer_native_client::{
     AccessCredential, AccountFieldErrors, AdmittedOperation, ContainerAction,
-    ContainerActionOptions, ContainerList, ContainerTarget, ControllerSettings, IdempotencyKey,
-    ImageList, ImageNodes, NativeClient, NativeClientConfig, NativeClientError, NodeId, NodeList,
-    OperationEvent, OperationSnapshot, PasswordSession, ProbeFailure, RefreshCredential,
-    SampleSeries, Traced, VolumeList, VolumeName, VolumeQuery, VolumeSpec,
+    ContainerActionOptions, ContainerList, ContainerTarget, ControllerSettings, ControllerStatus,
+    IdempotencyKey, ImageList, ImageNodes, NativeClient, NativeClientConfig, NativeClientError,
+    NodeId, NodeList, OperationEvent, OperationSnapshot, PasswordSession, ProbeFailure,
+    RefreshCredential, SampleSeries, Traced, VolumeList, VolumeName, VolumeQuery, VolumeSpec,
 };
 use kontainer_native_client::{AttachedContainer, NetworkId, NetworkList, NetworkSpec};
 use kontainer_native_client::{ClusterSummary, StackList, StackName, StackRemovalPlan};
@@ -128,6 +128,12 @@ pub(crate) trait Controller: Send + Sync + 'static {
         bucket: &'a str,
         cancellation: &'a CancellationToken,
     ) -> ControllerFuture<'a, Result<SampleSeries, NativeClientError>>;
+
+    fn get_status<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ControllerStatus, NativeClientError>>;
 
     fn get_settings<'a>(
         &'a self,
@@ -514,6 +520,14 @@ impl Controller for NativeController {
                 }
             }
         })
+    }
+
+    fn get_status<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ControllerStatus, NativeClientError>> {
+        Box::pin(self.client.get_status(access, cancellation))
     }
 
     fn get_settings<'a>(

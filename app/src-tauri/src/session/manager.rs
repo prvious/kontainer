@@ -66,7 +66,8 @@ pub(crate) use volumes::{CreateVolumeInput, VolumeListView};
 #[path = "manager_nodes.rs"]
 mod nodes;
 pub(crate) use nodes::{
-    ClusterSummaryView, ControllerSettingsView, NodeListView, SampleSeriesView,
+    ClusterSummaryView, ControllerSettingsView, ControllerStatusView, NodeListView,
+    SampleSeriesView,
 };
 
 #[path = "manager_exec.rs"]
