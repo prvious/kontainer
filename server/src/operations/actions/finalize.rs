@@ -58,6 +58,12 @@ pub async fn execute(
     operation_id: Uuid,
     outcome: Outcome,
 ) -> Result<DurableOperation, FinalizeError> {
+    #[cfg(test)]
+    if injected::take(operation_id) {
+        return Err(FinalizeError::Persistence(DbErr::Custom(
+            "injected finalize failure".to_owned(),
+        )));
+    }
     database
         .transaction(|transaction| {
             Box::pin(async move { finalize_in(transaction, operation_id, outcome).await })
@@ -134,6 +140,31 @@ fn bounded(value: &str, limit: usize) -> String {
         end -= 1;
     }
     trimmed[..end].to_owned()
+}
+
+/// A failure point for tests: the next `execute` for an operation fails with a persistence error
+/// before touching the database. Keyed by operation id, so tests running at once don't interfere.
+#[cfg(test)]
+pub(crate) mod injected {
+    use std::{collections::BTreeSet, sync::Mutex};
+
+    use uuid::Uuid;
+
+    static FAIL_NEXT: Mutex<BTreeSet<Uuid>> = Mutex::new(BTreeSet::new());
+
+    pub(crate) fn fail_next(operation_id: Uuid) {
+        FAIL_NEXT
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(operation_id);
+    }
+
+    pub(super) fn take(operation_id: Uuid) -> bool {
+        FAIL_NEXT
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&operation_id)
+    }
 }
 
 #[cfg(test)]

@@ -14,7 +14,7 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 use super::{
-    actions::{admit, cancel, claim_next, get, list_events, prune, recover_running},
+    actions::{admit, cancel, claim_next, finalize, get, list_events, prune, recover_running},
     bulk::{BulkTarget, run_bulk},
     domain::{DurableOperation, OperationKind, OperationSnapshot, OperationState},
     entities::{idempotency_record, operation},
@@ -84,7 +84,8 @@ fn sea_orm_admission(
     .with_request_id(Some("req-test-01".to_owned())))
 }
 
-async fn wait_terminal(
+/// Wait until the operation is terminal or `uncertain`; neither moves again on its own.
+async fn wait_settled(
     database: &sea_orm::DatabaseConnection,
     principal: Uuid,
     id: Uuid,
@@ -92,12 +93,12 @@ async fn wait_terminal(
     let principal = PrincipalContext::new(principal);
     for _ in 0..400 {
         let snapshot = get::execute(database, &principal, id).await?;
-        if snapshot.operation.state.is_terminal() {
+        if snapshot.operation.state.is_terminal() || snapshot.operation.state.is_uncertain() {
             return Ok(snapshot);
         }
         tokio::time::sleep(StdDuration::from_millis(10)).await;
     }
-    Err("operation did not reach a terminal state".into())
+    Err("operation did not settle".into())
 }
 
 #[tokio::test]
@@ -117,7 +118,7 @@ async fn postgres_noop_runs_end_to_end_with_progress_and_one_terminal_event()
             serde_json::json!({"steps": 3, "stepMs": 5}),
         )
         .await?;
-        let snapshot = wait_terminal(db, principal, id).await?;
+        let snapshot = wait_settled(db, principal, id).await?;
         let failed_id = admit_kind(
             db,
             principal,
@@ -125,7 +126,7 @@ async fn postgres_noop_runs_end_to_end_with_progress_and_one_terminal_event()
             serde_json::json!({"steps": 1, "stepMs": 1, "failWith": "no_eligible_nodes"}),
         )
         .await?;
-        let failed = wait_terminal(db, principal, failed_id).await?;
+        let failed = wait_settled(db, principal, failed_id).await?;
         draining.cancel();
         worker.await?;
 
@@ -181,12 +182,63 @@ async fn postgres_noop_runs_end_to_end_with_progress_and_one_terminal_event()
     Ok(())
 }
 
+#[tokio::test]
+async fn postgres_a_failed_finalize_is_retried_until_the_outcome_lands()
+-> Result<(), Box<dyn Error>> {
+    let Some(database) = PostgresTestDatabase::create(true).await? else {
+        return Ok(());
+    };
+    let evidence = async {
+        let db = &database.connection;
+        let principal = test_principal(db).await?;
+        // Admitted and armed before the worker starts, so the first finalize fails.
+        let id = admit_kind(
+            db,
+            principal,
+            OperationKind::Noop,
+            serde_json::json!({"steps": 1, "stepMs": 1}),
+        )
+        .await?;
+        finalize::injected::fail_next(id);
+        let (draining, worker) = start_worker(db, ExecutorRegistry::default().with(NoopExecutor));
+        let snapshot = wait_settled(db, principal, id).await?;
+        draining.cancel();
+        worker.await?;
+
+        assert_eq!(snapshot.operation.state, OperationState::Succeeded);
+        let took = snapshot.operation.finished_at.unwrap() - snapshot.operation.started_at.unwrap();
+        assert!(
+            took >= Duration::milliseconds(250),
+            "recorded on the retry after the first backoff, took {took}"
+        );
+        let events =
+            list_events::execute(db, &PrincipalContext::new(principal), id, 0, 100).await?;
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| event.state.is_terminal())
+                .count(),
+            1
+        );
+        Ok::<_, Box<dyn Error>>(())
+    }
+    .await;
+    let removed = database.cleanup().await?;
+    evidence?;
+    assert!(removed);
+    Ok(())
+}
+
 struct StuckExecutor;
 
 #[async_trait]
 impl OperationExecutor for StuckExecutor {
     fn kind(&self) -> OperationKind {
         OperationKind::ServiceRestart
+    }
+
+    fn timeout(&self, _payload: &serde_json::Value) -> StdDuration {
+        StdDuration::from_millis(50)
     }
 
     async fn execute(
@@ -216,8 +268,10 @@ impl OperationExecutor for PanickingExecutor {
     }
 }
 
+/// A timeout leaves the outcome unknown (the node may still finish), so it is `uncertain`, never a
+/// guessed `failed`; panics and unknown kinds fail with stable codes.
 #[tokio::test]
-async fn postgres_timeouts_panics_and_unknown_kinds_fail_with_stable_codes()
+async fn postgres_timeouts_are_uncertain_and_panics_and_unknown_kinds_fail_with_stable_codes()
 -> Result<(), Box<dyn Error>> {
     let Some(database) = PostgresTestDatabase::create(true).await? else {
         return Ok(());
@@ -227,8 +281,7 @@ async fn postgres_timeouts_panics_and_unknown_kinds_fail_with_stable_codes()
         let principal = test_principal(db).await?;
         let registry = ExecutorRegistry::default()
             .with(StuckExecutor)
-            .with(PanickingExecutor)
-            .with_timeout(OperationKind::ServiceRestart, StdDuration::from_millis(50));
+            .with(PanickingExecutor);
         let (draining, worker) = start_worker(db, registry);
         let stuck = admit_kind(
             db,
@@ -252,9 +305,9 @@ async fn postgres_timeouts_panics_and_unknown_kinds_fail_with_stable_codes()
         )
         .await?;
         let results = [
-            wait_terminal(db, principal, stuck).await?,
-            wait_terminal(db, principal, panicking).await?,
-            wait_terminal(db, principal, unregistered).await?,
+            wait_settled(db, principal, stuck).await?,
+            wait_settled(db, principal, panicking).await?,
+            wait_settled(db, principal, unregistered).await?,
         ];
         draining.cancel();
         worker.await?;
@@ -265,12 +318,16 @@ async fn postgres_timeouts_panics_and_unknown_kinds_fail_with_stable_codes()
         assert_eq!(
             codes,
             vec![
-                (OperationState::Failed, Some("timeout".to_owned())),
+                (OperationState::Uncertain, Some("timeout".to_owned())),
                 (OperationState::Failed, Some("internal_error".to_owned())),
                 (OperationState::Failed, Some("unsupported_kind".to_owned())),
             ]
         );
         assert!(!format!("{results:?}").contains("executor bug"));
+        assert_eq!(
+            results[0].operation.finished_at, None,
+            "it may still finish"
+        );
         Ok::<_, Box<dyn Error>>(())
     }
     .await;
@@ -323,8 +380,8 @@ async fn postgres_bulk_partial_failure_keeps_every_result() -> Result<(), Box<dy
         };
         let partial = admit_kind(db, principal, OperationKind::ContainersBulk, targets(&["a", "b", "c"])).await?;
         let complete = admit_kind(db, principal, OperationKind::ContainersBulk, targets(&["a", "c"])).await?;
-        let partial = wait_terminal(db, principal, partial).await?;
-        let complete = wait_terminal(db, principal, complete).await?;
+        let partial = wait_settled(db, principal, partial).await?;
+        let complete = wait_settled(db, principal, complete).await?;
         draining.cancel();
         worker.await?;
 

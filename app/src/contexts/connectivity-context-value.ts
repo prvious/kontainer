@@ -19,6 +19,9 @@ export const PAUSED_OFFLINE = {
     reason: "Kontainer can't reach the controller, so it won't send a change it can't confirm. Retry the connection first.",
 };
 
+/** What a change started while the controller is unreachable fails with; it is never sent. */
+export const CONTROLLER_UNREACHABLE = "controller_unreachable";
+
 /** Outside the authenticated layout nothing probes, so everything counts as reachable. */
 export const ConnectivityContext = createContext<ConnectivityContextValue>({
     probe: undefined,

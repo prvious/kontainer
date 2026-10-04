@@ -220,7 +220,7 @@ describe("Settings page", () => {
         expect(invoke).not.toHaveBeenCalledWith("save_app_settings", expect.anything());
     });
 
-    it("saves device settings and the retention together, applies the theme, and can undo", async () => {
+    it("saves the retention, then the device settings, applies the theme, and can undo", async () => {
         renderPage();
         await screen.findByRole("combobox", { name: "Metrics Retention" });
         await waitFor(() => expect(document.documentElement).toHaveClass("dark"));
@@ -236,13 +236,37 @@ describe("Settings page", () => {
         await waitFor(() => expect(document.documentElement).not.toHaveClass("dark"));
         expect(screen.queryByRole("region", { name: "Pending changes" })).not.toBeInTheDocument();
         expect(screen.getByRole("combobox", { name: "Metrics Retention" })).toHaveTextContent("30 days");
-        expect(toasts.success).toHaveBeenCalledWith("Settings saved", expect.objectContaining({ description: "2 changes saved." }));
+        const commands = vi.mocked(invoke).mock.calls.map(([command]) => command);
+        expect(commands.indexOf("update_settings")).toBeLessThan(commands.indexOf("save_app_settings"));
+        // A fixed id: a newer save replaces this toast, so its UNDO can't revert the newer save.
+        expect(toasts.success).toHaveBeenCalledWith("Settings saved", expect.objectContaining({ id: "settings-saved", description: "2 changes saved." }));
 
         const [, options] = toasts.success.mock.calls[0] as [string, { action: { onClick: () => void } }];
         await act(async () => options.action.onClick());
         await waitFor(() => expect(retention).toBe(7));
         expect(stored.scheme).toBe("dark");
         await waitFor(() => expect(document.documentElement).toHaveClass("dark"));
+    });
+
+    it("writes nothing when the controller refuses the retention", async () => {
+        const answer = vi.mocked(invoke).getMockImplementation();
+        vi.mocked(invoke).mockImplementation(async (command: string, args?: unknown) => {
+            if (command === "update_settings") throw "controller_unavailable";
+            return answer?.(command, args as never);
+        });
+        renderPage();
+        await screen.findByRole("combobox", { name: "Metrics Retention" });
+        await waitFor(() => expect(document.documentElement).toHaveClass("dark"));
+        await choose("Theme", "Light");
+        await choose("Metrics Retention", "30 days");
+        await userEvent.setup().click(screen.getByRole("button", { name: /SAVE CHANGES/ }));
+
+        await waitFor(() => expect(toasts.error).toHaveBeenCalledWith("Settings not saved", expect.anything()));
+        expect(invoke).not.toHaveBeenCalledWith("save_app_settings", expect.anything());
+        expect(stored.scheme).toBe("dark");
+        expect(document.documentElement).toHaveClass("dark");
+        expect(screen.getByRole("region", { name: "Pending changes" })).toHaveTextContent("2 unsaved changes");
+        expect(toasts.success).not.toHaveBeenCalled();
     });
 
     it("asks before leaving with unsaved changes, and stays or leaves", async () => {

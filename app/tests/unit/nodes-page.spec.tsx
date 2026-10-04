@@ -49,20 +49,23 @@ function nodeList() {
 
 const summary = { ...nodes.clusterSummary, nodesTotal: 4, nodesDegraded: 2 };
 
-/** Twelve 5 s buckets ending now; the last has two of four nodes reporting. */
+/**
+ * Twelve whole 10 s buckets, then the one still filling (99 %, one node so far). The newest whole
+ * bucket has two of four nodes reporting.
+ */
 function series() {
-    const end = Math.floor(Date.now() / 5000) * 5000;
-    const points = Array.from({ length: 12 }, (_, index) => ({
-        at: new Date(end - (11 - index) * 5000).toISOString(),
-        cpuPercent: 20 + index,
+    const end = Math.floor(Date.now() / 10_000) * 10_000;
+    const points = Array.from({ length: 13 }, (_, index) => ({
+        at: new Date(end - (12 - index) * 10_000).toISOString(),
+        cpuPercent: index === 12 ? 99 : 20 + index,
         memoryUsedBytes: 2 * 1024 ** 3,
         diskUsedBytes: null,
         containersRunning: 5,
         netRxBytesPerSec: null,
         netTxBytesPerSec: null,
-        nodes: index === 11 ? 2 : 4,
+        nodes: index === 12 ? 1 : index === 11 ? 2 : 4,
     }));
-    return { window: "5m", bucket: "5s", points, snapshotAt: new Date(end).toISOString() };
+    return { window: "5m", bucket: "10s", points, snapshotAt: new Date(end).toISOString() };
 }
 
 function mockCommands(overrides: Record<string, (args: Record<string, unknown>) => unknown> = {}) {
@@ -138,7 +141,7 @@ describe("Nodes page", () => {
         expect(within(agentless).getByRole("status")).toHaveTextContent("No Kontainer agent has checked in from this node");
     });
 
-    it("fills the cluster load strip and says how many nodes reported in a hovered bucket", async () => {
+    it("fills the cluster load strip over the last 2 minutes and says how many nodes reported in a hovered bucket", async () => {
         mockCommands();
         renderPage();
         const strip = await screen.findByRole("region", { name: "Cluster load" });
@@ -146,10 +149,13 @@ describe("Nodes page", () => {
         expect(within(strip).getByText("HEALTHY")).toBeInTheDocument();
         expect(within(strip).getByText("13")).toBeInTheDocument();
         expect(within(strip).getByText("GB / 8 GB")).toBeInTheDocument();
-        expect(invoke).toHaveBeenCalledWith("get_cluster_samples", { profileId: session.profileId, window: "5m", bucket: "5s" });
+        expect(invoke).toHaveBeenCalledWith("get_cluster_samples", { profileId: session.profileId, window: "5m", bucket: "10s" });
+        expect(within(strip).getByText("LAST 2m")).toBeInTheDocument();
 
-        const chart = within(strip).getByRole("img", { name: "Aggregate CPU, last 60 seconds" });
+        // The newest bar is the newest whole bucket: the one still filling (99 %) isn't drawn.
+        const chart = within(strip).getByRole("img", { name: "Aggregate CPU, last 2 minutes" });
         fireEvent.keyDown(chart, { key: "ArrowLeft" });
+        fireEvent.keyDown(chart, { key: "ArrowRight" });
         const tooltip = within(strip).getByRole("tooltip");
         expect(tooltip).toHaveTextContent("CPU31%");
         expect(tooltip).toHaveTextContent("Memory2 GB");

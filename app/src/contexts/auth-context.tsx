@@ -47,6 +47,8 @@ function SessionAuthProvider({ children }: { children: React.ReactNode }) {
             queryClient.setQueryData(sessionRestoreKey, view);
             void queryClient.invalidateQueries({ queryKey: sessionConnectionsKey });
             setExpired(false);
+            // A sign-in ends any switch: a later sign-out must not reopen Connect on that agent.
+            if (view) setNextOrigin(null);
         },
         [queryClient],
     );
@@ -170,7 +172,9 @@ function SessionAuthProvider({ children }: { children: React.ReactNode }) {
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-    const [queryClient] = useState(() => new QueryClient());
+    // Rust does the networking and answers with typed errors, so the OS's online flag must neither
+    // pause the health probe nor park a change to send it, unconfirmed, once the OS is back online.
+    const [queryClient] = useState(() => new QueryClient({ defaultOptions: { queries: { networkMode: "always" }, mutations: { networkMode: "always" } } }));
     return (
         <QueryClientProvider client={queryClient}>
             <SessionAuthProvider>{children}</SessionAuthProvider>

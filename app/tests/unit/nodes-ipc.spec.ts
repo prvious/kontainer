@@ -4,7 +4,6 @@ import { ipcFixture } from "../ipc-fixture";
 import {
     agentNodes,
     clusterUsage,
-    nodesDown,
     type ClusterSummary,
     type ControllerSettings,
     type ControllerStatusView,
@@ -20,12 +19,10 @@ ipcFixture<ControllerSettings>(fixture.settings);
 ipcFixture<ControllerStatusView>(fixture.status);
 
 describe("nodes IPC contract", () => {
-    it("derives the status bar figures and the DOWN badge from the cluster summary", () => {
+    it("derives the status bar figures from the cluster summary", () => {
         expect(clusterUsage(summary, nodes)).toEqual({ cpuPercent: 12.5, memoryUsedBytes: 1073741824, memoryTotalBytes: 8589934592, dockerVersion: "29.8.0" });
-        expect(nodesDown(summary)).toBe(2);
         expect(clusterUsage({ ...summary, cpuPercent: null }, [])).toEqual({});
         expect(clusterUsage(undefined, undefined)).toEqual({});
-        expect(nodesDown(undefined)).toBeUndefined();
         expect(agentNodes(nodes).map((node) => node.id)).toEqual(["manager", "worker-2"]);
     });
 });

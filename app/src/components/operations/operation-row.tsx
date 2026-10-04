@@ -1,20 +1,24 @@
 import { OperationStatus } from "@/components/kit/operation-status";
 import { notify } from "@/components/kit/notify";
-import { operationMeta, operationPhase, operationTrack } from "@/components/operations/operation-meta";
+import { operationMeta, operationPhase, operationTrack, pollErrorMeta } from "@/components/operations/operation-meta";
 import { useCancelOperation } from "@/hooks/use-cancel-operation";
-import { useOperation } from "@/hooks/use-operation";
+import { isPermanentPollError, useOperation } from "@/hooks/use-operation";
 import { useOperations } from "@/hooks/use-operations";
 import { useNow } from "@/hooks/use-now";
 import type { TrackedOperation } from "@/contexts/operations-context-value";
 
-/** One pinned operation: CANCEL while it has not started, DISMISS once it failed or settled. */
+/**
+ * One pinned operation: CANCEL while it has not started, DISMISS once it failed or settled. A poll
+ * that failed with nothing to show, or failed for good, reads as unknown with DISMISS.
+ */
 export function OperationRow({ operation }: { operation: TrackedOperation }) {
     const snapshot = useOperation(operation.id);
     const { dismiss } = useOperations();
     const cancel = useCancelOperation();
     const now = useNow();
     const view = snapshot.data;
-    const phase = operationPhase(view);
+    const pollError = snapshot.isError && (!view || isPermanentPollError(snapshot.error)) ? String(snapshot.error) : null;
+    const phase = pollError ? "uncertain" : operationPhase(view);
 
     async function cancelIt() {
         try {
@@ -37,7 +41,7 @@ export function OperationRow({ operation }: { operation: TrackedOperation }) {
         <OperationStatus
             phase={phase}
             title={operation.title}
-            meta={operationMeta(view, now)}
+            meta={pollError ? pollErrorMeta(pollError) : operationMeta(view, now)}
             progress={operationTrack(view)}
             action={action}
             className={phase === "failed" ? "border-destructive-soft" : undefined}

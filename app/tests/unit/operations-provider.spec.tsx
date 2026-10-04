@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act, render, renderHook, screen, waitFor } from "@testing-library/react";
+import { act, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -136,6 +136,38 @@ describe("operation tracking", () => {
         expect(screen.getByText("Scaling worker-processor")).toBeInTheDocument();
         await user.click(screen.getByRole("button", { name: "DISMISS" }));
         expect(screen.queryByText("Scaling worker-processor")).not.toBeInTheDocument();
+    });
+
+    it("says a status it couldn't read is unknown, without CANCEL, and stops polling once the operation is gone", async () => {
+        vi.mocked(invoke).mockImplementation(async (command: string) => {
+            if (command === "get_operation") throw "not_found";
+            return null;
+        });
+        const { wrapper } = setup();
+        function Harness() {
+            const { track } = useOperations();
+            return (
+                <>
+                    <button type='button' onClick={() => track({ id: operationId, scope: "stacks", title: "Removing stack legacy-api", invalidate: [] })}>
+                        track
+                    </button>
+                    <PinnedOperations scope='stacks' />
+                </>
+            );
+        }
+        render(<Harness />, { wrapper });
+        const user = userEvent.setup();
+        await user.click(screen.getByRole("button", { name: "track" }));
+        const pinned = await screen.findByRole("region", { name: "Operations" });
+        expect(await within(pinned).findByText("UNKNOWN · not_found — the status couldn't be read")).toBeInTheDocument();
+        expect(within(pinned).getByRole("status")).toHaveAttribute("data-phase", "uncertain");
+        expect(within(pinned).queryByRole("button", { name: "CANCEL" })).not.toBeInTheDocument();
+        const polls = () => vi.mocked(invoke).mock.calls.filter(([command]) => command === "get_operation").length;
+        const before = polls();
+        await act(() => new Promise((resolve) => setTimeout(resolve, 1300)));
+        expect(polls()).toBe(before);
+        await user.click(within(pinned).getByRole("button", { name: "DISMISS" }));
+        expect(screen.queryByText("Removing stack legacy-api")).not.toBeInTheDocument();
     });
 
     it("offers CANCEL while queued and cancels through Rust", async () => {

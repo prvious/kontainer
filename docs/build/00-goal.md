@@ -72,8 +72,8 @@ settings, all from the desktop app.
 13. **Security floors that are never simplified:** validation at every HTTP and IPC boundary
     (where data enters the more-trusted side; Rust's typed output to the WebView is not
     re-validated, see ADR 0032), Argon2id for passwords, generic authentication errors, login throttling, no secrets or
-    credentials in logs or in `session.json`, mTLS untouched, destructive actions behind typed
-    confirmation.
+    credentials in logs or in `session.json`, mTLS untouched, destructive actions that can lose
+    data require typed confirmation; others use a plain confirm (ADR 0036).
 14. **Real cluster.** The docker-in-docker Swarm from spec 02 is yours to use and reset. Never run
     Docker mutations against anything except the `kontainer-cluster-*` containers.
 15. **Scope discipline.** Build what the spec says and nothing beyond it. Deferred items in

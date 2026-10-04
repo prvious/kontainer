@@ -108,7 +108,8 @@ impl NodeSampler {
     }
 
     /// Take one reading. Container stats that miss `stats_deadline` are left out of this tick;
-    /// `docker info` failing fails the reading so check-in reports no sample rather than zeros.
+    /// `docker info` or the container listing failing fails the reading, so check-in reports no
+    /// sample rather than zeros.
     pub async fn sample(
         &mut self,
         stats_deadline: Duration,
@@ -117,11 +118,7 @@ impl NodeSampler {
         let tick = self.ticks;
         self.ticks += 1;
         let info = self.engine.node_info(cancellation).await?;
-        let running = self
-            .engine
-            .running_container_ids(cancellation)
-            .await
-            .unwrap_or_default();
+        let running = self.engine.running_container_ids(cancellation).await?;
         let current = self.read_stats(running, stats_deadline, cancellation).await;
         let now = Instant::now();
         let elapsed = self.previous_at.map(|previous| now - previous);
@@ -265,6 +262,7 @@ pub(crate) mod tests {
         pub step: u64,
         pub slow: Mutex<Option<String>>,
         pub info_fails: bool,
+        pub listing_fails: bool,
     }
 
     impl FakeNodeEngine {
@@ -286,6 +284,7 @@ pub(crate) mod tests {
                 step: 1000,
                 slow: Mutex::new(None),
                 info_fails: false,
+                listing_fails: false,
             }
         }
     }
@@ -321,6 +320,12 @@ pub(crate) mod tests {
             &self,
             _: &CancellationToken,
         ) -> Result<Vec<String>, EngineError> {
+            if self.listing_fails {
+                return Err(EngineError::new(
+                    EngineErrorKind::ConnectionUnavailable,
+                    EngineOperation::ListContainers,
+                ));
+            }
             let mut ids: Vec<_> = self.stats.keys().cloned().collect();
             ids.sort();
             Ok(ids)
@@ -431,6 +436,24 @@ pub(crate) mod tests {
                 .sample(Duration::from_secs(1), &CancellationToken::new())
                 .await
                 .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_container_listing_fails_the_reading_rather_than_reading_idle() {
+        let mut engine = FakeNodeEngine::two_containers();
+        engine.listing_fails = true;
+        let cache = ContainerStatsCache::default();
+        let mut sampler = NodeSampler::new(Arc::new(engine), cache.clone());
+        assert!(
+            sampler
+                .sample(Duration::from_secs(1), &CancellationToken::new())
+                .await
+                .is_err()
+        );
+        assert!(
+            cache.get(&"a".repeat(64)).is_none(),
+            "no zeroed stats either"
         );
     }
 

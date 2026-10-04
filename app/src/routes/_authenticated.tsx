@@ -19,7 +19,7 @@ import { ExecSessionsProvider } from "@/contexts/exec-sessions-context";
 import { useOpenShells } from "@/hooks/use-exec-sessions";
 import { useOpenLogTabs } from "@/hooks/use-log-tabs";
 import { OperationsProvider } from "@/contexts/operations-context";
-import { clusterUsage, nodesDown } from "@/types/nodes";
+import { clusterUsage } from "@/types/nodes";
 
 function ShellError() {
     return (
@@ -111,7 +111,7 @@ function AuthenticatedShell() {
                 {/* While the session-expired dialog is up the page stays mounted but inert (02.S5). */}
                 <SidebarProvider inert={expired || undefined} className='min-h-0 flex-1' style={{ "--sidebar-width": "220px" } as React.CSSProperties}>
                     <AppSidebar
-                        badges={{ nodesDown: nodesDown(summary.data), containers: containers.data?.items.filter((row) => !row.stale).length }}
+                        badges={{ nodesDown: summary.data?.nodesDown, containers: containers.data?.items.filter((row) => !row.stale).length }}
                         agent={controllerStatus.data && { version: controllerStatus.data.version, startedAt: controllerStatus.data.startedAt }}
                     />
                     <main className='min-w-0 flex-1 overflow-y-auto bg-background p-6'>

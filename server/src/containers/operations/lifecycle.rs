@@ -1,12 +1,13 @@
 //! `container.start` … `container.remove`: one lifecycle action on one container.
 
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use sea_orm::{DatabaseConnection, EntityTrait};
+use serde::Deserialize;
 
 use crate::{
-    containers::domain::{ContainerActionPayload, action_kind},
+    containers::domain::{ContainerActionPayload, action_kind, stop_budget},
     nodes::{
         agents::{AgentDirectory, NodeEndpoint},
         entities::node,
@@ -31,6 +32,22 @@ impl ContainerLifecycleExecutor {
 impl OperationExecutor for ContainerLifecycleExecutor {
     fn kind(&self) -> OperationKind {
         action_kind(self.0)
+    }
+
+    /// Stop and restart wait out the request's grace on the node (up to 600 s), so their budget
+    /// grows with it; it never drops below the kind's.
+    fn timeout(&self, payload: &serde_json::Value) -> Duration {
+        let budget = self.kind().timeout();
+        if !matches!(
+            self.0,
+            AgentContainerAction::Stop | AgentContainerAction::Restart
+        ) {
+            return budget;
+        }
+        let grace = ContainerActionPayload::deserialize(payload)
+            .ok()
+            .and_then(|payload| payload.timeout_seconds);
+        budget.max(stop_budget(grace))
     }
 
     async fn execute(
@@ -164,8 +181,50 @@ const fn settled_state(action: AgentContainerAction) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::action_failure;
-    use crate::rpc::{AgentClientError, AgentContainerAction};
+    use std::time::Duration;
+
+    use super::{ContainerLifecycleExecutor, action_failure};
+    use crate::{
+        operations::executor::OperationExecutor,
+        rpc::{AgentClientError, AgentContainerAction},
+    };
+
+    #[test]
+    fn stop_and_restart_budgets_grow_with_the_requested_grace() {
+        let budget = |action, timeout: Option<u32>| {
+            ContainerLifecycleExecutor(action).timeout(&serde_json::json!({
+                "nodeId": "manager",
+                "containerId": "a".repeat(64),
+                "action": action.as_str(),
+                "timeoutSeconds": timeout,
+            }))
+        };
+        let minute = Duration::from_secs(60);
+        assert_eq!(
+            budget(AgentContainerAction::Stop, Some(300)),
+            Duration::from_secs(310)
+        );
+        assert_eq!(
+            budget(AgentContainerAction::Restart, Some(600)),
+            Duration::from_secs(610)
+        );
+        assert_eq!(
+            budget(AgentContainerAction::Stop, None),
+            minute,
+            "never below the kind's"
+        );
+        assert_eq!(budget(AgentContainerAction::Stop, Some(30)), minute);
+        assert_eq!(
+            budget(AgentContainerAction::Start, Some(600)),
+            minute,
+            "no grace to wait"
+        );
+        assert_eq!(
+            ContainerLifecycleExecutor(AgentContainerAction::Stop).timeout(&serde_json::json!({})),
+            minute,
+            "an unreadable payload fails fast anyway"
+        );
+    }
 
     #[test]
     fn only_a_refused_removal_suggests_force() {

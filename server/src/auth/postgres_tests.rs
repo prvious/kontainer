@@ -215,7 +215,11 @@ async fn postgres_deep_status_enforces_session_and_drain_before_diagnostics()
                 cpu_cores: 4,
                 memory_total_bytes: 8 << 30,
                 agent_started_at: chrono::Utc::now(),
-                sample: None,
+                sample: Some(crate::nodes::postgres_tests::reading(
+                    chrono::Utc::now(),
+                    5.0,
+                    None,
+                )),
             },
         )
         .await?;
@@ -234,7 +238,7 @@ async fn postgres_deep_status_enforces_session_and_drain_before_diagnostics()
             (&"unknown".into(), &"unknown".into(), &"degraded".into()),
             "without a manager Swarm state is unknown, so the node is degraded"
         );
-        assert!(body["items"][0]["latestSample"].is_null());
+        assert!(body["items"][0]["latestSample"].is_object());
 
         assert_challenged(&router, path, None).await?;
         assert_challenged(&router, nodes_path, None).await?;

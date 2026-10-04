@@ -9,7 +9,7 @@ use serde::Serialize;
 use crate::{
     containers::operations::lifecycle::{action_failure, node_client},
     images::domain::{NodeSelection, RemoveImagePayload},
-    nodes::{actions::list_nodes, domain::NodeStatus},
+    nodes::actions::list_nodes,
     operations::{
         domain::{DurableOperation, OperationKind},
         executor::{ExecutionContext, ExecutionFailure, OperationExecutor},
@@ -55,12 +55,9 @@ impl OperationExecutor for RemoveImageExecutor {
                         "Membership could not be read.",
                     )
                 })?;
-                let reachable = nodes
-                    .into_iter()
-                    .filter(|node| node.status != NodeStatus::Offline)
-                    .map(|node| node.id)
-                    .collect();
-                (reachable, true)
+                // Every member, offline ones included: an unreachable node fails its part, so
+                // the image left there is reported rather than read as removed.
+                (nodes.into_iter().map(|node| node.id).collect(), true)
             }
         };
         let image_id = payload.image_id.as_str();

@@ -14,11 +14,12 @@ function failedProbe(reason: unknown): ProbeView {
 /**
  * Controller reachability for the authenticated layout (spec 14), derived from the health probe:
  * unreachable once a probe fetch has failed all three attempts, reachable again when one answers.
+ * It reads the last settled outcome, so a refetch that hasn't answered yet never flips it back.
  * `reconnectedAt` is recorded while rendering the flip back, not in an effect.
  */
 export function ConnectivityProvider({ enabled, children }: { enabled: boolean; children: ReactNode }) {
     const health = useControllerHealth(enabled);
-    const reachable = !health.isError;
+    const reachable = health.errorUpdatedAt <= health.dataUpdatedAt;
     const [wasReachable, setWasReachable] = useState(reachable);
     const [reconnectedAt, setReconnectedAt] = useState<number | null>(null);
     if (wasReachable !== reachable) {

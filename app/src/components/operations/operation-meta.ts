@@ -50,6 +50,11 @@ export function operationMeta(view: OperationView | undefined, now: number): str
     }
 }
 
+/** The status line when the operation couldn't be read: its state is unknown, not queued. */
+export function pollErrorMeta(code: string): string {
+    return `UNKNOWN · ${code} — the status couldn't be read`;
+}
+
 /** 0–1 for the track; succeeded fills it, queued leaves it empty. */
 export function operationTrack(view: OperationView | undefined): number | null {
     if (!view) return null;

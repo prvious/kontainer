@@ -337,7 +337,6 @@ pub async fn serve(router: Router, ctx: &AppContext, params: &ServeParams) -> Re
         agent_rpc,
         shutdown.clone(),
     );
-    tokio::pin!(servers);
     // Swarm-wide objects go through the configured host. Whether it is a manager is checked per
     // call (ADR 0031), so a daemon that starts late or is promoted later works without a restart;
     // until then manager-scoped routes answer 503 `not_a_manager` and the rest keeps working.
@@ -388,21 +387,55 @@ pub async fn serve(router: Router, ctx: &AppContext, params: &ServeParams) -> Re
         }
     });
 
-    let result = tokio::select! {
-        result = &mut servers => result,
-        _ = shutdown_signal() => {
-            shutdown.begin_drain();
-            servers.await
-        }
-    };
-    shutdown.begin_drain();
+    let result = run_until_stopped(servers, shutdown_signal(), worker, &shutdown).await;
     if let Err(error) = streams.await {
         tracing::error!(%error, "log stream shutdown task failed");
     }
     if let Err(error) = pruner.await {
         tracing::error!(%error, "sample pruning task failed");
     }
-    if let Err(error) = worker.await {
+    result
+}
+
+/// Wait for the servers to stop, then join the operation worker. A shutdown signal starts the
+/// drain first, and so does the worker stopping on its own: before the drain it only stops on a
+/// bug, and admission would keep answering 202 for operations nothing runs. That exit fails the
+/// controller, like a server's, rather than restarting the worker and hiding the cause.
+async fn run_until_stopped(
+    servers: impl Future<Output = Result<()>>,
+    signal: impl Future<Output = ()>,
+    mut worker: tokio::task::JoinHandle<()>,
+    shutdown: &ControllerShutdown,
+) -> Result<()> {
+    tokio::pin!(servers);
+    let mut worker_exit = None;
+    let result = tokio::select! {
+        result = &mut servers => result,
+        () = signal => {
+            shutdown.begin_drain();
+            servers.await
+        }
+        exit = &mut worker => {
+            let unexpected = !shutdown.draining().is_cancelled();
+            worker_exit = Some(exit);
+            if unexpected {
+                tracing::error!("the operation worker stopped before the drain; shutting down");
+                shutdown.begin_drain();
+            }
+            let result = servers.await;
+            if unexpected {
+                result.and(Err(Error::string("the operation worker stopped")))
+            } else {
+                result
+            }
+        }
+    };
+    shutdown.begin_drain();
+    let exit = match worker_exit {
+        Some(exit) => exit,
+        None => worker.await,
+    };
+    if let Err(error) = exit {
         tracing::error!(%error, "operation worker task failed");
     }
     result
@@ -1547,5 +1580,80 @@ mod tests {
 
     fn loopback() -> SocketAddr {
         SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 5150)
+    }
+
+    mod worker_supervision {
+        use std::{future::pending, time::Duration};
+
+        use loco_rs::Error;
+        use tokio_util::sync::CancellationToken;
+
+        use super::super::{ControllerShutdown, run_until_stopped};
+
+        /// Servers that stop once the drain starts, as the real ones do.
+        fn servers(shutdown: &ControllerShutdown) -> impl Future<Output = loco_rs::Result<()>> {
+            let draining = shutdown.draining();
+            async move {
+                draining.cancelled().await;
+                Ok(())
+            }
+        }
+
+        #[tokio::test]
+        async fn a_worker_that_stops_on_its_own_drains_and_fails_the_controller() {
+            let shutdown = ControllerShutdown::from(CancellationToken::new());
+            let worker = tokio::spawn(async {});
+            let result = tokio::time::timeout(
+                Duration::from_secs(5),
+                run_until_stopped(servers(&shutdown), pending(), worker, &shutdown),
+            )
+            .await
+            .expect("the worker's exit starts the drain");
+            assert!(shutdown.draining().is_cancelled());
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("operation worker stopped")
+            );
+        }
+
+        #[tokio::test]
+        async fn a_panicking_worker_fails_the_controller_too() {
+            let shutdown = ControllerShutdown::from(CancellationToken::new());
+            let worker = tokio::spawn(async { panic!("worker bug") });
+            let result = run_until_stopped(servers(&shutdown), pending(), worker, &shutdown).await;
+            assert!(result.is_err());
+        }
+
+        #[tokio::test]
+        async fn a_shutdown_signal_drains_then_joins_the_worker() {
+            let shutdown = ControllerShutdown::from(CancellationToken::new());
+            let draining = shutdown.draining();
+            let worker = tokio::spawn(async move { draining.cancelled().await });
+            let result = run_until_stopped(servers(&shutdown), async {}, worker, &shutdown).await;
+            assert!(result.is_ok());
+            assert!(shutdown.draining().is_cancelled());
+        }
+
+        #[tokio::test]
+        async fn a_worker_finishing_its_drain_first_keeps_the_server_error() {
+            let shutdown = ControllerShutdown::from(CancellationToken::new());
+            let draining = shutdown.draining();
+            let worker = tokio::spawn(async move { draining.cancelled().await });
+            let failing = {
+                let shutdown = shutdown.clone();
+                async move {
+                    shutdown.begin_drain();
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    Err(Error::string("public HTTP server failed"))
+                }
+            };
+            let result = run_until_stopped(failing, pending(), worker, &shutdown).await;
+            assert_eq!(
+                result.unwrap_err().to_string(),
+                Error::string("public HTTP server failed").to_string()
+            );
+        }
     }
 }

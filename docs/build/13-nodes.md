@@ -31,9 +31,11 @@ certificate), `MjblZ` (04.S6 add node, deferred); captions `mxibR`, `WF3UC`. Gap
   disabled with tooltip "Not built yet" (G17; the dialog in `MjblZ` is not built).
 - Cluster Load strip (`xtTtS`): tile, `CLUSTER LOAD` with `N nodes · a reachable · C containers`;
   readout: quorum StatusBadge `HEALTHY` / `DEGRADED`, `AGGREGATE CPU` percent, `MEMORY`
-  `used GB / total GB`, `LAST 60s` SparkBars from cluster samples (`5m` window, `5s` bucket,
-  showing the last 12 buckets). Hovering a bar pins a crosshair and a ChartTooltip that says the
-  bucket time, CPU, memory, and how many nodes contributed (04.S5).
+  `used GB / total GB`, `LAST 2m` SparkBars from cluster samples (`5m` window, `10s` bucket,
+  showing the last 12 whole buckets; the bucket still filling is left out). A 10 s bucket spans two
+  5 s check-ins, so check-in jitter doesn't show as "N of M nodes reporting" (G29). Hovering a bar
+  pins a crosshair and a ChartTooltip that says the bucket time, CPU, memory, and how many nodes
+  contributed (04.S5).
 - Node cards grid, three per row: name, role badge `LEADER` / `MANAGER` / `WORKER`, status dot
   and word `active` / `degraded` / `down`; rows IP Address, OS / Arch, Docker, Containers
   `n running`; CPU track `32% · 4 cores`; MEMORY track `5.2 GB / 8 GB`.
@@ -42,7 +44,8 @@ certificate), `MjblZ` (04.S6 add node, deferred); captions `mxibR`, `WF3UC`. Gap
 - Degraded card (04.S5): amber note "Agent last checked in 3m ago", figures dimmed but visible.
   The expiring-certificate warning and RENEW NOW are not built (no certificate lifecycle yet);
   record that in `design-gaps.md` as G24 "Certificate expiry surfaces".
-- Sidebar NODES badge shows `N DOWN` when any node is down or degraded.
+- Sidebar NODES badge shows `N DOWN` when any node is down. Degraded nodes don't count: degraded
+  includes a node that merely has no agent.
 
 ## Tests
 

@@ -48,6 +48,7 @@ export const Route = createFileRoute("/_authenticated/settings/")({
 });
 
 const APPLICATION_ROWS: Row[] = ["scheme", "refreshInterval", "shell", "fontSize", "scrollback"];
+const SAVED_TOAST_ID = "settings-saved";
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 const READ_ONLY = "h-8 w-56 cursor-default border-transparent bg-muted font-mono text-xs text-secondary-foreground focus-visible:ring-0";
 
@@ -126,11 +127,14 @@ function SettingsPage() {
     const shown = (row: Row) => (touched.has(row) && changed.includes(row) ? (errors[row] ?? null) : null);
     const changedFrom = (row: Row) => (changed.includes(row) ? valueText(row, baseline) : null);
 
-    /** Writes the application rows to the device and the retention to the controller. */
+    /**
+     * Writes the retention to the controller, then the application rows to the device. The remote
+     * write goes first because it is the one likely to fail, and then nothing has been written.
+     */
     async function commit(rows: Row[], next: SettingsDraft, current: AppSettings): Promise<boolean> {
         try {
-            if (rows.some((row) => APPLICATION_ROWS.includes(row))) await saveApp.mutateAsync(appSettingsFrom(current, next));
             if (rows.includes("retentionDays") && next.retentionDays !== null) await saveRetention.mutateAsync(next.retentionDays);
+            if (rows.some((row) => APPLICATION_ROWS.includes(row))) await saveApp.mutateAsync(appSettingsFrom(current, next));
             return true;
         } catch (code) {
             notify.error("Settings not saved", { code: String(code), message: "Your edits are still here; save again to retry." });
@@ -138,9 +142,10 @@ function SettingsPage() {
         }
     }
 
+    // One toast id: a newer save replaces the older toast, so its UNDO can't revert the newer save.
     function announce(rows: Row[], next: SettingsDraft, undo?: () => void) {
         const description = rows.length === 1 ? `${ROW_LABELS[rows[0]]} is now ${valueText(rows[0], next)}.` : `${plural(rows.length, "change")} saved.`;
-        notify.success("Settings saved", { description, action: undo ? { label: "UNDO", onClick: undo } : undefined });
+        notify.success("Settings saved", { id: SAVED_TOAST_ID, description, action: undo ? { label: "UNDO", onClick: undo } : undefined });
     }
 
     async function save() {

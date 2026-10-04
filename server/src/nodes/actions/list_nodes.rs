@@ -8,12 +8,30 @@ use sea_orm::{
 
 use super::database_now;
 use crate::nodes::{
-    domain::{LatestSample, NodeStatus, NodeView},
+    domain::{LatestSample, NodeStatus, NodeView, ONLINE_WITHIN_SECONDS},
     entities::{node, node_sample},
 };
 
-/// Every node with its latest sample and a status derived from the database clock. Returns the
-/// clock reading as the snapshot time.
+/// Whether a sample still describes the node: it was taken within the online window.
+fn is_fresh(sampled_at: DateTime<Utc>, now: DateTime<Utc>) -> bool {
+    (now - sampled_at).num_milliseconds() <= ONLINE_WITHIN_SECONDS * 1000
+}
+
+/// An agent that keeps checking in without a fresh sample can't read its Docker (it sends none
+/// then), so it is `degraded` rather than `online`.
+fn status(
+    last_check_in_at: DateTime<Utc>,
+    has_fresh_sample: bool,
+    now: DateTime<Utc>,
+) -> NodeStatus {
+    match NodeStatus::at(last_check_in_at, now) {
+        NodeStatus::Online if !has_fresh_sample => NodeStatus::Degraded,
+        status => status,
+    }
+}
+
+/// Every node with its latest sample, when fresh, and a status derived from the database clock.
+/// Returns the clock reading as the snapshot time.
 pub async fn execute(
     database: &DatabaseConnection,
 ) -> Result<(Vec<NodeView>, DateTime<Utc>), DbErr> {
@@ -46,19 +64,23 @@ pub async fn execute(
     let views = nodes
         .into_iter()
         .map(|row| {
-            let latest_sample = latest.get(&row.id).map(|sample| LatestSample {
-                sampled_at: sample.sampled_at,
-                cpu_percent: sample.cpu_percent,
-                memory_used_bytes: sample.memory_used_bytes,
-                disk_used_bytes: sample.disk_used_bytes,
-                containers_running: sample.containers_running,
-                containers_paused: sample.containers_paused,
-                containers_exited: sample.containers_exited,
-                net_rx_bytes_per_sec: sample.net_rx_bytes_per_sec,
-                net_tx_bytes_per_sec: sample.net_tx_bytes_per_sec,
-            });
+            // A stale sample is left out: old figures must not read as live.
+            let latest_sample = latest
+                .get(&row.id)
+                .filter(|sample| is_fresh(sample.sampled_at, now))
+                .map(|sample| LatestSample {
+                    sampled_at: sample.sampled_at,
+                    cpu_percent: sample.cpu_percent,
+                    memory_used_bytes: sample.memory_used_bytes,
+                    disk_used_bytes: sample.disk_used_bytes,
+                    containers_running: sample.containers_running,
+                    containers_paused: sample.containers_paused,
+                    containers_exited: sample.containers_exited,
+                    net_rx_bytes_per_sec: sample.net_rx_bytes_per_sec,
+                    net_tx_bytes_per_sec: sample.net_tx_bytes_per_sec,
+                });
             NodeView {
-                status: NodeStatus::at(row.last_check_in_at, now),
+                status: status(row.last_check_in_at, latest_sample.is_some(), now),
                 id: row.id,
                 hostname: row.hostname,
                 swarm_node_id: row.swarm_node_id,
@@ -77,4 +99,31 @@ pub async fn execute(
         })
         .collect();
     Ok((views, now))
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::{Duration, Utc};
+
+    use super::{is_fresh, status};
+    use crate::nodes::domain::NodeStatus;
+
+    #[test]
+    fn a_sample_older_than_the_online_window_is_not_live() {
+        let now = Utc::now();
+        assert!(is_fresh(now - Duration::seconds(15), now));
+        assert!(!is_fresh(now - Duration::seconds(16), now));
+        assert!(!is_fresh(now - Duration::hours(3), now));
+    }
+
+    #[test]
+    fn an_agent_checking_in_without_a_fresh_sample_is_degraded() {
+        let now = Utc::now();
+        let checked_in = now - Duration::seconds(2);
+        assert_eq!(status(checked_in, true, now), NodeStatus::Online);
+        assert_eq!(status(checked_in, false, now), NodeStatus::Degraded);
+        let silent = now - Duration::seconds(61);
+        assert_eq!(status(silent, false, now), NodeStatus::Offline);
+        assert_eq!(status(silent, true, now), NodeStatus::Offline);
+    }
 }

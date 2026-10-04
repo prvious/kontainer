@@ -67,9 +67,9 @@ Design: Containers `2rYBA` (light `tRaXy`); states `VfepO` (03.S4 partial result
   16), Pause or Play depending on state, Restart (`rotate-cw`) for exited; `⋮` menu: Logs
   (navigates to `/logs` with the owning service when there is one, otherwise disabled with
   tooltip "No service"), Exec, Restart, Stop / Start, Pause / Unpause, Remove.
-- Remove (G7): ConfirmDialog; running container requires the typed name and passes `force`;
-  stopped container plain Cancel / Remove. On success the row fades and a toast says removal is
-  final.
+- Remove (G7): ConfirmDialog with the typed name in every state, because removal loses the
+  writable layer and logs (ADR 0036); a running, paused, or restarting container also passes
+  `force`. On success the row fades and a toast says removal is final.
 - Bulk (03.S5): selecting swaps the toolbar for the bulk bar with Restart, Stop, Start, Pause,
   Unpause, Remove; Stop and Remove confirm with the count typed; one `containers.bulk` operation;
   its Operation Status row stays under the bar until dismissed; per-row failures marked on the row

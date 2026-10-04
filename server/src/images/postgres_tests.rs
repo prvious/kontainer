@@ -8,27 +8,30 @@ use axum::{
     http::{Request, StatusCode, header},
 };
 use chrono::Utc;
+use futures_util::StreamExt;
 use loco_rs::{
     app::{AppContext, Hooks},
     config::Config,
     environment::Environment,
 };
-use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
 use tokio_util::sync::CancellationToken;
 use tower::ServiceExt;
 
 use crate::{
     app::App,
     auth::{actions::create_session, domain::PrincipalContext},
+    images::operations::pull::PullImageExecutor,
     nodes::{
         actions::record_check_in,
         agents::{AgentDirectory, NodeEndpoint, SharedAgentDirectory},
+        entities::node,
         postgres_tests::check_in,
     },
     operations::{
         actions::get,
         domain::{OperationSnapshot, OperationState},
-        executor::production_registry,
+        executor::{ExecutorRegistry, production_registry},
         worker::{Worker, WorkerSettings},
     },
     rpc::{
@@ -42,11 +45,23 @@ fn image_id(fill: char) -> String {
     format!("sha256:{}", fill.to_string().repeat(64))
 }
 
+/// How a fake node's agent behaves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Behaviour {
+    Healthy,
+    /// The registry refuses the pull.
+    PullFails,
+    /// The pull sends a few events, then nothing.
+    PullStalls,
+    /// Every call fails as an offline node's would.
+    Unreachable,
+}
+
 #[derive(Debug)]
 struct FakeAgent {
     node_id: String,
     images: Vec<AgentImage>,
-    pull_fails: bool,
+    behaviour: Behaviour,
 }
 
 #[async_trait::async_trait]
@@ -77,6 +92,9 @@ impl AgentClient for FakeAgent {
         force: bool,
         _: &CancellationToken,
     ) -> Result<(), AgentClientError> {
+        if self.behaviour == Behaviour::Unreachable {
+            return Err(AgentClientError::Unavailable);
+        }
         let Some(image) = self.images.iter().find(|image| image.image_id == image_id) else {
             return Err(AgentClientError::NotFound);
         };
@@ -91,6 +109,9 @@ impl AgentClient for FakeAgent {
         _reference: &str,
         _: &CancellationToken,
     ) -> Result<AgentPullStream, AgentClientError> {
+        if self.behaviour == Behaviour::Unreachable {
+            return Err(AgentClientError::Unavailable);
+        }
         let progress = |layer: &str, status: &str, current, total| AgentPullEvent::Progress {
             layer_id: Some(layer.to_owned()),
             status: status.to_owned(),
@@ -102,15 +123,19 @@ impl AgentClient for FakeAgent {
             progress("l2", "Pulling fs layer", None, None),
             progress("l1", "Downloading", Some(100), Some(400)),
         ];
-        if self.pull_fails {
-            events.push(AgentPullEvent::Failed(
+        match self.behaviour {
+            Behaviour::PullFails => events.push(AgentPullEvent::Failed(
                 "unauthorized: authentication required".to_owned(),
-            ));
-        } else {
-            events.extend([
+            )),
+            Behaviour::PullStalls => {
+                return Ok(Box::pin(
+                    futures_util::stream::iter(events).chain(futures_util::stream::pending()),
+                ));
+            }
+            Behaviour::Healthy | Behaviour::Unreachable => events.extend([
                 progress("l1", "Pull complete", None, None),
                 progress("l2", "Already exists", None, None),
-            ]);
+            ]),
         }
         Ok(Box::pin(futures_util::stream::iter(events)))
     }
@@ -157,28 +182,35 @@ async fn fixture(database: &sea_orm::DatabaseConnection) -> Result<Fixture, Box<
     for node_id in ["manager", "worker-1", "worker-2"] {
         record_check_in::execute(database, "test", check_in(node_id, None)).await?;
     }
-    let agent = |node_id: &str, images, pull_fails| {
+    let agent = |node_id: &str, images, behaviour| {
         (
             node_id.to_owned(),
             Arc::new(FakeAgent {
                 node_id: node_id.to_owned(),
                 images,
-                pull_fails,
+                behaviour,
             }),
         )
     };
+    // `worker-3` and `worker-4` have agents but are members only once a test checks them in.
     let directory = Arc::new(FakeDirectory(HashMap::from([
         agent(
             "manager",
             vec![image('a', &["nginx:1.27"], 2), image('c', &[], 0)],
-            false,
+            Behaviour::Healthy,
         ),
         agent(
             "worker-1",
             vec![image('a', &["nginx:1.27", "nginx:latest"], 1)],
-            false,
+            Behaviour::Healthy,
         ),
-        agent("worker-2", vec![image('b', &["alpine:3.20"], 0)], true),
+        agent(
+            "worker-2",
+            vec![image('b', &["alpine:3.20"], 0)],
+            Behaviour::PullFails,
+        ),
+        agent("worker-3", vec![image('c', &[], 0)], Behaviour::Unreachable),
+        agent("worker-4", Vec::new(), Behaviour::PullStalls),
     ])));
     let config = Config::from_folder(&Environment::Test, Path::new("config"))?;
     let context = App::after_context(
@@ -242,10 +274,18 @@ async fn send(
 }
 
 async fn run(fixture: &Fixture, operation_id: &str) -> Result<OperationSnapshot, Box<dyn Error>> {
+    run_with(fixture, operation_id, production_registry()).await
+}
+
+async fn run_with(
+    fixture: &Fixture,
+    operation_id: &str,
+    registry: ExecutorRegistry,
+) -> Result<OperationSnapshot, Box<dyn Error>> {
     let draining = CancellationToken::new();
     let worker = Worker {
         database: fixture.context.db.clone(),
-        registry: Arc::new(production_registry()),
+        registry: Arc::new(registry),
         agents: Some(fixture.directory.clone() as Arc<dyn AgentDirectory>),
         manager: None,
         settings: WorkerSettings {
@@ -382,6 +422,52 @@ async fn postgres_pull_keeps_going_when_one_node_fails() -> Result<(), Box<dyn E
 }
 
 #[tokio::test]
+async fn postgres_a_silent_node_fails_its_pull_alone() -> Result<(), Box<dyn Error>> {
+    let Some(database) = PostgresTestDatabase::create(true).await? else {
+        return Ok(());
+    };
+    let evidence = async {
+        let fixture = fixture(&database.connection).await?;
+        record_check_in::execute(&fixture.context.db, "test", check_in("worker-4", None)).await?;
+        let body = serde_json::json!({ "reference": "alpine", "nodeIds": ["manager", "worker-4"] })
+            .to_string();
+        let (status, admitted) = send(
+            &fixture,
+            "POST",
+            "/api/v1/images/pulls",
+            Some("018f2e34-0000-7000-8000-000000000311"),
+            &body,
+        )
+        .await?;
+        assert_eq!(status, StatusCode::ACCEPTED);
+        let registry =
+            ExecutorRegistry::default().with(PullImageExecutor::with_idle(Duration::from_secs(1)));
+        let snapshot = run_with(
+            &fixture,
+            admitted["operationId"].as_str().unwrap(),
+            registry,
+        )
+        .await?;
+        assert_eq!(snapshot.operation.state, OperationState::Failed);
+        assert_eq!(snapshot.last_error_code.as_deref(), Some("partial_failure"));
+        let nodes = snapshot.progress.unwrap()["nodes"]
+            .as_array()
+            .unwrap()
+            .clone();
+        assert_eq!(nodes[0]["status"], "done", "the healthy node finished");
+        assert_eq!(nodes[1]["nodeId"], "worker-4");
+        assert_eq!(nodes[1]["status"], "failed");
+        assert_eq!(nodes[1]["error"], "No progress from the node for 1 s.");
+        Ok::<_, Box<dyn Error>>(())
+    }
+    .await;
+    let removed = database.cleanup().await?;
+    evidence?;
+    assert!(removed);
+    Ok(())
+}
+
+#[tokio::test]
 async fn postgres_remove_reports_per_node_results() -> Result<(), Box<dyn Error>> {
     let Some(database) = PostgresTestDatabase::create(true).await? else {
         return Ok(());
@@ -437,6 +523,43 @@ async fn postgres_remove_reports_per_node_results() -> Result<(), Box<dyn Error>
         assert_eq!(
             nodes[0],
             serde_json::json!({"nodeId": "worker-1", "ok": true})
+        );
+
+        // An offline member is still asked, so the copy left on it fails the operation.
+        record_check_in::execute(&fixture.context.db, "test", check_in("worker-3", None)).await?;
+        let offline = node::Entity::find_by_id("worker-3")
+            .one(&fixture.context.db)
+            .await?
+            .unwrap();
+        let mut offline: node::ActiveModel = offline.into();
+        offline.last_check_in_at = Set(Utc::now() - chrono::Duration::seconds(120));
+        offline.update(&fixture.context.db).await?;
+        let (_, admitted) = send(
+            &fixture,
+            "DELETE",
+            &format!("/api/v1/images/{}", image_id('c')),
+            Some("018f2e34-0000-7000-8000-000000000322"),
+            r#"{"nodeIds":"all"}"#,
+        )
+        .await?;
+        let partial = run(&fixture, admitted["operationId"].as_str().unwrap()).await?;
+        assert_eq!(partial.operation.state, OperationState::Failed);
+        assert_eq!(partial.last_error_code.as_deref(), Some("partial_failure"));
+        assert_eq!(
+            partial.error_message.as_deref(),
+            Some("1 of 4 nodes failed.")
+        );
+        let nodes = partial.progress.unwrap()["nodes"]
+            .as_array()
+            .unwrap()
+            .clone();
+        assert_eq!(
+            nodes[0],
+            serde_json::json!({"nodeId": "manager", "ok": true})
+        );
+        assert_eq!(
+            nodes[3],
+            serde_json::json!({"nodeId": "worker-3", "ok": false, "error": "agent_unavailable"})
         );
         Ok::<_, Box<dyn Error>>(())
     }

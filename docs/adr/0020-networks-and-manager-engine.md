@@ -1,6 +1,6 @@
 # 0020. Networks, the manager engine, and container networks
 
-- Status: accepted (amended by 0031)
+- Status: accepted (amended by 0031, 0036)
 - Date: 2026-09-28
 - Spec: docs/build/10-networks.md
 

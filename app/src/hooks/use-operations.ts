@@ -1,7 +1,9 @@
 import { useContext } from "react";
 import { useMutation, type QueryKey } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
+import { useConnectivity } from "@/hooks/use-connectivity";
 import { authenticatedInvoke } from "@/hooks/authenticated-invoke";
+import { CONTROLLER_UNREACHABLE } from "@/contexts/connectivity-context-value";
 import { OperationsContext, type OperationsContextValue } from "@/contexts/operations-context-value";
 import type { AdmittedOperation, OperationView } from "@/types/operations";
 
@@ -24,7 +26,9 @@ export function withIdempotencyKey<V extends object>(variables: V): V & WithIdem
 /**
  * Start a mutation through a Tauri command that returns `{ operationId, replayed }`, then track
  * the operation. A transport failure retries once with the same variables, hence the same key,
- * so the controller replays instead of admitting a second operation.
+ * so the controller replays instead of admitting a second operation. While the controller is
+ * unreachable the change is refused with `controller_unreachable` and never sent, whatever
+ * started it (03.S2).
  */
 export function useStartOperation<V extends WithIdempotencyKey>({
     command,
@@ -51,9 +55,13 @@ export function useStartOperation<V extends WithIdempotencyKey>({
 }) {
     const { session, reportInventoryCustodyError } = useAuth();
     const { track } = useOperations();
+    const { reachable } = useConnectivity();
     const profileId = session?.profileId ?? "";
     return useMutation({
-        mutationFn: (variables: V) => authenticatedInvoke<AdmittedOperation>(command, profileId, args(variables), reportInventoryCustodyError),
+        mutationFn: async (variables: V) => {
+            if (!reachable) throw CONTROLLER_UNREACHABLE;
+            return authenticatedInvoke<AdmittedOperation>(command, profileId, args(variables), reportInventoryCustodyError);
+        },
         retry: (failures, error: unknown) => failures < 1 && error === "controller_unavailable",
         onSuccess: (admitted, variables) =>
             track({

@@ -96,3 +96,20 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+
+#[cfg(test)]
+mod tests {
+    /// Rust reads and writes `session.json` and `settings.json` through `StoreExt`. The WebView
+    /// gets no store permission, so page script can't rewrite either file.
+    #[test]
+    fn the_webview_has_no_store_permission() {
+        let capability: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
+        let permissions = capability["permissions"].as_array().unwrap();
+        assert!(!permissions.is_empty());
+        assert!(permissions.iter().all(|permission| !permission
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("store:")));
+    }
+}

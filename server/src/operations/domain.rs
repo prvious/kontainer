@@ -145,11 +145,13 @@ impl OperationKind {
         Self::ALL.into_iter().find(|kind| kind.as_str() == value)
     }
 
-    /// Wall-clock budget for one execution: pulls get ten minutes, everything else one.
+    /// The kind's default wall-clock budget for one execution. Executors may size a longer one
+    /// from the payload (`OperationExecutor::timeout`).
     #[must_use]
     pub const fn timeout(self) -> Duration {
         match self {
-            Self::ImagePull => Duration::from_secs(10 * 60),
+            // Multi-GB pulls; a stalled node fails sooner, on the pull's own idle timeout.
+            Self::ImagePull => Duration::from_secs(60 * 60),
             // The 15 min convergence wait (rolling updates) plus the write and a last poll.
             Self::ServiceScale | Self::ServiceRestart | Self::ServiceRollback => {
                 Duration::from_secs(16 * 60)
@@ -389,13 +391,13 @@ mod tests {
     }
 
     #[test]
-    fn kinds_round_trip_and_pulls_get_ten_minutes() {
+    fn kinds_round_trip_and_pulls_get_an_hour() {
         use super::OperationKind;
         for kind in OperationKind::ALL {
             assert_eq!(OperationKind::parse(kind.as_str()), Some(kind));
         }
         assert_eq!(OperationKind::parse("container.explode"), None);
-        assert_eq!(OperationKind::ImagePull.timeout().as_secs(), 600);
+        assert_eq!(OperationKind::ImagePull.timeout().as_secs(), 3600);
         assert_eq!(OperationKind::ContainerRestart.timeout().as_secs(), 60);
         assert!(OperationState::Failed.is_terminal());
         assert!(!OperationState::Uncertain.is_terminal());

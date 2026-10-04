@@ -1,6 +1,6 @@
 # 0016. Operation execution, events schema, and the desktop operation model
 
-- Status: accepted
+- Status: accepted (amended by 0035)
 - Date: 2026-09-28
 - Spec: docs/build/06-operations.md
 

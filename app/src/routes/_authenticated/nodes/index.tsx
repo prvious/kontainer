@@ -22,7 +22,7 @@ const plural = (count: number, one: string) => `${count} ${one}${count === 1 ? "
 function NodesPage() {
     const nodes = useNodes();
     const summary = useClusterSummary();
-    const samples = useSamples("cluster", "5m", "5s");
+    const samples = useSamples("cluster", "5m", "10s");
     const now = useNow();
 
     const items = nodes.data?.items ?? [];

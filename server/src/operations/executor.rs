@@ -102,6 +102,13 @@ impl ExecutionContext {
 pub trait OperationExecutor: Send + Sync {
     fn kind(&self) -> OperationKind;
 
+    /// The wall-clock budget for running this payload. Past it the worker cancels the execution
+    /// and marks the operation `uncertain`. The kind's budget by default; an executor whose work
+    /// grows with the request (a stop's grace, a bulk's target count) sizes its own.
+    fn timeout(&self, _payload: &serde_json::Value) -> Duration {
+        self.kind().timeout()
+    }
+
     /// Run the operation; `Ok` carries the result detail shown on success.
     async fn execute(
         &self,
@@ -110,11 +117,10 @@ pub trait OperationExecutor: Send + Sync {
     ) -> Result<Option<serde_json::Value>, ExecutionFailure>;
 }
 
-/// Executors by kind, with per-kind timeouts (tests shorten them).
+/// Executors by kind.
 #[derive(Clone, Default)]
 pub struct ExecutorRegistry {
     executors: HashMap<OperationKind, Arc<dyn OperationExecutor>>,
-    timeouts: HashMap<OperationKind, Duration>,
 }
 
 impl ExecutorRegistry {
@@ -125,19 +131,8 @@ impl ExecutorRegistry {
     }
 
     #[must_use]
-    pub fn with_timeout(mut self, kind: OperationKind, timeout: Duration) -> Self {
-        self.timeouts.insert(kind, timeout);
-        self
-    }
-
-    #[must_use]
     pub fn get(&self, kind: OperationKind) -> Option<Arc<dyn OperationExecutor>> {
         self.executors.get(&kind).cloned()
-    }
-
-    #[must_use]
-    pub fn timeout(&self, kind: OperationKind) -> Duration {
-        self.timeouts.get(&kind).copied().unwrap_or(kind.timeout())
     }
 }
 
@@ -153,7 +148,7 @@ pub fn production_registry() -> ExecutorRegistry {
             .with(super::executors::noop::NoopExecutor)
             .with(ContainersBulkExecutor)
             .with(crate::images::operations::remove::RemoveImageExecutor)
-            .with(crate::images::operations::pull::PullImageExecutor)
+            .with(crate::images::operations::pull::PullImageExecutor::default())
             .with(crate::volumes::operations::create::CreateVolumeExecutor)
             .with(crate::volumes::operations::remove::RemoveVolumeExecutor)
             .with(crate::networks::operations::create::CreateNetworkExecutor)

@@ -1550,7 +1550,7 @@ fn map_action_status(status: &tonic::Status) -> AgentClientError {
 /// Extra time an action gets beyond the RPC timeout and the stop grace.
 const ACTION_ALLOWANCE: Duration = Duration::from_secs(20);
 /// A pull stream may run as long as the `image.pull` operation.
-const PULL_DEADLINE: Duration = Duration::from_secs(10 * 60);
+const PULL_DEADLINE: Duration = Duration::from_secs(60 * 60);
 /// An exec stream lives as long as the session may (8 h), plus a minute.
 const EXEC_DEADLINE: Duration = Duration::from_secs(8 * 60 * 60 + 60);
 const MAX_IMAGES_PER_NODE: usize = 2_000;

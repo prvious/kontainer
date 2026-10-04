@@ -15,7 +15,7 @@ function probeTone(probe: ProbeView | undefined): Tone {
 
 /**
  * SAVED CONNECTIONS on the Connect card: each row is probed once (three at a time) for its dot;
- * clicking fills the URL, the context menu forgets it.
+ * clicking fills the URL, and the context menu or Delete on the focused row forgets it.
  */
 export function SavedConnections({ connections, onChoose }: { connections: SavedConnection[]; onChoose: (connection: SavedConnection) => void }) {
     const probes = useConnectionProbes(connections.map((connection) => connection.origin));
@@ -38,10 +38,17 @@ export function SavedConnections({ connections, onChoose }: { connections: Saved
                         <li key={connection.id} className='border-b border-border last:border-b-0'>
                             <ContextMenu>
                                 <ContextMenuTrigger>
-                                    <LabelTooltip label={`${status} · last used ${relativeTime(connection.lastUsedAtUnixMs, now)}`}>
+                                    <LabelTooltip label={`${status} · last used ${relativeTime(connection.lastUsedAtUnixMs, now)}`} shortcut='DEL to forget'>
                                         <button
                                             type='button'
+                                            aria-keyshortcuts='Delete'
                                             onClick={() => onChoose(connection)}
+                                            onKeyDown={(event) => {
+                                                // The Mac's delete key reports Backspace.
+                                                if (event.key !== "Delete" && event.key !== "Backspace") return;
+                                                event.preventDefault();
+                                                forget.mutate(connection.id);
+                                            }}
                                             className='flex w-full items-center gap-3 px-3.5 py-3 text-left transition-colors hover:bg-secondary'
                                         >
                                             <StatusDot tone={probeTone(probe)} data-testid={`probe-${connection.id}`} />

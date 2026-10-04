@@ -91,11 +91,12 @@ describe("authenticated shell", () => {
     it("fills the status bar CPU and MEM and the sidebar DOWN badge from the cluster summary", async () => {
         mockCommands();
         renderApp();
-        // One online node sampled: 12.5 % CPU, 1 of 8 GB; one node degraded and one down.
+        // One online node sampled: 12.5 % CPU, 1 of 8 GB; one node degraded and one down. Only the
+        // down one counts toward the badge: degraded includes a node that merely has no agent.
         await waitFor(() => expect(screen.getByText("CPU 13%")).toBeInTheDocument());
         expect(screen.getByText("MEM 1/8G")).toBeInTheDocument();
         await waitFor(() => expect(screen.getByText("Docker 29.8.0")).toBeInTheDocument());
-        expect(screen.getByTestId("nav-badge-nodes")).toHaveTextContent("2 DOWN");
+        expect(screen.getByTestId("nav-badge-nodes")).toHaveTextContent("1 DOWN");
         expect(invoke).toHaveBeenCalledWith("get_cluster_summary", { profileId: session.profileId });
         expect(invoke).toHaveBeenCalledWith("list_nodes", { profileId: session.profileId });
     });

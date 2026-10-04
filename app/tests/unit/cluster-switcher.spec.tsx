@@ -36,15 +36,7 @@ function renderSwitcher(logout = vi.fn(async () => {})) {
         ),
     });
     const home = createRoute({ getParentRoute: () => rootRoute, path: "/", component: () => null });
-    const login = createRoute({
-        getParentRoute: () => rootRoute,
-        path: "/login",
-        validateSearch: (search: Record<string, unknown>) => ({ origin: typeof search.origin === "string" ? search.origin : undefined }),
-        component: function Login() {
-            return <span data-testid='login'>{login.useSearch().origin}</span>;
-        },
-    });
-    const router = createRouter({ routeTree: rootRoute.addChildren([home, login]), history: createMemoryHistory({ initialEntries: ["/"] }) });
+    const router = createRouter({ routeTree: rootRoute.addChildren([home]), history: createMemoryHistory({ initialEntries: ["/"] }) });
     render(
         <AuthContext value={auth}>
             <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
@@ -80,22 +72,22 @@ describe("ClusterSwitcher", () => {
         expect(offline).toHaveClass("opacity-50");
     });
 
-    it("signs out and opens Connect with the chosen origin", async () => {
+    // The signed-in shell's signed-out redirect opens Connect with that origin (settings-page.spec).
+    it("signs out toward the chosen origin", async () => {
         const user = userEvent.setup();
         const { logout } = renderSwitcher();
         await user.click(await screen.findByRole("button", { name: /Switch cluster/ }));
         await waitFor(() => expect(screen.getByTestId("switch-status-staging")).toHaveTextContent("healthy"));
         await user.click(screen.getByRole("menuitem", { name: /staging/ }));
-        await waitFor(() => expect(screen.getByTestId("login")).toHaveTextContent("https://staging.example/"));
-        expect(logout).toHaveBeenCalledTimes(1);
+        await waitFor(() => expect(logout).toHaveBeenCalledTimes(1));
+        expect(logout).toHaveBeenCalledWith(undefined, "https://staging.example/");
     });
 
-    it("ADD NEW AGENT opens Connect with an empty URL", async () => {
+    it("ADD NEW AGENT signs out toward Connect with an empty URL", async () => {
         const user = userEvent.setup();
-        renderSwitcher();
+        const { logout } = renderSwitcher();
         await user.click(await screen.findByRole("button", { name: /Switch cluster/ }));
         await user.click(await screen.findByRole("menuitem", { name: /Add new agent/ }));
-        await waitFor(() => expect(screen.getByTestId("login")).toBeInTheDocument());
-        expect(screen.getByTestId("login")).toHaveTextContent("");
+        await waitFor(() => expect(logout).toHaveBeenCalledWith(undefined, ""));
     });
 });

@@ -72,3 +72,5 @@ What becomes easier, what becomes harder, what must be revisited and when.
 | [0032](./0032-validate-where-less-trusted-data-enters.md) | Validate where less-trusted data enters a more-trusted component | accepted |
 | [0033](./0033-exec-abandoned-outcome.md) | Report a shell left running after its exec session closes as `abandoned` | accepted |
 | [0034](./0034-service-verdicts-from-swarm-update-status.md) | Decide service restart and rollback from Swarm's update status | accepted |
+| [0035](./0035-operation-budgets-and-uncertain-timeouts.md) | Size operation budgets to the work, and record a timeout as uncertain | accepted |
+| [0036](./0036-typed-confirmation-when-data-can-be-lost.md) | Typed confirmation when data can be lost | accepted |

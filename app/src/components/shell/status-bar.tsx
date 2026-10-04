@@ -9,8 +9,6 @@ export interface StatusBarData {
     cpuPercent?: number;
     memoryUsedBytes?: number;
     memoryTotalBytes?: number;
-    tasks?: number;
-    alerts?: number;
     terminals?: number;
     logStreams?: number;
     /** Controller reachability from the health probe. */
@@ -20,28 +18,28 @@ export interface StatusBarData {
 const DASH = "—";
 const gigabytes = (bytes: number) => (bytes / 1024 ** 3).toFixed(1).replace(/\.0$/, "");
 
-function Segment({ icon: Icon, children, tone, edge }: { icon?: LucideIcon; children: ReactNode; tone?: "destructive"; edge: "left" | "right" | "none" }) {
+function Segment({ icon: Icon, children, edge }: { icon?: LucideIcon; children: ReactNode; edge: "left" | "right" | "none" }) {
     return (
         <span
             className={cn(
                 "flex h-full items-center gap-1.25 px-2.5 font-mono text-3xs font-medium text-secondary-foreground",
                 edge === "right" && "border-r border-border",
                 edge === "left" && "border-l border-border",
-                tone === "destructive" && "font-bold text-destructive",
             )}
         >
-            {Icon && <Icon aria-hidden className={cn("size-2.75", tone === "destructive" ? "text-destructive" : "text-muted-foreground")} />}
+            {Icon && <Icon aria-hidden className='size-2.75 text-muted-foreground' />}
             {children}
         </span>
     );
 }
 
 /**
- * Status bar `KYxT3`. The branch and Traefik segments from the design are not rendered.
+ * Status bar `KYxT3`. The branch and Traefik segments from the design are not rendered. TASKS and
+ * ALERTS have no producer yet (deferred features), so they always read "—"; their figures and
+ * the alert tint arrive with whichever feature first produces them.
  * Presentational only: the authenticated layout composes `StatusBarData` from the queries.
  */
 export function StatusBar({ data }: { data: StatusBarData }) {
-    const alerts = data.alerts;
     const memory =
         data.memoryUsedBytes !== undefined && data.memoryTotalBytes !== undefined
             ? `${gigabytes(data.memoryUsedBytes)}/${gigabytes(data.memoryTotalBytes)}G`
@@ -59,10 +57,10 @@ export function StatusBar({ data }: { data: StatusBarData }) {
                     MEM {memory}
                 </Segment>
                 <Segment icon={Layers} edge='right'>
-                    {data.tasks ?? DASH} TASKS
+                    {DASH} TASKS
                 </Segment>
-                <Segment icon={TriangleAlert} edge='none' tone={alerts && alerts > 0 ? "destructive" : undefined}>
-                    {alerts ?? DASH} {alerts === 1 ? "ALERT" : "ALERTS"}
+                <Segment icon={TriangleAlert} edge='none'>
+                    {DASH} ALERTS
                 </Segment>
             </div>
             <div className='flex h-full items-center'>

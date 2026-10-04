@@ -1,5 +1,7 @@
 //! Containers across the cluster, and the payloads their operations carry.
 
+use std::time::Duration;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -11,6 +13,17 @@ use crate::{
 /// The merged list refuses beyond this; callers filter by node instead.
 pub const MAX_CONTAINERS: usize = 2_000;
 pub const MAX_STOP_TIMEOUT_SECONDS: u32 = 600;
+/// Docker's stop grace when a request names none.
+pub const DEFAULT_STOP_TIMEOUT_SECONDS: u32 = 10;
+
+/// What one stop or restart can take: its grace on the node, then 10 s for the kill and the
+/// answer.
+#[must_use]
+pub fn stop_budget(timeout_seconds: Option<u32>) -> Duration {
+    Duration::from_secs(u64::from(
+        timeout_seconds.unwrap_or(DEFAULT_STOP_TIMEOUT_SECONDS),
+    )) + Duration::from_secs(10)
+}
 
 /// One container on one node, with the node's display name.
 #[derive(Debug, Clone, PartialEq)]

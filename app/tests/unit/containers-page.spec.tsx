@@ -176,7 +176,7 @@ describe("Containers page", () => {
         expect(screen.getByRole("button", { name: /DEPLOY STACK/ })).toHaveAttribute("data-restricted", "true");
     });
 
-    it("requires the typed name to remove a running container, not a stopped one", async () => {
+    it("requires the typed name to remove a container in any state, and forces only a running one", async () => {
         mockCommands({ container_action: () => ({ operationId: "018f2e34-0000-7000-8000-0000000000cc", replayed: false }) });
         renderPage();
         await screen.findByText("scratch");
@@ -196,11 +196,21 @@ describe("Containers page", () => {
             ),
         );
 
+        // A stopped container loses its writable layer and logs too, so its name is typed as well.
         await user.click(within(rowFor("scratch")).getByRole("button", { name: /More actions/ }));
         await user.click(await screen.findByRole("menuitem", { name: "Remove" }));
-        const plain = await screen.findByRole("alertdialog");
-        expect(within(plain).queryByRole("textbox")).not.toBeInTheDocument();
-        expect(within(plain).getByRole("button", { name: /REMOVE/ })).toBeEnabled();
+        const stopped = await screen.findByRole("alertdialog");
+        expect(within(stopped).getByText("Its writable layer is deleted. This cannot be undone.")).toBeInTheDocument();
+        const remove = within(stopped).getByRole("button", { name: /REMOVE/ });
+        expect(remove).toBeDisabled();
+        await user.type(within(stopped).getByRole("textbox"), "scratch");
+        await user.click(remove);
+        await waitFor(() =>
+            expect(invoke).toHaveBeenCalledWith(
+                "container_action",
+                expect.objectContaining({ nodeId: "worker-1", containerId: "b".repeat(64), action: "remove", options: null }),
+            ),
+        );
     });
 
     it("offers menu entries by state", async () => {

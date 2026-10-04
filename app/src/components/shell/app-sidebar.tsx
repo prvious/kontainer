@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 export interface SidebarBadges {
     /** Total containers; hidden at zero. */
     containers?: number;
-    /** Nodes that are down or degraded; renders "N DOWN", hidden at zero. */
+    /** Nodes that are down (degraded ones don't count); renders "N DOWN", hidden at zero. */
     nodesDown?: number;
 }
 

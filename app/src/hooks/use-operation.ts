@@ -13,9 +13,13 @@ export const operationKey = (profileId: string, operationId: string) => ["operat
 /** Terminal, or uncertain (it will not move without someone looking): polling stops. */
 export const isSettled = (state: OperationState) => isTerminal(state) || state === "uncertain";
 
+/** Poll failures that asking again won't clear: polling stops and the row says so. */
+export const isPermanentPollError = (error: unknown) => error === "not_found" || error === "forbidden" || error === "invalid_response";
+
 /**
- * One operation, polled every second until it settles. Every settled snapshot is handed to the
- * operations provider, which acts on it once (invalidate, toast), whichever observer fetched it.
+ * One operation, polled every second until it settles or a poll fails for good. Every settled
+ * snapshot is handed to the operations provider, which acts on it once (invalidate, toast),
+ * whichever observer fetched it.
  */
 export function useOperation(operationId: string) {
     const { session, reportInventoryCustodyError } = useAuth();
@@ -30,7 +34,8 @@ export function useOperation(operationId: string) {
             return view;
         },
         enabled: Boolean(session) && !paused,
-        refetchInterval: (query) => (query.state.data && isSettled(query.state.data.state) ? false : POLL_INTERVAL_MS),
+        refetchInterval: (query) =>
+            (query.state.data && isSettled(query.state.data.state)) || isPermanentPollError(query.state.error) ? false : POLL_INTERVAL_MS,
         retry: false,
     });
 }

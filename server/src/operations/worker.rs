@@ -7,13 +7,19 @@ use futures_util::FutureExt;
 use sea_orm::DatabaseConnection;
 use tokio::{sync::Semaphore, time::Instant};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
+use uuid::Uuid;
 
 use super::{
-    actions::{claim_next, finalize, prune, recover_running},
+    actions::{claim_next, finalize, mark_uncertain, prune, recover_running},
     domain::{DurableOperation, OperationKind},
     executor::{ExecutionContext, ExecutorRegistry},
 };
 use crate::nodes::agents::AgentDirectory;
+
+/// The first wait before recording an outcome again after a database failure; it doubles up to
+/// [`RECORD_RETRY_MAX`].
+const RECORD_RETRY_FIRST: Duration = Duration::from_millis(250);
+const RECORD_RETRY_MAX: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone)]
 pub struct WorkerSettings {
@@ -33,7 +39,9 @@ impl WorkerSettings {
     pub fn new(grace: Duration) -> Self {
         Self {
             reference: format!("controller:{}", std::process::id()),
-            concurrency: 4,
+            // Pulls and service updates can hold a slot for many minutes; executions mostly wait
+            // on agents and the manager, not the database.
+            concurrency: 16,
             idle_min: Duration::from_millis(250),
             idle_max: Duration::from_secs(1),
             maintenance_every: Duration::from_secs(60 * 60),
@@ -167,26 +175,81 @@ struct Execution {
     forced: CancellationToken,
 }
 
+/// How an execution ended, before it is recorded.
+enum Ending {
+    Finished(finalize::Outcome),
+    /// The budget ran out. The node may still finish the work, so the result is unknown.
+    TimedOut,
+}
+
+#[derive(Debug, thiserror::Error)]
+enum RecordError {
+    #[error(transparent)]
+    Finalize(#[from] finalize::FinalizeError),
+    #[error(transparent)]
+    MarkUncertain(#[from] mark_uncertain::MarkUncertainError),
+}
+
+impl RecordError {
+    /// Only a database failure can succeed on a later try.
+    const fn is_retryable(&self) -> bool {
+        matches!(
+            self,
+            Self::Finalize(finalize::FinalizeError::Persistence(_))
+                | Self::MarkUncertain(mark_uncertain::MarkUncertainError::Persistence(_))
+        )
+    }
+}
+
 impl Execution {
     async fn execute(self, operation: DurableOperation) {
         let id = operation.id;
-        let Some(outcome) = self.outcome(&operation).await else {
+        let Some(ending) = self.ending(&operation).await else {
             // Forced shutdown: leave it `running` so recovery reports it as uncertain.
             return;
         };
-        if let Err(error) = finalize::execute(&self.database, id, outcome).await {
-            tracing::error!(%error, operation.id = %id, "operation outcome was not recorded");
+        // The outcome is known, so a database failure retries the write, holding the permit,
+        // rather than leaving the row `running` until the next restart.
+        let mut delay = RECORD_RETRY_FIRST;
+        loop {
+            let error = match self.record(id, &ending).await {
+                Ok(()) => return,
+                Err(error) => error,
+            };
+            if !error.is_retryable() {
+                tracing::error!(%error, operation.id = %id, "operation outcome was not recorded");
+                return;
+            }
+            tracing::warn!(%error, operation.id = %id, retry_in = ?delay, "operation outcome was not recorded; retrying");
+            tokio::select! {
+                // Forced shutdown: it stays `running`, and recovery reports it as uncertain.
+                () = self.forced.cancelled() => return,
+                () = tokio::time::sleep(delay) => {}
+            }
+            delay = (delay * 2).min(RECORD_RETRY_MAX);
         }
     }
 
-    async fn outcome(&self, operation: &DurableOperation) -> Option<finalize::Outcome> {
+    async fn record(&self, id: Uuid, ending: &Ending) -> Result<(), RecordError> {
+        match ending {
+            Ending::Finished(outcome) => {
+                finalize::execute(&self.database, id, outcome.clone()).await?;
+            }
+            Ending::TimedOut => {
+                mark_uncertain::execute(&self.database, id, "timeout").await?;
+            }
+        }
+        Ok(())
+    }
+
+    async fn ending(&self, operation: &DurableOperation) -> Option<Ending> {
         let Some(kind) = OperationKind::parse(&operation.kind) else {
-            return Some(unsupported());
+            return Some(Ending::Finished(unsupported()));
         };
         let Some(executor) = self.registry.get(kind) else {
-            return Some(unsupported());
+            return Some(Ending::Finished(unsupported()));
         };
-        let timeout = self.registry.timeout(kind);
+        let timeout = executor.timeout(&operation.payload);
         let cancellation = self.forced.child_token();
         let context = ExecutionContext::new(
             self.database.clone(),
@@ -201,30 +264,24 @@ impl Execution {
             return None;
         }
         Some(match result {
-            Ok(Ok(Ok(detail))) => finalize::Outcome::Succeeded { detail },
-            Ok(Ok(Err(failure))) => finalize::Outcome::Failed {
+            Ok(Ok(Ok(detail))) => Ending::Finished(finalize::Outcome::Succeeded { detail }),
+            Ok(Ok(Err(failure))) => Ending::Finished(finalize::Outcome::Failed {
                 code: failure.code,
                 message: failure.message,
                 detail: failure.detail,
-            },
+            }),
             Ok(Err(_panic)) => {
                 tracing::error!(operation.id = %operation.id, operation.kind = %operation.kind, "operation executor panicked");
-                finalize::Outcome::Failed {
+                Ending::Finished(finalize::Outcome::Failed {
                     code: "internal_error".to_owned(),
                     message: "The operation stopped unexpectedly.".to_owned(),
                     detail: None,
-                }
+                })
             }
             Err(_) => {
                 cancellation.cancel();
-                finalize::Outcome::Failed {
-                    code: "timeout".to_owned(),
-                    message: format!(
-                        "The operation did not finish within {}s.",
-                        timeout.as_secs()
-                    ),
-                    detail: None,
-                }
+                tracing::warn!(operation.id = %operation.id, operation.kind = %operation.kind, budget = ?timeout, "operation ran past its budget; its outcome is uncertain");
+                Ending::TimedOut
             }
         })
     }

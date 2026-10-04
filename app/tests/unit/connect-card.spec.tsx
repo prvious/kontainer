@@ -213,6 +213,26 @@ describe("Connect card", () => {
         await waitFor(() => expect(invoke).toHaveBeenCalledWith("session_bootstrap", { origin: "https://staging.kontainer.dev/" }));
     });
 
+    it("forgets a saved connection with Delete on its focused row, not only from the context menu", async () => {
+        const user = userEvent.setup();
+        let rows = saved;
+        mockCommands({
+            session_connections: () => rows,
+            session_forget_connection: ({ id }) => {
+                rows = rows.filter((row) => row.id !== id);
+                return null;
+            },
+        });
+        renderCard();
+        const staging = await screen.findByRole("button", { name: /Staging/ });
+        expect(staging).toHaveAttribute("aria-keyshortcuts", "Delete");
+        staging.focus();
+        await user.keyboard("{Delete}");
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith("session_forget_connection", { id: "c2" }));
+        await waitFor(() => expect(screen.queryByRole("button", { name: /Staging/ })).not.toBeInTheDocument());
+        expect(screen.getByRole("button", { name: /Production Cluster/ })).toBeInTheDocument();
+    });
+
     it("colours saved-connection dots from one probe each", async () => {
         mockCommands({
             session_connections: () => saved,

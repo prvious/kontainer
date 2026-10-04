@@ -23,6 +23,9 @@ use crate::{
 
 /// Progress is written at most this often (plus whenever a node finishes).
 const REPORT_EVERY: Duration = Duration::from_millis(500);
+/// A node that sends no pull event for this long fails, so one hung node doesn't hold the whole
+/// pull to the operation's budget.
+const IDLE_AT_MOST: Duration = Duration::from_secs(60);
 
 struct PullBoard {
     nodes: Mutex<BTreeMap<String, NodePull>>,
@@ -64,7 +67,23 @@ impl PullBoard {
     }
 }
 
-pub struct PullImageExecutor;
+pub struct PullImageExecutor {
+    idle: Duration,
+}
+
+impl Default for PullImageExecutor {
+    fn default() -> Self {
+        Self { idle: IDLE_AT_MOST }
+    }
+}
+
+impl PullImageExecutor {
+    /// The same executor giving up on a silent node sooner, for tests.
+    #[must_use]
+    pub const fn with_idle(idle: Duration) -> Self {
+        Self { idle }
+    }
+}
 
 #[async_trait]
 impl OperationExecutor for PullImageExecutor {
@@ -97,8 +116,9 @@ impl OperationExecutor for PullImageExecutor {
         context.report_progress(board.detail()).await;
         let board = &board;
         let reference = payload.reference.as_str();
+        let idle = self.idle;
         join_all(payload.node_ids.iter().map(|node_id| async move {
-            let finished = pull_one(node_id, reference, context, board).await;
+            let finished = pull_one(node_id, reference, idle, context, board).await;
             board.update(finished);
             if board.due(true) {
                 context.report_progress(board.detail()).await;
@@ -132,10 +152,11 @@ impl OperationExecutor for PullImageExecutor {
     }
 }
 
-/// Run one node's pull to its end and return its final state.
+/// Run one node's pull to its end and return its final state. A node silent for `idle` fails.
 async fn pull_one(
     node_id: &str,
     reference: &str,
+    idle: Duration,
     context: &ExecutionContext,
     board: &PullBoard,
 ) -> NodePull {
@@ -162,7 +183,13 @@ async fn pull_one(
             () = context.cancellation.cancelled() => {
                 return failed(&tracker, "The pull was interrupted.".to_owned());
             }
-            next = events.next() => next,
+            next = tokio::time::timeout(idle, events.next()) => match next {
+                Ok(next) => next,
+                Err(_) => {
+                    let seconds = idle.as_secs();
+                    return failed(&tracker, format!("No progress from the node for {seconds} s."));
+                }
+            },
         };
         match next {
             Some(AgentPullEvent::Progress {

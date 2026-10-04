@@ -1,13 +1,21 @@
 import type { ReactNode } from "react";
-import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, render, renderHook, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { invoke } from "@tauri-apps/api/core";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Trash2 } from "lucide-react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ActionButton } from "@/components/kit/action-button";
 import { ConfirmDialog } from "@/components/kit/confirm-dialog";
 import { RowActions } from "@/components/data-table/row-actions";
+import { AuthContext, type AuthContextValue } from "@/contexts/auth-context-value";
+import { ConnectivityProvider } from "@/contexts/connectivity-context";
 import { ConnectivityContext, type ConnectivityContextValue } from "@/contexts/connectivity-context-value";
+import { OperationsProvider } from "@/contexts/operations-context";
+import { useCancelOperation } from "@/hooks/use-cancel-operation";
+import { useConnectivity } from "@/hooks/use-connectivity";
+import { useStartOperation, withIdempotencyKey } from "@/hooks/use-operations";
 
 const offline: ConnectivityContextValue = { probe: { status: "unreachable" }, reachable: false, reconnectedAt: null, retry: () => {}, retrying: false };
 
@@ -77,4 +85,73 @@ describe("changes while the controller is unreachable", () => {
         renderOffline(<ActionButton mutates>CREATE VOLUME</ActionButton>, { ...offline, reachable: true, probe: { status: "ready" } });
         expect(screen.getByRole("button", { name: /CREATE VOLUME/ })).not.toHaveAttribute("aria-disabled");
     });
+});
+
+describe("the shared change hooks while the controller is unreachable", () => {
+    beforeEach(() => vi.clearAllMocks());
+
+    it("refuse a start or a cancel with controller_unreachable instead of sending or parking it", async () => {
+        const auth = { session: { profileId: "p1" }, expired: false, reportInventoryCustodyError: vi.fn() } as unknown as AuthContextValue;
+        const queryClient = new QueryClient();
+        const wrapper = ({ children }: { children: ReactNode }) => (
+            <AuthContext value={auth}>
+                <QueryClientProvider client={queryClient}>
+                    <ConnectivityContext value={offline}>
+                        <OperationsProvider>{children}</OperationsProvider>
+                    </ConnectivityContext>
+                </QueryClientProvider>
+            </AuthContext>
+        );
+        const { result } = renderHook(
+            () => ({
+                start: useStartOperation<{ idempotencyKey: string }>({ command: "start_thing", scope: "services", title: () => "Thing", invalidate: [] }),
+                cancel: useCancelOperation(),
+            }),
+            { wrapper },
+        );
+        const refusals: unknown[] = [];
+        await act(() => result.current.start.mutateAsync(withIdempotencyKey({})).catch((code: unknown) => void refusals.push(code)));
+        await act(() => result.current.cancel.mutateAsync("op-1").catch((code: unknown) => void refusals.push(code)));
+        expect(refusals).toEqual(["controller_unreachable", "controller_unreachable"]);
+        expect(invoke).not.toHaveBeenCalled();
+        expect(
+            queryClient
+                .getMutationCache()
+                .getAll()
+                .some((mutation) => mutation.state.isPaused),
+        ).toBe(false);
+    });
+
+    it("stays unreachable while a retried probe is out, until one answers", async () => {
+        let probes = 0;
+        let answer: (probe: unknown) => void = () => {};
+        vi.mocked(invoke).mockImplementation(async (command: string) => {
+            if (command !== "controller_health") return null;
+            probes += 1;
+            if (probes <= 3) return { status: "unreachable", diagnostic: "tcp" };
+            return new Promise((resolve) => (answer = resolve));
+        });
+        function Reachability() {
+            const { reachable, retry } = useConnectivity();
+            return (
+                <button type='button' onClick={retry}>
+                    {reachable ? "reachable" : "unreachable"}
+                </button>
+            );
+        }
+        render(
+            <QueryClientProvider client={new QueryClient()}>
+                <ConnectivityProvider enabled>
+                    <Reachability />
+                </ConnectivityProvider>
+            </QueryClientProvider>,
+        );
+        // Three attempts, 1 s apart, before the first verdict.
+        await waitFor(() => expect(screen.getByRole("button")).toHaveTextContent("unreachable"), { timeout: 4000 });
+        await act(async () => screen.getByRole("button").click());
+        await waitFor(() => expect(probes).toBe(4));
+        expect(screen.getByRole("button")).toHaveTextContent("unreachable");
+        await act(async () => answer({ status: "ready" }));
+        await waitFor(() => expect(screen.getByRole("button")).toHaveTextContent(/^reachable$/));
+    }, 8000);
 });

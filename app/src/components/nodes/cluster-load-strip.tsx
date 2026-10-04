@@ -5,8 +5,11 @@ import { bytes } from "@/components/containers/container-format";
 import { clockTime, shortDuration } from "@/lib/time";
 import type { ClusterSummary, SamplePoint } from "@/types/nodes";
 
-const BUCKET_MS = 5_000;
-/** The strip shows the last minute: twelve 5 s buckets of the 5 m cluster series. */
+const BUCKET_MS = 10_000;
+/**
+ * The strip shows the last 2 minutes: twelve 10 s buckets of the 5 m cluster series. A bucket
+ * spans two 5 s check-ins, so check-in jitter doesn't read as a node missing (spec 13, G29).
+ */
 export const TREND_BUCKETS = 12;
 
 const plural = (count: number, one: string) => `${count} ${one}${count === 1 ? "" : "s"}`;
@@ -26,11 +29,12 @@ function Figure({ label, value, unit }: { label: string; value: string; unit: st
 
 /**
  * Cluster Load strip `xtTtS`: node, reachable, and container counts; quorum; aggregate CPU and
- * memory; and CPU over the last 60 s. Hovering a bar pins a crosshair and says how many nodes
+ * memory; and CPU over the last 2 minutes. Hovering a bar pins a crosshair and says how many nodes
  * reported in that bucket (04.S5).
  */
 export function ClusterLoadStrip({ summary, points, now }: { summary: ClusterSummary | undefined; points: SamplePoint[]; now: number }) {
-    const recent = points.slice(-TREND_BUCKETS);
+    // The series ends with the bucket still filling; it would read as nodes missing, so it's left out.
+    const recent = points.slice(-TREND_BUCKETS - 1, -1);
     const buckets: SparkBucket[] = recent.map((point) => {
         const start = Date.parse(point.at);
         return { start, end: start + BUCKET_MS, value: point.cpuPercent === null ? null : Math.round(point.cpuPercent) };
@@ -74,7 +78,7 @@ export function ClusterLoadStrip({ summary, points, now }: { summary: ClusterSum
                         buckets={buckets}
                         width={148}
                         height={30}
-                        label='Aggregate CPU, last 60 seconds'
+                        label='Aggregate CPU, last 2 minutes'
                         tooltipTime={(bucket) => `${clockTime(bucket.start, true)} · ${shortDuration((now - bucket.end) / 1000)} ago`}
                         tooltipRows={(_, index) => [
                             { label: "CPU", value: `${Math.round(recent[index].cpuPercent ?? 0)}%` },
@@ -85,7 +89,7 @@ export function ClusterLoadStrip({ summary, points, now }: { summary: ClusterSum
                             tone: recent[index].nodes < total ? "warning" : "neutral",
                         })}
                     />
-                    <span className='font-mono text-3xs font-medium tracking-[1px] text-muted-foreground'>LAST 60s</span>
+                    <span className='font-mono text-3xs font-medium tracking-[1px] text-muted-foreground'>LAST 2m</span>
                 </div>
             </div>
         </section>

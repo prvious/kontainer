@@ -132,11 +132,6 @@ export function clusterUsage(
     return { ...usage, cpuPercent: summary.cpuPercent, memoryUsedBytes: summary.memoryUsedBytes, memoryTotalBytes: summary.memoryTotalBytes };
 }
 
-/** Nodes degraded or down: the sidebar's `N DOWN` badge. */
-export function nodesDown(summary: ClusterSummary | undefined): number | undefined {
-    return summary ? summary.nodesDegraded + summary.nodesDown : undefined;
-}
-
 /** Nodes an agent can act on: pull, create, and target pickers offer only these. */
 export function agentNodes(nodes: NodeSummary[]): NodeSummary[] {
     return nodes.filter((node) => node.agentStatus !== "no-agent");

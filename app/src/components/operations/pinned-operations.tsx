@@ -10,7 +10,7 @@ export function PinnedOperations({ scope }: { scope: string }) {
     const pinned = tracked.filter((operation) => operation.scope === scope);
     if (pinned.length === 0) return null;
     return (
-        <div aria-label='Operations' className='grid grid-cols-1 gap-3 lg:grid-cols-2'>
+        <div role='region' aria-label='Operations' className='grid grid-cols-1 gap-3 lg:grid-cols-2'>
             {pinned.map((operation) => (
                 <OperationRow key={operation.id} operation={operation} />
             ))}

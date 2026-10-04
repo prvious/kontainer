@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
-import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { onlineManager, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { AuthProvider } from "@/contexts/auth-context";
+import { useControllerHealth } from "@/hooks/session/use-controller-health";
 import { useAuth } from "@/hooks/use-auth";
 import type { SessionView } from "@/types/session";
 
@@ -215,6 +216,46 @@ describe("AuthProvider custody", () => {
             screen.getByText("Logout").click();
         });
         await waitFor(() => expect(screen.getByTestId("next-origin")).toHaveTextContent("none"));
+    });
+
+    it("forgets a switch's agent once a session is published again", async () => {
+        vi.mocked(invoke).mockImplementation(async (command: string) => (command === "session_restore" || command === "session_login" ? session : undefined));
+        renderAuth();
+        await restored();
+        await act(async () => screen.getByText("Switch agent").click());
+        await waitFor(() => expect(screen.getByTestId("next-origin")).toHaveTextContent("https://agent-eu.example.com"));
+        await act(async () => screen.getByText("Login").click());
+        await waitFor(() => expect(screen.getByTestId("session")).toHaveTextContent(session.profileId));
+        expect(screen.getByTestId("next-origin")).toHaveTextContent("none");
+    });
+
+    it("keeps probing and sends a change while the OS reports offline, since Rust does the networking", async () => {
+        vi.mocked(invoke).mockImplementation(async (command: string) => (command === "controller_health" ? { status: "ready" } : null));
+        function Offline() {
+            const health = useControllerHealth();
+            const change = useMutation({ mutationFn: () => invoke("send_change") });
+            return (
+                <>
+                    <span data-testid='probe'>{health.data?.status ?? "none"}</span>
+                    <span data-testid='change'>{change.isPaused ? "parked" : change.status}</span>
+                    <button onClick={() => change.mutate()}>Change</button>
+                </>
+            );
+        }
+        onlineManager.setOnline(false);
+        try {
+            render(
+                <AuthProvider>
+                    <Offline />
+                </AuthProvider>,
+            );
+            await waitFor(() => expect(screen.getByTestId("probe")).toHaveTextContent("ready"));
+            await act(async () => screen.getByText("Change").click());
+            await waitFor(() => expect(screen.getByTestId("change")).toHaveTextContent("success"));
+            expect(invoke).toHaveBeenCalledWith("send_change");
+        } finally {
+            onlineManager.setOnline(true);
+        }
     });
 
     it("keeps the held session visible when revocation fails", async () => {
