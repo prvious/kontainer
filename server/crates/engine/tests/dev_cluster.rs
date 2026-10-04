@@ -348,6 +348,121 @@ async fn dev_cluster_exec_runs_a_tty_shell_and_reports_its_exit() {
     assert!(is_missing_shell_status(status.exit_code), "{status:?}");
 }
 
+/// Closing a TTY shell's input ends its output but not the shell: Docker closes the attach
+/// without passing end of file to the terminal, so the shell is still running afterwards and
+/// an agent can't report that close as an exit.
+#[tokio::test]
+async fn dev_cluster_exec_shell_outlives_its_closed_input() {
+    use futures_util::StreamExt as _;
+    use kontainer_engine::ContainerPageRequest;
+
+    let manager = engine(dev_host(
+        "KONTAINER_TEST_DEV_MANAGER_HOST",
+        "tcp://localhost:2375",
+    ));
+    let cancellation = CancellationToken::new();
+    let page = manager
+        .list_containers(ContainerPageRequest::new(200, "").unwrap(), &cancellation)
+        .await
+        .unwrap();
+    let alpine = page
+        .containers
+        .iter()
+        .find(|container| {
+            container.image_reference.contains("alpine")
+                && container.state == kontainer_engine::ContainerState::Running
+        })
+        .expect("a running alpine-based seed container on the manager");
+    let env = vec!["TERM=xterm-256color".to_owned()];
+    let exec = manager
+        .exec_create(
+            &alpine.container_id,
+            &["/bin/sh".to_owned()],
+            &env,
+            &cancellation,
+        )
+        .await
+        .unwrap();
+    let mut attached = manager.exec_start(&exec, &cancellation).await.unwrap();
+    // The shell's own pid, so the test can stop it afterwards.
+    attached.input.write(b"echo pid=$$\r").await.unwrap();
+    let mut seen = String::new();
+    let pid = tokio::time::timeout(Duration::from_secs(5), async {
+        while let Some(Ok(bytes)) = attached.output.next().await {
+            seen.push_str(&String::from_utf8_lossy(&bytes));
+            let pid = seen.split("pid=").skip(1).find_map(|rest| {
+                let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+                (!digits.is_empty() && rest[digits.len()..].starts_with('\r')).then_some(digits)
+            });
+            if pid.is_some() {
+                return pid;
+            }
+        }
+        None
+    })
+    .await
+    .ok()
+    .flatten()
+    .expect("the shell prints its pid");
+
+    attached.input.close().await;
+    let drained = tokio::time::timeout(Duration::from_secs(5), async {
+        while attached.output.next().await.is_some() {}
+    })
+    .await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let status = manager.exec_inspect(&exec, &cancellation).await.unwrap();
+
+    let kill = manager
+        .exec_create(
+            &alpine.container_id,
+            &["kill".to_owned(), "-9".to_owned(), pid],
+            &env,
+            &cancellation,
+        )
+        .await
+        .unwrap();
+    let mut killing = manager.exec_start(&kill, &cancellation).await.unwrap();
+    while killing.output.next().await.is_some() {}
+
+    assert!(drained.is_ok(), "the output ends once the input closes");
+    assert!(status.running, "{status:?}");
+}
+
+/// A pull that can't succeed ends after one failure that carries the daemon's own message.
+#[tokio::test]
+async fn dev_cluster_a_failed_pull_ends_with_one_failure() {
+    use futures_util::StreamExt as _;
+    use kontainer_engine::PullEvent;
+
+    let manager = engine(dev_host(
+        "KONTAINER_TEST_DEV_MANAGER_HOST",
+        "tcp://localhost:2375",
+    ));
+    let events: Vec<_> = tokio::time::timeout(
+        Duration::from_secs(60),
+        manager
+            .pull_image(
+                "kontainer.invalid/no-such-image:missing",
+                &CancellationToken::new(),
+            )
+            .await
+            .unwrap()
+            .collect(),
+    )
+    .await
+    .expect("the pull ends");
+    let failures = events
+        .iter()
+        .filter(|event| matches!(event, PullEvent::Failed(_)))
+        .count();
+    assert_eq!(failures, 1, "{events:?}");
+    assert!(
+        matches!(events.last(), Some(PullEvent::Failed(message)) if !message.is_empty()),
+        "{events:?}"
+    );
+}
+
 /// A seed service's logs through the manager: history with task and node ids, no follow.
 #[tokio::test]
 async fn dev_cluster_service_logs_carry_task_and_node_ids() {
@@ -387,6 +502,20 @@ async fn dev_cluster_service_logs_carry_task_and_node_ids() {
             .service_logs("not-a-service", request, &cancellation)
             .await
             .is_err()
+    );
+    // A well-formed id of no service: the call succeeds and Docker's 404 is the only item.
+    let unknown: Vec<_> = manager
+        .service_logs("zzzzzzzzzzzzzzzzzzzzzzzzz", request, &cancellation)
+        .await
+        .unwrap()
+        .collect()
+        .await;
+    assert!(
+        matches!(
+            unknown.as_slice(),
+            [Err(error)] if error.kind() == kontainer_engine::EngineErrorKind::NotFound
+        ),
+        "{unknown:?}"
     );
 }
 

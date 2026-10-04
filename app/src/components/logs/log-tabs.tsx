@@ -14,11 +14,16 @@ function endedReason(ended: NonNullable<ReturnType<LogTab["buffer"]["getSnapshot
     return `${why} Lines received so far are kept; RESUME opens it again.`;
 }
 
-function TabHandle({ tab, name, onClose }: { tab: LogTab; name: string; onClose: () => void }) {
+function TabHandle({ tab, onClose }: { tab: LogTab; onClose: () => void }) {
     const snapshot = useLogBuffer(tab.buffer);
+    const name = tab.serviceName;
     const trigger = (
         <TabsTrigger
             value={tab.id}
+            aria-keyshortcuts='Delete'
+            onKeyDown={(event) => {
+                if (event.key === "Delete") onClose();
+            }}
             className='h-9.5 flex-none gap-2 rounded-none border-0 px-0 font-mono text-2xs font-medium text-secondary-foreground data-active:text-sidebar-accent-foreground'
         >
             <StatusDot tone={STATUS_TONE[snapshot.status]} data-testid={`log-tab-dot-${name}`} className='size-1.5' />
@@ -35,8 +40,15 @@ function TabHandle({ tab, name, onClose }: { tab: LogTab; name: string; onClose:
             ) : (
                 trigger
             )}
+            {/* Out of the tab order: keyboard users close the focused tab with Delete. */}
             <LabelTooltip label={`Close ${name}`}>
-                <button type='button' aria-label={`Close ${name}`} onClick={onClose} className='rounded-sm text-muted-foreground hover:text-foreground'>
+                <button
+                    type='button'
+                    tabIndex={-1}
+                    aria-label={`Close ${name}`}
+                    onClick={onClose}
+                    className='rounded-sm text-muted-foreground hover:text-foreground'
+                >
                     <X aria-hidden className='size-3' />
                 </button>
             </LabelTooltip>
@@ -45,22 +57,12 @@ function TabHandle({ tab, name, onClose }: { tab: LogTab; name: string; onClose:
 }
 
 /** Log tabs `cNE8S`: service name, a live / reconnecting / ended dot, close, and `+`. */
-export function LogTabs({
-    tabs,
-    nameOf,
-    onClose,
-    onNew,
-}: {
-    tabs: LogTab[];
-    nameOf: (serviceId: string) => string;
-    onClose: (id: string) => void;
-    onNew: () => void;
-}) {
+export function LogTabs({ tabs, onClose, onNew }: { tabs: LogTab[]; onClose: (id: string) => void; onNew: () => void }) {
     return (
         <div className='flex h-9.5 items-center border-b border-border'>
             <TabsList variant='line' className='h-9.5 gap-0 rounded-none p-0'>
                 {tabs.map((tab) => (
-                    <TabHandle key={tab.id} tab={tab} name={nameOf(tab.serviceId)} onClose={() => onClose(tab.id)} />
+                    <TabHandle key={tab.id} tab={tab} onClose={() => onClose(tab.id)} />
                 ))}
             </TabsList>
             <LabelTooltip label='New stream'>

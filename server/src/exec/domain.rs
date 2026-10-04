@@ -39,6 +39,8 @@ pub enum ExitReason {
     IdleTimeout,
     MaxDuration,
     ConnectionLost,
+    /// The session closed while the shell was still running, and it was left running.
+    Abandoned,
 }
 
 impl ExitReason {
@@ -49,6 +51,7 @@ impl ExitReason {
             Self::IdleTimeout => "idle_timeout",
             Self::MaxDuration => "max_duration",
             Self::ConnectionLost => "connection_lost",
+            Self::Abandoned => "abandoned",
         }
     }
 }

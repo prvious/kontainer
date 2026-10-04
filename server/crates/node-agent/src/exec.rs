@@ -3,7 +3,8 @@
 //! The first client frame opens the session. A container that isn't running is refused; without
 //! a requested shell the agent tries `/bin/bash -l` and falls back to `/bin/sh` when bash exits
 //! within 500 ms with 126 or 127. Output, input, and resizes then flow until the shell exits or
-//! the controller closes, and the exit code comes from the engine, never made up.
+//! the controller closes, and the exit code comes from the engine, never made up. A shell still
+//! running after the close is reported as still running and left alone (ADR 0033).
 
 use std::{pin::Pin, sync::Arc, time::Duration};
 
@@ -13,7 +14,7 @@ use kontainer_agent_proto::v1::{
     ExecStartedEvent, exec_client_frame, exec_server_frame,
 };
 use kontainer_engine::{
-    ContainerEngine, ExecAttachment, is_missing_shell_status, is_valid_container_id,
+    ContainerEngine, ExecAttachment, ExecStatus, is_missing_shell_status, is_valid_container_id,
 };
 use tokio::{sync::mpsc, time};
 use tokio_util::sync::CancellationToken;
@@ -226,7 +227,13 @@ impl Session {
                 },
             }
         };
-        if ended && is_missing_shell_status(self.exit_code(&exec_id).await) {
+        if ended
+            && is_missing_shell_status(
+                self.final_status(&exec_id)
+                    .await
+                    .and_then(|status| status.exit_code),
+            )
+        {
             return Err(StartFailure::MissingShell);
         }
         Ok(Started {
@@ -238,16 +245,17 @@ impl Session {
         })
     }
 
-    /// The exit code once the process has stopped, waiting up to [`CLOSE_GRACE`] for it.
-    async fn exit_code(&self, exec_id: &str) -> Option<i64> {
+    /// The process's status once it has stopped, waiting up to [`CLOSE_GRACE`] for it: still
+    /// `running` when it didn't stop in time, `None` when the engine didn't answer.
+    async fn final_status(&self, exec_id: &str) -> Option<ExecStatus> {
         let deadline = time::Instant::now() + CLOSE_GRACE;
         loop {
             match self.engine.exec_inspect(exec_id, &self.cancellation).await {
-                Ok(status) if !status.running => return status.exit_code,
-                Ok(_) if time::Instant::now() < deadline => {
+                Ok(status) if status.running && time::Instant::now() < deadline => {
                     time::sleep(Duration::from_millis(50)).await;
                 }
-                _ => return None,
+                Ok(status) => return Some(status),
+                Err(_) => return None,
             }
         }
     }
@@ -319,9 +327,12 @@ impl Session {
                 },
             }
         }
-        let code = self.exit_code(&exec_id).await;
+        // Closing a TTY's input ends its output but not the process, so a shell can outlive its
+        // session; it is reported as still running, not as exited.
+        let status = self.final_status(&exec_id).await;
         self.send(frame(exec_server_frame::Frame::Exit(ExecExitEvent {
-            code,
+            code: status.and_then(|status| status.exit_code),
+            still_running: status.is_some_and(|status| status.running),
         })))
         .await;
     }
@@ -385,6 +396,8 @@ mod tests {
         running: bool,
         missing: Vec<&'static str>,
         exit_code: Option<i64>,
+        /// The shell never stops, as a TTY shell whose input closed doesn't.
+        still_running: bool,
         commands: Mutex<HashMap<String, Vec<String>>>,
         resized: Mutex<Vec<(u16, u16)>>,
         written: Arc<Mutex<Vec<u8>>>,
@@ -468,6 +481,12 @@ mod tests {
                 return Ok(ExecStatus {
                     running: false,
                     exit_code: Some(127),
+                });
+            }
+            if self.still_running {
+                return Ok(ExecStatus {
+                    running: true,
+                    exit_code: None,
                 });
             }
             match self.exit_code {
@@ -611,7 +630,7 @@ mod tests {
         let exec_server_frame::Frame::Exit(exit) = next(&mut stream).await else {
             panic!("an exit");
         };
-        assert_eq!(exit.code, Some(3));
+        assert_eq!((exit.code, exit.still_running), (Some(3), false));
     }
 
     #[tokio::test]
@@ -632,7 +651,32 @@ mod tests {
         let exec_server_frame::Frame::Exit(exit) = next(&mut stream).await else {
             panic!("an exit");
         };
-        assert_eq!(exit.code, None);
+        assert_eq!((exit.code, exit.still_running), (None, false));
+    }
+
+    #[tokio::test]
+    async fn a_shell_still_running_after_the_close_grace_is_reported_as_still_running() {
+        let (output, receiver) = mpsc::unbounded_channel();
+        let engine = Arc::new(FakeEngine {
+            running: true,
+            still_running: true,
+            output: Mutex::new(Some(receiver)),
+            ..FakeEngine::default()
+        });
+        let (input, mut stream) = session(engine, Some("/bin/sh")).await;
+        assert!(matches!(
+            next(&mut stream).await,
+            exec_server_frame::Frame::Started(_)
+        ));
+        // Docker ends the output once the input closes; the shell carries on.
+        input
+            .send(client(exec_client_frame::Frame::Close(ExecCloseRequest {})))
+            .unwrap();
+        drop(output);
+        let exec_server_frame::Frame::Exit(exit) = next(&mut stream).await else {
+            panic!("an exit");
+        };
+        assert_eq!((exit.code, exit.still_running), (None, true));
     }
 
     #[test]

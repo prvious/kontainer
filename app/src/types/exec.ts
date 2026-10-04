@@ -9,6 +9,7 @@ export type ExecStreamEvent =
     | { type: "started"; shell: string }
     /** Base64 of the raw bytes the terminal wrote. */
     | { type: "output"; data: string }
+    /** `reason` stays open: `exited`, `idle_timeout`, `abandoned`, … and any a newer controller adds. */
     | { type: "exit"; code: number | null; reason: string }
     | { type: "error"; code: string; message: string }
     | { type: "closed"; reason: string };
@@ -46,8 +47,11 @@ export function endedText(exit: { code: number | null; reason: string } | null, 
                 return "8 hour limit";
             case "connection_lost":
                 return "connection lost";
+            // The session closed without seeing the shell exit.
+            case "abandoned":
+                return "the shell may still be running in the container";
             default:
-                return exit.reason.split("_").join(" ");
+                return exit.reason.split("_").join(" ") || "reason unknown";
         }
     }
     return CLOSED_TEXT[closed ?? "connection_lost"] ?? "connection lost";

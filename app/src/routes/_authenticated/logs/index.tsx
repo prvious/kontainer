@@ -50,7 +50,6 @@ function LogsPage() {
     const [wrap, setWrap] = useState(false);
 
     const serviceList = services.data?.items;
-    const nameOf = (serviceId: string) => serviceList?.find((service) => service.id === serviceId)?.name ?? serviceId;
     const active = logs.tabs.find((tab) => tab.id === logs.activeId) ?? null;
 
     // Arriving with `?service=` (from a Services or Containers row) opens that service's stream once
@@ -59,7 +58,7 @@ function LogsPage() {
     useEffect(() => {
         if (!search.service || !serviceList) return;
         const match = serviceList.find((service) => service.id === search.service || service.name === search.service);
-        if (match) open(match.id);
+        if (match) open(match);
         void navigate({ search: {}, replace: true });
     }, [search.service, serviceList, open, navigate]);
 
@@ -112,12 +111,12 @@ function LogsPage() {
                     onValueChange={(value) => typeof value === "string" && logs.select(value)}
                     className='flex min-h-0 flex-1 flex-col gap-0 overflow-hidden rounded-md border border-border bg-card'
                 >
-                    <LogTabs tabs={logs.tabs} nameOf={nameOf} onClose={logs.close} onNew={() => setPicking(true)} />
+                    <LogTabs tabs={logs.tabs} onClose={logs.close} onNew={() => setPicking(true)} />
                     {logs.tabs.map((tab) => (
                         <TabsContent key={tab.id} value={tab.id} className='flex min-h-0 flex-1 flex-col data-[hidden]:hidden'>
                             <LogTabBody
                                 tab={tab}
-                                name={nameOf(tab.serviceId)}
+                                name={tab.serviceName}
                                 filter={filter}
                                 wrap={wrap}
                                 onClearFilter={() => setFilter("")}

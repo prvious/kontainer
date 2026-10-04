@@ -147,35 +147,39 @@ pub fn reconnect_delay(attempt: u32) -> Duration {
 }
 
 /// Lines delivered in the last second before the newest one, to drop repeats after a reopen.
+/// Older lines always pass: a reopen never asks for them, and on the first connection they are
+/// another replica's history or a node whose clock runs behind.
 #[derive(Debug, Default)]
 pub struct Overlap {
     last_ts: Option<i64>,
-    recent: VecDeque<(i64, String, String)>,
+    recent: VecDeque<(i64, LogStream, String, String)>,
 }
 
 impl Overlap {
     /// Whether `line` is new; records it when it is.
     pub fn accept(&mut self, line: &LogLineItem) -> bool {
-        if let Some(last) = self.last_ts {
-            if line.ts_unix_ms < last - RECONNECT_OVERLAP_MS {
-                return false;
-            }
-            if self.recent.iter().any(|(ts, task, text)| {
-                *ts == line.ts_unix_ms && *task == line.task_id && *text == line.text
-            }) {
-                return false;
-            }
+        if self.recent.iter().any(|(ts, stream, task, text)| {
+            *ts == line.ts_unix_ms
+                && *stream == line.stream
+                && *task == line.task_id
+                && *text == line.text
+        }) {
+            return false;
         }
         let last = self
             .last_ts
             .map_or(line.ts_unix_ms, |last| last.max(line.ts_unix_ms));
         self.last_ts = Some(last);
-        self.recent
-            .push_back((line.ts_unix_ms, line.task_id.clone(), line.text.clone()));
+        self.recent.push_back((
+            line.ts_unix_ms,
+            line.stream,
+            line.task_id.clone(),
+            line.text.clone(),
+        ));
         while self
             .recent
             .front()
-            .is_some_and(|(ts, _, _)| *ts < last - RECONNECT_OVERLAP_MS)
+            .is_some_and(|(ts, ..)| *ts < last - RECONNECT_OVERLAP_MS)
         {
             self.recent.pop_front();
         }
@@ -191,7 +195,12 @@ impl Overlap {
 enum FollowState {
     Connect,
     Wait(Duration),
-    Connected(Box<dyn LogReceiver>),
+    /// `heard` turns true on the connection's first line or gap: only then has the reconnect
+    /// worked, so a stream that is accepted and then ends at once keeps backing off.
+    Connected {
+        receiver: Box<dyn LogReceiver>,
+        heard: bool,
+    },
     Done,
 }
 
@@ -279,11 +288,10 @@ impl<C: LogConnector> LogFollower<C> {
                     let request = self.reopen();
                     match self.connector.connect(request, cancellation).await {
                         Ok(receiver) => {
-                            if self.attempt > 0 {
-                                self.queued.push_back(LogEvent::Reconnected);
-                            }
-                            self.attempt = 0;
-                            self.state = FollowState::Connected(receiver);
+                            self.state = FollowState::Connected {
+                                receiver,
+                                heard: false,
+                            };
                         }
                         Err(_) if cancellation.is_cancelled() => return None,
                         Err(LogConnectError::Transient) => self.back_off(),
@@ -294,29 +302,42 @@ impl<C: LogConnector> LogFollower<C> {
                         ),
                     }
                 }
-                FollowState::Connected(receiver) => match receiver.next_frame(cancellation).await {
-                    Ok(LogFrame::Line(mut line)) => {
-                        if self.overlap.accept(&line) {
-                            self.delivered += 1;
-                            line.seq = self.delivered;
-                            return Some(LogEvent::Line(line));
+                FollowState::Connected { receiver, heard } => {
+                    let frame = receiver.next_frame(cancellation).await;
+                    if matches!(frame, Ok(LogFrame::Line(_) | LogFrame::Gap { .. }))
+                        && !std::mem::replace(heard, true)
+                    {
+                        if self.attempt > 0 {
+                            self.queued.push_back(LogEvent::Reconnected);
                         }
+                        self.attempt = 0;
                     }
-                    Ok(LogFrame::Gap { dropped }) => return Some(LogEvent::Gap { dropped }),
-                    Ok(LogFrame::End {
-                        reason: LogEndKind::Error,
-                        code,
-                        ..
-                    }) if transient_end(&code) => self.back_off(),
-                    Ok(LogFrame::End {
-                        reason,
-                        code,
-                        message,
-                    }) => self.finish(reason, code, message),
-                    Err(LogDisconnect::AccessExpired) => self.state = FollowState::Connect,
-                    Err(LogDisconnect::Dropped) => self.back_off(),
-                    Err(LogDisconnect::Cancelled) => return None,
-                },
+                    match frame {
+                        Ok(LogFrame::Line(mut line)) => {
+                            if self.overlap.accept(&line) {
+                                self.delivered += 1;
+                                line.seq = self.delivered;
+                                self.queued.push_back(LogEvent::Line(line));
+                            }
+                        }
+                        Ok(LogFrame::Gap { dropped }) => {
+                            self.queued.push_back(LogEvent::Gap { dropped });
+                        }
+                        Ok(LogFrame::End {
+                            reason: LogEndKind::Error,
+                            code,
+                            ..
+                        }) if transient_end(&code) => self.back_off(),
+                        Ok(LogFrame::End {
+                            reason,
+                            code,
+                            message,
+                        }) => self.finish(reason, code, message),
+                        Err(LogDisconnect::AccessExpired) => self.state = FollowState::Connect,
+                        Err(LogDisconnect::Dropped) => self.back_off(),
+                        Err(LogDisconnect::Cancelled) => return None,
+                    }
+                }
             }
         }
     }

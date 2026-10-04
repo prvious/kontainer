@@ -2,12 +2,16 @@ import { keepPreviousData, skipToken, useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { useQueriesPaused } from "@/hooks/use-queries-paused";
-import { authenticatedInvoke } from "@/hooks/authenticated-invoke";
+import { authenticatedInvoke, type ReportCustodyError } from "@/hooks/authenticated-invoke";
 import { useStartOperation, type WithIdempotencyKey } from "@/hooks/use-operations";
 import type { ServiceDetailView, ServiceListView } from "@/types/services";
 import { DEFAULT_APP_SETTINGS } from "@/types/settings";
 
 export const servicesKey = (profileId: string) => ["services", profileId] as const;
+
+/** The service list query's function, for callers that fetch it imperatively too. */
+export const listServices = (profileId: string, report: ReportCustodyError) =>
+    authenticatedInvoke<ServiceListView>("list_services", profileId, { stack: null }, report);
 
 /** While the swarm has no quorum the list asks again every ten seconds. */
 export const QUORUM_RETRY_MS = 10_000;
@@ -21,7 +25,7 @@ export function useServices() {
     const interval = settings.data?.refreshInterval ?? DEFAULT_APP_SETTINGS.refreshInterval ?? 5000;
     return useQuery({
         queryKey: servicesKey(profileId),
-        queryFn: () => authenticatedInvoke<ServiceListView>("list_services", profileId, { stack: null }, reportInventoryCustodyError),
+        queryFn: () => listServices(profileId, reportInventoryCustodyError),
         enabled: Boolean(session) && !paused,
         refetchInterval: (query) => (query.state.status === "error" ? QUORUM_RETRY_MS : interval),
         retry: false,

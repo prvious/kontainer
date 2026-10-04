@@ -14,8 +14,8 @@ use std::{
 use async_trait::async_trait;
 use chrono::Utc;
 use kontainer_engine::{
-    EngineError, LogSource, ServiceLogLine, ServiceLogRequest, ServiceLogStream, ServiceSummary,
-    SwarmStatus,
+    EngineError, EngineErrorKind, EngineOperation, LogSource, ServiceLogLine, ServiceLogRequest,
+    ServiceLogStream, ServiceSummary, SwarmStatus,
 };
 use kontainer_stream_protocol::{LogEndReason, LogMessage, LogStreamKind, LogsOpen};
 use kontainer_stream_transport::{NativeStreamClient, StreamClientError, StreamLimits};
@@ -128,7 +128,10 @@ impl ManagerEngine for FakeManager {
         _: &CancellationToken,
     ) -> Result<ServiceLogStream, ManagerError> {
         if service_id != SERVICE {
-            return Err(ManagerError::NotFound);
+            // As Bollard does: the call succeeds and Docker's 404 is the stream's first item.
+            let not_found =
+                EngineError::new(EngineErrorKind::NotFound, EngineOperation::ReadServiceLogs);
+            return Ok(Box::pin(futures_util::stream::iter([Err(not_found)])));
         }
         self.opens
             .lock()
@@ -347,12 +350,14 @@ async fn postgres_log_streams_authenticate_follow_truncate_and_end() -> Result<(
             .send_frame(&open.into_frame(1), &CancellationToken::new())
             .await
             .unwrap();
+        // Docker's 404 arrives as a stream item, and the service isn't listed: a terminal end,
+        // not an outage the desktop would retry every second.
         let LogMessage::End(end) = next(&mut unknown).await.unwrap() else {
             panic!("an end");
         };
         assert_eq!(
             (end.reason, end.code.as_str()),
-            (LogEndReason::Error, "not_found")
+            (LogEndReason::ServiceRemoved, "service_removed")
         );
 
         fixture.finish().await;

@@ -1,8 +1,9 @@
 import { Command, CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { useServices } from "@/hooks/use-services";
+import type { ServiceView } from "@/types/services";
 
 /** G10 stream picker: every service, searchable; choosing one opens its tab. */
-export function StreamPicker({ open, onOpenChange, onPick }: { open: boolean; onOpenChange: (open: boolean) => void; onPick: (serviceId: string) => void }) {
+export function StreamPicker({ open, onOpenChange, onPick }: { open: boolean; onOpenChange: (open: boolean) => void; onPick: (service: ServiceView) => void }) {
     const services = useServices();
     const items = services.data?.items ?? [];
     return (
@@ -19,7 +20,7 @@ export function StreamPicker({ open, onOpenChange, onPick }: { open: boolean; on
                                 key={service.id}
                                 value={`${service.name} ${service.id}`}
                                 onSelect={() => {
-                                    onPick(service.id);
+                                    onPick(service);
                                     onOpenChange(false);
                                 }}
                                 className='font-mono text-xs'

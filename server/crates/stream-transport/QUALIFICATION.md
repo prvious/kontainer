@@ -16,6 +16,11 @@ used by the tests exist only in the loopback fixture.
 - Maximum outbound queue: 32 frames and 1 MiB total encoded bytes
 - Maximum concurrent sessions per configured server seam: 4
 - Shutdown grace: 2 seconds
+- Upgrade deadline: 15 seconds; an unanswered upgrade is a native-client
+  `TransportFailure`
+- Liveness: the server sends a WebSocket Ping every 20 seconds, and a native
+  client that receives no message at all for 45 seconds ends the read with
+  `ConnectionEnded`
 
 Fallible configuration may lower those values but cannot exceed compiled safety
 ceilings of 64 KiB per frame, 1,024 queued frames, 16 MiB queued bytes, or

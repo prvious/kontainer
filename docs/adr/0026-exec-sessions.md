@@ -1,6 +1,6 @@
 # 0026. Exec sessions: protocol, agent RPC, relay, and the terminal
 
-- Status: accepted (amended by 0030)
+- Status: accepted (amended by 0030, 0033)
 - Date: 2026-09-28
 - Spec: docs/build/16-exec.md
 

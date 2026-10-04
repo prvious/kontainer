@@ -376,7 +376,10 @@ async fn postgres_exec_relays_a_shell_both_ways_and_reports_its_exit() -> Result
             .unwrap();
         wait_for(&fixture.agent, 3).await;
         assert_eq!(fixture.agent.received()[2], AgentExecInput::Close);
-        events.send(AgentExecEvent::Exit { code: Some(0) })?;
+        events.send(AgentExecEvent::Exit {
+            code: Some(0),
+            still_running: false,
+        })?;
         let ExecMessage::Exit(exit) = next(&mut client).await.unwrap() else {
             panic!("an exit");
         };
@@ -388,6 +391,19 @@ async fn postgres_exec_relays_a_shell_both_ways_and_reports_its_exit() -> Result
                 reason: "stream complete".to_owned()
             })
         );
+
+        // A shell the agent found still running after the close is abandoned, not exited.
+        let mut left = fixture.open(&fixture.access, "manager").await;
+        opened(&fixture.agent).await;
+        fixture.agent.events().send(AgentExecEvent::Exit {
+            code: None,
+            still_running: true,
+        })?;
+        let ExecMessage::Exit(exit) = next(&mut left).await.unwrap() else {
+            panic!("an exit");
+        };
+        assert_eq!((exit.code, exit.reason.as_str()), (None, "abandoned"));
+        drop(left);
 
         // The agent's engine failure reads as the node's; an unknown node never reaches an agent.
         let mut failing = fixture.open(&fixture.access, "manager").await;

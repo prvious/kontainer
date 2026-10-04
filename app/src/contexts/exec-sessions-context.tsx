@@ -9,9 +9,16 @@ import { useSettings } from "@/hooks/use-settings";
 import { INITIAL_EXEC_SIZE, type ExecStreamEvent } from "@/types/exec";
 
 /**
+ * Keystrokes and resizes run one at a time, in order: unscoped mutations run concurrently, and
+ * two `exec_write` calls can reach Rust out of order. One tab takes typing at a time, so one
+ * queue for every tab costs nothing.
+ */
+const EXEC_INPUT_SCOPE = "exec-input";
+
+/**
  * The Exec tabs for this window (mounted in the authenticated layout, so shells survive leaving
- * `/exec`). Each session's Channel feeds its tab's buffer; Rust ends every session on logout and
- * window close.
+ * `/exec`). Each session's Channel feeds its tab's buffer; Rust ends every session on logout,
+ * window close, and reload.
  */
 export function ExecSessionsProvider({ children }: { children: ReactNode }) {
     const { session, reportInventoryCustodyError } = useAuth();
@@ -25,6 +32,7 @@ export function ExecSessionsProvider({ children }: { children: ReactNode }) {
 
     const { mutate: resizeSession } = useMutation({
         mutationFn: ({ sessionId, cols, rows }: { sessionId: string; cols: number; rows: number }) => invoke("exec_resize", { sessionId, cols, rows }),
+        scope: { id: EXEC_INPUT_SCOPE },
     });
     // The size each tab's terminal last measured. A terminal fits before its shell starts, so the
     // size is sent once the session is live as well as on every change after.
@@ -70,6 +78,7 @@ export function ExecSessionsProvider({ children }: { children: ReactNode }) {
     });
     const { mutate: writeSession } = useMutation({
         mutationFn: ({ sessionId, data }: { sessionId: string; data: string }) => invoke("exec_write", { sessionId, data }),
+        scope: { id: EXEC_INPUT_SCOPE },
     });
 
     // The actions read tabs through `live`, so they keep their identity as tabs change.
@@ -79,6 +88,11 @@ export function ExecSessionsProvider({ children }: { children: ReactNode }) {
             setTabs((current) =>
                 current.some((entry) => entry.id === tab.id) ? current.map((entry) => (entry.id === tab.id ? tab : entry)) : [...current, tab],
             );
+        };
+        // A session that answered but hasn't ended, started or not: closing the tab must end its shell.
+        const closeIfOpen = (tab: ExecTab | undefined) => {
+            const status = tab?.buffer.getSnapshot().status;
+            if (tab?.sessionId && status !== "ended" && status !== "failed") closeSession(tab.sessionId);
         };
         const activeSession = (id: string) => {
             const tab = live.current.get(id);
@@ -102,7 +116,7 @@ export function ExecSessionsProvider({ children }: { children: ReactNode }) {
                 const tab = live.current.get(id);
                 live.current.delete(id);
                 sizes.current.delete(id);
-                if (tab?.sessionId && tab.buffer.getSnapshot().status === "active") closeSession(tab.sessionId);
+                closeIfOpen(tab);
                 const remaining = [...live.current.keys()];
                 setTabs((current) => current.filter((entry) => entry.id !== id));
                 setActiveId((active) => (active === id ? (remaining[remaining.length - 1] ?? null) : active));
@@ -110,7 +124,7 @@ export function ExecSessionsProvider({ children }: { children: ReactNode }) {
             reconnect(id, shell) {
                 const tab = live.current.get(id);
                 if (!tab) return;
-                if (tab.sessionId && tab.buffer.getSnapshot().status === "active") closeSession(tab.sessionId);
+                closeIfOpen(tab);
                 const next: ExecTab = { ...tab, sessionId: null, buffer: new ExecBuffer(), shell: shell === undefined ? tab.shell : shell };
                 put(next);
                 openSession(next);

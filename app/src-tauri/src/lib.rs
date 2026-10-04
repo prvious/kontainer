@@ -1,7 +1,18 @@
 mod actions;
 mod session;
 
-use tauri::Manager;
+use tauri::{webview::PageLoadEvent, Manager, Runtime};
+
+/// Log streams and shells belong to the page that opened them: a window close or a reload
+/// leaves nobody reading them, so they end and free their server slots.
+fn end_page_streams<R: Runtime>(app: &impl Manager<R>) {
+    if let Some(streams) = app.try_state::<session::log_streams::LogStreams>() {
+        streams.cancel_all();
+    }
+    if let Some(shells) = app.try_state::<session::exec_sessions::ExecSessions>() {
+        shells.cancel_all();
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -20,14 +31,13 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            // Log streams and shells belong to the window that opened them.
             if let tauri::WindowEvent::Destroyed = event {
-                window
-                    .state::<session::log_streams::LogStreams>()
-                    .cancel_all();
-                window
-                    .state::<session::exec_sessions::ExecSessions>()
-                    .cancel_all();
+                end_page_streams(window);
+            }
+        })
+        .on_page_load(|webview, payload| {
+            if payload.event() == PageLoadEvent::Started {
+                end_page_streams(webview);
             }
         })
         .invoke_handler(tauri::generate_handler![

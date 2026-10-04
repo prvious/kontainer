@@ -15,14 +15,25 @@ function TabHandle({ tab, onClose }: { tab: ExecTab; onClose: () => void }) {
         <div className='flex h-9.5 items-center gap-2.5 border-r border-border px-4 has-[[data-active]]:border-b-2 has-[[data-active]]:border-b-primary'>
             <TabsTrigger
                 value={tab.id}
+                aria-keyshortcuts='Delete'
+                onKeyDown={(event) => {
+                    if (event.key === "Delete") onClose();
+                }}
                 className='h-9.5 flex-none gap-2 rounded-none border-0 px-0 font-mono text-2xs font-medium text-secondary-foreground data-active:text-sidebar-accent-foreground'
             >
                 <StatusDot tone={STATUS_TONE[snapshot.status]} data-testid={`exec-tab-dot-${tab.name}`} className='size-1.5' />
                 <SquareTerminal aria-hidden className='size-3.5 text-muted-foreground' />
                 {tab.name}
             </TabsTrigger>
+            {/* Out of the tab order: keyboard users close the focused tab with Delete. */}
             <LabelTooltip label={`Close ${tab.name}`}>
-                <button type='button' aria-label={`Close ${tab.name}`} onClick={onClose} className='rounded-sm text-muted-foreground hover:text-foreground'>
+                <button
+                    type='button'
+                    tabIndex={-1}
+                    aria-label={`Close ${tab.name}`}
+                    onClick={onClose}
+                    className='rounded-sm text-muted-foreground hover:text-foreground'
+                >
                     <X aria-hidden className='size-3' />
                 </button>
             </LabelTooltip>

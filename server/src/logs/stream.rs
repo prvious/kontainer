@@ -109,7 +109,13 @@ impl LogStream {
                             return;
                         }
                     }
-                    Some(Err(_)) => return frames.end_unavailable().await,
+                    // Docker answers an unknown service with a 404 as the stream's first item.
+                    Some(Err(_)) => {
+                        if self.service_present(&open.service_id).await == Some(false) {
+                            return frames.end_removed().await;
+                        }
+                        return frames.end_unavailable().await;
+                    }
                     None => {
                         if self.service_present(&open.service_id).await == Some(false) {
                             return frames.end_removed().await;

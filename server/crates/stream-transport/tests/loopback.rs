@@ -865,6 +865,113 @@ async fn a_per_connection_application_sees_the_bearer_sent_on_upgrade() {
     http_task.await.unwrap();
 }
 
+fn short_timers(ping: Duration, idle: Duration) -> StreamLimits {
+    StreamLimits::default()
+        .with_timers(Duration::from_millis(200), ping, idle)
+        .unwrap()
+}
+
+#[tokio::test]
+async fn an_upgrade_that_never_answers_fails_as_transient_within_the_deadline() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    // Accepts the TCP connection, then never answers the HTTP upgrade.
+    let holder = tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        time::sleep(Duration::from_secs(5)).await;
+        drop(socket);
+    });
+    let limits = short_timers(Duration::from_secs(20), Duration::from_secs(45));
+
+    let connected = time::timeout(
+        Duration::from_secs(2),
+        NativeStreamClient::connect_with_bearer(
+            &format!("ws://{address}/stream"),
+            Some("kta_fixture"),
+            limits,
+            &CancellationToken::new(),
+        ),
+    )
+    .await
+    .expect("the handshake deadline ends the connect");
+    assert_eq!(connected.err(), Some(StreamClientError::TransportFailure));
+    holder.abort();
+}
+
+#[tokio::test]
+async fn a_silent_peer_ends_the_connection_within_the_idle_timeout() {
+    let router = Router::new().route(
+        "/silent",
+        get(|websocket: WebSocketUpgrade| async move {
+            // Upgrades, then reads without ever sending: no frames, no Pings.
+            websocket
+                .protocols([WEBSOCKET_SUBPROTOCOL])
+                .on_upgrade(|mut socket| async move { while socket.next().await.is_some() {} })
+        }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let http_shutdown = CancellationToken::new();
+    let shutdown = http_shutdown.clone();
+    let http_task = tokio::spawn(async move {
+        axum::serve(listener, router)
+            .with_graceful_shutdown(shutdown.cancelled_owned())
+            .await
+            .unwrap();
+    });
+    let limits = short_timers(Duration::from_secs(20), Duration::from_millis(300));
+    let cancellation = CancellationToken::new();
+
+    let mut client =
+        NativeStreamClient::connect(&format!("ws://{address}/silent"), limits, &cancellation)
+            .await
+            .unwrap();
+    let ended = time::timeout(Duration::from_secs(2), client.receive_frame(&cancellation))
+        .await
+        .expect("the idle timeout ends the read");
+    assert_eq!(ended, Err(StreamClientError::ConnectionEnded));
+
+    let (_, mut receiver) =
+        NativeStreamClient::connect(&format!("ws://{address}/silent"), limits, &cancellation)
+            .await
+            .unwrap()
+            .split();
+    let ended = time::timeout(
+        Duration::from_secs(2),
+        receiver.receive_frame(&cancellation),
+    )
+    .await
+    .expect("the split reader has the same idle timeout");
+    assert_eq!(ended, Err(StreamClientError::ConnectionEnded));
+
+    drop((client, receiver));
+    http_shutdown.cancel();
+    http_task.await.unwrap();
+}
+
+#[tokio::test]
+async fn server_pings_keep_a_quiet_connection_open_past_the_idle_timeout() {
+    let ping = Duration::from_millis(100);
+    let idle = Duration::from_millis(300);
+    let running =
+        LoopbackServer::start(short_timers(ping, idle), Arc::new(SilentApplication)).await;
+    let cancellation = CancellationToken::new();
+    let mut client =
+        NativeStreamClient::connect(&running.endpoint, short_timers(ping, idle), &cancellation)
+            .await
+            .unwrap();
+
+    assert!(
+        time::timeout(Duration::from_secs(1), client.receive_frame(&cancellation))
+            .await
+            .is_err(),
+        "still waiting for a frame after three idle timeouts"
+    );
+    client.close().await;
+    wait_for_drained_session(&running.server).await;
+    running.finish().await;
+}
+
 #[tokio::test]
 async fn a_split_client_reads_and_writes_at_once_and_closes_cleanly() {
     let running =

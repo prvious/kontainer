@@ -1,18 +1,22 @@
 //! Log streams: the authenticated connect, the IPC event contract, line batching, and the
-//! registry's cancellation.
+//! registry's cancellation, with shells, on reload and window close.
 
 use std::{
+    collections::VecDeque,
     sync::{Arc, Mutex},
     time::Duration,
 };
 
 use kontainer_native_client::{
-    LogConnectError, LogConnectFuture, LogConnector, LogDisconnect, LogEndKind, LogFrame,
-    LogLineItem, LogOpenRequest, LogReceiver, LogStream, NativeClientError, ServiceId,
+    ExecConnection, LogConnectError, LogConnectFuture, LogConnector, LogDisconnect, LogEndKind,
+    LogFrame, LogLineItem, LogOpenRequest, LogReceiver, LogStream, NativeClientError, ServiceId,
 };
 use tokio_util::sync::CancellationToken;
 
-use super::fakes::{future_ms, issued, Harness, ScriptedLogReceiver};
+use super::fakes::{
+    future_ms, issued, Harness, RecordedExecInput, ScriptedExecEvents, ScriptedLogReceiver,
+};
+use crate::session::exec_sessions::{ExecEventSink, ExecSessions, ExecStreamEvent};
 use crate::session::log_streams::{LogEventSink, LogStreamEvent, LogStreams};
 use crate::session::manager::{log_connect_error, InventoryError};
 
@@ -245,6 +249,60 @@ async fn lines_cross_in_batches_and_other_events_flush_them_first() {
             ..
         }
     ));
+}
+
+/// `lib.rs` from `start` up to the next `end`.
+fn lib_section(start: &str, end: &str) -> &'static str {
+    let from = LIB_SOURCE
+        .find(start)
+        .unwrap_or_else(|| panic!("lib.rs has {start}"));
+    let section = &LIB_SOURCE[from..];
+    &section[..section.find(end).unwrap()]
+}
+
+#[tokio::test]
+async fn a_reload_or_window_close_ends_every_stream_and_shell() {
+    let page_load = lib_section(".on_page_load(", "})");
+    assert!(
+        page_load.contains("PageLoadEvent::Started")
+            && page_load.contains("end_page_streams(webview)")
+    );
+    let window = lib_section(".on_window_event(", "})");
+    assert!(
+        window.contains("WindowEvent::Destroyed") && window.contains("end_page_streams(window)")
+    );
+    let ends = lib_section("fn end_page_streams", "\n}\n");
+    assert!(ends.contains("LogStreams>()") && ends.contains("streams.cancel_all()"));
+    assert!(ends.contains("ExecSessions>()") && ends.contains("shells.cancel_all()"));
+
+    // What the hook does, against both registries with something open in each.
+    let streams = LogStreams::default();
+    let shells = ExecSessions::default();
+    streams.open(
+        Scripted(vec![vec![Ok(LogFrame::Line(line(1, "a")))]]),
+        request(),
+        Collected::default(),
+    );
+    shells.open(
+        ExecConnection {
+            input: Box::new(RecordedExecInput(Arc::default())),
+            events: Box::new(ScriptedExecEvents(VecDeque::new())),
+        },
+        DiscardedExec,
+    );
+    assert_eq!((streams.len(), shells.len()), (1, 1));
+    streams.cancel_all();
+    shells.cancel_all();
+    settle(&streams).await;
+    assert_eq!(shells.len(), 0);
+}
+
+struct DiscardedExec;
+
+impl ExecEventSink for DiscardedExec {
+    fn deliver(&self, _: ExecStreamEvent) -> bool {
+        true
+    }
 }
 
 #[tokio::test]

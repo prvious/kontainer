@@ -21,6 +21,9 @@ describe("exec stream IPC contract", () => {
         expect(endedText({ code: null, reason: "exited" }, null)).toBe("exited · exit code unknown");
         expect(endedText({ code: null, reason: "idle_timeout" }, null)).toBe("idle timeout");
         expect(endedText({ code: null, reason: "max_duration" }, null)).toBe("8 hour limit");
+        expect(endedText({ code: null, reason: "abandoned" }, null)).toBe("the shell may still be running in the container");
+        expect(endedText({ code: null, reason: "agent_restarted" }, null)).toBe("agent restarted");
+        expect(endedText({ code: null, reason: "" }, null)).toBe("reason unknown");
         expect(endedText(null, "session_expired")).toBe("session expired");
         expect(endedText(null, "slow_consumer")).toBe("the client fell behind");
         expect(endedText(null, null)).toBe("connection lost");

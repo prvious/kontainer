@@ -35,9 +35,11 @@ const STREAM = "018f2e34-0000-7000-8000-00000000f001";
 
 type Channel = { onmessage: (message: unknown) => void };
 let channels: Channel[] = [];
+let serviceList = services.serviceList;
 
 function mockCommands() {
     channels = [];
+    serviceList = services.serviceList;
     vi.mocked(invoke).mockImplementation(async (command: string, args?: unknown) => {
         switch (command) {
             case "logs_open":
@@ -47,7 +49,7 @@ function mockCommands() {
             case "logs_retry_now":
                 return null;
             case "list_services":
-                return services.serviceList;
+                return serviceList;
             case "load_app_settings":
                 return { refreshInterval: 60_000 };
             case "controller_health":
@@ -127,12 +129,13 @@ describe("Logs page", () => {
         );
         expect(await screen.findByRole("tab", { name: new RegExp(web.name) })).toHaveAttribute("aria-selected", "true");
         await push(lines("level=info started", "WARN slow", "!panic: boom", "GET / 200"));
-        const view = screen.getByRole("rowgroup", { name: "Log lines" });
+        const view = screen.getByRole("table", { name: "Log lines" });
+        expect(within(view).getByRole("rowgroup")).toHaveAttribute("tabindex", "0");
         expect(within(view).getByText("level=info started")).toBeInTheDocument();
         expect(within(view).getByText("INFO")).toBeInTheDocument();
         expect(within(view).getByText("WARN")).toBeInTheDocument();
         expect(within(view).getByText("ERR")).toBeInTheDocument();
-        expect(within(view).getAllByRole("row")).toHaveLength(4);
+        expect(within(within(view).getByRole("rowgroup")).getAllByRole("row")).toHaveLength(4);
         await waitFor(() => expect(screen.getByText(/1 LOG STREAMS/)).toBeInTheDocument());
     });
 
@@ -140,7 +143,7 @@ describe("Logs page", () => {
         renderPage();
         await waitFor(() => expect(channels).toHaveLength(1));
         await push(lines("one", "two"));
-        const view = screen.getByRole("rowgroup", { name: "Log lines" });
+        const view = within(screen.getByRole("table", { name: "Log lines" })).getByRole("rowgroup");
         Object.defineProperties(view, {
             scrollHeight: { configurable: true, value: 2_000 },
             clientHeight: { configurable: true, value: 600 },
@@ -193,8 +196,11 @@ describe("Logs page", () => {
         await user.click(screen.getByRole("button", { name: /CLEAR FILTER/ }));
         expect(screen.getByRole("searchbox", { name: "Filter logs" })).toHaveValue("");
         await user.type(screen.getByRole("searchbox", { name: "Filter logs" }), "/health/");
+        // The replaced stream's late lines don't reach the new buffer.
+        await push(lines("GET /health 200 from the old stream"), 0);
         await push(lines("GET /health 200"), 1);
         expect(await screen.findByText("1 match")).toBeInTheDocument();
+        expect(screen.queryByText("GET /health 200 from the old stream")).not.toBeInTheDocument();
     });
 
     it("keeps a tab whose service was removed, explains it, and resumes from the last line", async () => {
@@ -217,6 +223,37 @@ describe("Logs page", () => {
         expect(invoke).toHaveBeenCalledWith("logs_close", { streamId: "018f2e34-0000-7000-8000-00000000f002" });
     });
 
+    it("resumes a redeployed service under its new id, by name", async () => {
+        renderPage();
+        await waitFor(() => expect(channels).toHaveLength(1));
+        await push(lines("before the redeploy"));
+        await push({ type: "ended", reason: "service_removed", code: "service_removed", message: "The service was removed." });
+        // Redeployed: same name, new id; the services cache still holds the old one.
+        const redeployed = "webappweb1111111111111111";
+        serviceList = {
+            ...services.serviceList,
+            items: services.serviceList.items.map((service) => (service.id === web.id ? { ...service, id: redeployed } : service)),
+        };
+        await userEvent.setup().click(await screen.findByRole("button", { name: /RESUME/ }));
+        await waitFor(() => expect(channels).toHaveLength(2));
+        const opens = vi.mocked(invoke).mock.calls.filter(([command]) => command === "logs_open");
+        expect(opens[1][1]).toMatchObject({ serviceId: redeployed });
+        expect(screen.getByRole("tab", { name: new RegExp(web.name) })).toBeInTheDocument();
+        expect(screen.getByText("before the redeploy")).toBeInTheDocument();
+    });
+
+    it("closes the focused tab with Delete; its close button stays out of the tab order", async () => {
+        renderPage();
+        const tab = await screen.findByRole("tab", { name: new RegExp(web.name) });
+        await waitFor(() => expect(screen.getByTestId(`log-tab-dot-${web.name}`)).toHaveAttribute("data-tone", "success"));
+        expect(tab).toHaveAttribute("aria-keyshortcuts", "Delete");
+        expect(screen.getByRole("button", { name: `Close ${web.name}` })).toHaveAttribute("tabindex", "-1");
+        act(() => tab.focus());
+        await userEvent.setup().keyboard("{Delete}");
+        expect(await screen.findByText("No log streams open")).toBeInTheDocument();
+        expect(invoke).toHaveBeenCalledWith("logs_close", { streamId: STREAM });
+    });
+
     it("opens more streams from the picker, side by side", async () => {
         renderPage("/logs");
         const user = userEvent.setup();
@@ -230,5 +267,12 @@ describe("Logs page", () => {
         await waitFor(() => expect(channels).toHaveLength(2));
         expect(screen.getAllByRole("tab")).toHaveLength(2);
         expect(screen.getByRole("tab", { name: new RegExp(other.name) })).toHaveAttribute("aria-selected", "true");
+
+        // A service that already has a tab gets it focused, not a second stream.
+        await user.click(screen.getByRole("button", { name: "New stream" }));
+        await user.click(await screen.findByRole("option", { name: new RegExp(web.name) }));
+        expect(screen.getByRole("tab", { name: new RegExp(web.name) })).toHaveAttribute("aria-selected", "true");
+        expect(screen.getAllByRole("tab")).toHaveLength(2);
+        expect(channels).toHaveLength(2);
     });
 });

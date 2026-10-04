@@ -191,6 +191,7 @@ impl ExecRelay {
                 .unwrap_or_default(),
         );
         tokio::pin!(expiry);
+        let mut started_exec_id = String::new();
         loop {
             let idle_at = activity.last() + timing.idle;
             tokio::select! {
@@ -239,6 +240,7 @@ impl ExecRelay {
                                 exec_id = %exec_id,
                                 shell = %shell,
                             );
+                            started_exec_id.clone_from(&exec_id);
                             frames.send(ExecMessage::Started(ExecStarted { exec_id, shell })).await
                         }
                         Some(AgentExecEvent::Output(bytes)) => {
@@ -252,11 +254,27 @@ impl ExecRelay {
                             }
                             sent
                         }
-                        Some(AgentExecEvent::Exit { code }) => {
+                        Some(AgentExecEvent::Exit { code, still_running }) => {
+                            let reason = if still_running {
+                                // Closing a TTY's input doesn't end its shell, and nothing stops
+                                // it (ADR 0033): say so, and leave a trail to find it by.
+                                tracing::info!(
+                                    target: AUDIT_TARGET,
+                                    event = "exec.abandoned",
+                                    principal = %principal_id,
+                                    session = %family_id,
+                                    node = %node_id,
+                                    container = %container_id,
+                                    exec_id = %started_exec_id,
+                                );
+                                ExitReason::Abandoned
+                            } else {
+                                ExitReason::Exited
+                            };
                             return frames
                                 .finish(ExecMessage::Exit(ExecExit {
                                     code,
-                                    reason: ExitReason::Exited.as_str().to_owned(),
+                                    reason: reason.as_str().to_owned(),
                                 }))
                                 .await;
                         }

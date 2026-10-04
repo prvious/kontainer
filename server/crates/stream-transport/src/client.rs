@@ -63,11 +63,17 @@ impl NativeStreamClient {
             .max_message_size(Some(limits.maximum_frame_bytes()))
             .max_frame_size(Some(limits.maximum_frame_bytes()));
 
-        let connection = connect_async_with_config(request, Some(configuration), false);
+        // A peer that accepts the connection but never answers the upgrade can't hold the caller.
+        let connection = time::timeout(
+            limits.handshake_deadline(),
+            connect_async_with_config(request, Some(configuration), false),
+        );
         let (socket, response) = tokio::select! {
             biased;
             () = cancellation.cancelled() => return Err(StreamClientError::Cancelled),
-            result = connection => result.map_err(map_connection_error)?,
+            result = connection => result
+                .map_err(|_| StreamClientError::TransportFailure)?
+                .map_err(map_connection_error)?,
         };
 
         let selected_protocol = response
@@ -114,7 +120,10 @@ impl NativeStreamClient {
                     self.close_with_handshake(StreamClose::CLIENT_CANCELLED).await;
                     return Err(StreamClientError::Cancelled);
                 }
-                message = self.socket.next() => message,
+                message = time::timeout(self.limits.idle_timeout(), self.socket.next()) => {
+                    // The server pings a quiet connection, so silence means it is gone.
+                    message.map_err(|_| StreamClientError::ConnectionEnded)?
+                }
             };
 
             match message {
@@ -263,7 +272,10 @@ impl NativeStreamReceiver {
             let message = tokio::select! {
                 biased;
                 () = cancellation.cancelled() => return Err(StreamClientError::Cancelled),
-                message = self.stream.next() => message,
+                message = time::timeout(self.limits.idle_timeout(), self.stream.next()) => {
+                    // The server pings a quiet connection, so silence means it is gone.
+                    message.map_err(|_| StreamClientError::ConnectionEnded)?
+                }
             };
             match message {
                 Some(Ok(Message::Binary(bytes))) => {

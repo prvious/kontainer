@@ -630,34 +630,21 @@ impl ContainerEngine for LocalDockerEngine {
             ));
         }
         let client = self.negotiate(cancellation).await?;
-        let reference = reference.to_owned();
-        let cancellation = cancellation.clone();
-        // The daemon stream borrows its client, so a task owns both and forwards typed events.
-        // It ends with the stream, when the receiver is dropped, or on cancellation.
-        let (sender, receiver) = tokio::sync::mpsc::channel(64);
-        tokio::spawn(async move {
-            let options = CreateImageOptionsBuilder::default()
-                .from_image(&reference)
-                .build();
-            let mut stream = client.create_image(Some(options), None, None);
-            loop {
-                let item = tokio::select! {
-                    biased;
-                    () = cancellation.cancelled() => break,
-                    item = stream.next() => item,
-                };
-                let Some(item) = item else { break };
-                let event = pull_event(item);
-                let failed = matches!(event, PullEvent::Failed(_));
-                if sender.send(event).await.is_err() || failed {
-                    break;
-                }
-            }
-        });
-        Ok(Box::pin(futures_util::stream::unfold(
-            receiver,
-            |mut receiver| async move { receiver.recv().await.map(|event| (event, receiver)) },
-        )))
+        let options = CreateImageOptionsBuilder::default()
+            .from_image(reference)
+            .build();
+        // The daemon stream owns its request, so the caller polls it directly: dropping the
+        // stream ends the pull's connection, as does cancellation. It ends after a failure.
+        let events = client
+            .create_image(Some(options), None, None)
+            .map(pull_event)
+            .scan(false, |failed, event| {
+                let next = (!*failed).then_some(event);
+                *failed = matches!(next, Some(PullEvent::Failed(_)));
+                std::future::ready(next)
+            })
+            .take_until(cancellation.clone().cancelled_owned());
+        Ok(Box::pin(events))
     }
 
     async fn disk_usage(&self, cancellation: &CancellationToken) -> Result<DiskUsage, EngineError> {
@@ -995,42 +982,30 @@ impl ContainerEngine for LocalDockerEngine {
             .since(since)
             .tail(&request.tail.to_string())
             .build();
-        let service_id = service_id.to_owned();
-        let cancellation = cancellation.clone();
-        // The daemon stream borrows its client, so a task owns both and forwards typed lines.
-        // It ends with the stream, when the receiver is dropped, or on cancellation.
-        let (sender, receiver) = tokio::sync::mpsc::channel(256);
-        tokio::spawn(async move {
-            let mut stream = client.service_logs(&service_id, Some(options));
-            loop {
-                let item = tokio::select! {
-                    biased;
-                    () = cancellation.cancelled() => break,
-                    () = sender.closed() => break,
-                    item = stream.next() => item,
-                };
-                let line = match item {
-                    None => break,
-                    Some(Ok(LogOutput::StdOut { message } | LogOutput::Console { message })) => {
+        // The daemon stream owns its request, so the caller polls it directly: dropping the
+        // stream ends the follow, as does cancellation. Docker's 404 for an unknown service is
+        // its first item; the stream ends after any error.
+        let lines = client
+            .service_logs(service_id, Some(options))
+            .filter_map(|item| {
+                std::future::ready(match item {
+                    Ok(LogOutput::StdOut { message } | LogOutput::Console { message }) => {
                         parse_service_log_line(LogSource::Stdout, &message).map(Ok)
                     }
-                    Some(Ok(LogOutput::StdErr { message })) => {
+                    Ok(LogOutput::StdErr { message }) => {
                         parse_service_log_line(LogSource::Stderr, &message).map(Ok)
                     }
-                    Some(Ok(LogOutput::StdIn { .. })) => None,
-                    Some(Err(error)) => Some(Err(EngineError::from_bollard(OPERATION, &error))),
-                };
-                let Some(line) = line else { continue };
-                let failed = line.is_err();
-                if sender.send(line).await.is_err() || failed {
-                    break;
-                }
-            }
-        });
-        Ok(Box::pin(futures_util::stream::unfold(
-            receiver,
-            |mut receiver| async move { receiver.recv().await.map(|line| (line, receiver)) },
-        )))
+                    Ok(LogOutput::StdIn { .. }) => None,
+                    Err(error) => Some(Err(EngineError::from_bollard(OPERATION, &error))),
+                })
+            })
+            .scan(false, |failed, line: Result<_, EngineError>| {
+                let next = (!*failed).then_some(line);
+                *failed = matches!(next, Some(Err(_)));
+                std::future::ready(next)
+            })
+            .take_until(cancellation.clone().cancelled_owned());
+        Ok(Box::pin(lines))
     }
 
     async fn list_swarm_nodes(

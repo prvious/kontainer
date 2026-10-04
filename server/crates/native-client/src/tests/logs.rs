@@ -63,21 +63,59 @@ fn reconnects_back_off_from_one_second_doubling_to_thirty() {
 }
 
 #[test]
-fn the_overlap_drops_repeats_and_lines_older_than_the_window() {
+fn the_overlap_drops_only_repeats() {
     let mut overlap = Overlap::default();
     assert!(overlap.accept(&item(10_000, "a")));
     assert!(overlap.accept(&item(10_500, "b")));
     assert!(!overlap.accept(&item(10_500, "b")), "the same line again");
     assert!(overlap.accept(&item(10_500, "c")), "same time, other text");
     assert!(
-        !overlap.accept(&item(9_400, "old")),
-        "older than one second before the last"
-    );
-    assert!(
         overlap.accept(&item(9_600, "late")),
         "inside the window and new"
     );
     assert_eq!(overlap.last_ts(), Some(10_500));
+}
+
+#[test]
+fn the_overlap_keeps_an_interleaved_replicas_older_history() {
+    let replica = |task: &str, ts: i64, text: &str| LogLineItem {
+        task_id: task.to_owned(),
+        ..item(ts, text)
+    };
+    let mut overlap = Overlap::default();
+    assert!(overlap.accept(&replica("a", 20_000, "a newest")));
+    for (ts, text) in [
+        (5_000, "b first"),
+        (12_000, "b second"),
+        (18_900, "b third"),
+    ] {
+        assert!(
+            overlap.accept(&replica("b", ts, text)),
+            "{text} is older than a's line but still new"
+        );
+    }
+    assert!(overlap.accept(&replica("a", 20_000, "b newest")));
+    assert!(
+        overlap.accept(&replica("b", 20_000, "a newest")),
+        "the same text at the same time from another task"
+    );
+    assert!(!overlap.accept(&replica("a", 20_000, "a newest")));
+    assert_eq!(overlap.last_ts(), Some(20_000));
+}
+
+#[test]
+fn the_overlap_tells_stdout_from_stderr() {
+    let mut overlap = Overlap::default();
+    assert!(overlap.accept(&item(10_000, "same")));
+    let stderr = LogLineItem {
+        stream: LogStream::Stderr,
+        ..item(10_000, "same")
+    };
+    assert!(
+        overlap.accept(&stderr),
+        "same text and millisecond on stderr"
+    );
+    assert!(!overlap.accept(&stderr), "but only once");
 }
 
 type Script = Arc<Mutex<VecDeque<Result<Vec<Result<LogFrame, LogDisconnect>>, LogConnectError>>>>;
@@ -227,7 +265,6 @@ async fn transient_ends_retry_expiry_reconnects_at_once_and_terminal_ends_stop()
                 attempt: 1,
                 next_retry_ms: 1_000
             },
-            LogEvent::Reconnected,
             LogEvent::Ended {
                 reason: LogEndKind::Error,
                 code: "not_found".to_owned(),
@@ -249,6 +286,50 @@ async fn transient_ends_retry_expiry_reconnects_at_once_and_terminal_ends_stop()
             code: "limit_reached".to_owned(),
             message: "The log stream could not be opened.".to_owned(),
         }]
+    );
+}
+
+#[tokio::test]
+async fn a_stream_that_ends_before_its_first_frame_keeps_backing_off() {
+    let unavailable = || {
+        Ok(LogFrame::End {
+            reason: LogEndKind::Error,
+            code: "manager_unavailable".to_owned(),
+            message: String::new(),
+        })
+    };
+    let (mut follower, _) = follower(vec![
+        Ok(vec![Err(LogDisconnect::Dropped)]),
+        Ok(vec![unavailable()]),
+        Ok(vec![Err(LogDisconnect::Dropped)]),
+        Ok(vec![Ok(LogFrame::Line(item(10_000, "a"))), unavailable()]),
+        Ok(vec![Ok(LogFrame::Gap { dropped: 2 }), unavailable()]),
+    ]);
+    let reconnecting = |attempt: u32, next_retry_ms: u64| LogEvent::Reconnecting {
+        attempt,
+        next_retry_ms,
+    };
+    assert_eq!(
+        drain(&mut follower).await,
+        vec![
+            reconnecting(1, 1_000),
+            reconnecting(2, 2_000),
+            reconnecting(3, 4_000),
+            LogEvent::Reconnected,
+            LogEvent::Line(LogLineItem {
+                seq: 1,
+                ..item(10_000, "a")
+            }),
+            reconnecting(1, 1_000),
+            LogEvent::Reconnected,
+            LogEvent::Gap { dropped: 2 },
+            reconnecting(1, 1_000),
+            LogEvent::Ended {
+                reason: LogEndKind::Error,
+                code: "script_ended".to_owned(),
+                message: "The log stream could not be opened.".to_owned(),
+            },
+        ]
     );
 }
 

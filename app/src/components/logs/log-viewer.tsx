@@ -81,31 +81,40 @@ export function LogViewer({ snapshot, rows, wrap }: { snapshot: LogBufferSnapsho
     const fresh = following ? 0 : snapshot.received - pausedAt;
     return (
         <div className='relative flex min-h-0 flex-1 flex-col'>
-            <div
-                role='row'
-                className='flex h-9 shrink-0 items-center gap-5 border-b border-border bg-secondary px-4 font-mono text-3xs font-bold tracking-[1.1px] text-muted-foreground'
-            >
-                <span role='columnheader' className='w-24'>
-                    TIMESTAMP
-                </span>
-                <span role='columnheader' className='w-14'>
-                    LEVEL
-                </span>
-                <span role='columnheader'>MESSAGE</span>
-            </div>
-            <div ref={scroller} role='rowgroup' aria-label='Log lines' onScroll={onScroll} className='min-h-0 flex-1 overflow-y-auto'>
-                <div className='relative w-full' style={{ height: virtualizer.getTotalSize() }}>
-                    {virtualizer.getVirtualItems().map((item) => (
-                        <div
-                            key={item.key}
-                            data-index={item.index}
-                            ref={virtualizer.measureElement}
-                            className='absolute top-0 left-0 w-full'
-                            style={{ transform: `translateY(${item.start}px)` }}
-                        >
-                            <Row row={rows[item.index]} wrap={wrap} />
-                        </div>
-                    ))}
+            <div role='table' aria-label='Log lines' className='flex min-h-0 flex-1 flex-col'>
+                <div
+                    role='row'
+                    className='flex h-9 shrink-0 items-center gap-5 border-b border-border bg-secondary px-4 font-mono text-3xs font-bold tracking-[1.1px] text-muted-foreground'
+                >
+                    <span role='columnheader' className='w-24'>
+                        TIMESTAMP
+                    </span>
+                    <span role='columnheader' className='w-14'>
+                        LEVEL
+                    </span>
+                    <span role='columnheader'>MESSAGE</span>
+                </div>
+                {/* Focusable so the scrollback scrolls from the keyboard. */}
+                <div
+                    ref={scroller}
+                    role='rowgroup'
+                    tabIndex={0}
+                    onScroll={onScroll}
+                    className='min-h-0 flex-1 overflow-y-auto outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset'
+                >
+                    <div className='relative w-full' style={{ height: virtualizer.getTotalSize() }}>
+                        {virtualizer.getVirtualItems().map((item) => (
+                            <div
+                                key={item.key}
+                                data-index={item.index}
+                                ref={virtualizer.measureElement}
+                                className='absolute top-0 left-0 w-full'
+                                style={{ transform: `translateY(${item.start}px)` }}
+                            >
+                                <Row row={rows[item.index]} wrap={wrap} />
+                            </div>
+                        ))}
+                    </div>
                 </div>
             </div>
             {!following && (

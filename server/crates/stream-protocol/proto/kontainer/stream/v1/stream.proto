@@ -107,7 +107,8 @@ message ExecOutput {
 }
 
 // `code` is absent when the exit status is unknown. `reason` says why the session ended:
-// `exited`, `idle_timeout`, `max_duration`, or `connection_lost`.
+// `exited`, `idle_timeout`, `max_duration`, `connection_lost`, or `abandoned` (the session
+// closed while the shell was still running, and it was left running).
 message ExecExit {
   optional int64 code = 1;
   string reason = 2;

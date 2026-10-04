@@ -370,6 +370,9 @@ async fn write_loop(
     mut signal: watch::Receiver<SessionSignal>,
     server: StreamServer,
 ) {
+    // A quiet connection still carries a Ping, so the client can tell quiet from dead.
+    let every = server.inner.limits.ping_interval();
+    let mut ping = time::interval_at(time::Instant::now() + every, every);
     loop {
         tokio::select! {
             biased;
@@ -419,6 +422,11 @@ async fn write_loop(
                 }
                 None => return,
             },
+            _ = ping.tick() => {
+                if sink.send(Message::Ping(axum::body::Bytes::new())).await.is_err() {
+                    return;
+                }
+            }
         }
     }
 }

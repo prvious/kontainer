@@ -247,6 +247,48 @@ describe("Exec page", () => {
         expect(screen.getByRole("separator")).toHaveTextContent("exit code unknown");
     });
 
+    it("says the shell may still be running when the session gave up on it", async () => {
+        renderPage();
+        await waitFor(() => expect(channels).toHaveLength(1));
+        await push({ type: "started", shell: "/bin/sh" });
+        await push({ type: "exit", code: null, reason: "abandoned" });
+        expect(await screen.findByText("Session ended — the shell may still be running in the container")).toBeInTheDocument();
+    });
+
+    it("ends a shell whose tab closes after the open answered but before it started", async () => {
+        renderPage();
+        const tab = await screen.findByRole("tab", { name: new RegExp(web.name) });
+        await waitFor(() => expect(channels).toHaveLength(1));
+        // Let the open's answer land; no `started` event comes.
+        await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+        expect(tab).toHaveAttribute("aria-keyshortcuts", "Delete");
+        expect(screen.getByRole("button", { name: `Close ${web.name}` })).toHaveAttribute("tabindex", "-1");
+        act(() => tab.focus());
+        await userEvent.setup().keyboard("{Delete}");
+        expect(await screen.findByText("No shells open")).toBeInTheDocument();
+        expect(invoke).toHaveBeenCalledWith("exec_close", { sessionId: sessionId(1) });
+    });
+
+    it("sends keystrokes one at a time, in the order they were typed", async () => {
+        const answers: (() => void)[] = [];
+        mockCommands({ exec_write: () => new Promise((resolve) => answers.push(() => resolve(null))) });
+        renderPage();
+        await waitFor(() => expect(channels).toHaveLength(1));
+        await push({ type: "started", shell: "/bin/sh" });
+        await waitFor(() => expect(terminals).toHaveLength(1));
+        const [terminal] = terminals;
+        await act(async () => {
+            terminal.type("l");
+            terminal.type("s");
+        });
+        await waitFor(() => expect(calls("exec_write")).toHaveLength(1));
+        await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+        expect(calls("exec_write")).toHaveLength(1);
+        await act(async () => answers[0]());
+        await waitFor(() => expect(calls("exec_write")).toHaveLength(2));
+        expect(calls("exec_write").map(([, args]) => (args as { data: string }).data)).toEqual(["l", "s"]);
+    });
+
     it("starts a stopped container and then opens the shell, or goes to its logs", async () => {
         const stopped = { ...web, state: "exited" };
         mockCommands({

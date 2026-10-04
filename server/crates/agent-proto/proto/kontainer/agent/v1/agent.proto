@@ -348,6 +348,9 @@ message ExecStartedEvent {
 
 message ExecExitEvent {
   optional int64 code = 1;
+  // The process was still running when the session ended: closing a TTY's input doesn't end
+  // it, and the agent leaves it running. `code` is then absent.
+  bool still_running = 2;
 }
 
 message ExecErrorEvent {

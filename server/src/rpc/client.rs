@@ -876,9 +876,11 @@ pub enum AgentExecEvent {
         shell: String,
     },
     Output(Vec<u8>),
-    /// `None` when the agent doesn't know the exit status.
+    /// `None` when the agent doesn't know the exit status. `still_running` when the session
+    /// ended but the process didn't: the agent left it running.
     Exit {
         code: Option<i64>,
+        still_running: bool,
     },
     Error {
         code: String,
@@ -910,7 +912,10 @@ fn exec_event(frame: exec_server_frame::Frame) -> AgentExecEvent {
             shell: bounded(started.shell, 256),
         },
         exec_server_frame::Frame::Output(bytes) => AgentExecEvent::Output(bytes),
-        exec_server_frame::Frame::Exit(exit) => AgentExecEvent::Exit { code: exit.code },
+        exec_server_frame::Frame::Exit(exit) => AgentExecEvent::Exit {
+            code: exit.code,
+            still_running: exit.still_running,
+        },
         exec_server_frame::Frame::Error(error) => AgentExecEvent::Error {
             code: bounded(error.code, 64),
             message: bounded(error.message, MAX_EXEC_TEXT),
