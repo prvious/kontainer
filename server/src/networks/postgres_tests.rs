@@ -121,6 +121,10 @@ impl ManagerEngine for FakeManager {
         _: &CancellationToken,
     ) -> Result<String, ManagerError> {
         self.created.lock().unwrap().push(network.clone());
+        self.networks
+            .lock()
+            .unwrap()
+            .push(swarm_network('n', &network.name));
         Ok(id('n'))
     }
 
@@ -130,7 +134,45 @@ impl ManagerEngine for FakeManager {
         _: &CancellationToken,
     ) -> Result<(), ManagerError> {
         self.removed.lock().unwrap().push(network.to_owned());
+        self.networks
+            .lock()
+            .unwrap()
+            .retain(|candidate| candidate.id != network);
         Ok(())
+    }
+}
+
+/// The manager engine of a controller on a worker: every call says it isn't a manager.
+#[derive(Debug)]
+struct WorkerHost;
+
+#[async_trait::async_trait]
+impl ManagerEngine for WorkerHost {
+    async fn list_networks(
+        &self,
+        _: &CancellationToken,
+    ) -> Result<Vec<NetworkSummary>, ManagerError> {
+        Err(ManagerError::NotAManager)
+    }
+
+    async fn inspect_network(
+        &self,
+        _: &str,
+        _: &CancellationToken,
+    ) -> Result<NetworkDetail, ManagerError> {
+        Err(ManagerError::NotAManager)
+    }
+
+    async fn create_network(
+        &self,
+        _: &NetworkCreate,
+        _: &CancellationToken,
+    ) -> Result<String, ManagerError> {
+        Err(ManagerError::NotAManager)
+    }
+
+    async fn remove_network(&self, _: &str, _: &CancellationToken) -> Result<(), ManagerError> {
+        Err(ManagerError::NotAManager)
     }
 }
 
@@ -201,6 +243,11 @@ impl AgentClient for FakeAgent {
         network: &AgentNetworkCreate,
         _: &CancellationToken,
     ) -> Result<String, AgentClientError> {
+        // Another request created it after admission: Docker's 409 reaches the controller as
+        // `container_running`.
+        if network.name == "raced-net" {
+            return Err(AgentClientError::ContainerRunning);
+        }
         self.created.lock().unwrap().push(network.clone());
         Ok(id('m'))
     }
@@ -525,6 +572,15 @@ async fn postgres_network_creation_validates_and_runs_on_the_manager_or_the_node
         let manager = fixture.manager.as_ref().unwrap();
         let made = manager.created.lock().unwrap()[0].clone();
         assert_eq!((made.driver.as_str(), made.attachable, made.subnet.as_deref()), ("overlay", true, Some("10.0.9.0/24")));
+        // A retry whose response was lost replays, though the name is taken by now; a new key is
+        // refused, and the same key with another body is a conflict.
+        let (status, replay) = send(&fixture, "POST", "/api/v1/networks", Some("018f2e34-0000-7000-8000-000000000502"), &overlay).await?;
+        assert_eq!((status, &replay["operationId"], &replay["replayed"]), (StatusCode::ACCEPTED, &admitted["operationId"], &serde_json::json!(true)));
+        let (status, error) = send(&fixture, "POST", "/api/v1/networks", Some("018f2e34-0000-7000-8000-000000000504"), &overlay).await?;
+        assert_eq!((status, error["fields"]["name"].as_str()), (StatusCode::BAD_REQUEST, Some("taken")));
+        let other = serde_json::json!({"name": "app-network", "driver": "overlay"}).to_string();
+        let (status, error) = send(&fixture, "POST", "/api/v1/networks", Some("018f2e34-0000-7000-8000-000000000502"), &other).await?;
+        assert_eq!((status, error["error"].as_str()), (StatusCode::CONFLICT, Some("idempotency_conflict")));
 
         let bridge = serde_json::json!({"name": "local-net", "driver": "bridge", "nodeId": "worker-2", "attachable": true}).to_string();
         let (_, admitted) = send(&fixture, "POST", "/api/v1/networks", Some("018f2e34-0000-7000-8000-000000000503"), &bridge).await?;
@@ -532,6 +588,15 @@ async fn postgres_network_creation_validates_and_runs_on_the_manager_or_the_node
         assert_eq!(created.operation.state, OperationState::Succeeded);
         assert_eq!(fixture.directory.0["worker-2"].created.lock().unwrap()[0].name, "local-net");
         assert_eq!(created.progress.unwrap()["nodeId"], "worker-2");
+
+        // Created on the node after admission checked the name: Docker's 409 reads as such.
+        let raced = serde_json::json!({"name": "raced-net", "driver": "bridge", "nodeId": "worker-2"}).to_string();
+        let (_, admitted) = send(&fixture, "POST", "/api/v1/networks", Some("018f2e34-0000-7000-8000-000000000505"), &raced).await?;
+        let failed = run(&fixture, admitted["operationId"].as_str().unwrap()).await?;
+        assert_eq!(
+            (failed.last_error_code.as_deref(), failed.error_message.as_deref()),
+            (Some("name_taken"), Some("worker-2 already has a network named raced-net."))
+        );
         Ok::<_, Box<dyn Error>>(())
     }
     .await;
@@ -568,6 +633,12 @@ async fn postgres_network_removal_refuses_builtins_and_attached_networks()
         let (_, admitted) = send(&fixture, "DELETE", &format!("/api/v1/networks/{}", id('e')), Some("018f2e34-0000-7000-8000-000000000513"), "").await?;
         assert_eq!(run(&fixture, admitted["operationId"].as_str().unwrap()).await?.operation.state, OperationState::Succeeded);
         assert_eq!(*manager.removed.lock().unwrap(), vec![id('e')]);
+        let (status, replay) = send(&fixture, "DELETE", &format!("/api/v1/networks/{}", id('e')), Some("018f2e34-0000-7000-8000-000000000513"), "").await?;
+        assert_eq!(
+            (status, &replay["operationId"], &replay["replayed"]),
+            (StatusCode::ACCEPTED, &admitted["operationId"], &serde_json::json!(true)),
+            "a retry whose response was lost replays, though the network is gone"
+        );
 
         let (_, admitted) = send(&fixture, "DELETE", &format!("/api/v1/networks/{}?node=worker-2", id('l')), Some("018f2e34-0000-7000-8000-000000000514"), "").await?;
         assert_eq!(run(&fixture, admitted["operationId"].as_str().unwrap()).await?.operation.state, OperationState::Succeeded);
@@ -591,45 +662,56 @@ async fn postgres_without_a_manager_swarm_changes_answer_not_a_manager()
     };
     let evidence = async {
         let fixture = fixture(&database.connection, false).await?;
-        let (_, body) = send(&fixture, "GET", "/api/v1/networks", None, "").await?;
-        assert_eq!(body["manager"], "not_a_manager");
-        let swarm: Vec<_> = body["items"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter(|item| item["scope"] == "swarm")
-            .map(|item| item["name"].as_str().unwrap())
-            .collect();
-        assert_eq!(
-            swarm,
-            vec!["ingress", "toolbox_kontainer"],
-            "swarm rows still come from the nodes"
-        );
-        let overlay = serde_json::json!({"name": "app-network", "driver": "overlay"}).to_string();
-        let (status, error) = send(
-            &fixture,
-            "POST",
-            "/api/v1/networks",
-            Some("018f2e34-0000-7000-8000-000000000520"),
-            &overlay,
-        )
-        .await?;
-        assert_eq!(
-            (status, error["error"].as_str()),
-            (StatusCode::SERVICE_UNAVAILABLE, Some("not_a_manager"))
-        );
-        let (status, error) = send(
-            &fixture,
-            "DELETE",
-            &format!("/api/v1/networks/{}", id('s')),
-            Some("018f2e34-0000-7000-8000-000000000521"),
-            "",
-        )
-        .await?;
-        assert_eq!(
-            (status, error["error"].as_str()),
-            (StatusCode::SERVICE_UNAVAILABLE, Some("not_a_manager"))
-        );
+        // No manager engine at all, then one on a host that says it isn't a manager.
+        for worker_hosted in [false, true] {
+            if worker_hosted {
+                fixture.context.shared_store.insert(SharedManagerEngine(
+                    Arc::new(WorkerHost) as Arc<dyn ManagerEngine>
+                ));
+            }
+            let (_, body) = send(&fixture, "GET", "/api/v1/networks", None, "").await?;
+            assert_eq!(body["manager"], "not_a_manager");
+            let swarm: Vec<_> = body["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|item| item["scope"] == "swarm")
+                .map(|item| item["name"].as_str().unwrap())
+                .collect();
+            assert_eq!(
+                swarm,
+                vec!["ingress", "toolbox_kontainer"],
+                "swarm rows still come from the nodes"
+            );
+            let overlay =
+                serde_json::json!({"name": "app-network", "driver": "overlay"}).to_string();
+            let (status, error) = send(
+                &fixture,
+                "POST",
+                "/api/v1/networks",
+                Some("018f2e34-0000-7000-8000-000000000520"),
+                &overlay,
+            )
+            .await?;
+            assert_eq!(
+                (status, error["error"].as_str()),
+                (StatusCode::SERVICE_UNAVAILABLE, Some("not_a_manager")),
+                "worker-hosted: {worker_hosted}"
+            );
+            let (status, error) = send(
+                &fixture,
+                "DELETE",
+                &format!("/api/v1/networks/{}", id('s')),
+                Some("018f2e34-0000-7000-8000-000000000521"),
+                "",
+            )
+            .await?;
+            assert_eq!(
+                (status, error["error"].as_str()),
+                (StatusCode::SERVICE_UNAVAILABLE, Some("not_a_manager")),
+                "worker-hosted: {worker_hosted}"
+            );
+        }
         Ok::<_, Box<dyn Error>>(())
     }
     .await;

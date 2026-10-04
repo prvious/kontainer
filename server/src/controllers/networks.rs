@@ -24,6 +24,7 @@ use utoipa::ToSchema;
 use super::{
     admission::{
         Admission, AdmittingRequestId, IdempotencyKey, admission_error, admit, field_error,
+        replay_existing,
     },
     images::all_members,
     nodes::json_no_store,
@@ -33,7 +34,7 @@ use crate::{
     networks::{
         actions::{
             inspect_network::{self, InspectNetworkError},
-            list_networks::{self, NetworkList},
+            list_networks::{self, ManagerStatus, NetworkList},
         },
         domain::{CreateNetworkPayload, NetworkRow, RemoveNetworkPayload},
     },
@@ -308,28 +309,10 @@ pub(crate) async fn create(
         return field_error("subnet", "invalid");
     }
     match (request.driver.as_str(), request.node_id.as_deref()) {
-        ("overlay", None) => {
-            if context.shared_store.get::<SharedManagerEngine>().is_none() {
-                return admission_error(StatusCode::SERVICE_UNAVAILABLE, "not_a_manager");
-            }
-        }
+        ("overlay", None) | ("bridge", Some(_)) => {}
         ("overlay", Some(_)) => return field_error("nodeId", "not_allowed"),
-        ("bridge", Some(node_id)) => match all_members(&context, &[node_id.to_owned()]).await {
-            Some(true) => {}
-            Some(false) => return field_error("nodeId", "invalid"),
-            None => {
-                return admission_error(StatusCode::SERVICE_UNAVAILABLE, "persistence_unavailable");
-            }
-        },
         ("bridge", None) => return field_error("nodeId", "required"),
         _ => return field_error("driver", "unsupported"),
-    }
-    let list = match current_list(&context).await {
-        Ok(list) => list,
-        Err(response) => return *response,
-    };
-    if list.items.iter().any(|row| row.name == request.name) {
-        return field_error("name", "taken");
     }
     let payload = CreateNetworkPayload {
         attachable: request.driver == "overlay" && request.attachable,
@@ -338,6 +321,39 @@ pub(crate) async fn create(
         node_id: request.node_id,
         subnet: request.subnet,
     };
+    let payload_value = serde_json::to_value(&payload).unwrap_or_default();
+    if let Some(replay) = replay_existing(
+        &context,
+        &principal,
+        "/networks",
+        &key,
+        OperationKind::NetworkCreate,
+        &payload_value,
+    )
+    .await
+    {
+        return replay;
+    }
+    if let Some(node_id) = payload.node_id.as_deref() {
+        match all_members(&context, &[node_id.to_owned()]).await {
+            Some(true) => {}
+            Some(false) => return field_error("nodeId", "invalid"),
+            None => {
+                return admission_error(StatusCode::SERVICE_UNAVAILABLE, "persistence_unavailable");
+            }
+        }
+    }
+    let list = match current_list(&context).await {
+        Ok(list) => list,
+        Err(response) => return *response,
+    };
+    // The list asked the manager, so this also refuses a host that is no longer one.
+    if payload.node_id.is_none() && list.manager == ManagerStatus::NotAManager {
+        return admission_error(StatusCode::SERVICE_UNAVAILABLE, "not_a_manager");
+    }
+    if list.items.iter().any(|row| row.name == payload.name) {
+        return field_error("name", "taken");
+    }
     admit(
         &context,
         Admission {
@@ -346,7 +362,7 @@ pub(crate) async fn create(
             request_id,
             scope: "/networks",
             kind: OperationKind::NetworkCreate,
-            payload: serde_json::to_value(payload).unwrap_or_default(),
+            payload: payload_value,
         },
     )
     .await
@@ -386,6 +402,19 @@ pub(crate) async fn remove(
         Ok(node) => node,
         Err(field) => return field_error(&field, "invalid"),
     };
+    let scope = format!("/networks/{network_id}");
+    if let Some(replay) = replay_existing(
+        &context,
+        &principal,
+        &scope,
+        &key,
+        OperationKind::NetworkRemove,
+        &serde_json::json!({ "networkId": network_id, "nodeId": node }),
+    )
+    .await
+    {
+        return replay;
+    }
     let list = match current_list(&context).await {
         Ok(list) => list,
         Err(response) => return *response,
@@ -402,10 +431,9 @@ pub(crate) async fn remove(
     if row.builtin {
         return admission_error(StatusCode::BAD_REQUEST, "builtin_network");
     }
-    if row.is_swarm() && context.shared_store.get::<SharedManagerEngine>().is_none() {
+    if row.is_swarm() && list.manager == ManagerStatus::NotAManager {
         return admission_error(StatusCode::SERVICE_UNAVAILABLE, "not_a_manager");
     }
-    let scope = format!("/networks/{network_id}");
     let payload = RemoveNetworkPayload {
         network_id,
         name: row.name,

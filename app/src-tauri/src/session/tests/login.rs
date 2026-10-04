@@ -3,6 +3,7 @@
 
 use std::sync::atomic::Ordering;
 
+use crate::session::controller::RedeemedSession;
 use crate::session::errors::LoginFailure;
 use crate::session::errors::SessionError;
 use crate::session::models::{
@@ -167,7 +168,7 @@ async fn different_pair_conflicts_without_overwriting_records() {
 }
 
 #[tokio::test]
-async fn conflicting_login_reports_cleanup_uncertain_when_revoke_fails() {
+async fn rejected_login_reports_cleanup_uncertain_when_revoke_fails() {
     let harness = Harness::new();
     let ready = harness.seed_ready_session();
     let before = crate::session::models::AnchorRecord {
@@ -186,11 +187,17 @@ async fn conflicting_login_reports_cleanup_uncertain_when_revoke_fails() {
         .script()
         .logout
         .push_back(Err(SessionError::ControllerUnavailable));
+    // The commit's anchor read fails after redemption, so the issued family
+    // must be revoked, and that revocation fails too.
+    harness
+        .vault
+        .fail_anchor_read_number
+        .store(2, Ordering::SeqCst);
     let error = harness
         .manager
         .login(login_input(ORIGIN))
         .await
-        .expect_err("conflict cleanup fails");
+        .expect_err("rejected commit cleanup fails");
     assert_eq!(error, SessionError::CleanupUncertain);
     assert_eq!(harness.vault.anchor(), Some(before));
 
@@ -671,7 +678,7 @@ async fn a_held_successor_blocks_login_until_committed() {
 }
 
 #[tokio::test]
-async fn a_different_pair_after_logout_still_conflicts() {
+async fn a_second_pair_commits_after_logout() {
     let harness = Harness::new();
     let anchor = harness.seed_ready_session();
     harness
@@ -685,23 +692,69 @@ async fn a_different_pair_after_logout_still_conflicts() {
         .script()
         .login
         .push_back(Ok(redeemed_for(9, OTHER_PRINCIPAL_ID)));
-    harness.controllers.script().logout.push_back(Ok(()));
 
-    // Single-profile custody keeps the retained identity: a different pair
-    // never overwrites it, even while no credential is held.
+    // A signed-out anchor holds no credential, so another pair starts a fresh
+    // profile at generation 0 instead of conflicting with the old one.
+    let view = harness
+        .manager
+        .login(login_input(ORIGIN))
+        .await
+        .expect("a second pair commits");
+    assert_eq!(view.principal_id, OTHER_PRINCIPAL_ID);
+    assert_ne!(view.profile_id, anchor.profile_id);
+    let committed = harness.vault.anchor().expect("anchor");
+    assert_eq!(committed.profile_id, view.profile_id);
+    assert_eq!(committed.principal_id, OTHER_PRINCIPAL_ID);
+    assert_eq!(committed.generation, 1);
+    assert_eq!(committed.state, AnchorState::Ready);
     assert_eq!(
         harness
-            .manager
-            .login(login_input(ORIGIN))
-            .await
-            .expect_err("conflict"),
-        SessionError::ProfileConflict
+            .vault
+            .profile(view.profile_id)
+            .expect("new record")
+            .generation,
+        1
+    );
+    assert_eq!(harness.count("logout"), 0, "nothing is revoked");
+}
+
+#[tokio::test]
+async fn signing_in_to_a_second_controller_after_logout_succeeds() {
+    let harness = Harness::new();
+    let first = harness.login_ok().await;
+    harness.controllers.script().logout.push_back(Ok(()));
+    harness.manager.logout().await.expect("logout");
+
+    harness
+        .controllers
+        .script()
+        .login
+        .push_back(Ok(RedeemedSession {
+            cluster_id: "other-cluster".to_owned(),
+            ..redeemed_for(2, OTHER_PRINCIPAL_ID)
+        }));
+    let second = harness
+        .manager
+        .login(login_input(OTHER_ORIGIN))
+        .await
+        .expect("second controller signs in");
+
+    assert_ne!(second.profile_id, first.profile_id);
+    assert_eq!(second.origin, OTHER_ORIGIN);
+    assert_eq!(second.cluster_id, "other-cluster");
+    let anchor = harness.vault.anchor().expect("anchor");
+    assert_eq!(anchor.profile_id, second.profile_id);
+    assert_eq!(anchor.origin, OTHER_ORIGIN);
+    assert_eq!(anchor.state, AnchorState::Ready);
+    assert_eq!(
+        harness.count("logout"),
+        1,
+        "only the first sign-out revokes"
     );
     assert_eq!(
-        harness.vault.anchor().expect("anchor").profile_id,
-        anchor.profile_id
+        harness.manager.restore().await.expect("restore"),
+        Some(second)
     );
-    assert_eq!(harness.count("logout"), 1);
 }
 
 #[tokio::test]

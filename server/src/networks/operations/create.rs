@@ -10,7 +10,7 @@ use crate::{
         domain::{DurableOperation, OperationKind},
         executor::{ExecutionContext, ExecutionFailure, OperationExecutor},
     },
-    rpc::{AgentContainerAction, AgentNetworkCreate},
+    rpc::{AgentClientError, AgentContainerAction, AgentNetworkCreate},
     swarm::engine::ManagerError,
 };
 
@@ -25,9 +25,8 @@ pub(crate) fn not_a_manager() -> ExecutionFailure {
 
 pub(crate) fn manager_failure(error: ManagerError) -> ExecutionFailure {
     match error {
-        ManagerError::NotFound => {
-            ExecutionFailure::new("not_found", "The network no longer exists.")
-        }
+        ManagerError::NotFound => ExecutionFailure::new("not_found", "It no longer exists."),
+        ManagerError::NotAManager => not_a_manager(),
         ManagerError::InvalidInput => {
             ExecutionFailure::new("invalid_request", "The manager refused the request.")
         }
@@ -87,7 +86,14 @@ impl OperationExecutor for CreateNetworkExecutor {
                 client
                     .create_network(&request, &context.cancellation)
                     .await
-                    .map_err(|error| action_failure(error, AgentContainerAction::Start))?
+                    .map_err(|error| match error {
+                        // Docker's 409 on create: the node already has a network by that name.
+                        AgentClientError::ContainerRunning => ExecutionFailure::new(
+                            "name_taken",
+                            format!("{node_id} already has a network named {}.", payload.name),
+                        ),
+                        error => action_failure(error, AgentContainerAction::Start),
+                    })?
             }
             _ => return Err(ExecutionFailure::invalid_payload()),
         };
@@ -96,5 +102,25 @@ impl OperationExecutor for CreateNetworkExecutor {
             "name": payload.name,
             "nodeId": payload.node_id,
         })))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::manager_failure;
+    use crate::swarm::engine::ManagerError;
+
+    #[test]
+    fn manager_failures_name_no_object_kind_and_no_daemon_text() {
+        let failure = |error| {
+            let failure = manager_failure(error);
+            (failure.code, failure.message)
+        };
+        assert_eq!(
+            failure(ManagerError::NotFound),
+            ("not_found".to_owned(), "It no longer exists.".to_owned()),
+            "services and stacks share this mapping"
+        );
+        assert_eq!(failure(ManagerError::NotAManager).0, "not_a_manager");
     }
 }

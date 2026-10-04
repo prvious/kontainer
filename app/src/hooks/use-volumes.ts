@@ -4,7 +4,7 @@ import { useAppSettings } from "@/hooks/use-app-settings";
 import { useQueriesPaused } from "@/hooks/use-queries-paused";
 import { authenticatedInvoke } from "@/hooks/authenticated-invoke";
 import { useStartOperation, type WithIdempotencyKey } from "@/hooks/use-operations";
-import { volumeListFromIpc, volumeRowId, VOLUME_NAME } from "@/types/volumes";
+import { volumeRowId, VOLUME_NAME, type VolumeListView } from "@/types/volumes";
 import type { OperationView } from "@/types/operations";
 import { DEFAULT_APP_SETTINGS } from "@/types/settings";
 
@@ -18,7 +18,7 @@ export function useVolumes() {
     const profileId = session?.profileId ?? "";
     return useQuery({
         queryKey: volumesKey(profileId),
-        queryFn: () => authenticatedInvoke("list_volumes", profileId, { nodeId: null, name: null }, volumeListFromIpc, reportInventoryCustodyError),
+        queryFn: () => authenticatedInvoke<VolumeListView>("list_volumes", profileId, { nodeId: null, name: null }, reportInventoryCustodyError),
         enabled: Boolean(session) && !paused,
         refetchInterval: settings.data?.refreshInterval ?? DEFAULT_APP_SETTINGS.refreshInterval ?? 5000,
         retry: false,
@@ -38,7 +38,7 @@ export function useVolumeNameTaken(nodeId: string | null, name: string | null) {
         queryKey: [...volumesKey(profileId), "conflict", nodeId, name] as const,
         queryFn: ready
             ? async () => {
-                  const list = await authenticatedInvoke("list_volumes", profileId, { nodeId, name }, volumeListFromIpc, reportInventoryCustodyError);
+                  const list = await authenticatedInvoke<VolumeListView>("list_volumes", profileId, { nodeId, name }, reportInventoryCustodyError);
                   return list.items.length > 0;
               }
             : skipToken,

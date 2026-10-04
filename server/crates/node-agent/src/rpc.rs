@@ -659,7 +659,8 @@ fn engine_error_to_status(error: &EngineError) -> Status {
         | EngineErrorKind::NotModified
         | EngineErrorKind::Conflict
         | EngineErrorKind::QuorumUnavailable
-        | EngineErrorKind::VersionConflict => Status::unavailable("engine is unavailable"),
+        | EngineErrorKind::VersionConflict
+        | EngineErrorKind::NotAManager => Status::unavailable("engine is unavailable"),
     }
 }
 

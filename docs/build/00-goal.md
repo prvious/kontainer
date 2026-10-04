@@ -69,8 +69,9 @@ settings, all from the desktop app.
     cross into domain actions or DTOs; public DTOs, domain types, protobuf messages, persistence
     models, and IPC types stay distinct; mutations are durable operations polled by the client;
     logs and exec are binary WebSocket; private RPC stays mTLS.
-13. **Security floors that are never simplified:** validation at every HTTP and IPC boundary,
-    Argon2id for passwords, generic authentication errors, login throttling, no secrets or
+13. **Security floors that are never simplified:** validation at every HTTP and IPC boundary
+    (where data enters the more-trusted side; Rust's typed output to the WebView is not
+    re-validated, see ADR 0032), Argon2id for passwords, generic authentication errors, login throttling, no secrets or
     credentials in logs or in `session.json`, mTLS untouched, destructive actions behind typed
     confirmation.
 14. **Real cluster.** The docker-in-docker Swarm from spec 02 is yours to use and reset. Never run

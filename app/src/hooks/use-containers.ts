@@ -5,7 +5,7 @@ import { useQueriesPaused } from "@/hooks/use-queries-paused";
 import { authenticatedInvoke } from "@/hooks/authenticated-invoke";
 import type { OperationView } from "@/types/operations";
 import { useStartOperation, type WithIdempotencyKey } from "@/hooks/use-operations";
-import { containerListFromIpc, containerRowId, type ContainerAction, type ContainerListView, type ContainerView } from "@/types/containers";
+import { containerRowId, type ContainerAction, type ContainerListView, type ContainerView } from "@/types/containers";
 import { DEFAULT_APP_SETTINGS } from "@/types/settings";
 
 export const containersKey = (profileId: string) => ["containers", profileId] as const;
@@ -40,7 +40,7 @@ export function useContainers() {
     return useQuery({
         queryKey: containersKey(profileId),
         queryFn: async (): Promise<ContainerSnapshot> => {
-            const next = await authenticatedInvoke("list_containers", profileId, { nodeId: null }, containerListFromIpc, reportInventoryCustodyError);
+            const next = await authenticatedInvoke<ContainerListView>("list_containers", profileId, { nodeId: null }, reportInventoryCustodyError);
             return mergeSnapshots(queryClient.getQueryData<ContainerSnapshot>(containersKey(profileId)), next);
         },
         enabled: Boolean(session) && !paused,

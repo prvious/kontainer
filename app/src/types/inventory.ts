@@ -30,14 +30,6 @@ export function inventoryErrorCode(error: unknown): InventoryErrorCode {
     return INVENTORY_ERROR_CODES.find((code) => code === value) ?? "invalid_response";
 }
 
-/** An object with exactly `fields` as its keys, or `invalid_response`. */
-export function exactRecord(value: unknown, fields: string[]): Record<string, unknown> {
-    if (typeof value !== "object" || value === null || Array.isArray(value)) throw "invalid_response";
-    const data = value as Record<string, unknown>;
-    if (Object.keys(data).sort().join("|") !== fields.slice().sort().join("|")) throw "invalid_response";
-    return data;
-}
-
 /** True when the text holds a control character (C0 or DEL), which no label or path may carry. */
 export function hasControlCharacter(value: string): boolean {
     for (const character of value) {

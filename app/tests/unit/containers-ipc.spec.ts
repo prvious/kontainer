@@ -1,27 +1,13 @@
 import { describe, expect, it } from "vitest";
 import fixture from "../fixtures/containers-ipc.json";
-import { containerListFromIpc, containerRowId } from "@/types/containers";
+import { ipcFixture } from "../ipc-fixture";
+import { containerRowId, type ContainerListView } from "@/types/containers";
 import { mergeSnapshots } from "@/hooks/use-containers";
 import { applyFilters, parseContainerSearch, sortFor, sortingFor } from "@/components/containers/container-search";
 import { bytes, portsText, statusChip, uptime, uptimeText } from "@/components/containers/container-format";
 
-const list = () => containerListFromIpc(structuredClone(fixture.containerList));
-
-describe("containers IPC contract", () => {
-    it("parses the shared fixture exactly as Rust serializes it", () => {
-        expect(containerListFromIpc(fixture.containerList)).toEqual(fixture.containerList);
-    });
-
-    it("rejects extra fields, unknown states, bad ids, and negative figures", () => {
-        const [web] = fixture.containerList.items;
-        const withItem = (item: unknown) => ({ ...fixture.containerList, items: [item] });
-        expect(() => containerListFromIpc(withItem({ ...web, command: "secret-canary" }))).toThrow();
-        expect(() => containerListFromIpc(withItem({ ...web, state: "exploded" }))).toThrow();
-        expect(() => containerListFromIpc(withItem({ ...web, containerId: "A".repeat(64) }))).toThrow();
-        expect(() => containerListFromIpc(withItem({ ...web, cpuPercent: -1 }))).toThrow();
-        expect(() => containerListFromIpc({ ...fixture.containerList, nodes: [{ nodeId: "x", status: "exploded", message: null }] })).toThrow();
-    });
-});
+// The shared fixture must fit the view Rust's own tests serialize to it.
+const list = () => ipcFixture<ContainerListView>(fixture.containerList);
 
 describe("partial snapshots", () => {
     it("carries a silent node's last rows forward as stale and drops them once it answers", () => {

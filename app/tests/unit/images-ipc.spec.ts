@@ -1,27 +1,16 @@
 import { describe, expect, it } from "vitest";
 import fixture from "../fixtures/images-ipc.json";
-import { imageLabel, imageListFromIpc, imageName, nodePullsFromProgress, referenceProblem, shortImageId } from "@/types/images";
+import { ipcFixture } from "../ipc-fixture";
+import { imageLabel, imageName, nodePullsFromProgress, referenceProblem, shortImageId, type ImageListView } from "@/types/images";
 import { imageSortFor, imageSortingFor, parseImageSearch } from "@/components/images/image-search";
 import { containerUsesImage, diskUsageBytes } from "@/components/images/image-format";
 import { nodeProgress } from "@/components/images/pull-progress";
 import type { OperationView } from "@/types/operations";
 
-const list = () => imageListFromIpc(structuredClone(fixture.imageList));
+// The shared fixture must fit the view Rust's own tests serialize to it.
+const list = () => ipcFixture<ImageListView>(fixture.imageList);
 
 describe("images IPC contract", () => {
-    it("parses the shared fixture exactly as Rust serializes it", () => {
-        expect(imageListFromIpc(fixture.imageList)).toEqual(fixture.imageList);
-    });
-
-    it("rejects extra fields, bad ids, and images on no node", () => {
-        const [nginx] = fixture.imageList.items;
-        const withItem = (item: unknown) => ({ ...fixture.imageList, items: [item] });
-        expect(() => imageListFromIpc(withItem({ ...nginx, config: { Env: ["secret-canary"] } }))).toThrow();
-        expect(() => imageListFromIpc(withItem({ ...nginx, imageId: "sha256:AAAA" }))).toThrow();
-        expect(() => imageListFromIpc(withItem({ ...nginx, nodeIds: [] }))).toThrow();
-        expect(() => imageListFromIpc(withItem({ ...nginx, sizeBytes: -1 }))).toThrow();
-    });
-
     it("reads per-node pulls from the operation progress and drops malformed entries", () => {
         const pulls = nodePullsFromProgress(fixture.pullProgress);
         expect(pulls.map((pull) => [pull.nodeId, pull.status])).toEqual([

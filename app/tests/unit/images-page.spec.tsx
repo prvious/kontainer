@@ -177,6 +177,24 @@ describe("Images page", () => {
         await waitFor(() => expect(invoke).toHaveBeenCalledWith("remove_image", expect.objectContaining({ nodeIds: "all", force: false })));
     });
 
+    it("forces the delete of an unused image tagged more than once, which Docker otherwise refuses", async () => {
+        const [, unused] = images.imageList.items;
+        const twiceTagged = { ...unused!, repoTags: ["redis:7", "redis:latest"], dangling: false };
+        mockCommands({
+            list_images: () => ({ ...images.imageList, items: [twiceTagged] }),
+            remove_image: () => ({ operationId: FIRST, replayed: false }),
+        });
+        renderPage();
+        const user = userEvent.setup();
+        await user.click(within(rowFor(await screen.findByText("redis:7").then((node) => node.textContent ?? ""))).getByRole("button", { name: "Delete" }));
+        const dialog = await screen.findByRole("alertdialog");
+        expect(within(dialog).queryByRole("textbox")).not.toBeInTheDocument();
+        await user.click(within(dialog).getByRole("button", { name: /^DELETE$/ }));
+        await waitFor(() =>
+            expect(invoke).toHaveBeenCalledWith("remove_image", expect.objectContaining({ imageId: twiceTagged.imageId, nodeIds: "all", force: true })),
+        );
+    });
+
     it("validates the reference on blur and pulls on every online node by default", async () => {
         mockCommands({
             pull_image: () => ({ operationId: FIRST, replayed: false }),

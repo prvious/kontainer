@@ -68,3 +68,5 @@ What becomes easier, what becomes harder, what must be revisited and when.
 | [0028](./0028-integrations-placeholders.md) | Integrations hub and GitHub page as placeholders, and a kit breadcrumb | accepted |
 | [0029](./0029-first-run-setup-code-and-bounded-sign-in.md) | Require a setup code to register the owner, and bound unauthenticated sign-in work | accepted |
 | [0030](./0030-exec-sessions-follow-the-session-family.md) | End exec shells with the session family, not the access credential, and audit under the crate target | accepted |
+| [0031](./0031-manager-engine-checked-per-call.md) | Check the manager engine's Swarm role per call, not once at boot | accepted |
+| [0032](./0032-validate-where-less-trusted-data-enters.md) | Validate where less-trusted data enters a more-trusted component | accepted |

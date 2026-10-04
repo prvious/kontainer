@@ -4,8 +4,7 @@
  * Mirrors `app/src-tauri/src/session/manager_networks.rs`; the shared fixture at
  * `app/tests/fixtures/networks-ipc.json` keeps both sides in sync.
  */
-import { exactRecord } from "@/types/inventory";
-import { nodeOutcomeFromIpc, type NodeOutcomeView } from "@/types/containers";
+import type { NodeOutcomeView } from "@/types/containers";
 
 export const NETWORK_SCOPES = ["swarm", "local"] as const;
 export type NetworkScope = (typeof NETWORK_SCOPES)[number];
@@ -45,66 +44,9 @@ export interface AttachedContainerView {
     name: string;
 }
 
-const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
-const NETWORK_ID = /^(?:[0-9a-z]{25}|[0-9a-z]{64})$/;
-const CONTAINER_ID = /^[0-9a-f]{64}$/;
-const isTextList = (value: unknown): value is string[] => Array.isArray(value) && value.every((entry) => typeof entry === "string");
-
 /** Names the controller creates: `[a-zA-Z0-9][a-zA-Z0-9_.-]*`, 1–128 characters. */
 export const NETWORK_NAME = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
 export const BUILTIN_NETWORKS = ["host", "bridge", "none", "docker_gwbridge", "ingress"];
-
-function networkFromIpc(value: unknown): NetworkView {
-    const data = exactRecord(value, ["id", "name", "driver", "scope", "subnets", "containers", "createdAt", "attachable", "internal", "builtin", "nodeIds"]);
-    if (
-        typeof data.id !== "string" ||
-        !NETWORK_ID.test(data.id) ||
-        typeof data.name !== "string" ||
-        typeof data.driver !== "string" ||
-        !NETWORK_SCOPES.some((scope) => scope === data.scope) ||
-        !isTextList(data.subnets) ||
-        typeof data.containers !== "number" ||
-        !Number.isInteger(data.containers) ||
-        data.containers < 0 ||
-        !(data.createdAt === null || (typeof data.createdAt === "string" && TIMESTAMP.test(data.createdAt))) ||
-        typeof data.attachable !== "boolean" ||
-        typeof data.internal !== "boolean" ||
-        typeof data.builtin !== "boolean" ||
-        !isTextList(data.nodeIds) ||
-        (data.scope === "local" && data.nodeIds.length !== 1)
-    )
-        throw "invalid_response";
-    return data as unknown as NetworkView;
-}
-
-export function networkListFromIpc(value: unknown): NetworkListView {
-    const data = exactRecord(value, ["items", "nodes", "manager", "snapshotAt"]);
-    if (
-        !Array.isArray(data.items) ||
-        data.items.length > 4000 ||
-        !Array.isArray(data.nodes) ||
-        !MANAGER_STATUSES.some((status) => status === data.manager) ||
-        typeof data.snapshotAt !== "string" ||
-        !TIMESTAMP.test(data.snapshotAt)
-    )
-        throw "invalid_response";
-    return {
-        items: data.items.map(networkFromIpc),
-        nodes: data.nodes.map(nodeOutcomeFromIpc),
-        manager: data.manager as ManagerStatus,
-        snapshotAt: data.snapshotAt,
-    };
-}
-
-export function attachedFromIpc(value: unknown): AttachedContainerView[] {
-    if (!Array.isArray(value) || value.length > 4096) throw "invalid_response";
-    return value.map((entry) => {
-        const data = exactRecord(entry, ["nodeId", "containerId", "name"]);
-        if (typeof data.nodeId !== "string" || typeof data.containerId !== "string" || !CONTAINER_ID.test(data.containerId) || typeof data.name !== "string")
-            throw "invalid_response";
-        return data as unknown as AttachedContainerView;
-    });
-}
 
 /** Stable row id: a swarm network is one row; a local one is unique per node. */
 export const networkRowId = (network: Pick<NetworkView, "id" | "scope" | "nodeIds">) =>

@@ -6,9 +6,12 @@ use sea_orm::{
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::operations::{
-    domain::{AdmitOperationRequest, CorruptOperationState, DurableOperation, OperationState},
-    entities::{audit_intent, idempotency_record, operation, operation_event},
+use crate::{
+    auth::domain::PrincipalContext,
+    operations::{
+        domain::{AdmitOperationRequest, CorruptOperationState, DurableOperation, OperationState},
+        entities::{audit_intent, idempotency_record, operation, operation_event},
+    },
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,9 +117,14 @@ async fn execute_at_failure_point(
             // A concurrent request can win the unique idempotency key race after
             // this transaction's initial lookup. The failed transaction has
             // already rolled back every inserted row before we resolve the winner.
-            match find_idempotency_record(database, &material)
-                .await
-                .map_err(AdmitOperationError::Persistence)?
+            match find_idempotency_record(
+                database,
+                &material.principal_ref,
+                &material.scope,
+                &material.key_hash,
+            )
+            .await
+            .map_err(AdmitOperationError::Persistence)?
             {
                 Some(record) => resolve_existing(database, record, &material.request_hash).await,
                 None => Err(AdmitOperationError::Persistence(error)),
@@ -137,7 +145,14 @@ async fn admit_in_transaction<C>(
 where
     C: ConnectionTrait,
 {
-    if let Some(record) = find_idempotency_record(database, material).await? {
+    if let Some(record) = find_idempotency_record(
+        database,
+        &material.principal_ref,
+        &material.scope,
+        &material.key_hash,
+    )
+    .await?
+    {
         return Ok(AdmissionAttempt::Existing(record));
     }
 
@@ -205,17 +220,44 @@ where
     Ok(AdmissionAttempt::Created(created_operation))
 }
 
+/// The operation `principal` already admitted with this key on `scope`, if any. Routes call it
+/// before their live preconditions, which the operation's own execution may have changed (the
+/// name is now taken, the stack is gone), so a retried request still replays.
+pub async fn find_admitted(
+    database: &DatabaseConnection,
+    principal: &PrincipalContext,
+    scope: &str,
+    idempotency_key: &str,
+) -> Result<Option<DurableOperation>, AdmitOperationError> {
+    let Some(record) = find_idempotency_record(
+        database,
+        &principal.reference(),
+        scope,
+        &sha256(idempotency_key.as_bytes()),
+    )
+    .await
+    .map_err(AdmitOperationError::Persistence)?
+    else {
+        return Ok(None);
+    };
+    load_operation(database, record.operation_id)
+        .await
+        .map(Some)
+}
+
 async fn find_idempotency_record<C>(
     database: &C,
-    material: &AdmissionMaterial,
+    principal_ref: &str,
+    scope: &str,
+    key_hash: &str,
 ) -> Result<Option<idempotency_record::Model>, DbErr>
 where
     C: ConnectionTrait,
 {
     idempotency_record::Entity::find()
-        .filter(idempotency_record::Column::PrincipalRef.eq(&material.principal_ref))
-        .filter(idempotency_record::Column::Scope.eq(&material.scope))
-        .filter(idempotency_record::Column::KeyHash.eq(&material.key_hash))
+        .filter(idempotency_record::Column::PrincipalRef.eq(principal_ref))
+        .filter(idempotency_record::Column::Scope.eq(scope))
+        .filter(idempotency_record::Column::KeyHash.eq(key_hash))
         .one(database)
         .await
 }
@@ -231,17 +273,22 @@ async fn resolve_existing(
         });
     }
 
-    let operation = operation::Entity::find_by_id(record.operation_id)
+    Ok(AdmitOperationOutcome {
+        operation: load_operation(database, record.operation_id).await?,
+        replayed: true,
+    })
+}
+
+async fn load_operation(
+    database: &DatabaseConnection,
+    operation_id: Uuid,
+) -> Result<DurableOperation, AdmitOperationError> {
+    Ok(operation::Entity::find_by_id(operation_id)
         .one(database)
         .await
         .map_err(AdmitOperationError::Persistence)?
         .ok_or(AdmitOperationError::MissingOperation)?
-        .try_into()?;
-
-    Ok(AdmitOperationOutcome {
-        operation,
-        replayed: true,
-    })
+        .try_into()?)
 }
 
 fn sha256(value: &[u8]) -> String {

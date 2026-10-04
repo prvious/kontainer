@@ -61,7 +61,9 @@ function ImagesPage() {
 
     function confirmDelete(image: ImageView) {
         const label = imageLabel(image);
-        remove.mutate(withIdempotencyKey({ imageId: image.imageId, nodeIds: "all" as const, force: image.usedBy > 0, label }), {
+        // Docker refuses to delete an image by id while it carries more than one tag, even when unused.
+        const force = image.usedBy > 0 || image.repoTags.length > 1;
+        remove.mutate(withIdempotencyKey({ imageId: image.imageId, nodeIds: "all" as const, force, label }), {
             onError: (code) =>
                 notify.error(`Couldn't delete ${label}`, { code: String(code), message: "The controller did not accept the removal. Nothing was changed." }),
         });

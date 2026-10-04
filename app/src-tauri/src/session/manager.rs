@@ -683,8 +683,9 @@ impl SessionManager {
             Ok(existing) => existing,
             Err(error) => return self.reject_issued(controller, &mut issued, error).await,
         };
+        // A signed-out anchor holds no credential: the same pair reuses its
+        // profile, and any other pair starts a fresh one.
         let (profile_id, old_generation) = match &existing {
-            None => (Uuid::new_v4(), 0),
             Some(anchor)
                 if anchor.state == AnchorState::LoggedOut
                     && anchor.cluster_id == cluster_id
@@ -692,6 +693,11 @@ impl SessionManager {
             {
                 (anchor.profile_id, anchor.generation)
             }
+            None
+            | Some(AnchorRecord {
+                state: AnchorState::LoggedOut,
+                ..
+            }) => (Uuid::new_v4(), 0),
             Some(anchor)
                 if matches!(
                     anchor.state,

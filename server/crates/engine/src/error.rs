@@ -24,6 +24,9 @@ pub enum EngineErrorKind {
     QuorumUnavailable,
     /// The object changed since the version the request was based on.
     VersionConflict,
+    /// The daemon is not a Swarm manager (a worker, or not in a Swarm), so it can't read or
+    /// change cluster state.
+    NotAManager,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -157,6 +160,11 @@ fn classify_bollard_error(error: &BollardError) -> EngineErrorKind {
         BollardError::DockerResponseServerError {
             status_code: 304, ..
         } => EngineErrorKind::NotModified,
+        BollardError::DockerResponseServerError { message, .. }
+            if message.to_ascii_lowercase().contains("not a swarm manager") =>
+        {
+            EngineErrorKind::NotAManager
+        }
         BollardError::DockerResponseServerError { message, .. } if is_quorum_message(message) => {
             EngineErrorKind::QuorumUnavailable
         }
@@ -245,6 +253,24 @@ mod tests {
             EngineError::from_bollard(EngineOperation::UpdateService, &out_of_sequence).kind(),
             EngineErrorKind::VersionConflict
         );
+    }
+
+    #[test]
+    fn a_daemon_that_is_not_a_manager_maps_to_its_own_kind() {
+        for message in [
+            "This node is not a swarm manager. Worker nodes can't be used to view or modify cluster state. Please run this command on a manager node or promote the current node to a manager.",
+            "This node is not a swarm manager. Use \"docker swarm init\" or \"docker swarm join\" to connect this node to swarm and try again.",
+        ] {
+            let error = BollardError::DockerResponseServerError {
+                status_code: 503,
+                message: message.to_owned(),
+            };
+            assert_eq!(
+                EngineError::from_bollard(EngineOperation::ListServices, &error).kind(),
+                EngineErrorKind::NotAManager,
+                "{message}"
+            );
+        }
     }
 
     #[test]

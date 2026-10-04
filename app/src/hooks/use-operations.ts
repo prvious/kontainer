@@ -3,7 +3,7 @@ import { useMutation, type QueryKey } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { authenticatedInvoke } from "@/hooks/authenticated-invoke";
 import { OperationsContext, type OperationsContextValue } from "@/contexts/operations-context-value";
-import { admittedFromIpc, type OperationView } from "@/types/operations";
+import type { AdmittedOperation, OperationView } from "@/types/operations";
 
 export function useOperations(): OperationsContextValue {
     const context = useContext(OperationsContext);
@@ -53,7 +53,7 @@ export function useStartOperation<V extends WithIdempotencyKey>({
     const { track } = useOperations();
     const profileId = session?.profileId ?? "";
     return useMutation({
-        mutationFn: (variables: V) => authenticatedInvoke(command, profileId, args(variables), admittedFromIpc, reportInventoryCustodyError),
+        mutationFn: (variables: V) => authenticatedInvoke<AdmittedOperation>(command, profileId, args(variables), reportInventoryCustodyError),
         retry: (failures, error: unknown) => failures < 1 && error === "controller_unavailable",
         onSuccess: (admitted, variables) =>
             track({

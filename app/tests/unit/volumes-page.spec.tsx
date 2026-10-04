@@ -11,7 +11,8 @@ import volumes from "../fixtures/volumes-ipc.json";
 import nodes from "../fixtures/nodes-ipc.json";
 import operations from "../fixtures/operations-ipc.json";
 import { middleTruncate } from "@/components/volumes/volume-search";
-import { volumeListFromIpc, type VolumeListView } from "@/types/volumes";
+import type { VolumeListView } from "@/types/volumes";
+import { ipcFixture } from "../ipc-fixture";
 
 vi.mock("sonner", () => ({
     toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), warning: vi.fn(), loading: vi.fn(), dismiss: vi.fn() }),
@@ -186,7 +187,7 @@ describe("Volumes page", () => {
     });
 
     it("creates with labels, waits for the operation, then closes and highlights the new row", async () => {
-        let listed: VolumeListView = volumeListFromIpc(volumes.volumeList);
+        let listed = ipcFixture<VolumeListView>(volumes.volumeList);
         mockCommands({
             list_volumes: (args) => (args.name ? { ...volumes.volumeList, items: [] } : listed),
             create_volume: () => {

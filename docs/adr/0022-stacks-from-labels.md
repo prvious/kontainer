@@ -1,6 +1,6 @@
 # 0022. Stacks from service labels, and stack removal
 
-- Status: accepted
+- Status: accepted (amended by 0031)
 - Date: 2026-09-28
 - Spec: docs/build/12-stacks.md
 

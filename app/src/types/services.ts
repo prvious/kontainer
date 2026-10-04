@@ -4,7 +4,6 @@
  * Mirrors `app/src-tauri/src/session/manager_services.rs`; the shared fixture at
  * `app/tests/fixtures/services-ipc.json` keeps both sides in sync.
  */
-import { exactRecord } from "@/types/inventory";
 
 export const SERVICE_MODES = ["replicated", "global"] as const;
 export type ServiceMode = (typeof SERVICE_MODES)[number];
@@ -51,80 +50,6 @@ export interface ServiceDetailView {
     service: ServiceView;
     tasks: TaskView[];
     latestError: string | null;
-}
-
-const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
-const SWARM_ID = /^[0-9a-z]{25}$/;
-const isCount = (value: unknown): value is number => typeof value === "number" && Number.isInteger(value) && value >= 0;
-const isOptionalText = (value: unknown) => value === null || typeof value === "string";
-const isOptionalTime = (value: unknown) => value === null || (typeof value === "string" && TIMESTAMP.test(value));
-
-function serviceFromIpc(value: unknown): ServiceView {
-    const data = exactRecord(value, [
-        "id",
-        "name",
-        "image",
-        "imageReference",
-        "mode",
-        "desiredReplicas",
-        "runningReplicas",
-        "ports",
-        "createdAt",
-        "updatedAt",
-        "version",
-        "stack",
-        "updateState",
-        "updateMessage",
-    ]);
-    if (
-        typeof data.id !== "string" ||
-        !SWARM_ID.test(data.id) ||
-        typeof data.name !== "string" ||
-        typeof data.image !== "string" ||
-        typeof data.imageReference !== "string" ||
-        !SERVICE_MODES.some((mode) => mode === data.mode) ||
-        !isCount(data.desiredReplicas) ||
-        !isCount(data.runningReplicas) ||
-        !Array.isArray(data.ports) ||
-        !data.ports.every((port) => typeof port === "string") ||
-        !isOptionalTime(data.createdAt) ||
-        !isOptionalTime(data.updatedAt) ||
-        !isCount(data.version) ||
-        !isOptionalText(data.stack) ||
-        !isOptionalText(data.updateState) ||
-        !isOptionalText(data.updateMessage)
-    )
-        throw "invalid_response";
-    return data as unknown as ServiceView;
-}
-
-export function serviceListFromIpc(value: unknown): ServiceListView {
-    const data = exactRecord(value, ["items", "snapshotAt"]);
-    if (!Array.isArray(data.items) || data.items.length > 2000 || typeof data.snapshotAt !== "string" || !TIMESTAMP.test(data.snapshotAt))
-        throw "invalid_response";
-    return { items: data.items.map(serviceFromIpc), snapshotAt: data.snapshotAt };
-}
-
-export function serviceDetailFromIpc(value: unknown): ServiceDetailView {
-    const data = exactRecord(value, ["service", "tasks", "latestError"]);
-    if (!Array.isArray(data.tasks) || data.tasks.length > 50 || !isOptionalText(data.latestError)) throw "invalid_response";
-    const tasks = data.tasks.map((entry): TaskView => {
-        const task = exactRecord(entry, ["id", "slot", "swarmNodeId", "state", "desiredState", "error", "message", "updatedAt", "containerId"]);
-        if (
-            typeof task.id !== "string" ||
-            !(task.slot === null || isCount(task.slot)) ||
-            !isOptionalText(task.swarmNodeId) ||
-            typeof task.state !== "string" ||
-            typeof task.desiredState !== "string" ||
-            !isOptionalText(task.error) ||
-            !isOptionalText(task.message) ||
-            !isOptionalTime(task.updatedAt) ||
-            !isOptionalText(task.containerId)
-        )
-            throw "invalid_response";
-        return task as unknown as TaskView;
-    });
-    return { service: serviceFromIpc(data.service), tasks, latestError: data.latestError as string | null };
 }
 
 export type ServiceStatus = "running" | "updating" | "scaling" | "partial" | "stopped";

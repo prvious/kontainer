@@ -4,7 +4,7 @@ import { useAppSettings } from "@/hooks/use-app-settings";
 import { useQueriesPaused } from "@/hooks/use-queries-paused";
 import { authenticatedInvoke } from "@/hooks/authenticated-invoke";
 import { useStartOperation, type WithIdempotencyKey } from "@/hooks/use-operations";
-import { imageListFromIpc } from "@/types/images";
+import type { ImageListView } from "@/types/images";
 import { DEFAULT_APP_SETTINGS } from "@/types/settings";
 import { containersKey } from "@/hooks/use-containers";
 
@@ -18,7 +18,7 @@ export function useImages() {
     const profileId = session?.profileId ?? "";
     return useQuery({
         queryKey: imagesKey(profileId),
-        queryFn: () => authenticatedInvoke("list_images", profileId, {}, imageListFromIpc, reportInventoryCustodyError),
+        queryFn: () => authenticatedInvoke<ImageListView>("list_images", profileId, {}, reportInventoryCustodyError),
         enabled: Boolean(session) && !paused,
         refetchInterval: settings.data?.refreshInterval ?? DEFAULT_APP_SETTINGS.refreshInterval ?? 5000,
         retry: false,

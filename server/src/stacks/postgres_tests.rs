@@ -211,6 +211,13 @@ impl ManagerEngine for FakeSwarm {
         _: &CancellationToken,
     ) -> Result<Vec<TaskSummary>, ManagerError> {
         let services = self.services.lock().unwrap();
+        // Like Docker: a filter naming a removed service is a 404, even while its tasks remain.
+        if ids
+            .iter()
+            .any(|id| !services.iter().any(|service| &service.id == id))
+        {
+            return Err(ManagerError::NotFound);
+        }
         let mut tasks = self.tasks.lock().unwrap();
         // Tasks of removed services go after a few looks.
         let orphaned = tasks
@@ -223,19 +230,11 @@ impl ManagerEngine for FakeSwarm {
                 self.linger.fetch_sub(1, Ordering::SeqCst);
             }
         }
-        let listed: Vec<TaskSummary> = tasks
+        Ok(tasks
             .iter()
-            .filter(|task| ids.contains(&task.service_id))
+            .filter(|task| ids.is_empty() || ids.contains(&task.service_id))
             .cloned()
-            .collect();
-        // Like Docker: a filter naming only removed services is a 404 once their tasks are gone.
-        let known = ids
-            .iter()
-            .any(|id| services.iter().any(|service| &service.id == id));
-        if listed.is_empty() && !known {
-            return Err(ManagerError::NotFound);
-        }
-        Ok(listed)
+            .collect())
     }
 
     async fn remove_service(&self, id: &str, _: &CancellationToken) -> Result<(), ManagerError> {
@@ -508,6 +507,12 @@ async fn postgres_stack_removal_goes_services_then_networks_and_keeps_volumes()
         assert_eq!(names, vec!["webapp_web", "webapp_api"], "the other stack is untouched");
         let (status, _) = send(&fixture, "DELETE", "/api/v1/stacks/toolbox", Some("018f2e34-0000-7000-8000-000000000702")).await?;
         assert_eq!(status, StatusCode::NOT_FOUND, "gone");
+        let (status, replay) = send(&fixture, "DELETE", "/api/v1/stacks/toolbox", Some("018f2e34-0000-7000-8000-000000000701")).await?;
+        assert_eq!(
+            (status, &replay["operationId"], &replay["replayed"]),
+            (StatusCode::ACCEPTED, &admitted["operationId"], &serde_json::json!(true)),
+            "a retry whose response was lost replays, though the stack is gone"
+        );
         Ok::<_, Box<dyn Error>>(())
     }
     .await;

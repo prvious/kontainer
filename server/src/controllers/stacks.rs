@@ -15,6 +15,7 @@ use utoipa::ToSchema;
 use super::{
     admission::{
         Admission, AdmittingRequestId, IdempotencyKey, admission_error, admit, field_error,
+        replay_existing,
     },
     nodes::json_no_store,
     services::{manager, manager_read_error, shutdown_token},
@@ -186,6 +187,21 @@ pub(crate) async fn remove(
     if !is_valid_stack_name(&name) {
         return field_error("name", "invalid");
     }
+    let scope = format!("/stacks/{name}");
+    let payload =
+        serde_json::to_value(StackRemovePayload { name: name.clone() }).unwrap_or_default();
+    if let Some(replay) = replay_existing(
+        &context,
+        &principal,
+        &scope,
+        &key,
+        OperationKind::StackRemove,
+        &payload,
+    )
+    .await
+    {
+        return replay;
+    }
     let manager = match manager(&context) {
         Ok(manager) => manager,
         Err(response) => return *response,
@@ -196,7 +212,6 @@ pub(crate) async fn remove(
         Ok(None) => return admission_error(StatusCode::NOT_FOUND, "not_found"),
         Err(error) => return manager_read_error(error),
     }
-    let scope = format!("/stacks/{name}");
     admit(
         &context,
         Admission {
@@ -205,7 +220,7 @@ pub(crate) async fn remove(
             request_id,
             scope: &scope,
             kind: OperationKind::StackRemove,
-            payload: serde_json::to_value(StackRemovePayload { name }).unwrap_or_default(),
+            payload,
         },
     )
     .await

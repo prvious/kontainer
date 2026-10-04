@@ -4,7 +4,7 @@ import { OperationsContext } from "@/contexts/operations-context-value";
 import { useAuth } from "@/hooks/use-auth";
 import { authenticatedInvoke } from "@/hooks/authenticated-invoke";
 import { operationKey } from "@/hooks/use-operation";
-import { operationFromIpc } from "@/types/operations";
+import type { OperationView } from "@/types/operations";
 
 /** Cancel an operation that has not started; the fresh snapshot replaces the polled one. */
 export function useCancelOperation() {
@@ -13,7 +13,7 @@ export function useCancelOperation() {
     const operations = useContext(OperationsContext);
     const profileId = session?.profileId ?? "";
     return useMutation({
-        mutationFn: (operationId: string) => authenticatedInvoke("cancel_operation", profileId, { operationId }, operationFromIpc, reportInventoryCustodyError),
+        mutationFn: (operationId: string) => authenticatedInvoke<OperationView>("cancel_operation", profileId, { operationId }, reportInventoryCustodyError),
         onSuccess: (view) => {
             queryClient.setQueryData(operationKey(profileId, view.id), view);
             operations?.settle(view);

@@ -12,7 +12,7 @@ use crate::{
         domain::NodeStatus,
         fan_out::{NodeFailure, NodeOutcome, PER_NODE_DEADLINE, fan_out},
     },
-    swarm::engine::ManagerEngine,
+    swarm::engine::{ManagerEngine, ManagerError},
 };
 
 /// How the manager answered the cluster-wide half of the list.
@@ -74,6 +74,7 @@ pub async fn execute(
                     .await
                 {
                     Ok(Ok(networks)) => (Some(networks), ManagerStatus::Ok),
+                    Ok(Err(ManagerError::NotAManager)) => (None, ManagerStatus::NotAManager),
                     _ => (None, ManagerStatus::Unavailable),
                 }
             }

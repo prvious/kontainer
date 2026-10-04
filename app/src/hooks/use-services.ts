@@ -4,7 +4,7 @@ import { useAppSettings } from "@/hooks/use-app-settings";
 import { useQueriesPaused } from "@/hooks/use-queries-paused";
 import { authenticatedInvoke } from "@/hooks/authenticated-invoke";
 import { useStartOperation, type WithIdempotencyKey } from "@/hooks/use-operations";
-import { serviceDetailFromIpc, serviceListFromIpc } from "@/types/services";
+import type { ServiceDetailView, ServiceListView } from "@/types/services";
 import { DEFAULT_APP_SETTINGS } from "@/types/settings";
 
 export const servicesKey = (profileId: string) => ["services", profileId] as const;
@@ -21,7 +21,7 @@ export function useServices() {
     const interval = settings.data?.refreshInterval ?? DEFAULT_APP_SETTINGS.refreshInterval ?? 5000;
     return useQuery({
         queryKey: servicesKey(profileId),
-        queryFn: () => authenticatedInvoke("list_services", profileId, { stack: null }, serviceListFromIpc, reportInventoryCustodyError),
+        queryFn: () => authenticatedInvoke<ServiceListView>("list_services", profileId, { stack: null }, reportInventoryCustodyError),
         enabled: Boolean(session) && !paused,
         refetchInterval: (query) => (query.state.status === "error" ? QUORUM_RETRY_MS : interval),
         retry: false,
@@ -37,7 +37,7 @@ export function useService(serviceId: string | null) {
         queryKey: [...servicesKey(profileId), "detail", serviceId] as const,
         queryFn:
             serviceId && session
-                ? () => authenticatedInvoke("get_service", profileId, { serviceId }, serviceDetailFromIpc, reportInventoryCustodyError)
+                ? () => authenticatedInvoke<ServiceDetailView>("get_service", profileId, { serviceId }, reportInventoryCustodyError)
                 : skipToken,
         retry: false,
         staleTime: 5_000,

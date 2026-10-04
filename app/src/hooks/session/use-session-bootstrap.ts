@@ -10,10 +10,6 @@ export function useSessionBootstrap(origin: string | null) {
         enabled: origin !== null,
         retry: false,
         staleTime: 30_000,
-        queryFn: async () => {
-            const value = await invokeLogin<{ ownerExists?: unknown }>("session_bootstrap", { origin });
-            if (typeof value?.ownerExists !== "boolean") throw { code: "invalid_response" };
-            return value.ownerExists;
-        },
+        queryFn: async () => (await invokeLogin<{ ownerExists: boolean }>("session_bootstrap", { origin })).ownerExists,
     });
 }

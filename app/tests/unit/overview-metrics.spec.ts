@@ -2,15 +2,16 @@ import { describe, expect, it } from "vitest";
 import nodesFixture from "../fixtures/nodes-ipc.json";
 import containersFixture from "../fixtures/containers-ipc.json";
 import { containerCounts, cpuByNode, cpuPeak, memoryFigures, networkRates, sampledNodeCount } from "@/components/overview/overview-metrics";
-import { clusterSummaryFromIpc, nodeListFromIpc, sampleSeriesFromIpc } from "@/types/nodes";
-import { containerListFromIpc } from "@/types/containers";
+import type { ClusterSummary, NodeList, SampleSeries } from "@/types/nodes";
+import type { ContainerListView } from "@/types/containers";
+import { ipcFixture } from "../ipc-fixture";
 
-const nodes = nodeListFromIpc(nodesFixture.nodeList).items;
-const summary = clusterSummaryFromIpc(nodesFixture.clusterSummary);
+const nodes = ipcFixture<NodeList>(nodesFixture.nodeList).items;
+const summary = ipcFixture<ClusterSummary>(nodesFixture.clusterSummary);
 
 describe("Overview card math", () => {
     it("takes the CPU peak from the busiest bucket and ignores gaps", () => {
-        const series = sampleSeriesFromIpc(nodesFixture.clusterSamples);
+        const series = ipcFixture<SampleSeries>(nodesFixture.clusterSamples);
         expect(cpuPeak(series.points)).toBe(30);
         expect(cpuPeak(series.points.slice(0, 1))).toBeNull();
         expect(cpuPeak([])).toBeNull();
@@ -31,7 +32,7 @@ describe("Overview card math", () => {
     });
 
     it("counts live containers by state and breaks CPU down per node with unreachable ones as null", () => {
-        const rows = containerListFromIpc(containersFixture.containerList).items.map((item) => ({ ...item, stale: false }));
+        const rows = ipcFixture<ContainerListView>(containersFixture.containerList).items.map((item) => ({ ...item, stale: false }));
         expect(containerCounts([...rows, { ...rows[0], stale: true }])).toEqual({ running: 1, paused: 0, exited: 1, total: 2 });
         expect(cpuByNode(nodes)).toEqual([
             { id: "manager", name: "manager", cores: 4, percent: 12.5 },

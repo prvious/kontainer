@@ -6,14 +6,7 @@ import { ExecSessionsContext, type ExecSessionsContextValue, type ExecTab } from
 import { authenticatedInvoke } from "@/hooks/authenticated-invoke";
 import { useAuth } from "@/hooks/use-auth";
 import { useSettings } from "@/hooks/use-settings";
-import { INITIAL_EXEC_SIZE, execStreamEventFromIpc } from "@/types/exec";
-
-const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-
-function sessionIdFromIpc(value: unknown): string {
-    if (typeof value !== "string" || !SESSION_ID.test(value)) throw "invalid_response";
-    return value;
-}
+import { INITIAL_EXEC_SIZE, type ExecStreamEvent } from "@/types/exec";
 
 /**
  * The Exec tabs for this window (mounted in the authenticated layout, so shells survive leaving
@@ -48,21 +41,15 @@ export function ExecSessionsProvider({ children }: { children: ReactNode }) {
     const { mutate: closeSession } = useMutation({ mutationFn: (sessionId: string) => invoke("exec_close", { sessionId }) });
     const { mutate: openSession } = useMutation({
         mutationFn: (tab: ExecTab) => {
-            const channel = new Channel<unknown>();
-            channel.onmessage = (raw) => {
-                try {
-                    const event = execStreamEventFromIpc(raw);
-                    tab.buffer.apply(event, Date.now());
-                    if (event.type === "started") sendSize(tab.id);
-                } catch {
-                    tab.buffer.apply({ type: "closed", reason: "connection_lost" }, Date.now());
-                }
+            const channel = new Channel<ExecStreamEvent>();
+            channel.onmessage = (event) => {
+                tab.buffer.apply(event, Date.now());
+                if (event.type === "started") sendSize(tab.id);
             };
-            return authenticatedInvoke(
+            return authenticatedInvoke<string>(
                 "exec_open",
                 profileId,
                 { nodeId: tab.nodeId, containerId: tab.containerId, shell: tab.shell, ...INITIAL_EXEC_SIZE, channel },
-                sessionIdFromIpc,
                 reportInventoryCustodyError,
             );
         },

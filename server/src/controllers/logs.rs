@@ -16,7 +16,7 @@ use crate::{
     auth::domain::{PrincipalContext, ValidatedSession},
     logs::{LogStreams, session::LogsSession},
     services::actions::list_services::MANAGER_READ_DEADLINE,
-    swarm::engine::SharedManagerEngine,
+    swarm::engine::{ManagerError, SharedManagerEngine},
 };
 
 #[utoipa::path(
@@ -47,12 +47,12 @@ pub(crate) async fn stream(
     // A manager that doesn't answer refuses the upgrade, so a client counts the attempt as failed
     // and backs off, instead of connecting only to be told the manager is gone.
     let cancellation = shutdown_token(&context);
-    let answers =
-        tokio::time::timeout(MANAGER_READ_DEADLINE, manager.0.swarm_status(&cancellation))
-            .await
-            .is_ok_and(|status| status.is_ok());
-    if !answers {
-        return admission_error(StatusCode::SERVICE_UNAVAILABLE, "manager_unavailable");
+    match tokio::time::timeout(MANAGER_READ_DEADLINE, manager.0.swarm_status(&cancellation)).await {
+        Ok(Ok(_)) => {}
+        Ok(Err(ManagerError::NotAManager)) => {
+            return admission_error(StatusCode::SERVICE_UNAVAILABLE, "not_a_manager");
+        }
+        _ => return admission_error(StatusCode::SERVICE_UNAVAILABLE, "manager_unavailable"),
     }
     let Some(slot) = streams.connections.try_acquire(session.family_id) else {
         return admission_error(StatusCode::TOO_MANY_REQUESTS, "limit_reached");

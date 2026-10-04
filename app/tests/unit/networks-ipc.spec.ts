@@ -1,30 +1,18 @@
 import { describe, expect, it } from "vitest";
 import fixture from "../fixtures/networks-ipc.json";
 import containersFixture from "../fixtures/containers-ipc.json";
-import { attachedFromIpc, isCidr, networkListFromIpc, networkNode, networkRowId, shortNetworkId } from "@/types/networks";
-import { containerListFromIpc } from "@/types/containers";
+import { ipcFixture } from "../ipc-fixture";
+import { isCidr, networkNode, networkRowId, shortNetworkId, type AttachedContainerView, type NetworkListView } from "@/types/networks";
+import type { ContainerListView } from "@/types/containers";
 import { applyFilters, parseContainerSearch } from "@/components/containers/container-search";
 import { mergeSnapshots } from "@/hooks/use-containers";
 import { applyNetworkFilters, driverSummary, networkNameProblem, parseNetworkSearch } from "@/components/networks/network-search";
 
-const list = () => networkListFromIpc(structuredClone(fixture.networkList));
+// The shared fixtures must fit the views Rust's own tests serialize to them.
+const list = () => ipcFixture<NetworkListView>(fixture.networkList);
+ipcFixture<AttachedContainerView[]>(fixture.attached);
 
 describe("networks IPC contract", () => {
-    it("parses the shared fixtures exactly as Rust serializes them", () => {
-        expect(networkListFromIpc(fixture.networkList)).toEqual(fixture.networkList);
-        expect(attachedFromIpc(fixture.attached)).toEqual(fixture.attached);
-    });
-
-    it("rejects extra fields, unknown scopes, and local networks on several nodes", () => {
-        const [bridge] = fixture.networkList.items;
-        const withItem = (item: unknown) => ({ ...fixture.networkList, items: [item] });
-        expect(() => networkListFromIpc(withItem({ ...bridge, options: { secret: "canary" } }))).toThrow();
-        expect(() => networkListFromIpc(withItem({ ...bridge, scope: "global" }))).toThrow();
-        expect(() => networkListFromIpc(withItem({ ...bridge, nodeIds: ["manager", "worker-1"] }))).toThrow();
-        expect(() => networkListFromIpc({ ...fixture.networkList, manager: "maybe" })).toThrow();
-        expect(() => attachedFromIpc([{ nodeId: "manager", containerId: "short", name: "x" }])).toThrow();
-    });
-
     it("keys swarm networks once and local ones per node", () => {
         const [bridge, overlay] = list().items;
         expect(networkRowId(bridge!)).toBe(`manager/${"b".repeat(64)}`);
@@ -35,7 +23,7 @@ describe("networks IPC contract", () => {
     });
 
     it("carries container networks for the Containers page filter", () => {
-        const rows = mergeSnapshots(undefined, containerListFromIpc(structuredClone(containersFixture.containerList))).items;
+        const rows = mergeSnapshots(undefined, ipcFixture<ContainerListView>(containersFixture.containerList)).items;
         expect(parseContainerSearch({ network: "shop_default" })).toEqual({ network: "shop_default" });
         expect(parseContainerSearch({ network: "-bad" })).toEqual({});
         expect(applyFilters(rows, { network: "shop_default" }).map((row) => row.name)).toEqual(["shop_web.1.x7kq"]);

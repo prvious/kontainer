@@ -1,9 +1,11 @@
-//! `stack.remove`: remove every service of the stack, wait until their tasks are gone, then remove
-//! the stack's networks (retrying while Swarm still detaches them). Volumes are never touched.
+//! `stack.remove`: remove every service of the stack, wait until their tasks have stopped, then
+//! remove the stack's networks (retrying while Swarm still detaches them). Volumes are never
+//! touched.
 
 use std::time::Duration;
 
 use async_trait::async_trait;
+use kontainer_engine::TaskSummary;
 
 use crate::{
     networks::operations::create::{manager_failure, not_a_manager},
@@ -17,6 +19,17 @@ use crate::{
 
 const POLL_EVERY: Duration = Duration::from_secs(2);
 const WAIT_AT_MOST: Duration = Duration::from_secs(60);
+/// Task states that never run again.
+const STOPPED_STATES: [&str; 6] = [
+    "complete", "shutdown", "failed", "rejected", "orphaned", "remove",
+];
+
+/// Whether any task of the removed services hasn't stopped yet.
+fn still_stopping(tasks: &[TaskSummary], service_ids: &[String]) -> bool {
+    tasks.iter().any(|task| {
+        service_ids.contains(&task.service_id) && !STOPPED_STATES.contains(&task.state.as_str())
+    })
+}
 
 pub struct RemoveStackExecutor {
     poll: Duration,
@@ -104,13 +117,10 @@ impl OperationExecutor for RemoveStackExecutor {
             .await;
         let deadline = tokio::time::Instant::now() + self.deadline;
         loop {
-            match manager
-                .list_tasks(&planned.service_ids, false, &context.cancellation)
-                .await
-            {
-                // Docker answers 404 for a task filter naming only removed services.
-                Ok(tasks) if tasks.is_empty() => break,
-                Err(ManagerError::NotFound) => break,
+            // Unfiltered: Docker answers 404 for a service filter naming a removed service, even
+            // while that service's tasks are still stopping.
+            match manager.list_tasks(&[], false, &context.cancellation).await {
+                Ok(tasks) if !still_stopping(&tasks, &planned.service_ids) => break,
                 Ok(_) => {}
                 Err(error) => return Err(manager_failure(error)),
             }
@@ -161,5 +171,32 @@ impl OperationExecutor for RemoveStackExecutor {
                 .await;
         }
         Ok(Some(detail("removed", removed, networks_removed, &volumes)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use kontainer_engine::TaskSummary;
+
+    use super::still_stopping;
+
+    #[test]
+    fn only_the_removed_services_tasks_that_still_run_hold_the_wait() {
+        let task = |service_id: &str, state: &str| TaskSummary {
+            service_id: service_id.to_owned(),
+            state: state.to_owned(),
+            ..TaskSummary::default()
+        };
+        let removed = vec!["gone".to_owned()];
+        assert!(still_stopping(&[task("gone", "running")], &removed));
+        assert!(!still_stopping(
+            &[
+                task("gone", "shutdown"),
+                task("gone", "complete"),
+                task("other", "running")
+            ],
+            &removed
+        ));
+        assert!(!still_stopping(&[], &removed));
     }
 }

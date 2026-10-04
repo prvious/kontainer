@@ -4,8 +4,7 @@
  * Mirrors `app/src-tauri/src/session/manager_volumes.rs`; the shared fixture at
  * `app/tests/fixtures/volumes-ipc.json` keeps both sides in sync.
  */
-import { exactRecord } from "@/types/inventory";
-import { nodeOutcomeFromIpc, type NodeOutcomeView } from "@/types/containers";
+import type { NodeOutcomeView } from "@/types/containers";
 
 export interface VolumeView {
     nodeId: string;
@@ -29,45 +28,8 @@ export interface VolumeListView {
     snapshotAt: string;
 }
 
-const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
-const isCount = (value: unknown): value is number => typeof value === "number" && Number.isInteger(value) && value >= 0;
-const isTextList = (value: unknown): value is string[] => Array.isArray(value) && value.every((entry) => typeof entry === "string");
-const isLabels = (value: unknown): value is Record<string, string> =>
-    typeof value === "object" && value !== null && !Array.isArray(value) && Object.values(value).every((entry) => typeof entry === "string");
-
 /** Docker's volume name rule, capped at 255: `[a-zA-Z0-9][a-zA-Z0-9_.-]+`. */
 export const VOLUME_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{1,254}$/;
-
-function volumeFromIpc(value: unknown): VolumeView {
-    const data = exactRecord(value, ["nodeId", "name", "driver", "mountPoint", "createdAt", "labels", "usedBy", "users", "sizeBytes"]);
-    if (
-        typeof data.nodeId !== "string" ||
-        typeof data.name !== "string" ||
-        !VOLUME_NAME.test(data.name) ||
-        typeof data.driver !== "string" ||
-        typeof data.mountPoint !== "string" ||
-        !(data.createdAt === null || (typeof data.createdAt === "string" && TIMESTAMP.test(data.createdAt))) ||
-        !isLabels(data.labels) ||
-        !isCount(data.usedBy) ||
-        !isTextList(data.users) ||
-        !(data.sizeBytes === null || isCount(data.sizeBytes))
-    )
-        throw "invalid_response";
-    return data as unknown as VolumeView;
-}
-
-export function volumeListFromIpc(value: unknown): VolumeListView {
-    const data = exactRecord(value, ["items", "nodes", "snapshotAt"]);
-    if (
-        !Array.isArray(data.items) ||
-        data.items.length > 4000 ||
-        !Array.isArray(data.nodes) ||
-        typeof data.snapshotAt !== "string" ||
-        !TIMESTAMP.test(data.snapshotAt)
-    )
-        throw "invalid_response";
-    return { items: data.items.map(volumeFromIpc), nodes: data.nodes.map(nodeOutcomeFromIpc), snapshotAt: data.snapshotAt };
-}
 
 /** Stable row id: a name is unique per node, not across the cluster. */
 export const volumeRowId = (volume: Pick<VolumeView, "nodeId" | "name">) => `${volume.nodeId}/${volume.name}`;

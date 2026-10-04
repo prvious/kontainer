@@ -9,7 +9,6 @@ import { routeTree } from "@/routeTree.gen";
 import { AuthContext, type AuthContextValue } from "@/contexts/auth-context-value";
 import { AppearanceProvider } from "@/contexts/appearance-context";
 import { REFRESH_INTERVALS, changedRows, draftFrom, fieldErrors, withCurrent } from "@/components/settings/settings-form";
-import { controllerStatusFromIpc } from "@/types/nodes";
 import { DEFAULT_APP_SETTINGS, type AppSettings } from "@/types/settings";
 import nodes from "../fixtures/nodes-ipc.json";
 
@@ -143,13 +142,6 @@ describe("settings form", () => {
         expect(errors.fontSize).toBe("Use a size from 10 to 24.");
         expect(fieldErrors({ ...baseline, agentUrl: "http://127.0.0.1:5150" }).agentUrl).toBeUndefined();
         expect(fieldErrors({ ...baseline, shell: "custom", customShell: "/bin/my shell" }).shell).toBeDefined();
-    });
-
-    it("parses the controller status exactly and refuses anything else", () => {
-        expect(controllerStatusFromIpc(nodes.status)).toEqual(nodes.status);
-        expect(() => controllerStatusFromIpc({ ...nodes.status, secret: "canary" })).toThrow();
-        expect(() => controllerStatusFromIpc({ ...nodes.status, logLevel: "info\n" })).toThrow();
-        expect(() => controllerStatusFromIpc({ ...nodes.status, startedAt: "yesterday" })).toThrow();
     });
 });
 

@@ -1,31 +1,24 @@
 import { describe, expect, it } from "vitest";
 import fixture from "../fixtures/operations-ipc.json";
 import inventory from "../fixtures/inventory-ipc.json";
+import { ipcFixture } from "../ipc-fixture";
 import { INVENTORY_ERROR_CODES } from "@/types/inventory";
-import { admittedFromIpc, isTerminal, operationEventsFromIpc, operationFromIpc, progressCounts } from "@/types/operations";
+import { isTerminal, progressCounts, type AdmittedOperation, type OperationEventView, type OperationView } from "@/types/operations";
 import { operationMeta, operationPhase, operationSummary, operationTrack } from "@/components/operations/operation-meta";
 
-describe("operations IPC contract", () => {
-    it("parses the shared fixture exactly as Rust serializes it", () => {
-        expect(operationFromIpc(fixture.operation)).toEqual(fixture.operation);
-        expect(operationFromIpc(fixture.failedOperation)).toEqual(fixture.failedOperation);
-        expect(operationEventsFromIpc(fixture.events)).toEqual(fixture.events);
-        expect(admittedFromIpc(fixture.admitted)).toEqual(fixture.admitted);
-        expect(INVENTORY_ERROR_CODES).toEqual(inventory.errorCodes);
-    });
+// The shared fixture must fit the views Rust's own tests serialize to it.
+const running = ipcFixture<OperationView>(fixture.operation);
+const failed = ipcFixture<OperationView>(fixture.failedOperation);
+ipcFixture<OperationEventView[]>(fixture.events);
+ipcFixture<AdmittedOperation>(fixture.admitted);
 
-    it("rejects extra fields, unknown states, and malformed ids", () => {
-        expect(() => operationFromIpc({ ...fixture.operation, payload: { secret: "canary" } })).toThrow();
-        expect(() => operationFromIpc({ ...fixture.operation, state: "exploded" })).toThrow();
-        expect(() => operationFromIpc({ ...fixture.operation, id: "op-1" })).toThrow();
-        expect(() => admittedFromIpc({ operationId: "nope", replayed: false })).toThrow();
-        expect(() => operationEventsFromIpc([{ ...fixture.events[0], state: "exploded" }])).toThrow();
+describe("operations IPC contract", () => {
+    it("shares the error codes with the Rust fixture", () => {
+        expect(INVENTORY_ERROR_CODES).toEqual(inventory.errorCodes);
     });
 });
 
 describe("operation status lines", () => {
-    const running = operationFromIpc(fixture.operation);
-    const failed = operationFromIpc(fixture.failedOperation);
     const now = Date.parse("2026-09-28T12:00:12.500Z");
 
     it("reads like the design for every phase", () => {

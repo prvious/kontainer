@@ -1,6 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
 import { invokeLogin } from "./invoke-login";
-import { sessionViewFromIpc } from "@/types/session";
+import type { SessionView } from "@/types/session";
 
 export interface PasswordLoginVariables {
     origin: string;
@@ -16,7 +16,7 @@ export interface PasswordLoginVariables {
  */
 export function useSessionLogin() {
     return useMutation({
-        mutationFn: async (variables: PasswordLoginVariables) => sessionViewFromIpc(await invokeLogin<unknown>("session_login", { ...variables })),
+        mutationFn: (variables: PasswordLoginVariables) => invokeLogin<SessionView>("session_login", { ...variables }),
         gcTime: 0,
     });
 }

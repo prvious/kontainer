@@ -16,7 +16,7 @@ use crate::{
     auth::domain::PrincipalContext,
     operations::{
         actions::admit::{self, AdmitOperationError},
-        domain::{AdmitOperationRequest, OperationKind},
+        domain::{AdmitOperationRequest, DurableOperation, OperationKind},
     },
 };
 
@@ -139,15 +139,7 @@ pub(crate) async fn admit(context: &AppContext, admission: Admission<'_>) -> Res
         Err(_) => return admission_error(StatusCode::BAD_REQUEST, "invalid_request"),
     };
     match admit::execute(&context.db, request).await {
-        Ok(outcome) => (
-            StatusCode::ACCEPTED,
-            [(header::CACHE_CONTROL, "no-store")],
-            Json(AdmittedResponse {
-                operation_id: outcome.operation.id.to_string(),
-                replayed: outcome.replayed,
-            }),
-        )
-            .into_response(),
+        Ok(outcome) => admitted(&outcome.operation, outcome.replayed),
         Err(AdmitOperationError::IdempotencyConflict { .. }) => {
             admission_error(StatusCode::CONFLICT, "idempotency_conflict")
         }
@@ -156,6 +148,53 @@ pub(crate) async fn admit(context: &AppContext, admission: Admission<'_>) -> Res
             admission_error(StatusCode::SERVICE_UNAVAILABLE, "persistence_unavailable")
         }
     }
+}
+
+/// Answer a retried mutation before the route's live preconditions run, since the original
+/// operation may have changed what they check. `request` holds the fields the client sent, as the
+/// payload names them: the original 202 when this key admitted the same kind with those values, 409
+/// `idempotency_conflict` when it admitted something else, and `None` for a new key.
+pub(crate) async fn replay_existing(
+    context: &AppContext,
+    principal: &PrincipalContext,
+    scope: &str,
+    key: &IdempotencyKey,
+    kind: OperationKind,
+    request: &serde_json::Value,
+) -> Option<Response> {
+    let operation = match admit::find_admitted(&context.db, principal, scope, &key.0).await {
+        Ok(operation) => operation?,
+        Err(error) => {
+            tracing::warn!(%error, "idempotency lookup failed");
+            return Some(admission_error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "persistence_unavailable",
+            ));
+        }
+    };
+    let same_request = operation.kind == kind.as_str()
+        && request.as_object().is_some_and(|fields| {
+            fields
+                .iter()
+                .all(|(field, value)| operation.payload.get(field) == Some(value))
+        });
+    Some(if same_request {
+        admitted(&operation, true)
+    } else {
+        admission_error(StatusCode::CONFLICT, "idempotency_conflict")
+    })
+}
+
+fn admitted(operation: &DurableOperation, replayed: bool) -> Response {
+    (
+        StatusCode::ACCEPTED,
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(AdmittedResponse {
+            operation_id: operation.id.to_string(),
+            replayed,
+        }),
+    )
+        .into_response()
 }
 
 #[cfg(test)]

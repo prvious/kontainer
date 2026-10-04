@@ -3,14 +3,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { useQueriesPaused } from "@/hooks/use-queries-paused";
 import { authenticatedInvoke, type ReportCustodyError as Report } from "@/hooks/authenticated-invoke";
-import {
-    clusterSummaryFromIpc,
-    controllerSettingsFromIpc,
-    controllerStatusFromIpc,
-    nodeListFromIpc,
-    sampleSeriesFromIpc,
-    type SampleWindow,
-} from "@/types/nodes";
+import type { ClusterSummary, ControllerSettings, ControllerStatusView, NodeList, SampleSeries, SampleWindow } from "@/types/nodes";
 import { DEFAULT_APP_SETTINGS } from "@/types/settings";
 
 /** `node` is a node id, or `"cluster"` for the cluster-wide series. */
@@ -21,20 +14,20 @@ export const nodesQueries = {
     list: (profileId: string, report: Report) =>
         queryOptions({
             queryKey: nodesQueries.all(profileId),
-            queryFn: () => authenticatedInvoke("list_nodes", profileId, {}, nodeListFromIpc, report),
+            queryFn: () => authenticatedInvoke<NodeList>("list_nodes", profileId, {}, report),
         }),
     summary: (profileId: string, report: Report) =>
         queryOptions({
             queryKey: [...nodesQueries.all(profileId), "summary"] as const,
-            queryFn: () => authenticatedInvoke("get_cluster_summary", profileId, {}, clusterSummaryFromIpc, report),
+            queryFn: () => authenticatedInvoke<ClusterSummary>("get_cluster_summary", profileId, {}, report),
         }),
     samples: (profileId: string, scope: SampleScope, window: SampleWindow, bucket: string, report: Report) =>
         queryOptions({
             queryKey: [...nodesQueries.all(profileId), "samples", scope, window, bucket] as const,
             queryFn: () =>
                 scope === "cluster"
-                    ? authenticatedInvoke("get_cluster_samples", profileId, { window, bucket }, sampleSeriesFromIpc, report)
-                    : authenticatedInvoke("get_node_samples", profileId, { nodeId: scope, window, bucket }, sampleSeriesFromIpc, report),
+                    ? authenticatedInvoke<SampleSeries>("get_cluster_samples", profileId, { window, bucket }, report)
+                    : authenticatedInvoke<SampleSeries>("get_node_samples", profileId, { nodeId: scope, window, bucket }, report),
         }),
 };
 
@@ -99,7 +92,7 @@ export function useControllerStatus() {
     const profileId = session?.profileId ?? "";
     return useQuery({
         queryKey: controllerStatusKey(profileId),
-        queryFn: () => authenticatedInvoke("get_status", profileId, {}, controllerStatusFromIpc, reportInventoryCustodyError),
+        queryFn: () => authenticatedInvoke<ControllerStatusView>("get_status", profileId, {}, reportInventoryCustodyError),
         enabled: Boolean(session) && !paused,
         staleTime: 60_000,
         refetchInterval: 60_000,
@@ -113,7 +106,7 @@ export function useControllerSettings() {
     const profileId = session?.profileId ?? "";
     return useQuery({
         queryKey: controllerSettingsKey(profileId),
-        queryFn: () => authenticatedInvoke("get_settings", profileId, {}, controllerSettingsFromIpc, reportInventoryCustodyError),
+        queryFn: () => authenticatedInvoke<ControllerSettings>("get_settings", profileId, {}, reportInventoryCustodyError),
         enabled: Boolean(session) && !paused,
         retry: false,
     });
@@ -125,7 +118,7 @@ export function useUpdateControllerSettings() {
     const profileId = session?.profileId ?? "";
     return useMutation({
         mutationFn: (metricsRetentionDays: number) =>
-            authenticatedInvoke("update_settings", profileId, { metricsRetentionDays }, controllerSettingsFromIpc, reportInventoryCustodyError),
+            authenticatedInvoke<ControllerSettings>("update_settings", profileId, { metricsRetentionDays }, reportInventoryCustodyError),
         onSuccess: (settings) => queryClient.setQueryData(controllerSettingsKey(profileId), settings),
     });
 }

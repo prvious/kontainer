@@ -66,10 +66,6 @@ fn deserialize_docker_host<'de, D: serde::Deserializer<'de>>(
         .map_err(serde::de::Error::custom)
 }
 
-/// The manager-scoped Docker host, validated for the running environment.
-#[derive(Debug, Clone)]
-pub struct ManagerDockerHost(pub DockerHost);
-
 fn validate_docker_host(docker: &DockerSettings, environment: &Environment) -> Result<()> {
     // Loco defaults to `development` when LOCO_ENV is unset, so the environment check alone
     // fails open; plain-TCP Docker is unauthenticated, so never allow it off this machine.
@@ -88,12 +84,11 @@ fn validate_docker_host(docker: &DockerSettings, environment: &Environment) -> R
     Ok(())
 }
 
+/// Refuse a Docker host the running environment doesn't allow, before anything serves. `serve`
+/// builds the manager engine from the same settings.
 pub fn init_docker_state(ctx: &AppContext) -> Result<()> {
     let settings = controller_settings(ctx)?;
-    validate_docker_host(&settings.docker, &ctx.environment)?;
-    ctx.shared_store
-        .insert(ManagerDockerHost(settings.docker.host));
-    Ok(())
+    validate_docker_host(&settings.docker, &ctx.environment)
 }
 
 fn deserialize_shutdown_grace<'de, D: serde::Deserializer<'de>>(
@@ -343,13 +338,13 @@ pub async fn serve(router: Router, ctx: &AppContext, params: &ServeParams) -> Re
         shutdown.clone(),
     );
     tokio::pin!(servers);
-    // Swarm-wide objects go through the configured manager; without one, manager-scoped routes
-    // answer 503 `not_a_manager` and the rest keeps working.
-    if let Some(host) = ctx.shared_store.get::<ManagerDockerHost>()
-        && let Some(manager) = crate::swarm::engine::connect_manager(&host.0).await
-    {
+    // Swarm-wide objects go through the configured host. Whether it is a manager is checked per
+    // call (ADR 0031), so a daemon that starts late or is promoted later works without a restart;
+    // until then manager-scoped routes answer 503 `not_a_manager` and the rest keeps working.
+    let manager = crate::swarm::engine::connect_manager(&settings.docker.host);
+    if let Some(manager) = &manager {
         ctx.shared_store
-            .insert(crate::swarm::engine::SharedManagerEngine(manager));
+            .insert(crate::swarm::engine::SharedManagerEngine(manager.clone()));
     }
     // Hourly sample pruning stops with the drain and is joined before serve returns.
     let pruner = tokio::spawn(crate::tasks::prune_samples::run_hourly(
@@ -366,10 +361,7 @@ pub async fn serve(router: Router, ctx: &AppContext, params: &ServeParams) -> Re
                 .shared_store
                 .get::<crate::nodes::agents::SharedAgentDirectory>()
                 .map(|directory| directory.0),
-            manager: ctx
-                .shared_store
-                .get::<crate::swarm::engine::SharedManagerEngine>()
-                .map(|manager| manager.0),
+            manager,
             settings: crate::operations::worker::WorkerSettings::new(
                 settings.shutdown_grace.duration(),
             ),

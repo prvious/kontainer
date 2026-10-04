@@ -4,7 +4,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useQueriesPaused } from "@/hooks/use-queries-paused";
 import { authenticatedInvoke } from "@/hooks/authenticated-invoke";
 import { OperationsContext, type TrackedOperation } from "@/contexts/operations-context-value";
-import { isTerminal, operationFromIpc, type OperationState, type OperationView } from "@/types/operations";
+import { isTerminal, type OperationState, type OperationView } from "@/types/operations";
 
 export const POLL_INTERVAL_MS = 1000;
 
@@ -25,7 +25,7 @@ export function useOperation(operationId: string) {
     return useQuery({
         queryKey: operationKey(profileId, operationId),
         queryFn: async () => {
-            const view = await authenticatedInvoke("get_operation", profileId, { operationId }, operationFromIpc, reportInventoryCustodyError);
+            const view = await authenticatedInvoke<OperationView>("get_operation", profileId, { operationId }, reportInventoryCustodyError);
             if (isSettled(view.state)) operations?.settle(view);
             return view;
         },

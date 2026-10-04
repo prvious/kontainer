@@ -11,7 +11,8 @@ import networks from "../fixtures/networks-ipc.json";
 import containers from "../fixtures/containers-ipc.json";
 import nodes from "../fixtures/nodes-ipc.json";
 import operations from "../fixtures/operations-ipc.json";
-import { networkListFromIpc, type NetworkListView } from "@/types/networks";
+import type { NetworkListView } from "@/types/networks";
+import { ipcFixture } from "../ipc-fixture";
 
 vi.mock("sonner", () => ({
     toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), warning: vi.fn(), loading: vi.fn(), dismiss: vi.fn() }),
@@ -194,7 +195,7 @@ describe("Networks page", () => {
     });
 
     it("creates an overlay, waits for the operation, then closes and highlights the row", async () => {
-        let listed: NetworkListView = networkListFromIpc(networks.networkList);
+        let listed = ipcFixture<NetworkListView>(networks.networkList);
         const createdRow = { ...listed.items[2]!, id: "n1n1n1n1n1n1n1n1n1n1n1n1n", name: "app-network" };
         mockCommands({
             list_networks: () => listed,

@@ -1,24 +1,13 @@
 import { describe, expect, it } from "vitest";
 import fixture from "../fixtures/volumes-ipc.json";
-import { LABEL_PROBLEMS, parseLabel, VOLUME_NAME, volumeListFromIpc, volumeRowId } from "@/types/volumes";
+import { ipcFixture } from "../ipc-fixture";
+import { LABEL_PROBLEMS, parseLabel, VOLUME_NAME, volumeRowId, type VolumeListView } from "@/types/volumes";
 import { allocated, applyVolumeFilters, middleTruncate, parseVolumeSearch, volumeSortFor, volumeSortingFor } from "@/components/volumes/volume-search";
 
-const list = () => volumeListFromIpc(structuredClone(fixture.volumeList));
+// The shared fixture must fit the view Rust's own tests serialize to it.
+const list = () => ipcFixture<VolumeListView>(fixture.volumeList);
 
 describe("volumes IPC contract", () => {
-    it("parses the shared fixture exactly as Rust serializes it", () => {
-        expect(volumeListFromIpc(fixture.volumeList)).toEqual(fixture.volumeList);
-    });
-
-    it("rejects extra fields, bad names, and negative sizes", () => {
-        const [redis] = fixture.volumeList.items;
-        const withItem = (item: unknown) => ({ ...fixture.volumeList, items: [item] });
-        expect(() => volumeListFromIpc(withItem({ ...redis, options: { device: "secret-canary" } }))).toThrow();
-        expect(() => volumeListFromIpc(withItem({ ...redis, name: "-bad" }))).toThrow();
-        expect(() => volumeListFromIpc(withItem({ ...redis, sizeBytes: -1 }))).toThrow();
-        expect(() => volumeListFromIpc(withItem({ ...redis, labels: { a: 1 } }))).toThrow();
-    });
-
     it("keys rows by node and name", () => {
         expect(list().items.map(volumeRowId)).toEqual(["manager/toolbox_redis-data", "worker-1/scratch"]);
     });

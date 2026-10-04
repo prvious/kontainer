@@ -1,27 +1,14 @@
 import { describe, expect, it } from "vitest";
 import fixture from "../fixtures/services-ipc.json";
-import { serviceDetailFromIpc, serviceListFromIpc, serviceStatus } from "@/types/services";
+import { ipcFixture } from "../ipc-fixture";
+import { serviceStatus, type ServiceDetailView, type ServiceListView } from "@/types/services";
 import { applyServiceFilters, parseServiceSearch, portsText, serviceSummary } from "@/components/services/service-search";
 import { progressCounts } from "@/types/operations";
 import { operationMeta } from "@/components/operations/operation-meta";
 
-const list = () => serviceListFromIpc(structuredClone(fixture.serviceList));
-
-describe("services IPC contract", () => {
-    it("parses the shared fixtures exactly as Rust serializes them", () => {
-        expect(serviceListFromIpc(fixture.serviceList)).toEqual(fixture.serviceList);
-        expect(serviceDetailFromIpc(fixture.serviceDetail)).toEqual(fixture.serviceDetail);
-    });
-
-    it("rejects extra fields, unknown modes, and bad ids", () => {
-        const [first] = fixture.serviceList.items;
-        const withItem = (item: unknown) => ({ ...fixture.serviceList, items: [item] });
-        expect(() => serviceListFromIpc(withItem({ ...first, env: ["SECRET=canary"] }))).toThrow();
-        expect(() => serviceListFromIpc(withItem({ ...first, mode: "job" }))).toThrow();
-        expect(() => serviceListFromIpc(withItem({ ...first, id: "short" }))).toThrow();
-        expect(() => serviceListFromIpc(withItem({ ...first, runningReplicas: -1 }))).toThrow();
-    });
-});
+// The shared fixtures must fit the views Rust's own tests serialize to them.
+const list = () => ipcFixture<ServiceListView>(fixture.serviceList);
+ipcFixture<ServiceDetailView>(fixture.serviceDetail);
 
 describe("service status and summary", () => {
     it("derive the STATUS column", () => {

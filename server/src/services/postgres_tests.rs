@@ -67,6 +67,8 @@ struct FakeSwarm {
     /// Scheduling fails: new tasks stay pending with this error.
     stuck: AtomicBool,
     quorum_lost: AtomicBool,
+    /// The host was demoted: Docker refuses every call as "not a swarm manager".
+    demoted: AtomicBool,
     writes: AtomicU64,
 }
 
@@ -105,12 +107,15 @@ impl FakeSwarm {
             ]),
             stuck: AtomicBool::new(false),
             quorum_lost: AtomicBool::new(false),
+            demoted: AtomicBool::new(false),
             writes: AtomicU64::new(0),
         }
     }
 
     fn check(&self) -> Result<(), ManagerError> {
-        if self.quorum_lost.load(Ordering::SeqCst) {
+        if self.demoted.load(Ordering::SeqCst) {
+            Err(ManagerError::NotAManager)
+        } else if self.quorum_lost.load(Ordering::SeqCst) {
             Err(ManagerError::QuorumUnavailable)
         } else {
             Ok(())
@@ -231,7 +236,7 @@ impl ManagerEngine for FakeSwarm {
             .lock()
             .unwrap()
             .iter()
-            .filter(|task| ids.contains(&task.service_id))
+            .filter(|task| ids.is_empty() || ids.contains(&task.service_id))
             .filter(|task| !current_only || task.desired_state == "running")
             .cloned()
             .collect())
@@ -517,6 +522,14 @@ async fn postgres_services_list_counts_detail_and_quorum() -> Result<(), Box<dyn
         assert!(error.get("operationId").is_none(), "nothing admitted");
         assert_eq!(fixture.swarm.writes.load(Ordering::SeqCst), writes);
 
+        // Demoted since: the engine exists, and Docker says it isn't a manager.
+        fixture.swarm.demoted.store(true, Ordering::SeqCst);
+        let (status, _, error) = send(&fixture, "GET", "/api/v1/services", None, "").await?;
+        assert_eq!(
+            (status, error["error"].as_str()),
+            (StatusCode::SERVICE_UNAVAILABLE, Some("not_a_manager"))
+        );
+
         let without = fixture_without_manager(&database.connection).await?;
         let (status, _, error) = send(&without, "GET", "/api/v1/services", None, "").await?;
         assert_eq!(
@@ -615,6 +628,36 @@ async fn postgres_service_actions_validate_and_converge() -> Result<(), Box<dyn 
         assert_eq!(
             up.progress.unwrap(),
             serde_json::json!({"desired": 3, "running": 3, "phase": "converged"})
+        );
+        // A retry whose response was lost replays, though version 7 is stale by now.
+        let (status, _, replay) = send(
+            &fixture,
+            "POST",
+            &format!("/api/v1/services/{WEB}/actions/scale"),
+            Some(&key(611)),
+            r#"{"version":7,"replicas":3}"#,
+        )
+        .await?;
+        assert_eq!(
+            (status, &replay["operationId"], &replay["replayed"]),
+            (
+                StatusCode::ACCEPTED,
+                &admitted["operationId"],
+                &serde_json::json!(true)
+            )
+        );
+        // The same key for another action is not a replay.
+        let (status, _, error) = send(
+            &fixture,
+            "POST",
+            &format!("/api/v1/services/{WEB}/actions/restart"),
+            Some(&key(611)),
+            r#"{"version":7}"#,
+        )
+        .await?;
+        assert_eq!(
+            (status, error["error"].as_str()),
+            (StatusCode::CONFLICT, Some("idempotency_conflict"))
         );
 
         // Down to one.

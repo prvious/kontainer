@@ -4,8 +4,7 @@
  * Mirrors `app/src-tauri/src/session/manager_images.rs`; the shared fixture at
  * `app/tests/fixtures/images-ipc.json` keeps both sides in sync.
  */
-import { exactRecord } from "@/types/inventory";
-import { nodeOutcomeFromIpc, type NodeOutcomeView } from "@/types/containers";
+import type { NodeOutcomeView } from "@/types/containers";
 
 export interface ImageView {
     /** `sha256:<64 hex>`. */
@@ -42,42 +41,7 @@ export interface NodePull {
     error?: string;
 }
 
-const TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
-const IMAGE_ID = /^sha256:[0-9a-f]{64}$/;
-const isTextList = (value: unknown): value is string[] => Array.isArray(value) && value.every((entry) => typeof entry === "string");
 const isCount = (value: unknown): value is number => typeof value === "number" && Number.isInteger(value) && value >= 0;
-
-function imageFromIpc(value: unknown): ImageView {
-    const data = exactRecord(value, ["imageId", "repoTags", "repoDigests", "sizeBytes", "createdAt", "usedBy", "dangling", "nodeIds"]);
-    if (
-        typeof data.imageId !== "string" ||
-        !IMAGE_ID.test(data.imageId) ||
-        !isTextList(data.repoTags) ||
-        !isTextList(data.repoDigests) ||
-        !isCount(data.sizeBytes) ||
-        typeof data.createdAt !== "string" ||
-        !TIMESTAMP.test(data.createdAt) ||
-        !isCount(data.usedBy) ||
-        typeof data.dangling !== "boolean" ||
-        !isTextList(data.nodeIds) ||
-        data.nodeIds.length === 0
-    )
-        throw "invalid_response";
-    return data as unknown as ImageView;
-}
-
-export function imageListFromIpc(value: unknown): ImageListView {
-    const data = exactRecord(value, ["items", "nodes", "snapshotAt"]);
-    if (
-        !Array.isArray(data.items) ||
-        data.items.length > 4000 ||
-        !Array.isArray(data.nodes) ||
-        typeof data.snapshotAt !== "string" ||
-        !TIMESTAMP.test(data.snapshotAt)
-    )
-        throw "invalid_response";
-    return { items: data.items.map(imageFromIpc), nodes: data.nodes.map(nodeOutcomeFromIpc), snapshotAt: data.snapshotAt };
-}
 
 /**
  * The per-node pulls in an `image.pull` progress document. The document is opaque at the IPC

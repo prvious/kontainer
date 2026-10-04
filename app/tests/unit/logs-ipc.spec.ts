@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import fixture from "../fixtures/logs-ipc.json";
+import { ipcFixture } from "../ipc-fixture";
 import { LogBuffer } from "@/components/logs/log-buffer";
-import { lineMatcher, logLevel, logStreamEventFromIpc, type LogLine } from "@/types/logs";
+import { lineMatcher, logLevel, type LogLine, type LogStreamEvent } from "@/types/logs";
 
-const [linesEvent] = fixture.events;
+// The shared fixture must fit the events Rust's own tests serialize to it.
+const [linesEvent] = ipcFixture<LogStreamEvent[]>(fixture.events);
 const line = (seq: number, text: string, stream: LogLine["stream"] = "stdout"): LogLine => ({
-    ...(linesEvent as { lines: LogLine[] }).lines[0],
+    ...(linesEvent as Extract<LogStreamEvent, { type: "lines" }>).lines[0],
     seq,
     ts: 1_790_000_000_000 + seq,
     text,
@@ -13,16 +15,6 @@ const line = (seq: number, text: string, stream: LogLine["stream"] = "stdout"): 
 });
 
 describe("log stream IPC contract", () => {
-    it("parses every event exactly as Rust serializes it and refuses anything else", () => {
-        for (const event of fixture.events) expect(logStreamEventFromIpc(event)).toEqual(event);
-        expect(() => logStreamEventFromIpc({ type: "gap", dropped: 1, secret: "canary" })).toThrow();
-        expect(() => logStreamEventFromIpc({ type: "gap", dropped: -1 })).toThrow();
-        expect(() => logStreamEventFromIpc({ type: "ended", reason: "deleted", code: "x", message: "" })).toThrow();
-        expect(() => logStreamEventFromIpc({ type: "lines", lines: [{ ...line(1, "a"), stream: "stdin" }] })).toThrow();
-        expect(() => logStreamEventFromIpc({ type: "unknown" })).toThrow();
-        expect(() => logStreamEventFromIpc(null)).toThrow();
-    });
-
     it("parses levels from the line, gives stderr without one ERR, and stdout without one nothing", () => {
         const cases: [string, LogLine["stream"], string | null, string | null][] = [
             ["level=info msg=started", "stdout", "INFO", "neutral"],

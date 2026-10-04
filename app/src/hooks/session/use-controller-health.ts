@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { invokeSession } from "./invoke-session";
-import { probeViewFromIpc } from "@/types/session";
+import type { ProbeView } from "@/types/session";
 
 export const controllerHealthKey = ["session", "health"] as const;
 export const HEALTH_INTERVAL_MS = 15_000;
@@ -22,10 +22,8 @@ export function useControllerHealth(enabled = true) {
         retry: PROBE_ATTEMPTS - 1,
         retryDelay: PROBE_RETRY_DELAY_MS,
         queryFn: async () => {
-            const value = await invokeSession<unknown>("controller_health");
-            if (value === null) return null;
-            const probe = probeViewFromIpc(value);
-            if (probe.status === "unreachable") throw probe;
+            const probe = await invokeSession<ProbeView | null>("controller_health");
+            if (probe?.status === "unreachable") throw probe;
             return probe;
         },
     });

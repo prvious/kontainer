@@ -20,6 +20,7 @@ use utoipa::ToSchema;
 use super::{
     admission::{
         Admission, AdmittingRequestId, IdempotencyKey, admission_error, admit, field_error,
+        replay_existing,
     },
     nodes::json_no_store,
 };
@@ -167,6 +168,9 @@ pub(super) fn manager_read_error(error: ManagerError) -> Response {
     match error {
         ManagerError::Unavailable | ManagerError::QuorumUnavailable | ManagerError::Cancelled => {
             quorum_unavailable()
+        }
+        ManagerError::NotAManager => {
+            admission_error(StatusCode::SERVICE_UNAVAILABLE, "not_a_manager")
         }
         _ => admission_error(StatusCode::SERVICE_UNAVAILABLE, "manager_unavailable"),
     }
@@ -337,6 +341,23 @@ pub(crate) async fn action(
         (_, Some(_)) => return field_error("replicas", "not_allowed"),
         (_, None) => {}
     }
+    let scope = format!("/services/{service_id}");
+    if let Some(replay) = replay_existing(
+        &context,
+        &principal,
+        &scope,
+        &key,
+        kind,
+        &serde_json::json!({
+            "serviceId": service_id,
+            "version": request.version,
+            "replicas": request.replicas,
+        }),
+    )
+    .await
+    {
+        return replay;
+    }
     let manager = match manager(&context) {
         Ok(manager) => manager,
         Err(response) => return *response,
@@ -357,7 +378,6 @@ pub(crate) async fn action(
     if action == ServiceAction::Scale && row.service.mode == ServiceMode::Global {
         return field_error("replicas", "global_service");
     }
-    let scope = format!("/services/{service_id}");
     let payload = ServiceActionPayload {
         service_id,
         name: row.service.name,

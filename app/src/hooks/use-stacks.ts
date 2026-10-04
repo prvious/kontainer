@@ -5,7 +5,7 @@ import { useQueriesPaused } from "@/hooks/use-queries-paused";
 import { authenticatedInvoke } from "@/hooks/authenticated-invoke";
 import { useStartOperation, type WithIdempotencyKey } from "@/hooks/use-operations";
 import { servicesKey } from "@/hooks/use-services";
-import { stackListFromIpc, stackPlanFromIpc } from "@/types/stacks";
+import type { StackListView, StackPlanView } from "@/types/stacks";
 import type { OperationView } from "@/types/operations";
 import { DEFAULT_APP_SETTINGS } from "@/types/settings";
 
@@ -20,7 +20,7 @@ export function useStacks() {
     const interval = settings.data?.refreshInterval ?? DEFAULT_APP_SETTINGS.refreshInterval ?? 5000;
     return useQuery({
         queryKey: stacksKey(profileId),
-        queryFn: () => authenticatedInvoke("list_stacks", profileId, {}, stackListFromIpc, reportInventoryCustodyError),
+        queryFn: () => authenticatedInvoke<StackListView>("list_stacks", profileId, {}, reportInventoryCustodyError),
         enabled: Boolean(session) && !paused,
         refetchInterval: (query) => (query.state.status === "error" ? 10_000 : interval),
         retry: false,
@@ -35,9 +35,7 @@ export function useStackPlan(name: string | null) {
     return useQuery({
         queryKey: [...stacksKey(profileId), "plan", name] as const,
         queryFn:
-            name && session
-                ? () => authenticatedInvoke("get_stack_removal_plan", profileId, { name }, stackPlanFromIpc, reportInventoryCustodyError)
-                : skipToken,
+            name && session ? () => authenticatedInvoke<StackPlanView>("get_stack_removal_plan", profileId, { name }, reportInventoryCustodyError) : skipToken,
         retry: false,
         staleTime: 0,
     });

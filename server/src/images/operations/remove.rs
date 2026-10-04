@@ -118,15 +118,38 @@ impl OperationExecutor for RemoveImageExecutor {
             .filter_map(|result| result.error.as_deref())
             .collect();
         let (code, message) = match codes.iter().next() {
-            Some(&"image_in_use") if codes.len() == 1 => (
-                "image_in_use".to_owned(),
-                "Containers use this image; delete it with force to remove it anyway.".to_owned(),
-            ),
+            Some(&"image_in_use") if codes.len() == 1 => {
+                ("image_in_use".to_owned(), in_use_message(force).to_owned())
+            }
             _ => (
                 "partial_failure".to_owned(),
                 format!("{} of {} nodes failed.", failed.len(), results.len()),
             ),
         };
         Err(ExecutionFailure::new(code, message).with_detail(detail))
+    }
+}
+
+/// Docker's 409: without force, a container or another tag holds the image and force overrides
+/// that; with force, only a running container still does.
+const fn in_use_message(force: bool) -> &'static str {
+    if force {
+        "A running container uses this image; stop it first."
+    } else {
+        "A container or another tag uses this image; delete it with force to remove it anyway."
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::in_use_message;
+
+    #[test]
+    fn force_is_suggested_only_when_it_was_not_sent() {
+        assert!(in_use_message(false).contains("with force"));
+        assert_eq!(
+            in_use_message(true),
+            "A running container uses this image; stop it first."
+        );
     }
 }

@@ -1,14 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { invokeSession } from "./invoke-session";
-import { probeViewFromIpc, savedConnectionsFromIpc, type ProbeView } from "@/types/session";
+import type { ProbeView, SavedConnection } from "@/types/session";
 
 export const sessionConnectionsKey = ["session", "connections"] as const;
 
 export function useSessionConnections() {
     return useQuery({
         queryKey: sessionConnectionsKey,
-        queryFn: async () => savedConnectionsFromIpc(await invokeSession<unknown>("session_connections")),
+        queryFn: () => invokeSession<SavedConnection[]>("session_connections"),
         staleTime: Infinity,
     });
 }
@@ -31,7 +31,7 @@ export async function probeAll(origins: string[], limit = MAX_PROBES_IN_FLIGHT):
         while (next < origins.length) {
             const origin = origins[next++];
             try {
-                results[origin] = probeViewFromIpc(await invoke<unknown>("connection_probe", { origin }));
+                results[origin] = await invoke<ProbeView>("connection_probe", { origin });
             } catch {
                 results[origin] = { status: "unreachable" };
             }
@@ -58,6 +58,6 @@ export function useConnectionProbe(origin: string | null) {
         enabled: origin !== null,
         retry: false,
         staleTime: 0,
-        queryFn: async () => probeViewFromIpc(await invokeSession<unknown>("connection_probe", { origin })),
+        queryFn: () => invokeSession<ProbeView>("connection_probe", { origin }),
     });
 }

@@ -5,7 +5,7 @@ import { useQueriesPaused } from "@/hooks/use-queries-paused";
 import { authenticatedInvoke } from "@/hooks/authenticated-invoke";
 import { useStartOperation, type WithIdempotencyKey } from "@/hooks/use-operations";
 import { containersKey } from "@/hooks/use-containers";
-import { attachedFromIpc, networkListFromIpc, networkRowId, type NetworkScope } from "@/types/networks";
+import { networkRowId, type AttachedContainerView, type NetworkListView, type NetworkScope } from "@/types/networks";
 import type { OperationView } from "@/types/operations";
 import { DEFAULT_APP_SETTINGS } from "@/types/settings";
 
@@ -19,7 +19,7 @@ export function useNetworks() {
     const profileId = session?.profileId ?? "";
     return useQuery({
         queryKey: networksKey(profileId),
-        queryFn: () => authenticatedInvoke("list_networks", profileId, {}, networkListFromIpc, reportInventoryCustodyError),
+        queryFn: () => authenticatedInvoke<NetworkListView>("list_networks", profileId, {}, reportInventoryCustodyError),
         enabled: Boolean(session) && !paused,
         refetchInterval: settings.data?.refreshInterval ?? DEFAULT_APP_SETTINGS.refreshInterval ?? 5000,
         retry: false,
@@ -39,11 +39,10 @@ export function useNetworkContainers(target: { id: string; nodeId: string | null
         queryFn:
             target && session
                 ? () =>
-                      authenticatedInvoke(
+                      authenticatedInvoke<AttachedContainerView[]>(
                           "inspect_network",
                           profileId,
                           { networkId: target.id, nodeId: target.nodeId },
-                          attachedFromIpc,
                           reportInventoryCustodyError,
                       )
                 : skipToken,

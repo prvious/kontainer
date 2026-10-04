@@ -6,15 +6,9 @@ import { LogStreamsContext, type LogStreamsContextValue, type LogTab } from "@/c
 import { authenticatedInvoke } from "@/hooks/authenticated-invoke";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { useAuth } from "@/hooks/use-auth";
-import { DEFAULT_LOG_SCROLLBACK, DEFAULT_LOG_TAIL, MAX_LOG_TAIL, logStreamEventFromIpc } from "@/types/logs";
+import { DEFAULT_LOG_SCROLLBACK, DEFAULT_LOG_TAIL, MAX_LOG_TAIL, type LogStreamEvent } from "@/types/logs";
 
 const HOUR_MS = 60 * 60 * 1000;
-const STREAM_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-
-function streamIdFromIpc(value: unknown): string {
-    if (typeof value !== "string" || !STREAM_ID.test(value)) throw "invalid_response";
-    return value;
-}
 
 interface OpenVariables {
     tab: LogTab;
@@ -38,24 +32,9 @@ export function LogStreamsProvider({ children }: { children: ReactNode }) {
 
     const { mutate: openStream } = useMutation({
         mutationFn: ({ tab, since, tail }: OpenVariables) => {
-            const channel = new Channel<unknown>();
-            channel.onmessage = (raw) => {
-                try {
-                    tab.buffer.apply(logStreamEventFromIpc(raw), Date.now());
-                } catch {
-                    tab.buffer.apply(
-                        { type: "ended", reason: "error", code: "invalid_response", message: "The log stream sent something unexpected." },
-                        Date.now(),
-                    );
-                }
-            };
-            return authenticatedInvoke(
-                "logs_open",
-                profileId,
-                { serviceId: tab.serviceId, since, tail, channel },
-                streamIdFromIpc,
-                reportInventoryCustodyError,
-            );
+            const channel = new Channel<LogStreamEvent>();
+            channel.onmessage = (event) => tab.buffer.apply(event, Date.now());
+            return authenticatedInvoke<string>("logs_open", profileId, { serviceId: tab.serviceId, since, tail, channel }, reportInventoryCustodyError);
         },
         onSuccess: (streamId, { tab }) => {
             if (!live.current.has(tab.id)) {

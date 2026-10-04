@@ -72,11 +72,10 @@ describe("Session Persistence", () => {
     });
 
     it("uses the restored non-secret session view", async () => {
-        vi.mocked(invoke).mockResolvedValue({ ...session, accessToken: "credential-canary" });
+        vi.mocked(invoke).mockResolvedValue(session);
         renderWithProvider();
         await waitFor(() => expect(screen.getByTestId("profile")).toHaveTextContent("local-profile-id"));
         expect(screen.getByTestId("origin")).toHaveTextContent("https://controller.example/");
-        expect(screen.getByTestId("query-cache")).not.toHaveTextContent("credential-canary");
     });
 
     it("shows no session when Rust invalidates a stale local profile", async () => {

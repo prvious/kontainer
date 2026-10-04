@@ -1,9 +1,13 @@
 //! `ManagerEngine`: the controller-owned port for swarm-wide objects: networks, services, tasks,
 //! and Swarm members. The Docker implementation wraps the engine crate's manager-scoped engine
-//! built from `settings.docker.host`; a host that is not a Swarm manager leaves the port absent and
-//! manager-scoped routes answer 503 `not_a_manager`.
+//! built from `settings.docker.host`. Whether that host is a Swarm manager is checked per call
+//! (ADR 0031): while it isn't, every call fails `NotAManager` and routes answer 503
+//! `not_a_manager`.
 
-use std::{sync::Arc, time::Duration};
+use std::{
+    sync::{Arc, Mutex, PoisonError},
+    time::{Duration, Instant},
+};
 
 use async_trait::async_trait;
 use kontainer_engine::{
@@ -28,6 +32,8 @@ pub enum ManagerError {
     QuorumUnavailable,
     /// The object changed since the version the request was based on.
     VersionConflict,
+    /// The configured host is not a Swarm manager (a worker, or not in a Swarm).
+    NotAManager,
 }
 
 impl std::fmt::Display for ManagerError {
@@ -40,6 +46,7 @@ impl std::fmt::Display for ManagerError {
             Self::Cancelled => "manager call was cancelled",
             Self::QuorumUnavailable => "the swarm has no quorum",
             Self::VersionConflict => "the object changed since it was read",
+            Self::NotAManager => "the configured Docker host is not a Swarm manager",
         })
     }
 }
@@ -52,6 +59,7 @@ impl From<kontainer_engine::EngineError> for ManagerError {
             EngineErrorKind::Cancelled => Self::Cancelled,
             EngineErrorKind::QuorumUnavailable => Self::QuorumUnavailable,
             EngineErrorKind::VersionConflict => Self::VersionConflict,
+            EngineErrorKind::NotAManager => Self::NotAManager,
             EngineErrorKind::Conflict
             | EngineErrorKind::DaemonRejected
             | EngineErrorKind::NotModified => Self::Rejected,
@@ -166,20 +174,79 @@ pub trait ManagerEngine: Send + Sync {
     }
 }
 
-/// The manager engine routes and executors use, when the configured host is a manager.
+/// The manager engine routes and executors use. It is present unless `settings.docker.host` can't
+/// be turned into an engine; whether that host is a manager is decided per call.
 #[derive(Clone)]
 pub struct SharedManagerEngine(pub Arc<dyn ManagerEngine>);
 
-/// The Docker manager, through the engine crate.
-pub struct DockerManagerEngine(LocalDockerEngine);
+/// How long one `describe()` answer about the host's Swarm role is trusted. A demotion inside it
+/// still fails `NotAManager`, from Docker's own refusal.
+const ROLE_TTL: Duration = Duration::from_secs(30);
+const DESCRIBE_DEADLINE: Duration = Duration::from_secs(5);
+
+/// The Docker manager, through the engine crate. Every call first checks that the host is a Swarm
+/// manager, because a worker answers `network ls` with only its local view.
+pub struct DockerManagerEngine<E = LocalDockerEngine> {
+    engine: E,
+    /// When `describe()` last answered, and whether it said "manager".
+    role: Mutex<Option<(Instant, bool)>>,
+}
+
+impl<E: ContainerEngine> DockerManagerEngine<E> {
+    pub const fn new(engine: E) -> Self {
+        Self {
+            engine,
+            role: Mutex::new(None),
+        }
+    }
+
+    /// The engine, once the host is known to be a manager. A `describe()` that fails (daemon down
+    /// or slow) is not remembered: this call fails as unavailable and the next one asks again.
+    async fn manager(&self, cancellation: &CancellationToken) -> Result<&E, ManagerError> {
+        let known = *self.role.lock().unwrap_or_else(PoisonError::into_inner);
+        let is_manager = match known {
+            Some((checked_at, is_manager)) if checked_at.elapsed() < ROLE_TTL => is_manager,
+            _ => {
+                let description = match tokio::time::timeout(
+                    DESCRIBE_DEADLINE,
+                    self.engine.describe(cancellation),
+                )
+                .await
+                {
+                    Ok(Ok(description)) => description,
+                    Ok(Err(error)) if error.kind() == EngineErrorKind::Cancelled => {
+                        return Err(ManagerError::Cancelled);
+                    }
+                    Ok(Err(_)) | Err(_) => return Err(ManagerError::Unavailable),
+                };
+                let is_manager = description.capabilities.swarm_manager_operations
+                    == CapabilityStatus::Supported;
+                if !is_manager && known.is_none_or(|(_, was_manager)| was_manager) {
+                    tracing::warn!(
+                        "settings.docker.host is not a Swarm manager; manager-scoped routes answer not_a_manager"
+                    );
+                }
+                *self.role.lock().unwrap_or_else(PoisonError::into_inner) =
+                    Some((Instant::now(), is_manager));
+                is_manager
+            }
+        };
+        if is_manager {
+            Ok(&self.engine)
+        } else {
+            Err(ManagerError::NotAManager)
+        }
+    }
+}
 
 #[async_trait]
-impl ManagerEngine for DockerManagerEngine {
+impl<E: ContainerEngine> ManagerEngine for DockerManagerEngine<E> {
     async fn list_networks(
         &self,
         cancellation: &CancellationToken,
     ) -> Result<Vec<NetworkSummary>, ManagerError> {
-        Ok(self.0.list_networks(cancellation).await?)
+        let engine = self.manager(cancellation).await?;
+        Ok(engine.list_networks(cancellation).await?)
     }
 
     async fn inspect_network(
@@ -187,7 +254,8 @@ impl ManagerEngine for DockerManagerEngine {
         id: &str,
         cancellation: &CancellationToken,
     ) -> Result<NetworkDetail, ManagerError> {
-        Ok(self.0.inspect_network(id, cancellation).await?)
+        let engine = self.manager(cancellation).await?;
+        Ok(engine.inspect_network(id, cancellation).await?)
     }
 
     async fn create_network(
@@ -195,7 +263,8 @@ impl ManagerEngine for DockerManagerEngine {
         network: &NetworkCreate,
         cancellation: &CancellationToken,
     ) -> Result<String, ManagerError> {
-        Ok(self.0.create_network(network, cancellation).await?)
+        let engine = self.manager(cancellation).await?;
+        Ok(engine.create_network(network, cancellation).await?)
     }
 
     async fn remove_network(
@@ -203,14 +272,16 @@ impl ManagerEngine for DockerManagerEngine {
         id: &str,
         cancellation: &CancellationToken,
     ) -> Result<(), ManagerError> {
-        Ok(self.0.remove_network(id, cancellation).await?)
+        let engine = self.manager(cancellation).await?;
+        Ok(engine.remove_network(id, cancellation).await?)
     }
 
     async fn list_services(
         &self,
         cancellation: &CancellationToken,
     ) -> Result<Vec<ServiceSummary>, ManagerError> {
-        Ok(self.0.list_services(cancellation).await?)
+        let engine = self.manager(cancellation).await?;
+        Ok(engine.list_services(cancellation).await?)
     }
 
     async fn list_tasks(
@@ -219,8 +290,8 @@ impl ManagerEngine for DockerManagerEngine {
         current_only: bool,
         cancellation: &CancellationToken,
     ) -> Result<Vec<TaskSummary>, ManagerError> {
-        Ok(self
-            .0
+        let engine = self.manager(cancellation).await?;
+        Ok(engine
             .list_tasks(service_ids, current_only, cancellation)
             .await?)
     }
@@ -232,8 +303,8 @@ impl ManagerEngine for DockerManagerEngine {
         version: u64,
         cancellation: &CancellationToken,
     ) -> Result<(), ManagerError> {
-        Ok(self
-            .0
+        let engine = self.manager(cancellation).await?;
+        Ok(engine
             .scale_service(service_id, replicas, version, cancellation)
             .await?)
     }
@@ -244,8 +315,8 @@ impl ManagerEngine for DockerManagerEngine {
         version: u64,
         cancellation: &CancellationToken,
     ) -> Result<(), ManagerError> {
-        Ok(self
-            .0
+        let engine = self.manager(cancellation).await?;
+        Ok(engine
             .force_update_service(service_id, version, cancellation)
             .await?)
     }
@@ -256,8 +327,8 @@ impl ManagerEngine for DockerManagerEngine {
         version: u64,
         cancellation: &CancellationToken,
     ) -> Result<(), ManagerError> {
-        Ok(self
-            .0
+        let engine = self.manager(cancellation).await?;
+        Ok(engine
             .rollback_service(service_id, version, cancellation)
             .await?)
     }
@@ -266,7 +337,8 @@ impl ManagerEngine for DockerManagerEngine {
         &self,
         cancellation: &CancellationToken,
     ) -> Result<SwarmStatus, ManagerError> {
-        Ok(self.0.swarm_status(cancellation).await?)
+        let engine = self.manager(cancellation).await?;
+        Ok(engine.swarm_status(cancellation).await?)
     }
 
     async fn remove_service(
@@ -274,14 +346,16 @@ impl ManagerEngine for DockerManagerEngine {
         service_id: &str,
         cancellation: &CancellationToken,
     ) -> Result<(), ManagerError> {
-        Ok(self.0.remove_service(service_id, cancellation).await?)
+        let engine = self.manager(cancellation).await?;
+        Ok(engine.remove_service(service_id, cancellation).await?)
     }
 
     async fn list_swarm_nodes(
         &self,
         cancellation: &CancellationToken,
     ) -> Result<Vec<SwarmNode>, ManagerError> {
-        Ok(self.0.list_swarm_nodes(cancellation).await?)
+        let engine = self.manager(cancellation).await?;
+        Ok(engine.list_swarm_nodes(cancellation).await?)
     }
 
     async fn service_logs(
@@ -290,46 +364,160 @@ impl ManagerEngine for DockerManagerEngine {
         request: ServiceLogRequest,
         cancellation: &CancellationToken,
     ) -> Result<ServiceLogStream, ManagerError> {
-        Ok(self
-            .0
+        let engine = self.manager(cancellation).await?;
+        Ok(engine
             .service_logs(service_id, request, cancellation)
             .await?)
     }
 }
 
-const DESCRIBE_DEADLINE: Duration = Duration::from_secs(5);
-
-/// Connect to `host` and keep it only if it is a Swarm manager. Anything else is logged once and
-/// yields `None`.
-pub async fn connect_manager(host: &DockerHost) -> Option<Arc<dyn ManagerEngine>> {
-    let engine = match LocalDockerEngine::connect_for_manager(LocalEngineOptions {
+/// The manager engine for `host`. Building it does no I/O, so it exists even while the daemon is
+/// down or not yet a manager; `None` only for a host the engine can't use, logged once.
+pub fn connect_manager(host: &DockerHost) -> Option<Arc<dyn ManagerEngine>> {
+    match LocalDockerEngine::connect_for_manager(LocalEngineOptions {
         host: host.clone(),
         operation_timeout: Duration::from_secs(10),
     }) {
-        Ok(engine) => engine,
+        Ok(engine) => Some(Arc::new(DockerManagerEngine::new(engine))),
         Err(error) => {
-            tracing::warn!(%error, "manager engine is not configured; manager-scoped routes answer not_a_manager");
-            return None;
+            tracing::warn!(%error, docker.host = %host, "manager engine is not configured; manager-scoped routes answer not_a_manager");
+            None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        collections::VecDeque,
+        sync::{
+            Mutex,
+            atomic::{AtomicUsize, Ordering},
+        },
     };
-    let cancellation = CancellationToken::new();
-    match tokio::time::timeout(DESCRIBE_DEADLINE, engine.describe(&cancellation)).await {
-        Ok(Ok(description))
-            if description.capabilities.swarm_manager_operations == CapabilityStatus::Supported =>
-        {
-            Some(Arc::new(DockerManagerEngine(engine)))
+
+    use async_trait::async_trait;
+    use kontainer_engine::{
+        CapabilityStatus, ContainerEngine, EngineAccessScope, EngineApiVersion, EngineCapabilities,
+        EngineDescription, EngineError, EngineErrorKind, EngineOperation, NetworkSummary,
+        UnsupportedCapabilityReason,
+    };
+    use tokio_util::sync::CancellationToken;
+
+    use super::{DockerManagerEngine, ManagerEngine, ManagerError};
+
+    /// Answers `describe()` from a queue: `Some(true)` a manager, `Some(false)` a worker, `None`
+    /// a daemon that doesn't answer.
+    struct FakeDocker {
+        describes: Mutex<VecDeque<Option<bool>>>,
+        describe_calls: AtomicUsize,
+    }
+
+    impl FakeDocker {
+        fn answering(answers: &[Option<bool>]) -> Self {
+            Self {
+                describes: Mutex::new(answers.iter().copied().collect()),
+                describe_calls: AtomicUsize::new(0),
+            }
         }
-        Ok(Ok(_)) => {
-            tracing::warn!(docker.host = %host, "settings.docker.host is not a Swarm manager; manager-scoped routes answer not_a_manager");
-            None
+    }
+
+    #[async_trait]
+    impl ContainerEngine for FakeDocker {
+        async fn is_available(&self) -> Result<bool, EngineError> {
+            Ok(true)
         }
-        Ok(Err(error)) => {
-            tracing::warn!(%error, docker.host = %host, "manager engine is unreachable; manager-scoped routes answer not_a_manager");
-            None
+
+        async fn describe(&self, _: &CancellationToken) -> Result<EngineDescription, EngineError> {
+            self.describe_calls.fetch_add(1, Ordering::SeqCst);
+            let manager = self
+                .describes
+                .lock()
+                .unwrap()
+                .pop_front()
+                .flatten()
+                .ok_or_else(|| {
+                    EngineError::new(
+                        EngineErrorKind::ConnectionUnavailable,
+                        EngineOperation::Describe,
+                    )
+                })?;
+            let version = EngineApiVersion::new(1, 47);
+            Ok(EngineDescription {
+                access_scope: EngineAccessScope::Manager,
+                daemon_version: "28.0.0".to_owned(),
+                daemon_api_version: version,
+                minimum_api_version: version,
+                negotiated_api_version: version,
+                operating_system: "linux".to_owned(),
+                architecture: "x86_64".to_owned(),
+                capabilities: EngineCapabilities {
+                    local_container_operations: CapabilityStatus::Supported,
+                    swarm_node_operations: CapabilityStatus::Supported,
+                    swarm_manager_operations: if manager {
+                        CapabilityStatus::Supported
+                    } else {
+                        CapabilityStatus::Unsupported(
+                            UnsupportedCapabilityReason::ManagerControlUnavailable,
+                        )
+                    },
+                },
+            })
         }
-        Err(_) => {
-            tracing::warn!(docker.host = %host, "manager engine did not answer; manager-scoped routes answer not_a_manager");
-            None
+
+        async fn list_networks(
+            &self,
+            _: &CancellationToken,
+        ) -> Result<Vec<NetworkSummary>, EngineError> {
+            Ok(vec![NetworkSummary::default()])
         }
+    }
+
+    #[tokio::test]
+    async fn a_daemon_that_was_down_is_used_once_it_answers() {
+        let manager = DockerManagerEngine::new(FakeDocker::answering(&[None, Some(true)]));
+        let cancellation = CancellationToken::new();
+
+        assert_eq!(
+            manager.list_networks(&cancellation).await.err(),
+            Some(ManagerError::Unavailable)
+        );
+        for _ in 0..2 {
+            assert_eq!(
+                manager
+                    .list_networks(&cancellation)
+                    .await
+                    .map(|networks| networks.len()),
+                Ok(1)
+            );
+        }
+        assert_eq!(
+            manager.engine.describe_calls.load(Ordering::SeqCst),
+            2,
+            "the failure is not remembered; the success is"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_host_that_is_not_a_manager_refuses_every_call() {
+        let manager = DockerManagerEngine::new(FakeDocker::answering(&[Some(false)]));
+        let cancellation = CancellationToken::new();
+
+        assert_eq!(
+            manager.list_networks(&cancellation).await.err(),
+            Some(ManagerError::NotAManager),
+            "a worker's local network list is not the swarm's"
+        );
+        assert_eq!(
+            manager.list_services(&cancellation).await.err(),
+            Some(ManagerError::NotAManager)
+        );
+        assert_eq!(manager.engine.describe_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn docker_refusing_a_non_manager_maps_to_not_a_manager() {
+        let error = EngineError::new(EngineErrorKind::NotAManager, EngineOperation::ListServices);
+        assert_eq!(ManagerError::from(error), ManagerError::NotAManager);
     }
 }

@@ -5,7 +5,6 @@
  * `app/tests/fixtures/logs-ipc.json` keeps both sides in sync.
  */
 import type { Tone } from "@/components/kit/badges";
-import { exactRecord } from "@/types/inventory";
 
 export interface LogLine {
     /** Lines delivered by this stream, counted across reconnects. */
@@ -31,55 +30,6 @@ export const DEFAULT_LOG_TAIL = 500;
 export const MAX_LOG_TAIL = 5_000;
 /** The buffer keeps this many lines when the scrollback setting is unset. */
 export const DEFAULT_LOG_SCROLLBACK = 10_000;
-
-const isCount = (value: unknown): value is number => typeof value === "number" && Number.isInteger(value) && value >= 0;
-
-function lineFromIpc(value: unknown): LogLine {
-    const data = exactRecord(value, ["seq", "ts", "stream", "taskId", "nodeId", "text", "truncated"]);
-    if (
-        !isCount(data.seq) ||
-        !isCount(data.ts) ||
-        (data.stream !== "stdout" && data.stream !== "stderr") ||
-        typeof data.taskId !== "string" ||
-        typeof data.nodeId !== "string" ||
-        typeof data.text !== "string" ||
-        typeof data.truncated !== "boolean"
-    )
-        throw "invalid_response";
-    return data as unknown as LogLine;
-}
-
-export function logStreamEventFromIpc(value: unknown): LogStreamEvent {
-    const type = (value as { type?: unknown } | null)?.type;
-    switch (type) {
-        case "lines": {
-            const data = exactRecord(value, ["type", "lines"]);
-            if (!Array.isArray(data.lines) || data.lines.length > 1_000) throw "invalid_response";
-            return { type, lines: data.lines.map(lineFromIpc) };
-        }
-        case "gap": {
-            const data = exactRecord(value, ["type", "dropped"]);
-            if (!isCount(data.dropped)) throw "invalid_response";
-            return { type, dropped: data.dropped };
-        }
-        case "reconnecting": {
-            const data = exactRecord(value, ["type", "attempt", "nextRetryMs"]);
-            if (!isCount(data.attempt) || !isCount(data.nextRetryMs)) throw "invalid_response";
-            return { type, attempt: data.attempt, nextRetryMs: data.nextRetryMs };
-        }
-        case "reconnected":
-            exactRecord(value, ["type"]);
-            return { type };
-        case "ended": {
-            const data = exactRecord(value, ["type", "reason", "code", "message"]);
-            if ((data.reason !== "service_removed" && data.reason !== "error") || typeof data.code !== "string" || typeof data.message !== "string")
-                throw "invalid_response";
-            return { type, reason: data.reason, code: data.code, message: data.message };
-        }
-        default:
-            throw "invalid_response";
-    }
-}
 
 export interface LogLevel {
     label: "FATAL" | "ERROR" | "WARN" | "INFO" | "DEBUG" | "TRACE" | "ERR";

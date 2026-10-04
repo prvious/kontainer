@@ -1,21 +1,15 @@
 import { describe, expect, it } from "vitest";
 import fixture from "../fixtures/exec-ipc.json";
+import { ipcFixture } from "../ipc-fixture";
 import { ExecBuffer } from "@/components/exec/exec-buffer";
-import { decodeOutput, endedText, execStreamEventFromIpc, type ExecStreamEvent } from "@/types/exec";
+import { decodeOutput, endedText, type ExecStreamEvent } from "@/types/exec";
+
+// The shared fixture must fit the events Rust's own tests serialize to it.
+ipcFixture<ExecStreamEvent[]>(fixture.events);
 
 const output = (text: string): ExecStreamEvent => ({ type: "output", data: btoa(text) });
 
 describe("exec stream IPC contract", () => {
-    it("parses every event exactly as Rust serializes it and refuses anything else", () => {
-        for (const event of fixture.events) expect(execStreamEventFromIpc(event)).toEqual(event);
-        expect(() => execStreamEventFromIpc({ type: "output", data: "b2s=", secret: "canary" })).toThrow();
-        expect(() => execStreamEventFromIpc({ type: "output", data: "not base64!" })).toThrow();
-        expect(() => execStreamEventFromIpc({ type: "exit", code: 1.5, reason: "exited" })).toThrow();
-        expect(() => execStreamEventFromIpc({ type: "started", shell: "x".repeat(257) })).toThrow();
-        expect(() => execStreamEventFromIpc({ type: "unknown" })).toThrow();
-        expect(() => execStreamEventFromIpc(null)).toThrow();
-    });
-
     it("decodes output to the raw bytes, escape sequences included", () => {
         expect(Array.from(decodeOutput("b2sNCg=="))).toEqual([0x6f, 0x6b, 0x0d, 0x0a]);
         expect(decodeOutput(btoa("\u001b[31mred"))[0]).toBe(0x1b);
