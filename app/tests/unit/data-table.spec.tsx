@@ -92,12 +92,50 @@ describe("DataTable", () => {
         expect(names()).toEqual(["nginx-proxy-01", "api-gateway", "worker-processor-03"]);
     });
 
-    it("searches across searchable columns and counts the rows shown", async () => {
+    it("keeps missing values last when sorting descending", async () => {
         const user = userEvent.setup();
         render(<Harness />);
+        await user.click(screen.getByRole("button", { name: "CPU" }));
+        await user.click(screen.getByRole("button", { name: /CPU/ }));
+        expect(screen.getByRole("columnheader", { name: /CPU/ })).toHaveAttribute("aria-sort", "descending");
+        expect(names()).toEqual(["api-gateway", "nginx-proxy-01", "worker-processor-03"]);
+    });
+
+    it("searches across searchable columns and counts the rows shown out of the total", async () => {
+        const user = userEvent.setup();
+        render(<Harness />);
+        const count = screen.getByText("ALL CONTAINERS").nextSibling;
+        expect(count).toHaveTextContent(/^3$/);
         await user.type(screen.getByRole("searchbox", { name: "Search containers" }), "kontainer/");
         expect(names()).toEqual(["api-gateway", "worker-processor-03"]);
-        expect(screen.getByText("ALL CONTAINERS").nextSibling).toHaveTextContent("2");
+        expect(count).toHaveTextContent(/^2 OF 3$/);
+    });
+
+    it("counts against the page's total when its own filters hide rows", () => {
+        render(<DataTable title='ALL' data={ROWS.slice(0, 2)} total={3} columns={COLUMNS} getRowId={(row) => row.id} />);
+        expect(screen.getByText("ALL").nextSibling).toHaveTextContent(/^2 OF 3$/);
+    });
+
+    it("renders sortable headers as plain text when the order is fixed", () => {
+        render(<DataTable title='ALL' data={ROWS} columns={COLUMNS} getRowId={(row) => row.id} sorting={[{ id: "cpu", desc: true }]} />);
+        expect(screen.queryByRole("button", { name: /CPU/ })).not.toBeInTheDocument();
+        // No checkbox column here, so the name is the first cell.
+        expect(bodyRows().map((row) => within(row).getAllByRole("cell")[0].textContent)).toEqual(["api-gateway", "nginx-proxy-01", "worker-processor-03"]);
+    });
+
+    it("shows the stale banner above faded rows, and drops it when the region failed outright", () => {
+        const banner = <p>Couldn't refresh</p>;
+        const { rerender } = render(<DataTable title='ALL' data={ROWS} columns={COLUMNS} getRowId={(row) => row.id} stale={banner} />);
+        expect(screen.getByText("Couldn't refresh")).toBeInTheDocument();
+        expect(bodyRows().every((row) => row.classList.contains("opacity-50"))).toBe(true);
+
+        rerender(<DataTable title='ALL' data={ROWS} columns={COLUMNS} getRowId={(row) => row.id} />);
+        expect(screen.queryByText("Couldn't refresh")).not.toBeInTheDocument();
+        expect(bodyRows().some((row) => row.classList.contains("opacity-50"))).toBe(false);
+
+        rerender(<DataTable title='ALL' data={[]} columns={COLUMNS} getRowId={(row) => row.id} stale={banner} errorState={<p>Failed</p>} />);
+        expect(screen.queryByText("Couldn't refresh")).not.toBeInTheDocument();
+        expect(screen.getByText("ALL").nextSibling).toHaveTextContent("—");
     });
 
     it("shows filter chips and clears them", async () => {

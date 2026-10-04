@@ -1,8 +1,8 @@
-import { useState } from "react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, describe, it, expect, vi, beforeEach } from "vitest";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
+import { toast } from "sonner";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
 import { routeTree } from "@/routeTree.gen";
@@ -78,26 +78,51 @@ function mockCommands(overrides: Record<string, (args: Record<string, unknown>) 
     });
 }
 
-function Harness({ path }: { path: string }) {
-    const [router] = useState(() => createRouter({ routeTree, context: { auth }, history: createMemoryHistory({ initialEntries: [path] }) }));
-    return <RouterProvider router={router} context={{ auth }} />;
-}
-
+/** Renders the app at `path` and returns its router, so a test can leave the page. */
 function renderPage(path = "/volumes") {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    return render(
+    const router = createRouter({ routeTree, context: { auth }, history: createMemoryHistory({ initialEntries: [path] }) });
+    render(
         <AuthContext value={auth}>
             <QueryClientProvider client={queryClient}>
-                <Harness path={path} />
+                <RouterProvider router={router} context={{ auth }} />
             </QueryClientProvider>
         </AuthContext>,
     );
+    return router;
 }
 
 const rowFor = (name: string) => screen.getByText(name).closest("tr") as HTMLElement;
 
+/** `pg-data` on manager: the name check finds nothing, the create is admitted, and `get_operation` answers `operation()`. */
+function mockCreate(operation: () => Record<string, unknown>) {
+    mockCommands({
+        list_volumes: (args) => (args.name ? { ...volumes.volumeList, items: [] } : volumes.volumeList),
+        create_volume: () => ({ operationId: OPERATION, replayed: false }),
+        get_operation: () => ({
+            ...operations.operation,
+            id: OPERATION,
+            kind: "volume.create",
+            progress: { nodeId: "manager", name: "pg-data" },
+            ...operation(),
+        }),
+    });
+}
+
+async function submitCreate(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(screen.getByRole("button", { name: /CREATE VOLUME/ }));
+    const dialog = await screen.findByRole("dialog");
+    await user.type(within(dialog).getByLabelText("Name"), "pg-data");
+    await user.click(within(dialog).getByRole("button", { name: /CREATE VOLUME/ }));
+    await waitFor(() =>
+        expect(invoke).toHaveBeenCalledWith("create_volume", expect.objectContaining({ volume: { nodeId: "manager", name: "pg-data", labels: {} } })),
+    );
+    return dialog;
+}
+
 describe("Volumes page", () => {
     beforeEach(() => vi.clearAllMocks());
+    afterEach(() => vi.useRealTimers());
 
     it("lists volumes per node with sizes, mount points, and the storage strip", async () => {
         mockCommands();
@@ -225,5 +250,71 @@ describe("Volumes page", () => {
         await screen.findByText("pg-data");
         await waitFor(() => expect(rowFor("pg-data").classList.contains("bg-primary-faint")).toBe(true));
         expect(rowFor("scratch").classList.contains("bg-primary-faint")).toBe(false);
+    });
+
+    it("creates on the first click while the name check is still in flight, and says pinning is up to the user", async () => {
+        mockCommands({
+            list_volumes: (args) => (args.name ? new Promise(() => {}) : volumes.volumeList),
+            create_volume: () => ({ operationId: OPERATION, replayed: false }),
+        });
+        renderPage();
+        await screen.findByText("scratch");
+        const dialog = await submitCreate(userEvent.setup());
+        expect(within(dialog).getByText(/Pin services that mount it to that node with a placement constraint\./)).toBeInTheDocument();
+        expect(within(dialog).queryByText(/will be pinned/)).not.toBeInTheDocument();
+    });
+
+    it("keeps CREATE disabled while a label fails to parse", async () => {
+        mockCommands({ list_volumes: (args) => (args.name ? { ...volumes.volumeList, items: [] } : volumes.volumeList) });
+        renderPage();
+        await screen.findByText("scratch");
+        const user = userEvent.setup();
+        await user.click(screen.getByRole("button", { name: /CREATE VOLUME/ }));
+        const dialog = await screen.findByRole("dialog");
+        await user.type(within(dialog).getByLabelText("Name"), "pg-data");
+        await user.click(within(dialog).getByRole("button", { name: /Add label/ }));
+        await user.type(within(dialog).getByRole("textbox", { name: "New label" }), "=billing");
+        await user.tab();
+        expect(await within(dialog).findByText("Labels are key=value, with a key.")).toBeInTheDocument();
+        expect(within(dialog).getByRole("button", { name: /CREATE VOLUME/ })).toBeDisabled();
+    });
+
+    it("frees CREATE after a failed create once the name is edited", async () => {
+        mockCreate(() => ({ state: "failed", errorCode: "conflict", errorMessage: "A volume named pg-data already exists on manager." }));
+        renderPage();
+        await screen.findByText("scratch");
+        const user = userEvent.setup();
+        const dialog = await submitCreate(user);
+        expect(await within(dialog).findByText("A volume named pg-data already exists on manager.")).toBeInTheDocument();
+        const create = within(dialog).getByRole("button", { name: /CREATE VOLUME/ });
+        await user.type(within(dialog).getByLabelText("Name"), "-2");
+        expect(create).toBeEnabled();
+        expect(create).not.toHaveAttribute("aria-busy");
+    });
+
+    it("doesn't pull the user back when a create settles after they left the page", async () => {
+        let settled = false;
+        mockCreate(() => ({ state: settled ? "succeeded" : "running" }));
+        const router = renderPage();
+        await screen.findByText("scratch");
+        await submitCreate(userEvent.setup());
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith("get_operation", expect.objectContaining({ operationId: OPERATION })));
+        await act(() => router.navigate({ to: "/stacks" }));
+        settled = true;
+        await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Created pg-data", expect.anything()), { timeout: 3000 });
+        await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+        expect(router.state.location.pathname).toBe("/stacks");
+    });
+
+    it("doesn't pull the user back when the highlight ends after they left the page", async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        mockCreate(() => ({ state: "succeeded" }));
+        const router = renderPage();
+        await screen.findByText("scratch");
+        await submitCreate(userEvent.setup({ advanceTimers: vi.advanceTimersByTime }));
+        await waitFor(() => expect(router.state.location.search).toEqual({ highlightedRow: "manager/pg-data" }));
+        await act(() => router.navigate({ to: "/stacks" }));
+        await act(() => vi.advanceTimersByTimeAsync(3_500));
+        expect(router.state.location.pathname).toBe("/stacks");
     });
 });

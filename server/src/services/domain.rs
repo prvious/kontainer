@@ -1,5 +1,5 @@
-//! Swarm services with running counts from their tasks, and the convergence rules service
-//! operations wait on.
+//! Swarm services with running counts from their tasks, and the rules service operations wait
+//! on: task counts for scaling, Swarm's update status for restart and rollback.
 
 use std::collections::HashMap;
 
@@ -78,57 +78,35 @@ pub struct ServiceActionPayload {
     pub replicas: Option<u64>,
 }
 
-/// Where a converging service stands.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Convergence {
-    pub desired: u64,
-    pub running: u64,
-    pub converged: bool,
+/// Scaling has converged when the running count matches and no task Swarm is stopping still
+/// runs. Swarm picks which slots go, so slot numbers say nothing.
+#[must_use]
+pub fn scale_converged(row: &ServiceRow, tasks: &[TaskSummary]) -> bool {
+    row.running == row.desired
+        && !tasks
+            .iter()
+            .any(|task| task.state == "running" && task.desired_state != "running")
 }
 
-/// Scaling converges when the running count matches and, going down, no task above the new
-/// count still runs.
+/// Swarm's verdict on the update a restart or rollback started, from its update status (ADR
+/// 0034): `None` while it runs or hasn't started, otherwise `Ok`, or the failure code with what
+/// Swarm did.
 #[must_use]
-pub fn scale_convergence(tasks: &[TaskSummary], desired: u64) -> Convergence {
-    let running = tasks.iter().filter(|task| task.is_running()).count() as u64;
-    let lingering = tasks
-        .iter()
-        .any(|task| task.state == "running" && task.slot.is_some_and(|slot| slot > desired));
-    Convergence {
-        desired,
-        running,
-        converged: running == desired && !lingering,
-    }
-}
-
-/// A restart converges when every running task started after it was asked for.
-#[must_use]
-pub fn restart_convergence(tasks: &[TaskSummary], desired: u64, since_seconds: i64) -> Convergence {
-    let running: Vec<&TaskSummary> = tasks.iter().filter(|task| task.is_running()).collect();
-    let fresh = running.iter().all(|task| {
-        task.updated_at_seconds
-            .is_some_and(|at| at >= since_seconds)
-    });
-    Convergence {
-        desired,
-        running: running.len() as u64,
-        converged: running.len() as u64 == desired && fresh,
-    }
-}
-
-/// A rollback converges when Swarm is no longer rolling back and the counts match.
-#[must_use]
-pub fn rollback_convergence(
-    tasks: &[TaskSummary],
-    desired: u64,
-    update_state: Option<&str>,
-) -> Convergence {
-    let running = tasks.iter().filter(|task| task.is_running()).count() as u64;
-    let busy = matches!(update_state, Some("updating" | "rollback_started"));
-    Convergence {
-        desired,
-        running,
-        converged: running == desired && !busy,
+pub fn update_verdict(
+    action: ServiceAction,
+    row: &ServiceRow,
+) -> Option<Result<(), (&'static str, &'static str)>> {
+    match (action, row.service.update_state.as_deref()) {
+        (_, Some("completed")) | (ServiceAction::Rollback, Some("rollback_completed")) => {
+            Some(Ok(()))
+        }
+        (_, Some("paused")) => Some(Err(("update_paused", "paused the update"))),
+        (_, Some("rollback_paused")) => Some(Err(("rollback_paused", "paused the rollback"))),
+        // The service's failure action rolled the restart back.
+        (_, Some("rollback_completed")) => Some(Err(("rolled_back", "rolled back the update"))),
+        // With no task to replace, Swarm never starts the update.
+        (ServiceAction::Restart, None) if row.desired == 0 => Some(Ok(())),
+        _ => None,
     }
 }
 
@@ -137,8 +115,7 @@ mod tests {
     use kontainer_engine::{ServiceMode, ServiceSummary, TaskSummary};
 
     use super::{
-        latest_task_error, restart_convergence, rollback_convergence, scale_convergence,
-        service_rows,
+        ServiceAction, ServiceRow, latest_task_error, scale_converged, service_rows, update_verdict,
     };
 
     fn task(service: &str, slot: Option<u64>, state: &str, desired: &str) -> TaskSummary {
@@ -185,36 +162,90 @@ mod tests {
         assert_eq!(counts, vec![("monitoring_agent", 2, 2), ("shop_web", 2, 3)]);
     }
 
+    fn row(replicas: u64, tasks: &[TaskSummary], update_state: Option<&str>) -> ServiceRow {
+        let service = ServiceSummary {
+            id: "web".to_owned(),
+            mode: ServiceMode::Replicated { replicas },
+            update_state: update_state.map(str::to_owned),
+            ..ServiceSummary::default()
+        };
+        service_rows(vec![service], tasks).remove(0)
+    }
+
     #[test]
-    fn convergence_rules() {
+    fn scaling_converges_on_counts_and_no_stopping_task_left_running() {
         let up = [
             task("web", Some(1), "running", "running"),
             task("web", Some(2), "starting", "running"),
         ];
         assert!(
-            !scale_convergence(&up, 2).converged,
+            !scale_converged(&row(2, &up, None), &up),
             "accepted is not converged"
         );
         let down = [
             task("web", Some(1), "running", "running"),
             task("web", Some(2), "running", "shutdown"),
         ];
-        let state = scale_convergence(&down, 1);
-        assert_eq!(
-            (state.running, state.converged),
-            (1, false),
+        assert!(
+            !scale_converged(&row(1, &down, None), &down),
             "slot 2 still runs"
         );
-        assert!(scale_convergence(&down[..1], 1).converged);
+        assert!(scale_converged(&row(1, &down[..1], None), &down[..1]));
 
-        let restarted = [task("web", Some(1), "running", "running")];
+        // Swarm removed slot 1 and kept slots 2 and 3.
+        let stopping = [
+            task("web", Some(1), "running", "remove"),
+            task("web", Some(2), "running", "running"),
+            task("web", Some(3), "running", "running"),
+        ];
+        assert!(!scale_converged(&row(2, &stopping, None), &stopping));
+        let kept = [
+            task("web", Some(1), "shutdown", "remove"),
+            task("web", Some(2), "running", "running"),
+            task("web", Some(3), "running", "running"),
+        ];
         assert!(
-            !restart_convergence(&restarted, 1, 200).converged,
-            "the old task still runs"
+            scale_converged(&row(2, &kept, None), &kept),
+            "kept slots above the new count"
         );
-        assert!(restart_convergence(&restarted, 1, 50).converged);
-        assert!(!rollback_convergence(&restarted, 1, Some("rollback_started")).converged);
-        assert!(rollback_convergence(&restarted, 1, Some("rollback_completed")).converged);
+    }
+
+    #[test]
+    fn restart_and_rollback_follow_swarms_update_status() {
+        let tasks = [task("web", Some(1), "running", "running")];
+        let verdict = |action, state| update_verdict(action, &row(1, &tasks, state));
+        for action in [ServiceAction::Restart, ServiceAction::Rollback] {
+            assert_eq!(verdict(action, None), None, "not started yet");
+            assert_eq!(verdict(action, Some("updating")), None);
+            assert_eq!(verdict(action, Some("rollback_started")), None);
+            assert_eq!(verdict(action, Some("completed")), Some(Ok(())));
+            assert_eq!(
+                verdict(action, Some("paused")),
+                Some(Err(("update_paused", "paused the update")))
+            );
+            assert_eq!(
+                verdict(action, Some("rollback_paused")),
+                Some(Err(("rollback_paused", "paused the rollback")))
+            );
+        }
+        assert_eq!(
+            verdict(ServiceAction::Rollback, Some("rollback_completed")),
+            Some(Ok(()))
+        );
+        assert_eq!(
+            verdict(ServiceAction::Restart, Some("rollback_completed")),
+            Some(Err(("rolled_back", "rolled back the update"))),
+            "the failure action undid the restart"
+        );
+        assert_eq!(
+            update_verdict(ServiceAction::Restart, &row(0, &[], None)),
+            Some(Ok(())),
+            "nothing to replace"
+        );
+        assert_eq!(
+            update_verdict(ServiceAction::Rollback, &row(0, &[], None)),
+            None
+        );
     }
 
     #[test]

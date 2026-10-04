@@ -4,7 +4,7 @@ import { Pause, Play, RotateCw, Terminal } from "lucide-react";
 import { DataTable, type DataTableColumn } from "@/components/data-table/data-table";
 import { RowActions, type RowIconAction, type RowMenuItem } from "@/components/data-table/row-actions";
 import { StatusChip } from "@/components/kit/badges";
-import { bytes, portsText, statusChip, uptimeText } from "@/components/containers/container-format";
+import { bytes, needsForce, portsText, statusChip, uptimeText } from "@/components/containers/container-format";
 import { useNow } from "@/hooks/use-now";
 import type { ContainerRow } from "@/hooks/use-containers";
 import { containerRowId, type ContainerAction } from "@/types/containers";
@@ -15,14 +15,23 @@ type Row = ContainerRow & Record<string, unknown>;
 const NOT_RUNNING = { title: "Container isn't running", reason: "Exec opens a shell in a running container. Start it first." };
 const STALE = { title: "Node didn't answer", reason: "This row is the last thing the node reported. Actions return when it checks in again." };
 
+/** Starting a stopped Swarm task revives it outside Swarm's control, beside its replacement. */
+function replacedTask(row: ContainerRow) {
+    if (row.taskId === null || needsForce(row)) return undefined;
+    return {
+        title: `Managed by service ${row.serviceName ?? "Swarm"}`,
+        reason: "Restart the service instead. Starting a stopped task runs it outside Swarm's control.",
+    };
+}
+
 export interface ContainersTableProps {
     /** Section title; the Containers page's ALL CONTAINERS by default. */
     title?: string;
     rows: ContainerRow[];
-    snapshotAt: string;
     search: string;
-    sorting: SortingState;
-    onSortingChange: (sorting: SortingState) => void;
+    /** Omit `onSortingChange` for a fixed order with plain headers. */
+    sorting?: SortingState;
+    onSortingChange?: (sorting: SortingState) => void;
     /** Omit both for a table without bulk selection. */
     selection?: RowSelectionState;
     onSelectionChange?: (selection: RowSelectionState) => void;
@@ -40,9 +49,12 @@ export interface ContainersTableProps {
     onLogs?: (row: ContainerRow) => void;
     /** Opens a shell in the row's container on the Exec screen; running rows only. */
     onExec?: (row: ContainerRow) => void;
-    countLabel: string;
+    /** Rows before the page's filters, for the `N OF M` count. */
+    total?: number;
     isFirstLoad: boolean;
     isRefetching: boolean;
+    /** The banner shown while a refetch fails after a good load. */
+    stale?: ReactNode;
     emptyState: ReactNode;
     errorState?: ReactNode;
 }
@@ -58,21 +70,31 @@ function rowActions(
     const disabled = stale ? { disabled: true, disabledReason: STALE } : {};
     const execBlocked = stale ? STALE : row.state !== "running" ? NOT_RUNNING : undefined;
     const exec = () => onExec?.(row);
+    const task = replacedTask(row);
+    const startBlocked = stale ? STALE : task;
     const actions: RowIconAction[] = [
         { label: "Exec", icon: Terminal, onClick: exec, mutates: true, disabled: execBlocked !== undefined || !onExec, disabledReason: execBlocked },
     ];
     if (row.state === "running") actions.push({ label: "Pause", icon: Pause, onClick: () => onAction(row, "pause"), mutates: true, ...disabled });
     else if (row.state === "paused") actions.push({ label: "Unpause", icon: Play, onClick: () => onAction(row, "unpause"), mutates: true, ...disabled });
-    else actions.push({ label: "Restart", icon: RotateCw, onClick: () => onAction(row, "restart"), mutates: true, ...disabled });
+    else
+        actions.push({
+            label: "Restart",
+            icon: RotateCw,
+            onClick: () => onAction(row, "restart"),
+            mutates: true,
+            disabled: startBlocked !== undefined,
+            disabledReason: startBlocked,
+        });
 
-    const live = row.state === "running" || row.state === "paused" || row.state === "restarting";
+    const live = needsForce(row);
     const menu: RowMenuItem[] = [
         { label: row.serviceName ? "Logs" : "Logs (no service)", onClick: () => onLogs?.(row), disabled: !row.serviceName || !onLogs },
         { label: "Exec", onClick: exec, disabled: execBlocked !== undefined || !onExec, mutates: true },
-        { label: "Restart", onClick: () => onAction(row, "restart"), disabled: stale, separatorBefore: true, mutates: true },
+        { label: "Restart", onClick: () => onAction(row, "restart"), disabled: startBlocked !== undefined, separatorBefore: true, mutates: true },
         live
             ? { label: "Stop", onClick: () => onAction(row, "stop"), disabled: stale, mutates: true }
-            : { label: "Start", onClick: () => onAction(row, "start"), disabled: stale, mutates: true },
+            : { label: "Start", onClick: () => onAction(row, "start"), disabled: startBlocked !== undefined, mutates: true },
         row.state === "paused"
             ? { label: "Unpause", onClick: () => onAction(row, "unpause"), disabled: stale, mutates: true }
             : { label: "Pause", onClick: () => onAction(row, "pause"), disabled: stale || row.state !== "running", mutates: true },
@@ -84,7 +106,7 @@ function rowActions(
 /** The ALL CONTAINERS table (`UFRzW`): STATUS, NAME, IMAGE, CPU, MEM, PORTS, UPTIME, actions. */
 export function ContainersTable(props: ContainersTableProps) {
     const now = useNow();
-    const { snapshotAt, failures } = props;
+    const { failures } = props;
     const columns: DataTableColumn<Row>[] = [
         {
             id: "status",
@@ -139,7 +161,7 @@ export function ContainersTable(props: ContainersTableProps) {
             cell: (row) => {
                 const failure = failures.get(containerRowId(row));
                 if (failure) return <span className='text-destructive'>failed · {failure}</span>;
-                return <span className='text-muted-foreground'>{uptimeText(row, snapshotAt, now)}</span>;
+                return <span className='text-muted-foreground'>{uptimeText(row, now)}</span>;
             },
         },
     ];
@@ -160,9 +182,10 @@ export function ContainersTable(props: ContainersTableProps) {
             rowClassName={(row) =>
                 cn((props.pending.has(containerRowId(row)) || props.dimmed) && "opacity-50 transition-opacity", row.stale && "text-muted-foreground")
             }
-            countLabel={props.countLabel}
+            total={props.total}
             isFirstLoad={props.isFirstLoad}
             isRefetching={props.isRefetching}
+            stale={props.stale}
             emptyState={props.emptyState}
             errorState={props.errorState}
         />

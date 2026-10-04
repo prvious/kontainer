@@ -53,6 +53,19 @@ impl RemoveStackExecutor {
     }
 }
 
+/// For a failure after the services are gone: the stack no longer lists, so name the networks
+/// left behind and where they can be removed.
+fn networks_left(networks: &[(String, String)]) -> String {
+    if networks.is_empty() {
+        return String::new();
+    }
+    let names: Vec<&str> = networks.iter().map(|(_, name)| name.as_str()).collect();
+    format!(
+        " Networks left: {}. Remove them from the Networks page.",
+        names.join(", ")
+    )
+}
+
 fn detail(phase: &str, services: usize, networks: usize, volumes: &[String]) -> serde_json::Value {
     serde_json::json!({
         "phase": phase,
@@ -115,6 +128,7 @@ impl OperationExecutor for RemoveStackExecutor {
         context
             .report_progress(detail("waiting_for_tasks", removed, 0, &volumes))
             .await;
+        let all_networks = networks_left(&planned.network_ids);
         let deadline = tokio::time::Instant::now() + self.deadline;
         loop {
             // Unfiltered: Docker answers 404 for a service filter naming a removed service, even
@@ -122,12 +136,27 @@ impl OperationExecutor for RemoveStackExecutor {
             match manager.list_tasks(&[], false, &context.cancellation).await {
                 Ok(tasks) if !still_stopping(&tasks, &planned.service_ids) => break,
                 Ok(_) => {}
-                Err(error) => return Err(manager_failure(error)),
+                Err(error) => {
+                    let failure = manager_failure(error);
+                    return Err(ExecutionFailure::new(
+                        failure.code,
+                        format!(
+                            "The services of {} were removed. {}{all_networks}",
+                            payload.name, failure.message
+                        ),
+                    )
+                    .with_detail(detail(
+                        "waiting_for_tasks",
+                        removed,
+                        0,
+                        &volumes,
+                    )));
+                }
             }
             if tokio::time::Instant::now() >= deadline {
                 return Err(ExecutionFailure::new(
                     "tasks_remaining",
-                    format!("The services of {} were removed, but their tasks were still stopping after {} s. Its networks were left.", payload.name, self.deadline.as_secs()),
+                    format!("The services of {} were removed, but their tasks were still stopping after {} s.{all_networks}", payload.name, self.deadline.as_secs()),
                 )
                 .with_detail(detail("waiting_for_tasks", removed, 0, &volumes)));
             }
@@ -141,7 +170,7 @@ impl OperationExecutor for RemoveStackExecutor {
         for (network_id, name) in &planned.network_ids {
             let deadline = tokio::time::Instant::now() + self.deadline;
             loop {
-                match manager
+                let error = match manager
                     .remove_network(network_id, &context.cancellation)
                     .await
                 {
@@ -149,16 +178,36 @@ impl OperationExecutor for RemoveStackExecutor {
                     // Swarm detaches the last endpoints a moment after the tasks go.
                     Err(ManagerError::Rejected) if tokio::time::Instant::now() < deadline => {
                         tokio::time::sleep(self.poll).await;
+                        continue;
                     }
-                    Err(ManagerError::Rejected) => {
-                        return Err(ExecutionFailure::new(
-                            "in_use",
-                            format!("{name} was still in use after {} s; the stack's services are gone.", self.deadline.as_secs()),
-                        )
-                        .with_detail(detail("removing_networks", removed, networks_removed, &volumes)));
-                    }
-                    Err(error) => return Err(manager_failure(error)),
-                }
+                    Err(error) => error,
+                };
+                let left = networks_left(&planned.network_ids[networks_removed..]);
+                let failure = if error == ManagerError::Rejected {
+                    ExecutionFailure::new(
+                        "in_use",
+                        format!(
+                            "The services of {} were removed, but {name} was still in use after {} s.{left}",
+                            payload.name,
+                            self.deadline.as_secs()
+                        ),
+                    )
+                } else {
+                    let failure = manager_failure(error);
+                    ExecutionFailure::new(
+                        failure.code,
+                        format!(
+                            "The services of {} were removed. {}{left}",
+                            payload.name, failure.message
+                        ),
+                    )
+                };
+                return Err(failure.with_detail(detail(
+                    "removing_networks",
+                    removed,
+                    networks_removed,
+                    &volumes,
+                )));
             }
             networks_removed += 1;
             context
@@ -178,7 +227,21 @@ impl OperationExecutor for RemoveStackExecutor {
 mod tests {
     use kontainer_engine::TaskSummary;
 
-    use super::still_stopping;
+    use super::{networks_left, still_stopping};
+
+    #[test]
+    fn a_failure_names_the_networks_left_and_where_to_remove_them() {
+        let network = |name: &str| ("id".to_owned(), name.to_owned());
+        assert_eq!(
+            networks_left(&[network("shop_default"), network("shop_backend")]),
+            " Networks left: shop_default, shop_backend. Remove them from the Networks page."
+        );
+        assert_eq!(
+            networks_left(&[]),
+            "",
+            "a stack without networks leaves none"
+        );
+    }
 
     #[test]
     fn only_the_removed_services_tasks_that_still_run_hold_the_wait() {

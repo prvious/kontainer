@@ -9,17 +9,15 @@ use crate::{
     swarm::engine::{ManagerEngine, ManagerError},
 };
 
-/// Tasks returned with one service, newest first.
-const MAX_TASKS: usize = 50;
-
 pub struct ServiceDetail {
     pub row: ServiceRow,
+    /// Every task, newest first.
     pub tasks: Vec<TaskSummary>,
     pub latest_error: Option<String>,
 }
 
-/// One service with its recent tasks (every state) and the newest task error. `Ok(None)` when
-/// the manager has no such service.
+/// One service with its tasks (every state) and the newest task error. `Ok(None)` when the
+/// manager has no such service. Convergence polls through this, so it keeps every task.
 pub async fn execute(
     manager: &dyn ManagerEngine,
     service_id: &str,
@@ -41,7 +39,6 @@ pub async fn execute(
         let row = service_rows(vec![service], &tasks)
             .pop()
             .ok_or(ManagerError::Unavailable)?;
-        tasks.truncate(MAX_TASKS);
         Ok(Some(ServiceDetail {
             row,
             tasks,

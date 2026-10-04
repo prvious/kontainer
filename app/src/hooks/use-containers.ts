@@ -13,6 +13,8 @@ export const containersKey = (profileId: string) => ["containers", profileId] as
 /** A row the latest snapshot did not confirm: its node did not answer, so it is last known. */
 export interface ContainerRow extends ContainerView {
     stale: boolean;
+    /** `snapshotAt` of the last snapshot that confirmed the row: the latest one unless it is stale. */
+    lastSeenAt: string;
 }
 
 export interface ContainerSnapshot extends Omit<ContainerListView, "items"> {
@@ -21,13 +23,14 @@ export interface ContainerSnapshot extends Omit<ContainerListView, "items"> {
 
 /**
  * Keep the last good rows of a node that did not answer this time, marked stale, so a silent
- * node's containers stay visible as UNKNOWN (03.S4). The query function merges with the previous
- * snapshot when data arrives, never in an effect.
+ * node's containers stay visible as UNKNOWN (03.S4). A carried row keeps the time it was last
+ * confirmed. The query function merges with the previous snapshot when data arrives, never in an
+ * effect.
  */
 export function mergeSnapshots(previous: ContainerSnapshot | undefined, next: ContainerListView): ContainerSnapshot {
     const silent = new Set(next.nodes.filter((node) => node.status !== "ok").map((node) => node.nodeId));
     const carried = (previous?.items ?? []).filter((row) => silent.has(row.nodeId)).map((row) => ({ ...row, stale: true }));
-    return { ...next, items: [...next.items.map((item) => ({ ...item, stale: false })), ...carried] };
+    return { ...next, items: [...next.items.map((item) => ({ ...item, stale: false, lastSeenAt: next.snapshotAt })), ...carried] };
 }
 
 /** Every container on the cluster, polled at the refresh interval. */

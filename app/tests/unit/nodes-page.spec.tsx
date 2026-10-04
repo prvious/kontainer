@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
@@ -94,13 +94,14 @@ function Harness({ path }: { path: string }) {
 
 function renderPage() {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    return render(
+    render(
         <AuthContext value={auth}>
             <QueryClientProvider client={queryClient}>
                 <Harness path='/nodes' />
             </QueryClientProvider>
         </AuthContext>,
     );
+    return queryClient;
 }
 
 describe("Nodes page", () => {
@@ -172,5 +173,23 @@ describe("Nodes page", () => {
         });
         renderPage();
         expect(await screen.findByText("No nodes yet")).toBeInTheDocument();
+    });
+
+    it("keeps the last cards faded under a stale banner when a refresh fails", async () => {
+        let failing = false;
+        mockCommands({
+            list_nodes: () => {
+                if (failing) throw "controller_unavailable";
+                return nodeList();
+            },
+        });
+        const queryClient = renderPage();
+        const leader = await screen.findByRole("article", { name: "manager" });
+        expect(screen.queryByText(/Couldn't refresh/)).not.toBeInTheDocument();
+        failing = true;
+        await act(() => queryClient.refetchQueries({ queryKey: ["nodes", session.profileId], exact: true }));
+        expect(await screen.findByText(/^Couldn't refresh — showing the snapshot from \d\d:\d\d:\d\d$/)).toBeInTheDocument();
+        expect(screen.getByRole("article", { name: "manager" })).toBe(leader);
+        expect(leader.parentElement).toHaveClass("opacity-50");
     });
 });

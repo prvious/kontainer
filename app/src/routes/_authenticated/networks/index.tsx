@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { Network, Plus, RefreshCw } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { ActionButton } from "@/components/kit/action-button";
@@ -7,6 +7,7 @@ import { ConfirmDialog } from "@/components/kit/confirm-dialog";
 import { EmptyState, ErrorState } from "@/components/kit/region-states";
 import { InlineAlert } from "@/components/kit/inline-alert";
 import { notify } from "@/components/kit/notify";
+import { StaleSnapshotAlert } from "@/components/kit/stale-snapshot-alert";
 import { TableToolbar, type FilterChip } from "@/components/data-table/table-toolbar";
 import { PinnedOperations } from "@/components/operations/pinned-operations";
 import { NetworkOverviewStrip } from "@/components/networks/network-overview-strip";
@@ -30,6 +31,7 @@ const HIGHLIGHT_MS = 3000;
 function NetworksPage() {
     const search = Route.useSearch();
     const navigate = Route.useNavigate();
+    const router = useRouter();
     const networks = useNetworks();
     const nodes = useNodes();
     const remove = useRemoveNetwork();
@@ -51,10 +53,15 @@ function NetworksPage() {
         void navigate({ search: { ...next, highlightedRow: undefined }, replace: true });
     }
 
+    /** The create operation settles after polling; the user may be on another page by then. */
+    const onNetworksPage = () => router.matchRoute({ to: Route.to }) !== false;
+
     function created(row: string) {
         setCreateOpen(false);
+        if (!onNetworksPage()) return;
         void navigate({ search: (previous: NetworkSearch) => ({ ...previous, highlightedRow: row }), replace: true });
         setTimeout(() => {
+            if (!onNetworksPage()) return;
             void navigate({
                 search: (previous: NetworkSearch) => (previous.highlightedRow === row ? { ...previous, highlightedRow: undefined } : previous),
                 replace: true,
@@ -159,9 +166,10 @@ function NetworksPage() {
                     pending={pending}
                     highlighted={search.highlightedRow}
                     onRemove={setRemoving}
-                    countLabel={filtered.length === rows.length && !search.q ? String(rows.length) : `${filtered.length} OF ${rows.length}`}
+                    total={rows.length}
                     isFirstLoad={networks.isPending}
                     isRefetching={networks.isFetching && !networks.isPending}
+                    stale={networks.error && snapshot ? <StaleSnapshotAlert query={networks} /> : undefined}
                     emptyState={emptyState}
                     errorState={errorState}
                 />

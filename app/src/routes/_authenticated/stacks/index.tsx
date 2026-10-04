@@ -6,6 +6,7 @@ import { BookOpen, Layers, Upload } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { ActionButton } from "@/components/kit/action-button";
 import { EmptyState, ErrorState } from "@/components/kit/region-states";
+import { StaleSnapshotAlert } from "@/components/kit/stale-snapshot-alert";
 import { TableToolbar } from "@/components/data-table/table-toolbar";
 import { PinnedOperations } from "@/components/operations/pinned-operations";
 import { StacksTable } from "@/components/stacks/stacks-table";
@@ -69,18 +70,20 @@ function StacksPage() {
         );
 
     const retryIn = Math.max(0, Math.ceil((stacks.errorUpdatedAt + 10_000 - now) / 1000));
-    const errorState = errorCode ? (
-        <ErrorState
-            title="Couldn't load stacks"
-            details={{ status: 503, code: errorCode, message: "The stack list request failed." }}
-            retryLabel={retryIn > 0 ? `RETRY IN ${retryIn}s` : "TRY AGAIN"}
-            onRetry={() => void stacks.refetch()}
-        >
-            {errorCode === "quorum_unavailable"
-                ? "The Swarm manager can't reach a majority of managers, so stacks can't be read. Your workloads keep running — nothing here is reported as down while the cluster can't answer."
-                : "The controller answered, but the stack list request failed. Nothing was changed."}
-        </ErrorState>
-    ) : undefined;
+    // Like Services: quorum loss replaces the rows; any other failed refetch keeps the snapshot, marked stale.
+    const errorState =
+        errorCode && (errorCode === "quorum_unavailable" || !stacks.data) ? (
+            <ErrorState
+                title="Couldn't load stacks"
+                details={{ status: 503, code: errorCode, message: "The stack list request failed." }}
+                retryLabel={retryIn > 0 ? `RETRY IN ${retryIn}s` : "TRY AGAIN"}
+                onRetry={() => void stacks.refetch()}
+            >
+                {errorCode === "quorum_unavailable"
+                    ? "The Swarm manager can't reach a majority of managers, so stacks can't be read. Your workloads keep running — nothing here is reported as down while the cluster can't answer."
+                    : "The controller answered, but the stack list request failed. Nothing was changed."}
+            </ErrorState>
+        ) : undefined;
 
     const empty = rows.length === 0 && !search.q && !errorCode && !stacks.isPending;
     return (
@@ -117,9 +120,9 @@ function StacksPage() {
                     onShowServices={(stack) => void navigate({ to: "/services", search: { stack: stack.name } })}
                     onRemove={(stack) => setRemoving(stack.name)}
                     writable={!stacks.isError}
-                    countLabel={errorCode ? "—" : String(rows.length)}
                     isFirstLoad={stacks.isPending}
                     isRefetching={stacks.isFetching && !stacks.isPending}
+                    stale={stacks.error && stacks.data ? <StaleSnapshotAlert query={stacks} /> : undefined}
                     emptyState={emptyState}
                     errorState={errorState}
                 />

@@ -6,6 +6,7 @@ import { ActionButton } from "@/components/kit/action-button";
 import { EmptyState, ErrorState } from "@/components/kit/region-states";
 import { InlineAlert } from "@/components/kit/inline-alert";
 import { notify } from "@/components/kit/notify";
+import { StaleSnapshotAlert } from "@/components/kit/stale-snapshot-alert";
 import { TableToolbar } from "@/components/data-table/table-toolbar";
 import { PinnedOperations } from "@/components/operations/pinned-operations";
 import { bytes } from "@/components/containers/container-format";
@@ -127,7 +128,6 @@ function ImagesPage() {
                     }}
                     pending={pending}
                     onDelete={setDeleting}
-                    countLabel={String(rows.length)}
                     headerRight={
                         <span className='flex items-center gap-4 font-mono text-3xs font-bold tracking-[1px] text-muted-foreground uppercase'>
                             <span className='flex items-center gap-1.5'>
@@ -140,6 +140,7 @@ function ImagesPage() {
                     }
                     isFirstLoad={images.isPending}
                     isRefetching={images.isFetching && !images.isPending}
+                    stale={images.error && snapshot ? <StaleSnapshotAlert query={images} /> : undefined}
                     emptyState={emptyState}
                     errorState={errorState}
                 />

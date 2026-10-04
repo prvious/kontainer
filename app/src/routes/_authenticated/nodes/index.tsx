@@ -4,10 +4,12 @@ import { PageHeader } from "@/components/page-header";
 import { ActionButton } from "@/components/kit/action-button";
 import { EmptyState, ErrorState } from "@/components/kit/region-states";
 import { SkeletonStat } from "@/components/kit/skeletons";
+import { StaleSnapshotAlert } from "@/components/kit/stale-snapshot-alert";
 import { ClusterLoadStrip } from "@/components/nodes/cluster-load-strip";
 import { NodeCard } from "@/components/nodes/node-card";
 import { useNow } from "@/hooks/use-now";
 import { useClusterSummary, useNodes, useSamples } from "@/hooks/use-nodes";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/nodes/")({
     component: NodesPage,
@@ -44,7 +46,7 @@ function NodesPage() {
                 ))}
             </div>
         );
-    } else if (nodes.isError && items.length === 0) {
+    } else if (nodes.error && !nodes.data) {
         grid = (
             <ErrorState
                 title="Couldn't load nodes"
@@ -61,8 +63,9 @@ function NodesPage() {
             </EmptyState>
         );
     } else {
+        // A failed refetch keeps the last cards, faded under the stale banner.
         grid = (
-            <div className='grid grid-cols-2 gap-3 xl:grid-cols-3'>
+            <div className={cn("grid grid-cols-2 gap-3 xl:grid-cols-3", nodes.error && "opacity-50")}>
                 {items.map((node) => (
                     <NodeCard key={node.id} node={node} now={now} />
                 ))}
@@ -78,6 +81,7 @@ function NodesPage() {
                 </ActionButton>
             </PageHeader>
             <ClusterLoadStrip summary={summary.data} points={samples.data?.points ?? []} now={now} />
+            {nodes.error && nodes.data && <StaleSnapshotAlert query={nodes} />}
             {grid}
         </div>
     );

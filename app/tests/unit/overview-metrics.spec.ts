@@ -32,7 +32,8 @@ describe("Overview card math", () => {
     });
 
     it("counts live containers by state and breaks CPU down per node with unreachable ones as null", () => {
-        const rows = ipcFixture<ContainerListView>(containersFixture.containerList).items.map((item) => ({ ...item, stale: false }));
+        const list = ipcFixture<ContainerListView>(containersFixture.containerList);
+        const rows = list.items.map((item) => ({ ...item, stale: false, lastSeenAt: list.snapshotAt }));
         expect(containerCounts([...rows, { ...rows[0], stale: true }])).toEqual({ running: 1, paused: 0, exited: 1, total: 2 });
         expect(cpuByNode(nodes)).toEqual([
             { id: "manager", name: "manager", cores: 4, percent: 12.5 },

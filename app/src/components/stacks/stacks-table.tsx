@@ -23,7 +23,10 @@ export interface StacksTableProps {
     onShowServices: (stack: StackView) => void;
     onRemove: (stack: StackView) => void;
     writable: boolean;
-    countLabel: string;
+    /** Rows before the page's filters, for the `N OF M` count. */
+    total?: number;
+    /** The banner shown while a refetch fails after a good load. */
+    stale?: ReactNode;
     isFirstLoad: boolean;
     isRefetching: boolean;
     emptyState: ReactNode;
@@ -105,7 +108,8 @@ export function StacksTable(props: StacksTableProps) {
                 />
             )}
             rowClassName={(row) => cn(props.pending.has(row.name) && "opacity-50 transition-opacity", row.status === "stopped" && "bg-destructive-soft/40")}
-            countLabel={props.countLabel}
+            total={props.total}
+            stale={props.stale}
             isFirstLoad={props.isFirstLoad}
             isRefetching={props.isRefetching}
             emptyState={props.emptyState}

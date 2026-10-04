@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { ArrowDownUp, HardDrive, Plus, RefreshCw } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { ActionButton } from "@/components/kit/action-button";
@@ -7,6 +7,7 @@ import { ConfirmDialog } from "@/components/kit/confirm-dialog";
 import { EmptyState, ErrorState } from "@/components/kit/region-states";
 import { InlineAlert } from "@/components/kit/inline-alert";
 import { notify } from "@/components/kit/notify";
+import { StaleSnapshotAlert } from "@/components/kit/stale-snapshot-alert";
 import { TableToolbar, type FilterChip } from "@/components/data-table/table-toolbar";
 import { PinnedOperations } from "@/components/operations/pinned-operations";
 import { bytes } from "@/components/containers/container-format";
@@ -42,6 +43,7 @@ const plural = (count: number, one: string, many = `${one}s`) => `${count} ${cou
 function VolumesPage() {
     const search = Route.useSearch();
     const navigate = Route.useNavigate();
+    const router = useRouter();
     const volumes = useVolumes();
     const nodes = useNodes();
     const remove = useRemoveVolume();
@@ -64,11 +66,16 @@ function VolumesPage() {
         void navigate({ search: { ...next, highlightedRow: undefined }, replace: true });
     }
 
+    /** The create operation settles after polling; the user may be on another page by then. */
+    const onVolumesPage = () => router.matchRoute({ to: Route.to }) !== false;
+
     function created(volume: { nodeId: string; name: string }) {
         setCreateOpen(false);
+        if (!onVolumesPage()) return;
         const row = volumeRowId(volume);
         void navigate({ search: (previous: VolumeSearch) => ({ ...previous, highlightedRow: row }), replace: true });
         setTimeout(() => {
+            if (!onVolumesPage()) return;
             void navigate({
                 search: (previous: VolumeSearch) => (previous.highlightedRow === row ? { ...previous, highlightedRow: undefined } : previous),
                 replace: true,
@@ -171,7 +178,7 @@ function VolumesPage() {
                     pending={pending}
                     highlighted={search.highlightedRow}
                     onRemove={setRemoving}
-                    countLabel={filtered.length === rows.length && !search.q ? String(rows.length) : `${filtered.length} OF ${rows.length}`}
+                    total={rows.length}
                     headerRight={
                         <span className='flex items-center gap-1.5 font-mono text-3xs font-bold tracking-[1px] text-muted-foreground uppercase'>
                             <ArrowDownUp aria-hidden className='size-3' /> {VOLUME_SORT_LABELS[sort]} {sort === "name" ? "asc" : "desc"}
@@ -179,6 +186,7 @@ function VolumesPage() {
                     }
                     isFirstLoad={volumes.isPending}
                     isRefetching={volumes.isFetching && !volumes.isPending}
+                    stale={volumes.error && snapshot ? <StaleSnapshotAlert query={volumes} /> : undefined}
                     emptyState={emptyState}
                     errorState={errorState}
                 />

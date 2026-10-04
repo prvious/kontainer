@@ -155,6 +155,25 @@ describe("Overview page", () => {
         await act(async () => release(containers.containerList));
     });
 
+    it("shows an error, not skeletons forever, when the summary fails before its first answer", async () => {
+        let failing = true;
+        mockCommands({
+            get_cluster_summary: () => {
+                if (failing) throw "controller_unavailable";
+                return nodes.clusterSummary;
+            },
+        });
+        renderPage();
+        expect(await screen.findByText("Couldn't load cluster figures")).toBeInTheDocument();
+        expect(screen.queryByTestId("skeleton-stat")).not.toBeInTheDocument();
+        expect(screen.getByText("couldn't sync cluster state")).toBeInTheDocument();
+        expect(screen.getByText("controller_unavailable")).toBeInTheDocument();
+
+        failing = false;
+        await userEvent.setup().click(screen.getByRole("button", { name: /TRY AGAIN/ }));
+        expect(await screen.findByRole("region", { name: "CPU USAGE" })).toBeInTheDocument();
+    });
+
     it("keeps cached figures dimmed and pauses changes after three failed probes", async () => {
         mockCommands({ controller_health: () => ({ status: "unreachable", diagnostic: "tcp" }) });
         renderPage();

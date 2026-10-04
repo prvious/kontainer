@@ -25,7 +25,10 @@ export interface NetworksTableProps {
     /** Row id of a just-created network. */
     highlighted?: string;
     onRemove: (network: NetworkView) => void;
-    countLabel: string;
+    /** Rows before the page's filters, for the `N OF M` count. */
+    total?: number;
+    /** The banner shown while a refetch fails after a good load. */
+    stale?: ReactNode;
     isFirstLoad: boolean;
     isRefetching: boolean;
     emptyState: ReactNode;
@@ -95,7 +98,8 @@ export function NetworksTable(props: NetworksTableProps) {
                     props.highlighted === networkRowId(row) && "bg-primary-faint transition-colors",
                 )
             }
-            countLabel={props.countLabel}
+            total={props.total}
+            stale={props.stale}
             isFirstLoad={props.isFirstLoad}
             isRefetching={props.isRefetching}
             emptyState={props.emptyState}

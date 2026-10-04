@@ -6,6 +6,7 @@ import { ActionButton } from "@/components/kit/action-button";
 import { InlineAlert } from "@/components/kit/inline-alert";
 import { EmptyState, ErrorState } from "@/components/kit/region-states";
 import { SkeletonStat } from "@/components/kit/skeletons";
+import { StaleSnapshotAlert } from "@/components/kit/stale-snapshot-alert";
 import { ContainersTable } from "@/components/containers/containers-table";
 import { RemoveContainerDialog } from "@/components/containers/remove-container-dialog";
 import { useRunContainerAction } from "@/components/containers/use-run-container-action";
@@ -74,6 +75,8 @@ function OverviewPage() {
 
     const queries = [summary, nodes, hour, containers];
     const firstLoad = summary.data === undefined || containers.data === undefined;
+    // The cards need both; one that failed before its first answer would leave skeletons forever.
+    const loadFailure = [summary, containers].find((query) => query.error && query.data === undefined);
     const syncedAt = summary.dataUpdatedAt > 0 ? summary.dataUpdatedAt : null;
     const staleAt = connectivity.reachable ? null : syncedAt;
     const reconnected = connectivity.reachable && connectivity.reconnectedAt !== null && now - connectivity.reconnectedAt < RECONNECTED_ALERT_MS;
@@ -90,7 +93,9 @@ function OverviewPage() {
     }
 
     let subtitle;
-    if (firstLoad) {
+    if (loadFailure) {
+        subtitle = <span className='text-destructive'>couldn't sync cluster state</span>;
+    } else if (firstLoad) {
         subtitle = (
             <span className='flex items-center gap-1.5'>
                 <Loader2 aria-hidden className='size-3 animate-spin text-primary' />
@@ -159,7 +164,14 @@ function OverviewPage() {
                     Figures are live again and changes are enabled.
                 </InlineAlert>
             )}
-            {firstLoad ? (
+            {loadFailure ? (
+                <ErrorState
+                    title="Couldn't load cluster figures"
+                    details={{ code: String(loadFailure.error), message: "The cluster summary or container inventory request failed. Nothing was changed." }}
+                    onRetry={() => void loadFailure.refetch()}
+                    className='rounded-md border border-border bg-card'
+                />
+            ) : firstLoad ? (
                 <div aria-label='Loading cluster figures' aria-busy className='grid grid-cols-2 gap-4 xl:grid-cols-4'>
                     {[0, 1, 2, 3].map((index) => (
                         <SkeletonStat key={index} className='min-h-30' />
@@ -178,11 +190,8 @@ function OverviewPage() {
             <ContainersTable
                 title={staleAt !== null ? `RUNNING CONTAINERS · AS OF ${clockTime(staleAt)}` : "RUNNING CONTAINERS"}
                 rows={shown}
-                snapshotAt={containers.data?.snapshotAt ?? new Date(0).toISOString()}
                 search=''
-                // Rows arrive busiest first and capped; the table keeps that order.
-                sorting={[]}
-                onSortingChange={() => {}}
+                // Rows arrive busiest first and capped; the table keeps that order and its headers stay plain.
                 headerRight={
                     <>
                         <OverviewTableControls
@@ -206,10 +215,12 @@ function OverviewPage() {
                 onRemove={setRemoving}
                 onLogs={(row) => void navigate({ to: "/logs", search: { service: row.serviceName ?? undefined } })}
                 onExec={(row) => void navigate({ to: "/exec", search: { node: row.nodeId, container: row.containerId } })}
-                countLabel={matching.length > shown.length ? `${shown.length} OF ${matching.length}` : String(matching.length)}
+                total={matching.length}
                 isFirstLoad={containers.isPending}
                 isRefetching={containers.isFetching && !containers.isPending}
                 dimmed={staleAt !== null}
+                // While the controller is unreachable the alert above already says the data is cached.
+                stale={containers.error && containers.data && staleAt === null ? <StaleSnapshotAlert query={containers} /> : undefined}
                 emptyState={emptyState}
                 errorState={errorState}
             />

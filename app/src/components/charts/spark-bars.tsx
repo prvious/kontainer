@@ -102,7 +102,8 @@ export function SparkBars({
                 onMouseLeave={() => setActive(null)}
             >
                 <YAxis hide domain={[0, "dataMax"]} />
-                <Bar dataKey='value' isAnimationActive={false} minPointSize={1}>
+                {/* A zero still shows a 1 px bar; a gap shows none. */}
+                <Bar dataKey='value' isAnimationActive={false} minPointSize={(value) => (value === null ? 0 : 1)}>
                     {data.map((entry) => (
                         <Cell
                             key={entry.index}

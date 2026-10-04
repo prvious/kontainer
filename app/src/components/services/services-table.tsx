@@ -38,7 +38,10 @@ export interface ServicesTableProps {
     onLogs: (service: ServiceView) => void;
     /** False while the manager can't take writes. */
     writable: boolean;
-    countLabel: string;
+    /** Rows before the page's filters, for the `N OF M` count. */
+    total?: number;
+    /** The banner shown while a refetch fails after a good load. */
+    stale?: ReactNode;
     isFirstLoad: boolean;
     isRefetching: boolean;
     emptyState: ReactNode;
@@ -134,7 +137,8 @@ export function ServicesTable(props: ServicesTableProps) {
             onSortingChange={props.onSortingChange}
             rowActions={(row) => <RowActions label={row.name} menu={menu(row)} />}
             rowClassName={(row) => cn(props.statusOf(row) === "stopped" && "bg-destructive-soft/40")}
-            countLabel={props.countLabel}
+            total={props.total}
+            stale={props.stale}
             isFirstLoad={props.isFirstLoad}
             isRefetching={props.isRefetching}
             emptyState={props.emptyState}

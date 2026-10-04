@@ -63,16 +63,20 @@ function CreateVolumeBody({
     const [labelError, setLabelError] = useState<string | null>(null);
     const [settleError, setSettleError] = useState<string | null>(null);
     const taken = useVolumeNameTaken(node, checkedName);
+    // Waiting for the admitted operation to settle; the mutation itself only covers admission.
+    const [waiting, setWaiting] = useState(false);
     const create = useCreateVolume((view, variables) => {
+        setWaiting(false);
         if (view.state === "succeeded") onCreated({ nodeId: variables.nodeId, name: variables.name });
         else setSettleError(view.errorMessage ?? "The volume was not created.");
     });
-    const [waiting, setWaiting] = useState(false);
 
     const formatInvalid = checkedName !== null && !VOLUME_NAME.test(checkedName);
     const conflict = checkedName === name && taken.data === true;
     const nameError = formatInvalid ? NAME_RULE : conflict ? `A volume named ${name} already exists on ${node}. Pick another name or another node.` : null;
-    const invalid = node === null || !VOLUME_NAME.test(name) || conflict || (checkedName === name && taken.isFetching) || labelDraft !== null;
+    // An in-flight name check doesn't block CREATE (the controller still refuses a duplicate); a
+    // label that failed to parse does, since labels can't be changed after creation.
+    const invalid = node === null || !VOLUME_NAME.test(name) || conflict || labelError !== null;
 
     function addLabel() {
         if (labelDraft === null || labelDraft.trim() === "") {
@@ -103,7 +107,7 @@ function CreateVolumeBody({
         });
     }
 
-    const pending = create.isPending || (waiting && settleError === null);
+    const pending = create.isPending || waiting;
     return (
         <form
             onSubmit={(event) => {
@@ -114,7 +118,7 @@ function CreateVolumeBody({
             <div className='flex flex-col gap-1.5 px-5 pt-5 pr-10'>
                 <DialogTitle className='font-sans text-base font-semibold text-foreground'>Create volume</DialogTitle>
                 <DialogDescription className='font-mono text-2xs leading-relaxed text-muted-foreground'>
-                    Local volumes live on a single node. Services that mount it will be pinned to that node.
+                    Local volumes live on a single node. Pin services that mount it to that node with a placement constraint.
                 </DialogDescription>
             </div>
             <div className='flex flex-col gap-4 px-5 pt-4'>

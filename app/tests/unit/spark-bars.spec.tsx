@@ -19,4 +19,16 @@ describe("SparkBars", () => {
         fireEvent.keyDown(chart, { key: "Escape" });
         expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
     });
+
+    it("draws no bar for a gap, and still a 1 px bar for a zero", () => {
+        const { container } = render(<SparkBars buckets={buckets.map((bucket, index) => (index === 0 ? { ...bucket, value: 0 } : bucket))} label='CPU' />);
+        const heights = [...container.querySelectorAll(".recharts-bar-rectangle")].map((bar) => {
+            const rectangle = bar.querySelector(".recharts-rectangle");
+            return rectangle ? Number(rectangle.getAttribute("height")) : 0;
+        });
+        expect(heights).toHaveLength(3);
+        expect(heights[0]).toBe(1);
+        expect(heights[1]).toBe(0);
+        expect(heights[2]).toBeGreaterThan(1);
+    });
 });

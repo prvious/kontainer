@@ -39,9 +39,9 @@ export function uptime(seconds: number): string {
     return `${total}s`;
 }
 
-/** UPTIME cell: running for, `exited 2m ago`, `restarting`, or `last seen …` for stale rows. */
-export function uptimeText(row: ContainerRow, snapshotAt: string, now: number): string {
-    if (row.stale) return `last seen ${relativeTime(Date.parse(snapshotAt), now).replace(" ago", "")}`;
+/** UPTIME cell: running for, `exited 2m ago`, `restarting`, or `last seen 2h ago` for stale rows. */
+export function uptimeText(row: ContainerRow, now: number): string {
+    if (row.stale) return `last seen ${relativeTime(Date.parse(row.lastSeenAt), now)}`;
     if (row.state === "restarting") return "restarting";
     if ((row.state === "running" || row.state === "paused") && row.startedAt) return uptime((now - Date.parse(row.startedAt)) / 1000);
     if ((row.state === "exited" || row.state === "dead") && row.finishedAt) return `exited ${relativeTime(Date.parse(row.finishedAt), now)}`;
@@ -69,3 +69,6 @@ export function portsText(ports: string[]): string {
 }
 
 export const isRunning = (row: Pick<ContainerRow, "state">) => row.state === "running";
+
+/** Running, paused, or restarting: Docker removes it only with `force`, which kills it first. */
+export const needsForce = (row: Pick<ContainerRow, "state">) => row.state === "running" || row.state === "paused" || row.state === "restarting";

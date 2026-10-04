@@ -149,9 +149,11 @@ function SessionAuthProvider({ children }: { children: React.ReactNode }) {
                 session,
                 reportInventoryCustodyError,
                 issue,
-                // A retried restore counts as loading, so the splash shows progress, not the old failure.
-                isLoading: restore.isPending || restore.isRefetching,
-                restoreError: restore.error ? sessionErrorCode(restore.error) : null,
+                // A retried boot restore counts as loading, so the splash shows progress, not the old
+                // failure. Once a restore has answered, a refetch or its failure never swaps the signed-in
+                // app (and its terminals and log tabs) for the splash.
+                isLoading: restore.isPending || (restore.isRefetching && restore.data === undefined),
+                restoreError: restore.error && restore.data === undefined ? sessionErrorCode(restore.error) : null,
                 expired,
                 login,
                 register,

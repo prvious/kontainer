@@ -6,6 +6,7 @@ import { ActionButton } from "@/components/kit/action-button";
 import { ConfirmDialog } from "@/components/kit/confirm-dialog";
 import { EmptyState, ErrorState } from "@/components/kit/region-states";
 import { notify } from "@/components/kit/notify";
+import { StaleSnapshotAlert } from "@/components/kit/stale-snapshot-alert";
 import { TableToolbar, type FilterChip } from "@/components/data-table/table-toolbar";
 import { PinnedOperations } from "@/components/operations/pinned-operations";
 import { ServicesTable } from "@/components/services/services-table";
@@ -140,24 +141,27 @@ function ServicesPage() {
         );
 
     const retryIn = Math.max(0, Math.ceil((services.errorUpdatedAt + QUORUM_RETRY_MS - now) / 1000));
-    const errorState = errorCode ? (
-        <ErrorState
-            title="Couldn't load services"
-            details={{
-                status: 503,
-                code: errorCode,
-                message: quorumLost ? "The swarm has no quorum." : "The service list request failed.",
-            }}
-            retryLabel={retryIn > 0 ? `RETRY IN ${retryIn}s` : "TRY AGAIN"}
-            onRetry={() => void services.refetch()}
-        >
-            {quorumLost
-                ? "The Swarm manager can't reach a majority of managers, so the service list can't be read. Your workloads keep running — nothing here is reported as down while the cluster can't answer."
-                : errorCode === "not_a_manager"
-                  ? "The controller's Docker host is not a Swarm manager, so there are no services to show."
-                  : "The controller answered, but the service list request failed. Nothing was changed."}
-        </ErrorState>
-    ) : undefined;
+    // Quorum loss replaces the rows even when a snapshot exists, so nothing reads as down (04.S4);
+    // any other failed refetch keeps the snapshot under the stale banner.
+    const errorState =
+        errorCode && (quorumLost || !snapshot) ? (
+            <ErrorState
+                title="Couldn't load services"
+                details={{
+                    status: 503,
+                    code: errorCode,
+                    message: quorumLost ? "The swarm has no quorum." : "The service list request failed.",
+                }}
+                retryLabel={retryIn > 0 ? `RETRY IN ${retryIn}s` : "TRY AGAIN"}
+                onRetry={() => void services.refetch()}
+            >
+                {quorumLost
+                    ? "The Swarm manager can't reach a majority of managers, so the service list can't be read. Your workloads keep running — nothing here is reported as down while the cluster can't answer."
+                    : errorCode === "not_a_manager"
+                      ? "The controller's Docker host is not a Swarm manager, so there are no services to show."
+                      : "The controller answered, but the service list request failed. Nothing was changed."}
+            </ErrorState>
+        ) : undefined;
 
     const subtitle =
         services.isError && snapshot
@@ -207,9 +211,10 @@ function ServicesPage() {
                     onRollback={(service) => setConfirming({ kind: "rollback", service })}
                     onLogs={(service) => void navigate({ to: "/logs", search: { service: service.id } })}
                     writable={writable}
-                    countLabel={errorCode ? "—" : filtered.length === rows.length && !search.q ? String(rows.length) : `${filtered.length} OF ${rows.length}`}
+                    total={rows.length}
                     isFirstLoad={services.isPending}
                     isRefetching={services.isFetching && !services.isPending}
+                    stale={services.error && snapshot ? <StaleSnapshotAlert query={services} /> : undefined}
                     emptyState={emptyState}
                     errorState={errorState}
                 />

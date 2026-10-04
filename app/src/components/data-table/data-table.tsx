@@ -4,7 +4,6 @@ import {
     createColumnHelper,
     createFilteredRowModel,
     createSortedRowModel,
-    filterFn_includesString,
     globalFilteringFeature,
     rowSelectionFeature,
     rowSortingFeature,
@@ -26,7 +25,7 @@ export interface DataTableColumn<TData> {
     id: string;
     header: string;
     cell: (row: TData) => ReactNode;
-    /** Enables sorting by this column. `null` sorts last. */
+    /** Enables sorting by this column. `null` sorts last in both directions. */
     sortValue?: (row: TData) => string | number | null;
     /** Includes this column in the global search. */
     searchValue?: (row: TData) => string;
@@ -38,7 +37,6 @@ const features = tableFeatures({
     columnFilteringFeature,
     globalFilteringFeature,
     filteredRowModel: createFilteredRowModel(),
-    filterFns: { includesString: filterFn_includesString },
     rowSortingFeature,
     sortedRowModel: createSortedRowModel(),
     rowSelectionFeature,
@@ -52,10 +50,8 @@ function resolve<T>(updater: Updater<T>, current: T): T {
     return typeof updater === "function" ? (updater as (old: T) => T)(current) : updater;
 }
 
-function compare(left: string | number | null, right: string | number | null): number {
-    if (left === right) return 0;
-    if (left === null) return 1;
-    if (right === null) return -1;
+/** Missing values never get here: `sortUndefined: "last"` puts them at the end in either direction. */
+function compare(left: string | number, right: string | number): number {
     if (typeof left === "number" && typeof right === "number") return left - right;
     return String(left).localeCompare(String(right), undefined, { numeric: true, sensitivity: "base" });
 }
@@ -69,6 +65,7 @@ export interface DataTableProps<TData extends Record<string, unknown>> {
     /** Global search text; rows match when any searchable column contains it. */
     search?: string;
     sorting?: SortingState;
+    /** Makes the sortable headers clickable; without it `sorting` is a fixed order. */
     onSortingChange?: (sorting: SortingState) => void;
     /** Enables the checkbox column. Selection is owned by the page so the bulk bar can act on it. */
     rowSelection?: RowSelectionState;
@@ -78,12 +75,17 @@ export interface DataTableProps<TData extends Record<string, unknown>> {
     rowClassName?: (row: TData) => string | undefined;
     /** Right side of the section header (search box, filter button). */
     headerRight?: ReactNode;
-    /** Count badge text; defaults to the number of rows shown. */
-    countLabel?: string;
+    /**
+     * Rows before the page's own filters; defaults to `data.length`. The count badge reads
+     * `shown OF total` whenever the filters or the search hide some.
+     */
+    total?: number;
     /** First load only: six skeleton rows. */
     isFirstLoad?: boolean;
     /** A background refetch: rows stay, the header icon spins. */
     isRefetching?: boolean;
+    /** A refetch failed after a good load: this banner sits above the rows, which fade. */
+    stale?: ReactNode;
     /** Rendered inside the body when there are zero rows after filtering. */
     emptyState?: ReactNode;
     /** Replaces the body when the region failed to load. */
@@ -104,9 +106,10 @@ export function DataTable<TData extends Record<string, unknown>>({
     rowActions,
     rowClassName,
     headerRight,
-    countLabel,
+    total = data.length,
     isFirstLoad = false,
     isRefetching = false,
+    stale,
     emptyState,
     errorState,
     className,
@@ -116,12 +119,14 @@ export function DataTable<TData extends Record<string, unknown>>({
         const helper = createColumnHelper<Features, TData>();
         return helper.columns(
             columns.map((column) =>
-                helper.accessor((row) => column.searchValue?.(row) ?? "", {
+                // The value is the sort key, so TanStack can put a missing one last whatever the direction.
+                helper.accessor((row) => column.sortValue?.(row) ?? undefined, {
                     id: column.id,
                     header: column.header,
                     enableSorting: column.sortValue !== undefined,
                     enableGlobalFilter: column.searchValue !== undefined,
-                    sortFn: (left, right) => compare(column.sortValue?.(left.original) ?? null, column.sortValue?.(right.original) ?? null),
+                    sortUndefined: "last",
+                    sortFn: (left, right) => compare(left.getValue<string | number>(column.id), right.getValue<string | number>(column.id)),
                 }),
             ),
         );
@@ -134,8 +139,12 @@ export function DataTable<TData extends Record<string, unknown>>({
         data,
         getRowId: (row) => getRowId(row),
         state: { globalFilter: search, sorting, rowSelection: rowSelection ?? EMPTY_SELECTION },
-        globalFilterFn: "includesString",
+        // Case-insensitive substring over each searchable column's `searchValue`.
+        globalFilterFn: (row, columnId, filterValue: string) =>
+            columnsById.get(columnId)?.searchValue?.(row.original).toLowerCase().includes(filterValue.toLowerCase()) ?? false,
         getColumnCanGlobalFilter: (column) => columnsById.get(column.id)?.searchValue !== undefined,
+        // The first click sorts ascending for every column, numbers included.
+        sortDescFirst: false,
         onSortingChange: (updater) => onSortingChange?.(resolve(updater, sorting)),
         onRowSelectionChange: (updater) => onRowSelectionChange?.(resolve(updater, rowSelection ?? EMPTY_SELECTION)),
         enableRowSelection: selectable,
@@ -145,6 +154,8 @@ export function DataTable<TData extends Record<string, unknown>>({
     const allSelected = selectable && rows.length > 0 && table.getIsAllRowsSelected();
     const someSelected = selectable && table.getIsSomeRowsSelected() && !allSelected;
     const columnCount = columns.length + (selectable ? 1 : 0) + (rowActions ? 1 : 0);
+    const faded = Boolean(stale) && !errorState;
+    const count = errorState ? "—" : rows.length === total ? total : `${rows.length} OF ${total}`;
 
     let body: ReactNode;
     if (errorState) {
@@ -178,6 +189,7 @@ export function DataTable<TData extends Record<string, unknown>>({
                 data-state={row.getIsSelected() ? "selected" : undefined}
                 className={cn(
                     "group/row h-11 border-b border-border transition-colors hover:bg-secondary/60 data-[state=selected]:bg-primary-faint",
+                    faded && "opacity-50",
                     rowClassName?.(row.original),
                 )}
             >
@@ -215,11 +227,12 @@ export function DataTable<TData extends Record<string, unknown>>({
             <header className='flex h-11 items-center justify-between gap-3 border-b border-border px-4'>
                 <div className='flex items-center gap-3'>
                     <h2 className='font-mono text-2xs font-bold tracking-[1px] text-foreground uppercase'>{title}</h2>
-                    <LabelBadge>{countLabel ?? rows.length}</LabelBadge>
+                    <LabelBadge>{count}</LabelBadge>
                     {isRefetching && <RefreshCw aria-label='Refreshing' className='size-3 animate-spin text-muted-foreground' />}
                 </div>
                 {headerRight && <div className='flex items-center gap-2'>{headerRight}</div>}
             </header>
+            {faded && <div className='border-b border-border p-3'>{stale}</div>}
             {/* Tables scroll horizontally inside their card below the design width (design-gaps G20). */}
             <div className='overflow-x-auto'>
                 <Table className='min-w-[1100px] table-fixed'>
@@ -245,7 +258,7 @@ export function DataTable<TData extends Record<string, unknown>>({
                                         aria-sort={sorted === "asc" ? "ascending" : sorted === "desc" ? "descending" : undefined}
                                         className={cn("px-2 first:pl-4", column?.className)}
                                     >
-                                        {header.column.getCanSort() ? (
+                                        {header.column.getCanSort() && onSortingChange ? (
                                             <button
                                                 type='button'
                                                 onClick={header.column.getToggleSortingHandler()}

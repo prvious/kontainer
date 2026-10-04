@@ -55,6 +55,7 @@ function TestConsumer() {
             <span data-testid='origin'>{auth.session?.origin ?? "none"}</span>
             <span data-testid='issue'>{auth.issue ?? "none"}</span>
             <span data-testid='loading'>{String(auth.isLoading)}</span>
+            <span data-testid='restore-error'>{auth.restoreError ?? "none"}</span>
             <span data-testid='expired'>{String(auth.expired)}</span>
             <span data-testid='next-origin'>{auth.nextOrigin ?? "none"}</span>
             <button
@@ -244,6 +245,47 @@ describe("AuthProvider custody", () => {
         });
         await waitFor(() => expect(screen.getByTestId("issue")).toHaveTextContent("local_cleanup_failed"));
         expect(screen.getByTestId("session")).toHaveTextContent("none");
+    });
+
+    it("keeps the signed-in app mounted while a restore is retried, even when the retry fails", async () => {
+        let restores = 0;
+        let fail: (error: unknown) => void = () => {};
+        vi.mocked(invoke).mockImplementation(async (command: string) => {
+            if (command !== "session_restore") return null;
+            restores += 1;
+            return restores === 1 ? session : new Promise((_, reject) => (fail = reject));
+        });
+        renderAuth();
+        await restored();
+        expect(screen.getByTestId("session")).toHaveTextContent(session.profileId);
+
+        await act(async () => screen.getByText("Retry restore").click());
+        await waitFor(() => expect(restores).toBe(2));
+        // `isLoading` and `restoreError` are what swap the router for the splash (app.tsx).
+        expect(screen.getByTestId("loading")).toHaveTextContent("false");
+        await act(async () => fail("vault_unavailable"));
+        expect(screen.getByTestId("loading")).toHaveTextContent("false");
+        expect(screen.getByTestId("restore-error")).toHaveTextContent("none");
+        expect(screen.getByTestId("session")).toHaveTextContent(session.profileId);
+    });
+
+    it("still shows progress, then the failure, while a failed boot restore is retried", async () => {
+        let restores = 0;
+        let fail: (error: unknown) => void = () => {};
+        vi.mocked(invoke).mockImplementation(async (command: string) => {
+            if (command !== "session_restore") return null;
+            restores += 1;
+            if (restores === 1) throw "vault_unavailable";
+            return new Promise((_, reject) => (fail = reject));
+        });
+        renderAuth();
+        await waitFor(() => expect(screen.getByTestId("restore-error")).toHaveTextContent("vault_unavailable"));
+
+        await act(async () => screen.getByText("Retry restore").click());
+        await waitFor(() => expect(screen.getByTestId("loading")).toHaveTextContent("true"));
+        await act(async () => fail("vault_unavailable"));
+        await restored();
+        expect(screen.getByTestId("restore-error")).toHaveTextContent("vault_unavailable");
     });
 
     it("renders revoked restore as re-login-required", async () => {

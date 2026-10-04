@@ -37,6 +37,8 @@ use crate::{
 /// Seconds the desktop waits before asking again when the swarm has no quorum.
 const QUORUM_RETRY_SECONDS: u32 = 10;
 const MAX_REPLICAS: u64 = 1_000;
+/// Tasks returned with one service, newest first.
+const MAX_TASKS: usize = 50;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -276,7 +278,12 @@ pub(crate) async fn show(
             StatusCode::OK,
             ServiceDetailResponse {
                 service: service_response(detail.row),
-                tasks: detail.tasks.into_iter().map(task_response).collect(),
+                tasks: detail
+                    .tasks
+                    .into_iter()
+                    .take(MAX_TASKS)
+                    .map(task_response)
+                    .collect(),
                 latest_error: detail.latest_error,
             },
         ),

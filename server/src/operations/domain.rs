@@ -150,9 +150,9 @@ impl OperationKind {
     pub const fn timeout(self) -> Duration {
         match self {
             Self::ImagePull => Duration::from_secs(10 * 60),
-            // The 60 s convergence wait plus the write and a last poll.
+            // The 15 min convergence wait (rolling updates) plus the write and a last poll.
             Self::ServiceScale | Self::ServiceRestart | Self::ServiceRollback => {
-                Duration::from_secs(90)
+                Duration::from_secs(16 * 60)
             }
             // Up to 60 s for the services' tasks to go, then up to 60 s for the networks.
             Self::StackRemove => Duration::from_secs(150),

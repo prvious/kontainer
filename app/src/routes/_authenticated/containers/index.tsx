@@ -8,6 +8,7 @@ import { ConfirmDialog } from "@/components/kit/confirm-dialog";
 import { EmptyState, ErrorState } from "@/components/kit/region-states";
 import { InlineAlert } from "@/components/kit/inline-alert";
 import { notify } from "@/components/kit/notify";
+import { StaleSnapshotAlert } from "@/components/kit/stale-snapshot-alert";
 import { TableToolbar, type FilterChip } from "@/components/data-table/table-toolbar";
 import { BulkBar } from "@/components/data-table/bulk-bar";
 import { PinnedOperations } from "@/components/operations/pinned-operations";
@@ -26,6 +27,7 @@ import {
 } from "@/components/containers/container-search";
 import { useContainers, useContainersBulkAction, type ContainerRow } from "@/hooks/use-containers";
 import { RemoveContainerDialog } from "@/components/containers/remove-container-dialog";
+import { needsForce } from "@/components/containers/container-format";
 import { useRunContainerAction } from "@/components/containers/use-run-container-action";
 import { useTrackedOperations, isSettled } from "@/hooks/use-operation";
 import { withIdempotencyKey } from "@/hooks/use-operations";
@@ -84,13 +86,23 @@ function ContainersPage() {
                     failures.set(`${result.nodeId}/${result.containerId}`, result.error ?? "failed");
     }
 
+    /** A new search or filter drops the selection, so a bulk action never reaches rows it hides. */
     function setSearch(next: ContainerSearch) {
+        setSelection({});
         void navigate({ search: next, replace: true });
     }
 
     function startBulk(bulkAction: ContainerAction) {
-        const targets = selected.map((row) => ({ nodeId: row.nodeId, containerId: row.containerId }));
-        const force = bulkAction === "remove" && selected.some((row) => row.state === "running");
+        // Starting a stopped Swarm task revives it outside Swarm's control, so START leaves tasks out.
+        const skipped = bulkAction === "start" ? selected.filter((row) => row.taskId !== null) : [];
+        const acting = selected.filter((row) => !skipped.includes(row));
+        if (skipped.length > 0)
+            notify.warning(`Skipped ${plural(skipped.length, "Swarm task")}`, {
+                description: "Swarm manages these containers. Restart their services instead.",
+            });
+        if (acting.length === 0) return;
+        const targets = acting.map((row) => ({ nodeId: row.nodeId, containerId: row.containerId }));
+        const force = bulkAction === "remove" && acting.some(needsForce);
         bulk.mutate(withIdempotencyKey({ action: bulkAction, targets, force }), {
             onSuccess: () => setSelection({}),
             onError: (code) =>
@@ -220,7 +232,6 @@ function ContainersPage() {
                 <PinnedOperations scope='containers' />
                 <ContainersTable
                     rows={filtered}
-                    snapshotAt={snapshot?.snapshotAt ?? new Date(0).toISOString()}
                     search={search.q ?? ""}
                     sorting={sortingFor(search.sort)}
                     onSortingChange={(sorting) => {
@@ -235,9 +246,10 @@ function ContainersPage() {
                     onRemove={setRemoving}
                     onLogs={(row) => void navigate({ to: "/logs", search: { service: row.serviceName ?? undefined } })}
                     onExec={(row) => void navigate({ to: "/exec", search: { node: row.nodeId, container: row.containerId } })}
-                    countLabel={filtered.length === rows.length && !search.q ? String(rows.length) : `${filtered.length} OF ${rows.length}`}
+                    total={rows.length}
                     isFirstLoad={containers.isPending}
                     isRefetching={containers.isFetching && !containers.isPending}
+                    stale={containers.error && snapshot ? <StaleSnapshotAlert query={containers} /> : undefined}
                     emptyState={emptyState}
                     errorState={errorState}
                 />
@@ -249,7 +261,9 @@ function ContainersPage() {
                 onOpenChange={(open) => !open && setConfirmBulk(null)}
                 title={`${confirmBulk === "remove" ? "Remove" : "Stop"} ${plural(confirmCount, "container")}?`}
                 description={
-                    confirmBulk === "remove" ? "Running ones are killed first. Removal cannot be undone." : "Each gets 10 seconds to stop before it is killed."
+                    confirmBulk === "remove"
+                        ? "Running, paused, and restarting ones are killed first. Removal cannot be undone."
+                        : "Each gets 10 seconds to stop before it is killed."
                 }
                 impact={selected
                     .slice(0, 8)

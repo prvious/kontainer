@@ -25,7 +25,10 @@ export interface VolumesTableProps {
     /** `nodeId/name` of a just-created volume. */
     highlighted?: string;
     onRemove: (volume: VolumeView) => void;
-    countLabel: string;
+    /** Rows before the page's filters, for the `N OF M` count. */
+    total?: number;
+    /** The banner shown while a refetch fails after a good load. */
+    stale?: ReactNode;
     headerRight?: ReactNode;
     isFirstLoad: boolean;
     isRefetching: boolean;
@@ -123,7 +126,8 @@ export function VolumesTable(props: VolumesTableProps) {
                     props.highlighted === volumeRowId(row) && "bg-primary-faint transition-colors",
                 )
             }
-            countLabel={props.countLabel}
+            total={props.total}
+            stale={props.stale}
             headerRight={props.headerRight}
             isFirstLoad={props.isFirstLoad}
             isRefetching={props.isRefetching}

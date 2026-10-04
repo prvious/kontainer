@@ -304,8 +304,12 @@ impl AgentClient for FakeAgent {
 #[derive(Debug)]
 struct FakeDirectory;
 
+/// Every member answers, except one named `unreachable`.
 impl AgentDirectory for FakeDirectory {
-    fn client(&self, _: &NodeEndpoint) -> Result<Arc<dyn AgentClient>, AgentClientError> {
+    fn client(&self, node: &NodeEndpoint) -> Result<Arc<dyn AgentClient>, AgentClientError> {
+        if node.node_id == "unreachable" {
+            return Err(AgentClientError::Unavailable);
+        }
         Ok(Arc::new(FakeAgent))
     }
 }
@@ -473,6 +477,31 @@ async fn postgres_stacks_group_services_and_plan_their_removal() -> Result<(), B
         assert_eq!(status, StatusCode::NOT_FOUND);
         let (status, _) = send(&fixture, "GET", "/api/v1/stacks/-bad/plan", None).await?;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+
+        // One node doesn't answer: the figures are left out, not summed from the rest.
+        record_check_in::execute(&database.connection, "test", check_in("unreachable", None))
+            .await?;
+        let (status, body) = send(&fixture, "GET", "/api/v1/stacks", None).await?;
+        assert_eq!(status, StatusCode::OK);
+        let figures: Vec<_> = body["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| {
+                (
+                    item["name"].as_str().unwrap(),
+                    item["cpuPercent"].clone(),
+                    item["memoryBytes"].clone(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            figures,
+            vec![
+                ("toolbox", serde_json::Value::Null, serde_json::Value::Null),
+                ("webapp", serde_json::Value::Null, serde_json::Value::Null)
+            ]
+        );
         Ok::<_, Box<dyn Error>>(())
     }
     .await;
@@ -555,6 +584,39 @@ async fn postgres_stack_removal_reports_tasks_that_never_go() -> Result<(), Box<
                 .iter()
                 .any(|network| network.name == "webapp_kontainer"),
             "networks left"
+        );
+        let message = stuck.error_message.unwrap();
+        assert!(
+            message
+                .ends_with("Networks left: webapp_kontainer. Remove them from the Networks page."),
+            "the stack no longer lists, so the message says where the rest goes: {message}"
+        );
+
+        // A network that never frees up is named, with the same pointer.
+        fixture.swarm.linger.store(0, Ordering::SeqCst);
+        fixture.swarm.busy.store(u32::MAX, Ordering::SeqCst);
+        let (_, admitted) = send(
+            &fixture,
+            "DELETE",
+            "/api/v1/stacks/toolbox",
+            Some("018f2e34-0000-7000-8000-000000000704"),
+        )
+        .await?;
+        let busy = run(
+            &fixture,
+            admitted["operationId"].as_str().unwrap(),
+            Duration::from_millis(150),
+        )
+        .await?;
+        assert_eq!(busy.operation.state, OperationState::Failed);
+        assert_eq!(busy.last_error_code.as_deref(), Some("in_use"));
+        let message = busy.error_message.unwrap();
+        assert!(
+            message.starts_with(
+                "The services of toolbox were removed, but toolbox_kontainer was still in use"
+            ) && message
+                .ends_with("Networks left: toolbox_kontainer. Remove them from the Networks page."),
+            "{message}"
         );
         Ok::<_, Box<dyn Error>>(())
     }

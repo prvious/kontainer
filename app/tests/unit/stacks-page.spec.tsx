@@ -168,4 +168,57 @@ describe("Stacks page", () => {
         expect(await within(dialog).findByText("Waiting for tasks to stop")).toBeInTheDocument();
         await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument(), { timeout: 3000 });
     });
+
+    /** Opens the remove dialog for toolbox, types the name, and confirms; `settle` is the operation's final snapshot. */
+    async function removeToolbox(settle: Record<string, unknown>) {
+        let plans = 0;
+        let polls = 0;
+        mockCommands({
+            // Once the services are gone the stack no longer exists, so the refreshed plan fails.
+            get_stack_removal_plan: () => {
+                plans += 1;
+                if (plans > 1) throw "not_found";
+                return stacks.plan;
+            },
+            remove_stack: () => ({ operationId: OPERATION, replayed: false }),
+            get_operation: () => {
+                polls += 1;
+                const base = { ...operations.operation, id: OPERATION, kind: "stack.remove" };
+                return polls < 2
+                    ? { ...base, state: "running", progress: { phase: "removing_networks", servicesRemoved: 3, networksRemoved: 0, volumesRetained: [] } }
+                    : {
+                          ...base,
+                          finishedAt: "2026-09-28T12:01:05.000Z",
+                          progress: { phase: "removing_networks", servicesRemoved: 3, networksRemoved: 0 },
+                          ...settle,
+                      };
+            },
+        });
+        renderPage();
+        await screen.findByText("toolbox");
+        const user = userEvent.setup();
+        await user.click(within(rowFor("toolbox")).getByRole("button", { name: /More actions/ }));
+        await user.click(await screen.findByRole("menuitem", { name: "Remove" }));
+        const dialog = await screen.findByRole("alertdialog");
+        await within(dialog).findByText("toolbox_alpine · toolbox_nginx · toolbox_redis");
+        await user.type(within(dialog).getByRole("textbox"), "toolbox");
+        await user.click(within(dialog).getByRole("button", { name: /REMOVE STACK/ }));
+        return dialog;
+    }
+
+    it("shows a failure after the services went with the real message and never says nothing changed", async () => {
+        const message = "Removed 3 services, but network toolbox_kontainer is still in use. Remove it from Networks once it's empty.";
+        const dialog = await removeToolbox({ state: "failed", errorCode: "network_in_use", errorMessage: message });
+        expect(await within(dialog).findByRole("alert", {}, { timeout: 3000 })).toHaveTextContent(message);
+        expect(await within(dialog).findByText(/The removal plan couldn't be loaded \(not_found\)/)).toBeInTheDocument();
+        expect(within(dialog).queryByText(/Nothing was changed/)).not.toBeInTheDocument();
+        expect(within(dialog).getByRole("link", { name: "OPEN NETWORKS" })).toHaveAttribute("href", "/networks");
+    });
+
+    it("says an uncertain removal is uncertain", async () => {
+        const dialog = await removeToolbox({ state: "uncertain" });
+        expect(await within(dialog).findByRole("alert", {}, { timeout: 3000 })).toHaveTextContent("Outcome uncertain — check the stack before retrying.");
+        expect(within(dialog).queryByText(/Nothing was changed/)).not.toBeInTheDocument();
+        expect(within(dialog).queryByRole("link", { name: "OPEN NETWORKS" })).not.toBeInTheDocument();
+    });
 });

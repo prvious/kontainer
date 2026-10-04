@@ -71,3 +71,4 @@ What becomes easier, what becomes harder, what must be revisited and when.
 | [0031](./0031-manager-engine-checked-per-call.md) | Check the manager engine's Swarm role per call, not once at boot | accepted |
 | [0032](./0032-validate-where-less-trusted-data-enters.md) | Validate where less-trusted data enters a more-trusted component | accepted |
 | [0033](./0033-exec-abandoned-outcome.md) | Report a shell left running after its exec session closes as `abandoned` | accepted |
+| [0034](./0034-service-verdicts-from-swarm-update-status.md) | Decide service restart and rollback from Swarm's update status | accepted |

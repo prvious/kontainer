@@ -47,6 +47,7 @@ Node ids refer to `docs/design.pen`. Open the file with the Pencil MCP using its
 | G25 | Exec connection line shows PID and TTY | Exec `f8D6u` footer | Docker's exec API does not expose them; the line shows the container name and session count only (spec 16, ADR 0026). | Missing, deferred |
 | G26 | Theme setting row (system / light / dark) | Settings `8wGs5` has no appearance row | A "Theme" select as the first APPLICATION row, styled like the other rows. Built; the choice applies when saved (spec 17). | Built |
 | G27 | Setup code on Create owner | Connect · Create owner `wLzP9` / `T0KgTd` has display name, email, and password only | A fourth "Setup code" field (monospace) with the help line "Printed by the controller when it starts…"; a wrong or missing code is a field error. Required so the first network client can't claim a fresh controller (ADR 0029). | Built, not in the design |
+| G28 | Create volume help line | Create Volume dialog says "Services that mount it will be pinned to that node." | Swarm does not pin a service to a local volume's node; a task placed elsewhere gets a new, empty volume. The dialog says "Pin services that mount it to that node with a placement constraint." The design copy should change to match. | Conflict: built differently |
 
 ## Added in this pass
 

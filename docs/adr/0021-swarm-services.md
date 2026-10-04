@@ -1,6 +1,6 @@
 # 0021. Swarm services, convergence, and the quorum state
 
-- Status: accepted
+- Status: accepted (amended by 0034)
 - Date: 2026-09-28
 - Spec: docs/build/11-services.md
 

@@ -42,6 +42,8 @@ use crate::{
 
 const WEB: &str = "webappweb0000000000000000";
 const AGENT: &str = "monitoring000000000000000";
+/// Swarm's message when a task of an update fails.
+const PAUSED_MESSAGE: &str = "update paused due to failure or early termination of task x1";
 
 fn task(service: &str, slot: Option<u64>, state: &str, updated: i64) -> TaskSummary {
     TaskSummary {
@@ -59,14 +61,18 @@ fn task(service: &str, slot: Option<u64>, state: &str, updated: i64) -> TaskSumm
     }
 }
 
-/// A manager whose tasks move one step toward the desired count per `list_tasks` call.
+/// A manager whose tasks and update status move one step per `list_tasks` call.
 #[derive(Debug)]
 struct FakeSwarm {
     services: Mutex<Vec<ServiceSummary>>,
     tasks: Mutex<Vec<TaskSummary>>,
     /// Scheduling fails: new tasks stay pending with this error.
     stuck: AtomicBool,
+    /// Updates and rollbacks pause on a failed task instead of completing.
+    failing_updates: AtomicBool,
     quorum_lost: AtomicBool,
+    /// The next write is accepted, then the swarm loses quorum.
+    quorum_lost_after_write: AtomicBool,
     /// The host was demoted: Docker refuses every call as "not a swarm manager".
     demoted: AtomicBool,
     writes: AtomicU64,
@@ -106,7 +112,9 @@ impl FakeSwarm {
                 task(AGENT, None, "running", now),
             ]),
             stuck: AtomicBool::new(false),
+            failing_updates: AtomicBool::new(false),
             quorum_lost: AtomicBool::new(false),
+            quorum_lost_after_write: AtomicBool::new(false),
             demoted: AtomicBool::new(false),
             writes: AtomicU64::new(0),
         }
@@ -140,14 +148,35 @@ impl FakeSwarm {
         change(service);
         service.version += 1;
         self.writes.fetch_add(1, Ordering::SeqCst);
+        if self.quorum_lost_after_write.swap(false, Ordering::SeqCst) {
+            self.quorum_lost.store(true, Ordering::SeqCst);
+        }
         Ok(())
     }
 
     /// One scheduling step for the web service.
     fn step(&self) {
-        let desired = match self.services.lock().unwrap()[0].mode {
-            ServiceMode::Replicated { replicas } => replicas,
-            ServiceMode::Global => 0,
+        let desired = {
+            let mut services = self.services.lock().unwrap();
+            let web = &mut services[0];
+            let failing = self.failing_updates.load(Ordering::SeqCst);
+            let next = match (web.update_state.as_deref(), failing) {
+                (Some("updating"), true) => Some(("paused", PAUSED_MESSAGE)),
+                (Some("updating"), false) => Some(("completed", "update completed")),
+                (Some("rollback_started"), true) => Some(("rollback_paused", PAUSED_MESSAGE)),
+                (Some("rollback_started"), false) => {
+                    Some(("rollback_completed", "rollback completed"))
+                }
+                _ => None,
+            };
+            if let Some((state, message)) = next {
+                web.update_state = Some(state.to_owned());
+                web.update_message = Some(message.to_owned());
+            }
+            match web.mode {
+                ServiceMode::Replicated { replicas } => replicas,
+                ServiceMode::Global => 0,
+            }
         };
         let mut tasks = self.tasks.lock().unwrap();
         if !self.stuck.load(Ordering::SeqCst) {
@@ -155,6 +184,13 @@ impl FakeSwarm {
                 task.state = "running".to_owned();
                 task.error = None;
             }
+        }
+        // A task Swarm marked to go stops one step later.
+        for task in tasks
+            .iter_mut()
+            .filter(|task| task.state == "running" && task.desired_state != "running")
+        {
+            task.state = "shutdown".to_owned();
         }
         let web: Vec<usize> = tasks
             .iter()
@@ -164,7 +200,12 @@ impl FakeSwarm {
             .collect();
         let now = Utc::now().timestamp();
         if (web.len() as u64) < desired {
-            let slot = web.len() as u64 + 1;
+            let slot = web
+                .iter()
+                .filter_map(|index| tasks[*index].slot)
+                .max()
+                .unwrap_or(0)
+                + 1;
             if self.stuck.load(Ordering::SeqCst) {
                 if !tasks
                     .iter()
@@ -178,10 +219,11 @@ impl FakeSwarm {
             } else {
                 tasks.push(task(WEB, Some(slot), "running", now));
             }
-        } else if let Some(&last) = web.iter().max_by_key(|index| tasks[**index].slot)
+        } else if let Some(&lowest) = web.iter().min_by_key(|index| tasks[**index].slot)
             && web.len() as u64 > desired
         {
-            tasks.remove(last);
+            // Swarm picks which slot goes; here the lowest, so higher slots stay.
+            tasks[lowest].desired_state = "remove".to_owned();
         }
     }
 }
@@ -260,19 +302,11 @@ impl ManagerEngine for FakeSwarm {
         version: u64,
         _: &CancellationToken,
     ) -> Result<(), ManagerError> {
-        self.bump(id, version, |_| {})?;
-        // Every task is replaced by a fresh one.
-        let now = Utc::now().timestamp() + 1;
-        for task in self
-            .tasks
-            .lock()
-            .unwrap()
-            .iter_mut()
-            .filter(|task| task.service_id == id)
-        {
-            task.updated_at_seconds = Some(now);
-        }
-        Ok(())
+        // Swarm clears the status on the write; its updater reports `updating` a moment later.
+        self.bump(id, version, |service| {
+            service.update_state = Some("updating".to_owned());
+            service.update_message = Some("update in progress".to_owned());
+        })
     }
 
     async fn rollback_service(
@@ -282,7 +316,8 @@ impl ManagerEngine for FakeSwarm {
         _: &CancellationToken,
     ) -> Result<(), ManagerError> {
         self.bump(id, version, |service| {
-            service.update_state = Some("rollback_completed".to_owned())
+            service.update_state = Some("rollback_started".to_owned());
+            service.update_message = Some("manually requested rollback".to_owned());
         })
     }
 
@@ -682,6 +717,16 @@ async fn postgres_service_actions_validate_and_converge() -> Result<(), Box<dyn 
             down.error_message
         );
         assert_eq!(down.progress.unwrap()["running"], 1);
+        let kept: Vec<_> = fixture
+            .swarm
+            .tasks
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|task| task.service_id == WEB && task.is_running())
+            .map(|task| task.slot)
+            .collect();
+        assert_eq!(kept, vec![Some(3)], "the slot kept is above the new count");
 
         // Scheduling fails: the timeout names the task error.
         fixture.swarm.stuck.store(true, Ordering::SeqCst);
@@ -709,7 +754,7 @@ async fn postgres_service_actions_validate_and_converge() -> Result<(), Box<dyn 
         );
         fixture.swarm.stuck.store(false, Ordering::SeqCst);
 
-        // Restart replaces every task; rollback waits for Swarm to finish.
+        // Restart and rollback end on Swarm's update status.
         let (_, _, admitted) = send(
             &fixture,
             "POST",
@@ -750,6 +795,63 @@ async fn postgres_service_actions_validate_and_converge() -> Result<(), Box<dyn 
             "{:?}",
             rollback.error_message
         );
+        assert_eq!(rollback.progress.unwrap()["phase"], "converged");
+
+        // A rollback Swarm pauses on a failed task fails with Swarm's own message.
+        fixture.swarm.failing_updates.store(true, Ordering::SeqCst);
+        let (_, _, admitted) = send(
+            &fixture,
+            "POST",
+            &format!("/api/v1/services/{WEB}/actions/rollback"),
+            Some(&key(616)),
+            r#"{"version":12}"#,
+        )
+        .await?;
+        let paused = run(
+            &fixture,
+            admitted["operationId"].as_str().unwrap(),
+            Duration::from_secs(2),
+        )
+        .await?;
+        assert_eq!(paused.operation.state, OperationState::Failed);
+        assert_eq!(paused.last_error_code.as_deref(), Some("rollback_paused"));
+        let message = paused.error_message.unwrap();
+        assert_eq!(
+            message,
+            format!("Swarm paused the rollback of webapp_web: {PAUSED_MESSAGE}.")
+        );
+        fixture.swarm.failing_updates.store(false, Ordering::SeqCst);
+
+        // Quorum goes right after the restart is accepted: the failure says so, not "0 of 0".
+        fixture
+            .swarm
+            .quorum_lost_after_write
+            .store(true, Ordering::SeqCst);
+        let (_, _, admitted) = send(
+            &fixture,
+            "POST",
+            &format!("/api/v1/services/{WEB}/actions/restart"),
+            Some(&key(617)),
+            r#"{"version":13}"#,
+        )
+        .await?;
+        let unread = run(
+            &fixture,
+            admitted["operationId"].as_str().unwrap(),
+            Duration::from_millis(200),
+        )
+        .await?;
+        assert_eq!(unread.operation.state, OperationState::Failed);
+        assert_eq!(
+            unread.last_error_code.as_deref(),
+            Some("quorum_unavailable")
+        );
+        let message = unread.error_message.unwrap();
+        assert!(
+            message.starts_with("webapp_web was changed, but the manager couldn't be read"),
+            "{message}"
+        );
+        fixture.swarm.quorum_lost.store(false, Ordering::SeqCst);
         Ok::<_, Box<dyn Error>>(())
     }
     .await;

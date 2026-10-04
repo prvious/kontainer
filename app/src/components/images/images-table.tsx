@@ -21,7 +21,10 @@ export interface ImagesTableProps {
     /** Images an in-flight removal acts on. */
     pending: Set<string>;
     onDelete: (image: ImageView) => void;
-    countLabel: string;
+    /** Rows before the page's filters, for the `N OF M` count. */
+    total?: number;
+    /** The banner shown while a refetch fails after a good load. */
+    stale?: ReactNode;
     headerRight?: ReactNode;
     isFirstLoad: boolean;
     isRefetching: boolean;
@@ -99,7 +102,8 @@ export function ImagesTable(props: ImagesTableProps) {
                 <RowActions label={imageLabel(row)} actions={[{ label: "Delete", icon: Trash2, onClick: () => props.onDelete(row), mutates: true }]} />
             )}
             rowClassName={(row) => cn(props.pending.has(row.imageId) && "opacity-50 transition-opacity")}
-            countLabel={props.countLabel}
+            total={props.total}
+            stale={props.stale}
             headerRight={props.headerRight}
             isFirstLoad={props.isFirstLoad}
             isRefetching={props.isRefetching}

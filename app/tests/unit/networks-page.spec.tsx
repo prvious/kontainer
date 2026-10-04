@@ -1,8 +1,8 @@
-import { useState } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
+import { toast } from "sonner";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
 import { routeTree } from "@/routeTree.gen";
@@ -73,25 +73,18 @@ function mockCommands(overrides: Record<string, (args: Record<string, unknown>) 
     });
 }
 
-function Harness({ path }: { path: string }) {
-    const [router] = useState(() => createRouter({ routeTree, context: { auth }, history: createMemoryHistory({ initialEntries: [path] }) }));
-    return (
-        <>
-            <RouterProvider router={router} context={{ auth }} />
-            <span data-testid='location'>{router.state.location.href}</span>
-        </>
-    );
-}
-
+/** Renders the app at `path` and returns its router, so a test can leave the page. */
 function renderPage(path = "/networks") {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    return render(
+    const router = createRouter({ routeTree, context: { auth }, history: createMemoryHistory({ initialEntries: [path] }) });
+    render(
         <AuthContext value={auth}>
             <QueryClientProvider client={queryClient}>
-                <Harness path={path} />
+                <RouterProvider router={router} context={{ auth }} />
             </QueryClientProvider>
         </AuthContext>,
     );
+    return router;
 }
 
 const rowFor = (name: string) => screen.getByText(name).closest("tr") as HTMLElement;
@@ -229,5 +222,32 @@ describe("Networks page", () => {
         await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
         await screen.findByText("app-network");
         await waitFor(() => expect(rowFor("app-network").classList.contains("bg-primary-faint")).toBe(true));
+    });
+
+    it("doesn't pull the user back when a create settles after they left the page", async () => {
+        let settled = false;
+        mockCommands({
+            create_network: () => ({ operationId: OPERATION, replayed: false }),
+            get_operation: () => ({
+                ...operations.operation,
+                id: OPERATION,
+                kind: "network.create",
+                state: settled ? "succeeded" : "running",
+                progress: { networkId: "n1n1n1n1n1n1n1n1n1n1n1n1n", name: "app-network", nodeId: null },
+            }),
+        });
+        const router = renderPage();
+        await screen.findByText("toolbox_kontainer");
+        const user = userEvent.setup();
+        await user.click(screen.getByRole("button", { name: /CREATE NETWORK/ }));
+        const dialog = await screen.findByRole("dialog");
+        await user.type(within(dialog).getByLabelText("Name"), "app-network");
+        await user.click(within(dialog).getByRole("button", { name: /CREATE NETWORK/ }));
+        await waitFor(() => expect(invoke).toHaveBeenCalledWith("get_operation", expect.objectContaining({ operationId: OPERATION })));
+        await act(() => router.navigate({ to: "/stacks" }));
+        settled = true;
+        await waitFor(() => expect(toast.success).toHaveBeenCalled(), { timeout: 3000 });
+        await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+        expect(router.state.location.pathname).toBe("/stacks");
     });
 });

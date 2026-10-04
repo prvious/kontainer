@@ -1,8 +1,9 @@
 import { useState } from "react";
+import { Link } from "@tanstack/react-router";
 import { HardDrive, Trash2 } from "lucide-react";
 import { ConfirmDialog } from "@/components/kit/confirm-dialog";
 import { notify } from "@/components/kit/notify";
-import { useOperationViews } from "@/hooks/use-operation";
+import { isSettled, useOperationViews } from "@/hooks/use-operation";
 import { withIdempotencyKey } from "@/hooks/use-operations";
 import { useRemoveStack, useStackPlan } from "@/hooks/use-stacks";
 import { STACK_REMOVAL_PHASES } from "@/types/stacks";
@@ -19,36 +20,46 @@ function Names({ label, names }: { label: string; names: string[] }) {
     );
 }
 
+const UNCERTAIN = "Outcome uncertain — check the stack before retrying.";
+
 /**
  * Remove stack (04.S2): the plan loads first — services and stack networks removed, named volumes
  * retained — then typing the stack name enables REMOVE STACK. While the operation runs the dialog
- * shows its phase; it closes on success.
+ * shows its phase; it closes on success. A failure stays in the dialog whatever the plan shows
+ * afterwards: once the services are gone the plan itself may no longer load.
  */
 export function RemoveStackDialog({ name, onClose }: { name: string | null; onClose: () => void }) {
     const plan = useStackPlan(name);
+    // The last removal started here. It is kept after it settles: from then on something may have changed.
     const [operationId, setOperationId] = useState<string | null>(null);
-    const [failure, setFailure] = useState<string | null>(null);
     const [view] = useOperationViews(operationId ? [operationId] : []);
-    const remove = useRemoveStack((settled) => {
-        setOperationId(null);
-        if (settled.state === "succeeded") onClose();
-        else setFailure(settled.errorMessage ?? "The stack was not removed.");
-    });
 
     function close() {
         setOperationId(null);
-        setFailure(null);
         onClose();
     }
 
-    const phase = typeof view?.progress?.phase === "string" ? (STACK_REMOVAL_PHASES[view.progress.phase] ?? view.progress.phase) : null;
-    const running = operationId !== null || remove.isPending;
-    const content = plan.isPending ? (
-        <p className='font-mono text-2xs text-muted-foreground'>Loading what will be removed…</p>
+    const remove = useRemoveStack((settled) => {
+        if (settled.state === "succeeded") close();
+    });
+
+    const settled = view && isSettled(view.state) ? view : undefined;
+    const running = remove.isPending || (operationId !== null && settled === undefined);
+    const failure =
+        running || !settled || settled.state === "succeeded"
+            ? null
+            : settled.state === "uncertain"
+              ? UNCERTAIN
+              : (settled.errorMessage ?? "The stack was not removed.");
+    const phase = !settled && typeof view?.progress?.phase === "string" ? (STACK_REMOVAL_PHASES[view.progress.phase] ?? view.progress.phase) : null;
+    const planContent = plan.isPending ? (
+        <p className='text-muted-foreground'>Loading what will be removed…</p>
     ) : plan.isError ? (
-        <p className='font-mono text-2xs text-destructive'>The removal plan couldn't be loaded ({String(plan.error)}). Nothing was changed.</p>
+        <p className='text-destructive'>
+            The removal plan couldn't be loaded ({String(plan.error)}).{operationId === null && " Nothing was changed."}
+        </p>
     ) : plan.data ? (
-        <div className='flex flex-col gap-2.5 font-mono text-2xs'>
+        <>
             <div className='flex flex-col gap-1.5 rounded-sm border border-destructive/40 bg-destructive-soft px-3 py-2.5'>
                 <span className='text-3xs font-bold tracking-[1px] text-destructive uppercase'>Will be removed</span>
                 <Names label='service' names={plan.data.services} />
@@ -61,14 +72,25 @@ export function RemoveStackDialog({ name, onClose }: { name: string | null; onCl
                     <Names label='volume' names={plan.data.volumesRetained} />
                 </div>
             </div>
+        </>
+    ) : null;
+    const content = (
+        <div className='flex flex-col gap-2.5 font-mono text-2xs'>
+            {planContent}
             {running && <p className='text-muted-foreground'>{phase ?? "Starting…"}</p>}
             {failure && (
                 <p role='alert' className='text-destructive'>
-                    {failure}
+                    {failure}{" "}
+                    {settled?.state === "failed" && (
+                        // Networks left behind by a half-finished removal are removed from there (D8).
+                        <Link to='/networks' className='font-bold whitespace-nowrap text-sidebar-accent-foreground hover:underline'>
+                            OPEN NETWORKS
+                        </Link>
+                    )}
                 </p>
             )}
         </div>
-    ) : null;
+    );
 
     return (
         <ConfirmDialog
@@ -82,7 +104,6 @@ export function RemoveStackDialog({ name, onClose }: { name: string | null; onCl
             pending={running}
             onConfirm={() => {
                 if (!name || !plan.data) return;
-                setFailure(null);
                 remove.mutate(withIdempotencyKey({ name }), {
                     onSuccess: (admitted) => setOperationId(admitted.operationId),
                     onError: (code) =>

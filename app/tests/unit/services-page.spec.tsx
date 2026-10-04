@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -66,13 +66,14 @@ function Harness({ path }: { path: string }) {
 
 function renderPage(path = "/services") {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    return render(
+    render(
         <AuthContext value={auth}>
             <QueryClientProvider client={queryClient}>
                 <Harness path={path} />
             </QueryClientProvider>
         </AuthContext>,
     );
+    return queryClient;
 }
 
 const rowFor = (name: string) => screen.getByText(name).closest("tr") as HTMLElement;
@@ -216,5 +217,31 @@ describe("Services page", () => {
         expect(create).toHaveAttribute("data-restricted", "true");
         await userEvent.setup().hover(create);
         expect(await screen.findByText("Changes are paused")).toBeInTheDocument();
+    });
+
+    it("keeps the snapshot under a stale banner when a refresh fails, but still hides it on quorum loss", async () => {
+        let failure: string | null = null;
+        mockCommands({
+            list_services: () => {
+                if (failure) throw failure;
+                return services.serviceList;
+            },
+        });
+        const queryClient = renderPage();
+        await screen.findByText("webapp_web");
+        const refetch = () => act(() => queryClient.refetchQueries({ queryKey: ["services", session.profileId], exact: true }));
+
+        failure = "controller_unavailable";
+        await refetch();
+        expect(await screen.findByText(/^Couldn't refresh — showing the snapshot from \d\d:\d\d:\d\d$/)).toBeInTheDocument();
+        expect(rowFor("webapp_web")).toHaveClass("opacity-50");
+        expect(screen.queryByText("Couldn't load services")).not.toBeInTheDocument();
+
+        // Quorum loss never shows the snapshot: nothing may read as down while the cluster can't answer (04.S4).
+        failure = "quorum_unavailable";
+        await refetch();
+        expect(await screen.findByText("Couldn't load services")).toBeInTheDocument();
+        expect(screen.queryByText("webapp_web")).not.toBeInTheDocument();
+        expect(screen.queryByText(/Couldn't refresh/)).not.toBeInTheDocument();
     });
 });
