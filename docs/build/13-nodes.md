@@ -15,11 +15,20 @@ certificate), `MjblZ` (04.S6 add node, deferred); captions `mxibR`, `WF3UC`. Gap
   `isLeader`, `availability`, `swarmStatus` (ready/down/unknown), `address`. A Swarm node with no
   agent appears with `agentStatus: "no-agent"`; an agent whose Swarm node is unknown appears with
   role `unknown`.
+- Departed nodes (ADR 0037): once the manager has answered, an offline agent row whose
+  `swarm_node_id` Swarm no longer lists (a removed or replaced node) is left out. An offline row
+  that never named a Swarm id stays: an agent that never joined is a real problem. When several
+  rows claim one Swarm id, the newest check-in pairs with it and the older claimants count as
+  unlisted. A manager that doesn't answer leaves every row in. Stacks apply the same rule to
+  their CPU and memory figures; the other fan-out lists still name a departed node unavailable
+  until its rows are pruned.
 - Derived `health` per node: `active` when the agent is online and Swarm says ready; `degraded`
   when the agent is degraded or Swarm is not ready; `down` when the agent is offline or Swarm says
   down.
-- `GET /api/v1/cluster/summary` → nodes total, active, degraded, down; managers reachable and
-  quorum state (`healthy` when the manager answers and every manager is ready, else `degraded`);
+- `GET /api/v1/cluster/summary` → nodes total, active, degraded, down; managers total and
+  reachable, both null when the manager doesn't answer (unknown is not zero: the Overview then
+  says `manager unreachable`, and `no swarm manager` only for zero managers); quorum state
+  (`healthy` when the manager answers and every manager is ready, else `degraded`);
   aggregate CPU percent (average over online nodes), memory used and total (sums), containers
   running (sum). Used by this page's strip, the Overview (spec 14), and the status bar.
 

@@ -74,3 +74,5 @@ What becomes easier, what becomes harder, what must be revisited and when.
 | [0034](./0034-service-verdicts-from-swarm-update-status.md) | Decide service restart and rollback from Swarm's update status | accepted |
 | [0035](./0035-operation-budgets-and-uncertain-timeouts.md) | Size operation budgets to the work, and record a timeout as uncertain | accepted |
 | [0036](./0036-typed-confirmation-when-data-can-be-lost.md) | Typed confirmation when data can be lost | accepted |
+| [0037](./0037-node-status-fresh-samples-and-departed-nodes.md) | Node status from fresh samples, departed nodes, and unknown manager counts | accepted |
+| [0038](./0038-remove-the-desktop-operation-events-chain.md) | Remove the desktop operation-events chain until a screen shows operation history | accepted |

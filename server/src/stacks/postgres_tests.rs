@@ -23,7 +23,7 @@ use loco_rs::{
     config::Config,
     environment::Environment,
 };
-use sea_orm::{ActiveModelTrait, ActiveValue::Set};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
 use tokio_util::sync::CancellationToken;
 use tower::ServiceExt;
 
@@ -33,6 +33,7 @@ use crate::{
     nodes::{
         actions::record_check_in,
         agents::{AgentDirectory, NodeEndpoint, SharedAgentDirectory},
+        entities::node,
         postgres_tests::check_in,
     },
     operations::{
@@ -235,6 +236,20 @@ impl ManagerEngine for FakeSwarm {
             .filter(|task| ids.is_empty() || ids.contains(&task.service_id))
             .cloned()
             .collect())
+    }
+
+    /// Swarm lists only the manager, under the id `check_in` claims.
+    async fn list_swarm_nodes(
+        &self,
+        _: &CancellationToken,
+    ) -> Result<Vec<kontainer_engine::SwarmNode>, ManagerError> {
+        Ok(vec![kontainer_engine::SwarmNode {
+            id: "tj42rq5nzwf8".to_owned(),
+            hostname: "manager".to_owned(),
+            role: kontainer_engine::SwarmRole::Manager,
+            state: kontainer_engine::SwarmNodeState::Ready,
+            ..kontainer_engine::SwarmNode::default()
+        }])
     }
 
     async fn remove_service(&self, id: &str, _: &CancellationToken) -> Result<(), ManagerError> {
@@ -477,6 +492,22 @@ async fn postgres_stacks_group_services_and_plan_their_removal() -> Result<(), B
         assert_eq!(status, StatusCode::NOT_FOUND);
         let (status, _) = send(&fixture, "GET", "/api/v1/stacks/-bad/plan", None).await?;
         assert_eq!(status, StatusCode::BAD_REQUEST);
+
+        // A replaced node, offline under a Swarm id Swarm no longer lists, holds no containers:
+        // its failed outcome leaves the figures in.
+        let mut replaced = check_in("replaced", None);
+        replaced.swarm_node_id = Some("replacedswarm0000000000000".to_owned());
+        record_check_in::execute(&database.connection, "test", replaced).await?;
+        let row = node::Entity::find_by_id("replaced")
+            .one(&database.connection)
+            .await?
+            .unwrap();
+        let mut row: node::ActiveModel = row.into();
+        row.last_check_in_at = Set(Utc::now() - chrono::Duration::seconds(120));
+        row.update(&database.connection).await?;
+        let (status, body) = send(&fixture, "GET", "/api/v1/stacks", None).await?;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["items"][1]["cpuPercent"].as_f64(), Some(12.5));
 
         // One node doesn't answer: the figures are left out, not summed from the rest.
         record_check_in::execute(&database.connection, "test", check_in("unreachable", None))

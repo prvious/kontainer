@@ -29,7 +29,7 @@ Decisions: ADR 0003 (samples, no spool), ADR 0004 (dev TCP).
 - New config: `KONTAINER_CONTROLLER_RPC_ENDPOINT` (`https://host:port`) and
   `KONTAINER_CONTROLLER_SERVER_NAME`, both required; the client certificate is the agent's own.
 - A supervised `check_in` task: every interval, collect a sample, call `CheckIn`, adopt the
-  returned interval. Failures log at warn with backoff capped at 30 s; the agent never exits
+  returned interval. Failures log at warn with backoff capped at 10 s (so the agent is back inside the online window soon after a controller restart); the agent never exits
   because the controller is away.
 - Sampling, all through the engine trait, never Bollard types outside the engine crate:
   - `docker info` for counts, cores, total memory, versions, Swarm node id;

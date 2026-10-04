@@ -1,4 +1,4 @@
-import { keepPreviousData, queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { useQueriesPaused } from "@/hooks/use-queries-paused";
@@ -7,7 +7,7 @@ import type { ClusterSummary, ControllerSettings, ControllerStatusView, NodeList
 import { DEFAULT_APP_SETTINGS } from "@/types/settings";
 
 /** `node` is a node id, or `"cluster"` for the cluster-wide series. */
-export type SampleScope = string;
+type SampleScope = string;
 
 export const nodesQueries = {
     all: (profileId: string) => ["nodes", profileId] as const,
@@ -50,7 +50,6 @@ export function useNodes() {
         enabled: Boolean(session) && !paused,
         refetchInterval: interval,
         retry: false,
-        placeholderData: keepPreviousData,
     });
 }
 
@@ -65,7 +64,6 @@ export function useClusterSummary() {
         enabled: Boolean(session) && !paused,
         refetchInterval: interval,
         retry: false,
-        placeholderData: keepPreviousData,
     });
 }
 
@@ -79,11 +77,10 @@ export function useSamples(scope: SampleScope, window: SampleWindow, bucket: str
         enabled: Boolean(session) && !paused,
         refetchInterval: interval,
         retry: false,
-        placeholderData: keepPreviousData,
     });
 }
 
-export const controllerStatusKey = (profileId: string) => ["controller-status", profileId] as const;
+const controllerStatusKey = (profileId: string) => ["controller-status", profileId] as const;
 
 /** The controller's version, log filter, and start time; they change only when it restarts. */
 export function useControllerStatus() {

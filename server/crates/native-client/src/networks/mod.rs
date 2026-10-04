@@ -6,7 +6,7 @@ mod calls;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::client::parse_timestamp;
+use crate::client::{parse_timestamp, valid_display_name};
 use crate::containers::{NodeId, NodeOutcome, NodeOutcomeBody};
 use crate::error::NativeClientError;
 
@@ -174,7 +174,7 @@ impl NetworkListBody {
                     NetworkScope::Swarm => true,
                 };
                 if NetworkId::parse(&item.id).is_err()
-                    || !valid_network_name(&item.name)
+                    || !valid_display_name(&item.name)
                     || item.driver.len() > 512
                     || item.subnets.len() > 16
                     || !nodes_ok

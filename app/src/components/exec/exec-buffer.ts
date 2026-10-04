@@ -4,7 +4,6 @@ export type ExecStatus = "connecting" | "active" | "ended" | "failed";
 
 export interface ExecSnapshot {
     status: ExecStatus;
-    shell: string | null;
     exit: { code: number | null; reason: string } | null;
     /** Why the shell could not start, or the error that ended it. */
     error: { code: string; message: string } | null;
@@ -12,7 +11,7 @@ export interface ExecSnapshot {
     endedAt: number | null;
 }
 
-const CONNECTING: ExecSnapshot = { status: "connecting", shell: null, exit: null, error: null, closed: null, endedAt: null };
+const CONNECTING: ExecSnapshot = { status: "connecting", exit: null, error: null, closed: null, endedAt: null };
 /** Output kept for a terminal that mounts again (leaving and returning to `/exec`). */
 const MAX_REPLAY_BYTES = 2 * 1024 * 1024;
 
@@ -60,7 +59,7 @@ export class ExecBuffer {
         if (current.status === "ended" || current.status === "failed") return;
         switch (event.type) {
             case "started":
-                this.#set({ status: "active", shell: event.shell });
+                this.#set({ status: "active" });
                 return;
             case "output": {
                 const bytes = decodeOutput(event.data);

@@ -11,6 +11,8 @@
 
 use std::time::Duration;
 
+use kontainer_stream_protocol::StreamFrame;
+use kontainer_stream_transport::{NativeStreamClient, StreamClientError, StreamLimits};
 use reqwest::{Client, Method, Request, Response, header, redirect, retry};
 use serde::{Deserialize, de::DeserializeOwned};
 use tokio::time::{Instant, timeout_at};
@@ -173,6 +175,70 @@ impl NativeClient {
         self.origin
             .join(path)
             .map_err(|_| NativeClientError::InvalidConfiguration)
+    }
+
+    /// Upgrade to the WebSocket stream at `path` with `access` and send its `open` frame, both
+    /// inside one `deadline`: a peer that completes the upgrade but never takes the open can't
+    /// hold the caller either. A 401 is `Unauthorized`, so the caller can refresh and try again;
+    /// a 429 is `LimitReached`.
+    pub(crate) async fn open_stream(
+        &self,
+        path: &str,
+        access: &AccessCredential,
+        open: &StreamFrame,
+        deadline: Duration,
+        cancellation: &CancellationToken,
+    ) -> Result<NativeStreamClient, NativeClientError> {
+        // WebSockets verify with the public roots only; a custom bundle is refused, not ignored.
+        if self.custom_trust {
+            return Err(NativeClientError::InvalidConfiguration);
+        }
+        let mut endpoint = self.endpoint(path)?;
+        let scheme = if endpoint.scheme() == "https" {
+            "wss"
+        } else {
+            "ws"
+        };
+        endpoint
+            .set_scheme(scheme)
+            .map_err(|()| NativeClientError::InvalidConfiguration)?;
+        let connect_and_open = async {
+            let mut client = NativeStreamClient::connect_with_bearer(
+                endpoint.as_str(),
+                Some(access.expose()),
+                StreamLimits::default(),
+                cancellation,
+            )
+            .await
+            .map_err(|error| match error {
+                StreamClientError::HandshakeRejected { status: 401 } => {
+                    NativeClientError::Unauthorized
+                }
+                StreamClientError::HandshakeRejected { status: 429 } => {
+                    NativeClientError::LimitReached
+                }
+                StreamClientError::HandshakeRejected { status: 400 } => {
+                    NativeClientError::InvalidRequest
+                }
+                StreamClientError::HandshakeRejected { status: 503 } => {
+                    NativeClientError::ServiceUnavailable
+                }
+                StreamClientError::Cancelled => NativeClientError::Cancelled,
+                StreamClientError::InvalidEndpoint => NativeClientError::InvalidConfiguration,
+                _ => NativeClientError::Unavailable,
+            })?;
+            client
+                .send_frame(open, cancellation)
+                .await
+                .map_err(|error| match error {
+                    StreamClientError::Cancelled => NativeClientError::Cancelled,
+                    _ => NativeClientError::Unavailable,
+                })?;
+            Ok(client)
+        };
+        tokio::time::timeout(deadline, connect_and_open)
+            .await
+            .unwrap_or(Err(NativeClientError::Unavailable))
     }
 
     /// Build a request that presents an access credential in exactly one
@@ -530,4 +596,11 @@ pub(crate) fn parse_timestamp(
         return Err(NativeClientError::InvalidResponse);
     }
     Ok(parsed)
+}
+
+/// A name a list shows: non-empty, at most 512 characters, no control characters. A list only
+/// displays what Docker holds, so one odd name must not blank the page; the strict rules apply
+/// where a name is created or acted on.
+pub(crate) fn valid_display_name(value: &str) -> bool {
+    !value.is_empty() && value.chars().count() <= 512 && !value.chars().any(char::is_control)
 }

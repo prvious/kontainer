@@ -1,4 +1,4 @@
-//! Operation events, cancellation, and mutation admission contracts.
+//! Operation cancellation and mutation admission contracts.
 
 use serde_json::json;
 use tokio_util::sync::CancellationToken;
@@ -19,67 +19,6 @@ fn access() -> AccessCredential {
 
 fn operation_id() -> Uuid {
     Uuid::parse_str(OPERATION_ID).unwrap()
-}
-
-fn event(sequence: i32, state: &str) -> serde_json::Value {
-    json!({
-        "sequence": sequence,
-        "state": state,
-        "errorCode": null,
-        "message": null,
-        "detail": if state == "running" { json!({"total": 3, "done": 1}) } else { json!(null) },
-        "createdAt": "2026-09-19T06:50:00.000Z",
-    })
-}
-
-#[tokio::test]
-async fn events_page_in_order_after_the_cursor() {
-    let ordered = json!({"items": [event(2, "running"), event(3, "succeeded")]}).to_string();
-    let unordered = json!({"items": [event(3, "running"), event(2, "succeeded")]}).to_string();
-    let stale = json!({"items": [event(1, "recoverable")]}).to_string();
-    let server = TestServer::plain(vec![
-        respond(200, &ordered),
-        respond(200, &unordered),
-        respond(200, &stale),
-    ])
-    .await;
-    let client = plain_client(&server);
-    let events = client
-        .list_operation_events(&access(), operation_id(), 1, 100, &CancellationToken::new())
-        .await
-        .unwrap();
-    assert_eq!(events.len(), 2);
-    assert_eq!(events[0].detail, Some(json!({"total": 3, "done": 1})));
-    assert_eq!(events[1].state, OperationState::Succeeded);
-    for _ in 0..2 {
-        assert_eq!(
-            client
-                .list_operation_events(&access(), operation_id(), 1, 100, &CancellationToken::new())
-                .await
-                .err(),
-            Some(NativeClientError::InvalidResponse)
-        );
-    }
-    assert_eq!(
-        server.requests()[0].target,
-        format!("/api/v1/operations/{OPERATION_ID}/events?after=1&limit=100")
-    );
-    for limit in [0, 101] {
-        assert_eq!(
-            client
-                .list_operation_events(
-                    &access(),
-                    operation_id(),
-                    0,
-                    limit,
-                    &CancellationToken::new()
-                )
-                .await
-                .err(),
-            Some(NativeClientError::InvalidRequest)
-        );
-    }
-    assert_eq!(server.request_count(), 3);
 }
 
 #[tokio::test]

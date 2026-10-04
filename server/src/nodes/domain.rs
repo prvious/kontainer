@@ -1,6 +1,6 @@
 //! Node membership in the controller's own terms, distinct from protobuf and persistence.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use chrono::{DateTime, Utc};
 use kontainer_engine::{SwarmNode, SwarmNodeState, SwarmRole};
@@ -284,18 +284,85 @@ impl ClusterNode {
     }
 }
 
-/// Pair each agent with the Swarm node its check-in names, then add Swarm members without an
-/// agent. Ordered leader, managers, workers, unknown, then by name.
+/// The agent row that holds each Swarm id the manager lists: of several rows claiming one id (a
+/// re-keyed agent, or a rebuilt host), the one with the newest check-in.
+fn swarm_holders(agents: &[NodeView], swarm: &[SwarmNode]) -> HashMap<String, String> {
+    let listed: HashSet<&str> = swarm.iter().map(|node| node.id.as_str()).collect();
+    let mut holders: HashMap<&str, &NodeView> = HashMap::new();
+    for agent in agents {
+        let Some(id) = agent
+            .swarm_node_id
+            .as_deref()
+            .filter(|id| listed.contains(id))
+        else {
+            continue;
+        };
+        holders
+            .entry(id)
+            .and_modify(|held| {
+                if agent.last_check_in_at > held.last_check_in_at {
+                    *held = agent;
+                }
+            })
+            .or_insert(agent);
+    }
+    holders
+        .into_iter()
+        .map(|(swarm_id, agent)| (swarm_id.to_owned(), agent.id.clone()))
+        .collect()
+}
+
+fn holds_swarm_id(agent: &NodeView, holders: &HashMap<String, String>) -> bool {
+    agent
+        .swarm_node_id
+        .as_ref()
+        .and_then(|id| holders.get(id))
+        .is_some_and(|holder| *holder == agent.id)
+}
+
+/// A node Swarm has moved past: offline, and naming a Swarm id the manager no longer lists or now
+/// pairs with a newer claimant. An offline row that never named a Swarm id is not departed: an
+/// agent that never joined is a real problem.
+fn is_departed(agent: &NodeView, holders: &HashMap<String, String>) -> bool {
+    agent.status == NodeStatus::Offline
+        && agent.swarm_node_id.is_some()
+        && !holds_swarm_id(agent, holders)
+}
+
+/// The agent rows a node list leaves out once the manager has answered with `swarm` (ADR 0037).
 #[must_use]
-pub fn join_nodes(agents: Vec<NodeView>, swarm: Vec<SwarmNode>) -> Vec<ClusterNode> {
+pub fn departed_agent_ids(agents: &[NodeView], swarm: &[SwarmNode]) -> HashSet<String> {
+    let holders = swarm_holders(agents, swarm);
+    agents
+        .iter()
+        .filter(|agent| is_departed(agent, &holders))
+        .map(|agent| agent.id.clone())
+        .collect()
+}
+
+/// Pair each agent with the Swarm node its check-in names, then add Swarm members without an
+/// agent. `swarm` is `None` when the manager did not answer: every agent then stays, unpaired.
+/// When it answered, departed rows are left out and each Swarm id pairs with its newest claimant;
+/// an older claimant still online shows unpaired. Ordered leader, managers, workers, unknown,
+/// then by name.
+#[must_use]
+pub fn join_nodes(agents: Vec<NodeView>, swarm: Option<Vec<SwarmNode>>) -> Vec<ClusterNode> {
+    let answered = swarm.is_some();
+    let swarm = swarm.unwrap_or_default();
+    let holders = swarm_holders(&agents, &swarm);
     let mut swarm: BTreeMap<String, SwarmNode> = swarm
         .into_iter()
         .map(|node| (node.id.clone(), node))
         .collect();
     let mut joined: Vec<ClusterNode> = agents
         .into_iter()
+        .filter(|agent| !(answered && is_departed(agent, &holders)))
         .map(|agent| ClusterNode {
-            swarm: agent.swarm_node_id.as_ref().and_then(|id| swarm.remove(id)),
+            swarm: agent
+                .swarm_node_id
+                .as_ref()
+                .filter(|_| holds_swarm_id(&agent, &holders))
+                .and_then(|id| swarm.remove(id)),
             agent: Some(agent),
         })
         .collect();
@@ -323,8 +390,10 @@ pub struct ClusterSummary {
     pub nodes_active: u32,
     pub nodes_degraded: u32,
     pub nodes_down: u32,
-    pub managers_total: u32,
-    pub managers_reachable: u32,
+    /// `None` when the manager did not answer: unknown, not zero.
+    pub managers_total: Option<u32>,
+    /// `None` when the manager did not answer.
+    pub managers_reachable: Option<u32>,
     pub quorum: QuorumState,
     /// Mean over online nodes with a sample; `None` when there are none.
     pub cpu_percent: Option<f64>,
@@ -335,7 +404,8 @@ pub struct ClusterSummary {
 }
 
 /// Counts by health, manager reachability, and load over online agents. Quorum is healthy when
-/// the manager answered and every manager is ready and reachable.
+/// the manager answered and every manager is ready and reachable. Manager counts are unknown
+/// when it did not answer.
 #[must_use]
 pub fn summarize(nodes: &[ClusterNode], swarm_answered: bool) -> ClusterSummary {
     let count = |predicate: &dyn Fn(&ClusterNode) -> bool| {
@@ -375,8 +445,8 @@ pub fn summarize(nodes: &[ClusterNode], swarm_answered: bool) -> ClusterSummary 
         nodes_active: count(&|node| node.health() == NodeHealth::Active),
         nodes_degraded: count(&|node| node.health() == NodeHealth::Degraded),
         nodes_down: count(&|node| node.health() == NodeHealth::Down),
-        managers_total,
-        managers_reachable,
+        managers_total: swarm_answered.then_some(managers_total),
+        managers_reachable: swarm_answered.then_some(managers_reachable),
         quorum: if swarm_answered && managers_total > 0 && every_manager_ready {
             QuorumState::Healthy
         } else {
@@ -586,11 +656,11 @@ mod tests {
                 agent("manager", NodeStatus::Online, Some("mgr"), 10.0, 1),
                 agent("stale-id", NodeStatus::Online, Some("gone"), 10.0, 1),
             ],
-            vec![
+            Some(vec![
                 member("wk2", "worker-2", SwarmRole::Worker, SwarmNodeState::Ready),
                 member("wk1", "worker-1", SwarmRole::Worker, SwarmNodeState::Ready),
                 leader,
-            ],
+            ]),
         );
         let summary: Vec<_> = joined
             .iter()
@@ -619,6 +689,113 @@ mod tests {
         );
     }
 
+    fn checked_in(mut agent: NodeView, seconds_ago: i64) -> NodeView {
+        agent.last_check_in_at -= Duration::seconds(seconds_ago);
+        agent
+    }
+
+    #[test]
+    fn a_departed_node_drops_out_only_once_the_manager_answers() {
+        use super::{AgentStatus, departed_agent_ids, join_nodes};
+
+        let agents = || {
+            vec![
+                agent("manager", NodeStatus::Online, Some("mgr"), 10.0, 1),
+                // Replaced: Swarm no longer lists its id.
+                agent("replaced", NodeStatus::Offline, Some("old"), 10.0, 1),
+                // Never joined a Swarm: still a real problem.
+                agent("unjoined", NodeStatus::Offline, None, 10.0, 1),
+                // Lost its Swarm id but still checks in: shown unpaired.
+                agent("orphan", NodeStatus::Degraded, Some("gone"), 10.0, 1),
+                // Swarm still lists it: down, not departed.
+                agent("worker-1", NodeStatus::Offline, Some("wk1"), 10.0, 1),
+            ]
+        };
+        let swarm = vec![
+            member("mgr", "manager", SwarmRole::Manager, SwarmNodeState::Ready),
+            member("wk1", "worker-1", SwarmRole::Worker, SwarmNodeState::Down),
+        ];
+        let names = |nodes: &[super::ClusterNode]| {
+            let mut names: Vec<_> = nodes
+                .iter()
+                .map(|node| (node.name().to_owned(), node.agent_status()))
+                .collect();
+            names.sort_by(|left, right| left.0.cmp(&right.0));
+            names
+        };
+
+        let answered = join_nodes(agents(), Some(swarm.clone()));
+        assert_eq!(
+            names(&answered),
+            vec![
+                ("manager".to_owned(), AgentStatus::Online),
+                ("orphan".to_owned(), AgentStatus::Degraded),
+                ("unjoined".to_owned(), AgentStatus::Offline),
+                ("worker-1".to_owned(), AgentStatus::Offline),
+            ]
+        );
+        assert_eq!(
+            departed_agent_ids(&agents(), &swarm),
+            ["replaced".to_owned()].into_iter().collect()
+        );
+
+        let silent = join_nodes(agents(), None);
+        assert_eq!(silent.len(), 5, "a silent manager skips nothing");
+        assert!(silent.iter().all(|node| node.swarm.is_none()));
+    }
+
+    #[test]
+    fn a_swarm_id_pairs_with_its_newest_claimant() {
+        use super::{AgentStatus, departed_agent_ids, join_nodes};
+
+        let agents = || {
+            vec![
+                // The host rebuilt under a new agent identity, same Swarm node.
+                checked_in(
+                    agent("rebuilt", NodeStatus::Online, Some("wk1"), 10.0, 1),
+                    1,
+                ),
+                checked_in(
+                    agent("previous", NodeStatus::Offline, Some("wk1"), 10.0, 1),
+                    300,
+                ),
+                // An older claimant still checking in shows unpaired.
+                checked_in(
+                    agent("clone", NodeStatus::Degraded, Some("wk1"), 10.0, 1),
+                    30,
+                ),
+            ]
+        };
+        let swarm = vec![member(
+            "wk1",
+            "worker-1",
+            SwarmRole::Worker,
+            SwarmNodeState::Ready,
+        )];
+        let joined = join_nodes(agents(), Some(swarm.clone()));
+        let rows: Vec<_> = joined
+            .iter()
+            .map(|node| {
+                (
+                    node.agent.as_ref().map(|agent| agent.id.as_str()),
+                    node.swarm.as_ref().map(|swarm| swarm.id.as_str()),
+                    node.agent_status(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                (Some("rebuilt"), Some("wk1"), AgentStatus::Online),
+                (Some("clone"), None, AgentStatus::Degraded),
+            ]
+        );
+        assert_eq!(
+            departed_agent_ids(&agents(), &swarm),
+            ["previous".to_owned()].into_iter().collect()
+        );
+    }
+
     #[test]
     fn summary_counts_health_managers_and_load_over_online_agents() {
         use super::{QuorumState, join_nodes, summarize};
@@ -632,12 +809,12 @@ mod tests {
                 agent("worker-2", NodeStatus::Degraded, Some("wk2"), 90.0, 4 << 30),
                 agent("worker-3", NodeStatus::Offline, Some("wk3"), 90.0, 4 << 30),
             ],
-            vec![
+            Some(vec![
                 leader.clone(),
                 member("wk1", "worker-1", SwarmRole::Worker, SwarmNodeState::Ready),
                 member("wk2", "worker-2", SwarmRole::Worker, SwarmNodeState::Ready),
                 member("wk3", "worker-3", SwarmRole::Worker, SwarmNodeState::Down),
-            ],
+            ]),
         );
         let summary = summarize(&nodes, true);
         assert_eq!(
@@ -649,7 +826,10 @@ mod tests {
             ),
             (4, 2, 1, 1)
         );
-        assert_eq!((summary.managers_total, summary.managers_reachable), (1, 1));
+        assert_eq!(
+            (summary.managers_total, summary.managers_reachable),
+            (Some(1), Some(1))
+        );
         assert_eq!(
             summary.quorum,
             QuorumState::Healthy,
@@ -664,28 +844,43 @@ mod tests {
         assert_eq!(summary.memory_total_bytes, 16 << 30);
         assert_eq!(summary.containers_running, 6);
 
+        let silent = summarize(&nodes, false);
         assert_eq!(
-            summarize(&nodes, false).quorum,
+            silent.quorum,
             QuorumState::Degraded,
             "a manager that did not answer"
+        );
+        assert_eq!(
+            (silent.managers_total, silent.managers_reachable),
+            (None, None),
+            "unknown, not zero"
         );
         let mut unreachable = leader.clone();
         unreachable.manager_reachable = Some(false);
         let second = join_nodes(
             vec![agent("manager", NodeStatus::Online, Some("mgr"), 30.0, 1)],
-            vec![leader, {
+            Some(vec![leader, {
                 let mut other = unreachable;
                 other.id = "mgr2".to_owned();
                 other.is_leader = false;
                 other
-            }],
+            }]),
         );
         let summary = summarize(&second, true);
-        assert_eq!((summary.managers_total, summary.managers_reachable), (2, 1));
+        assert_eq!(
+            (summary.managers_total, summary.managers_reachable),
+            (Some(2), Some(1))
+        );
         assert_eq!(summary.quorum, QuorumState::Degraded);
 
         let empty = summarize(&[], false);
         assert_eq!(empty.cpu_percent, None);
         assert_eq!(empty.quorum, QuorumState::Degraded);
+        let no_manager = summarize(&[], true);
+        assert_eq!(
+            (no_manager.managers_total, no_manager.managers_reachable),
+            (Some(0), Some(0)),
+            "an answer naming no manager is zero"
+        );
     }
 }

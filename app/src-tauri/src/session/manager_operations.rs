@@ -5,7 +5,7 @@
 //! `app/tests/fixtures/operations-ipc.json` keeps both sides in sync.
 
 use kontainer_native_client::{
-    AdmittedOperation, IdempotencyKey, OperationEvent, OperationSnapshot, OperationState,
+    AdmittedOperation, IdempotencyKey, OperationSnapshot, OperationState,
 };
 use serde::Serialize;
 use uuid::Uuid;
@@ -25,7 +25,6 @@ pub(crate) struct OperationView {
     id: String,
     kind: String,
     state: OperationState,
-    last_event_sequence: i32,
     error_code: Option<String>,
     error_message: Option<String>,
     progress: Option<serde_json::Value>,
@@ -34,17 +33,6 @@ pub(crate) struct OperationView {
     started_at: Option<String>,
     finished_at: Option<String>,
     request_id: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct OperationEventView {
-    sequence: i32,
-    state: OperationState,
-    error_code: Option<String>,
-    message: Option<String>,
-    detail: Option<serde_json::Value>,
-    created_at: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -60,7 +48,6 @@ impl From<OperationSnapshot> for OperationView {
             id: snapshot.id.to_string(),
             kind: snapshot.kind,
             state: snapshot.state,
-            last_event_sequence: snapshot.last_event_sequence,
             error_code: snapshot.last_error_code,
             error_message: snapshot.error_message,
             progress: snapshot.progress,
@@ -69,19 +56,6 @@ impl From<OperationSnapshot> for OperationView {
             started_at: snapshot.started_at.map(|at| timestamp!(at)),
             finished_at: snapshot.finished_at.map(|at| timestamp!(at)),
             request_id: snapshot.request_id,
-        }
-    }
-}
-
-impl From<OperationEvent> for OperationEventView {
-    fn from(event: OperationEvent) -> Self {
-        Self {
-            sequence: event.sequence,
-            state: event.state,
-            error_code: event.error_code,
-            message: event.message,
-            detail: event.detail,
-            created_at: timestamp!(event.created_at),
         }
     }
 }
@@ -121,26 +95,6 @@ impl SessionManager {
             .await
             .map_err(operation_error)?;
         Ok(snapshot.into())
-    }
-
-    pub(crate) async fn operation_events(
-        &self,
-        profile_id: Uuid,
-        operation_id: &str,
-        after: u32,
-    ) -> Result<Vec<OperationEventView>, InventoryError> {
-        let id = parse_operation_id(operation_id)?;
-        let events = self
-            .authenticated(
-                profile_id,
-                &(id, after),
-                |controller, access, cancellation, (id, after)| {
-                    controller.list_operation_events(access, *id, *after, cancellation)
-                },
-            )
-            .await
-            .map_err(operation_error)?;
-        Ok(events.into_iter().map(OperationEventView::from).collect())
     }
 
     pub(crate) async fn cancel_operation(

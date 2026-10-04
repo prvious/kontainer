@@ -36,7 +36,6 @@ export interface AuthContextValue {
     nextOrigin?: string | null;
     retryCommit: () => Promise<void>;
     retryRestore: () => Promise<void>;
-    clearIssue: () => void;
     reportInventoryCustodyError?: (profileId: string, code: InventoryErrorCode) => void;
 }
 

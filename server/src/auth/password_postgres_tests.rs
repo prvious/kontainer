@@ -407,6 +407,50 @@ async fn login_succeeds_case_insensitively_and_failures_count_down() -> Result<(
 }
 
 #[tokio::test]
+async fn a_non_ascii_owner_email_signs_in_in_any_case() -> Result<(), Box<dyn Error>> {
+    with_app(|app, database| async move {
+        // Rust lowers `İ` to `i` plus a combining dot; PostgreSQL lowers it to a plain `i`.
+        // Lowering only one side in Rust locked this owner out even with the exact email.
+        let email = "İnci.Ünal@Exämple.com";
+        let mut registration = registration();
+        registration["email"] = json!(email);
+        let (status, _, _) = call(
+            &app,
+            "POST",
+            "/api/v1/auth/register",
+            Some(registration),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+
+        // The compose database's en_US.utf8 collation lowers `Ü` and `Ä` too.
+        for typed in [email, " İNCI.ünal@exÄmple.COM "] {
+            let (status, body, _) = call(
+                &app,
+                "POST",
+                "/api/v1/auth/password/login",
+                Some(login(typed, PASSWORD)),
+                None,
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{typed}: {body}");
+        }
+        assert!(
+            reset_password::execute(
+                &database,
+                "İNCI.ÜNAL@EXÄMPLE.COM",
+                "a brand new passphrase".to_owned()
+            )
+            .await
+            .is_ok()
+        );
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
 async fn an_unknown_email_costs_the_same_hashing_work_as_a_wrong_password()
 -> Result<(), Box<dyn Error>> {
     with_app(|app, _| async move {

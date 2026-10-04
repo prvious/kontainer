@@ -1,4 +1,4 @@
-import { keepPreviousData, skipToken, useQuery } from "@tanstack/react-query";
+import { skipToken, useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { useQueriesPaused } from "@/hooks/use-queries-paused";
@@ -9,7 +9,7 @@ import type { StackListView, StackPlanView } from "@/types/stacks";
 import type { OperationView } from "@/types/operations";
 import { DEFAULT_APP_SETTINGS } from "@/types/settings";
 
-export const stacksKey = (profileId: string) => ["stacks", profileId] as const;
+const stacksKey = (profileId: string) => ["stacks", profileId] as const;
 
 /** Every stack, polled at the refresh interval (every 10 s while it errors). */
 export function useStacks() {
@@ -24,7 +24,6 @@ export function useStacks() {
         enabled: Boolean(session) && !paused,
         refetchInterval: (query) => (query.state.status === "error" ? 10_000 : interval),
         retry: false,
-        placeholderData: keepPreviousData,
     });
 }
 

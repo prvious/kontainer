@@ -6,7 +6,7 @@ import { authenticatedInvoke } from "@/hooks/authenticated-invoke";
 import { OperationsContext, type TrackedOperation } from "@/contexts/operations-context-value";
 import { isTerminal, type OperationState, type OperationView } from "@/types/operations";
 
-export const POLL_INTERVAL_MS = 1000;
+const POLL_INTERVAL_MS = 1000;
 
 export const operationKey = (profileId: string, operationId: string) => ["operations", profileId, operationId] as const;
 

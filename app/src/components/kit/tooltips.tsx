@@ -4,11 +4,11 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 type Side = "top" | "bottom" | "left" | "right";
 
 /** Tooltip `rXjCV`: a short label (and optional shortcut) for icon-only actions and truncated values. */
-export function LabelTooltip({ label, shortcut, side = "top", children }: { label: string; shortcut?: string; side?: Side; children: ReactElement }) {
+export function LabelTooltip({ label, shortcut, children }: { label: string; shortcut?: string; children: ReactElement }) {
     return (
         <Tooltip>
             <TooltipTrigger render={children} />
-            <TooltipContent side={side} className='flex items-center gap-2.5 px-2.5 py-1.5 font-mono text-2xs font-medium'>
+            <TooltipContent className='flex items-center gap-2.5 px-2.5 py-1.5 font-mono text-2xs font-medium'>
                 <span>{label}</span>
                 {shortcut && <span className='text-3xs font-semibold text-foreground-faint'>{shortcut}</span>}
             </TooltipContent>

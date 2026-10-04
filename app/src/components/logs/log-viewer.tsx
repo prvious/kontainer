@@ -14,8 +14,6 @@ const levelClass = {
     destructive: "border-destructive/40 bg-destructive-soft text-destructive",
     warning: "border-warning/40 bg-warning-soft text-warning",
     neutral: "border-border bg-secondary text-secondary-foreground",
-    success: "border-border bg-secondary text-secondary-foreground",
-    primary: "border-border bg-secondary text-secondary-foreground",
 } as const;
 
 function Row({ row, wrap }: { row: LogRow; wrap: boolean }) {

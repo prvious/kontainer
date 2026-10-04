@@ -1,6 +1,42 @@
 {
   "paths": {
     "/api/v1/networks": {
+      "get": {
+        "operationId": "list_networks",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkListResponse"
+                }
+              }
+            },
+            "description": "Swarm-scope networks once, local ones per node, and one outcome per member"
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "Agent RPC not configured, persistence unavailable, or controller draining"
+          }
+        },
+        "security": [
+          {
+            "access_session": []
+          }
+        ],
+        "tags": [
+          "super::networks"
+        ]
+      },
       "post": {
         "operationId": "create_network",
         "parameters": [
@@ -164,6 +200,82 @@
               }
             },
             "description": "`not_a_manager` for a swarm network without a Swarm manager, persistence unavailable, or draining"
+          }
+        },
+        "security": [
+          {
+            "access_session": []
+          }
+        ],
+        "tags": [
+          "super::networks"
+        ]
+      },
+      "get": {
+        "operationId": "inspect_network",
+        "parameters": [
+          {
+            "description": "Docker network id",
+            "in": "path",
+            "name": "networkId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The node of a local network; omit for a swarm-scope one",
+            "in": "query",
+            "name": "node",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkContainersResponse"
+                }
+              }
+            },
+            "description": "The containers attached, with their nodes"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FieldErrorResponse"
+                }
+              }
+            },
+            "description": "`invalid_request` naming the field"
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "No such member node, or the node doesn't have it"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "Agent RPC not configured, agent or persistence unavailable"
           }
         },
         "security": [

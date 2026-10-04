@@ -13,8 +13,8 @@ use kontainer_native_client::{
     AccessCredential, AccountFieldErrors, AdmittedOperation, ContainerAction,
     ContainerActionOptions, ContainerList, ContainerTarget, ControllerSettings, ControllerStatus,
     IdempotencyKey, ImageList, ImageNodes, NativeClient, NativeClientConfig, NativeClientError,
-    NodeId, NodeList, OperationEvent, OperationSnapshot, PasswordSession, ProbeFailure,
-    RefreshCredential, SampleSeries, Traced, VolumeList, VolumeName, VolumeQuery, VolumeSpec,
+    NodeId, NodeList, OperationSnapshot, PasswordSession, ProbeFailure, RefreshCredential,
+    SampleSeries, Traced, VolumeList, VolumeName, VolumeQuery, VolumeSpec,
 };
 use kontainer_native_client::{AttachedContainer, NetworkId, NetworkList, NetworkSpec};
 use kontainer_native_client::{ClusterSummary, StackList, StackName, StackRemovalPlan};
@@ -307,14 +307,6 @@ pub(crate) trait Controller: Send + Sync + 'static {
         operation_id: Uuid,
         cancellation: &'a CancellationToken,
     ) -> ControllerFuture<'a, Result<OperationSnapshot, NativeClientError>>;
-
-    fn list_operation_events<'a>(
-        &'a self,
-        access: &'a AccessCredential,
-        operation_id: Uuid,
-        after: u32,
-        cancellation: &'a CancellationToken,
-    ) -> ControllerFuture<'a, Result<Vec<OperationEvent>, NativeClientError>>;
 
     fn cancel_operation<'a>(
         &'a self,
@@ -780,22 +772,6 @@ impl Controller for NativeController {
             self.client
                 .get_operation(access, operation_id, cancellation),
         )
-    }
-
-    fn list_operation_events<'a>(
-        &'a self,
-        access: &'a AccessCredential,
-        operation_id: Uuid,
-        after: u32,
-        cancellation: &'a CancellationToken,
-    ) -> ControllerFuture<'a, Result<Vec<OperationEvent>, NativeClientError>> {
-        Box::pin(self.client.list_operation_events(
-            access,
-            operation_id,
-            after,
-            kontainer_native_client::MAX_EVENT_PAGE,
-            cancellation,
-        ))
     }
 
     fn cancel_operation<'a>(

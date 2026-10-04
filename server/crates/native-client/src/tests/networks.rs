@@ -92,11 +92,14 @@ async fn network_lists_that_break_the_contract_are_rejected() {
     bad_scope["items"][1]["scope"] = json!("global");
     let mut extra = valid.clone();
     extra["items"][0]["options"] = json!({"secret": "canary"});
+    let mut unprintable = valid.clone();
+    unprintable["items"][0]["name"] = json!("net\u{1b}[31m");
     for (label, body) in [
         ("a local network on two nodes", two_nodes_local),
         ("a node outside the membership", foreign),
         ("an unknown scope", bad_scope),
         ("an unknown field", extra),
+        ("a control character in a name", unprintable),
     ] {
         let server = TestServer::plain(vec![respond(200, &body.to_string())]).await;
         assert_eq!(
@@ -108,6 +111,16 @@ async fn network_lists_that_break_the_contract_are_rejected() {
             "{label}"
         );
     }
+
+    // A name Kontainer would never create still lists.
+    let mut odd_name = valid;
+    odd_name["items"][0]["name"] = json!("legacy net (old)");
+    let server = TestServer::plain(vec![respond(200, &odd_name.to_string())]).await;
+    let list = plain_client(&server)
+        .list_networks(&access(), &CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(list.items[0].name, "legacy net (old)");
 }
 
 #[tokio::test]

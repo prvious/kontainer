@@ -67,7 +67,8 @@ operation succeeds only when every target succeeded; otherwise `failed` with cod
 
 ## Desktop
 
-- Tauri: `get_operation(id)`, `list_operation_events(id, after)`, `cancel_operation(id)`. Every
+- Tauri: `get_operation(id)`, `cancel_operation(id)`. The events route has no desktop caller
+  until a screen shows operation history (ADR 0038). Every
   mutation command takes an `idempotencyKey` argument and returns `{ operationId, replayed }`.
 - React generates the idempotency key with `crypto.randomUUID()` per user gesture and keeps it in
   the mutation variables so a retried mutation reuses it.

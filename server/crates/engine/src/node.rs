@@ -18,11 +18,14 @@ pub struct NodeInfo {
     pub containers_stopped: u32,
 }
 
-/// One stats reading for a running container. CPU is percent of one core times cores
-/// used (Docker's convention: 0 to 100 × cores). Network counters are cumulative.
+/// One stats reading for a running container. Counters are cumulative. CPU is percent of one
+/// core times cores used (Docker's convention: 0 to 100 × cores).
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct ContainerStats {
+    /// Needs two readings, so the engine's one-shot read leaves it `None`: the caller derives it
+    /// from the previous reading's `cpu` with [`cpu_percent`].
     pub cpu_percent: Option<f64>,
+    pub cpu: CpuCounters,
     pub memory_used_bytes: Option<u64>,
     pub memory_limit_bytes: Option<u64>,
     pub net_rx_bytes: u64,

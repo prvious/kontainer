@@ -1,6 +1,6 @@
 # 0023. Nodes joined with Swarm, and the cluster summary
 
-- Status: accepted
+- Status: accepted (amended by 0037)
 - Date: 2026-09-28
 - Spec: docs/build/13-nodes.md
 

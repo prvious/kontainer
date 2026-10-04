@@ -169,7 +169,26 @@ async fn cluster_summary_is_strict_and_consistent() {
         ("GET", "/api/v1/cluster/summary")
     );
 
+    assert_eq!(
+        (summary.managers_total, summary.managers_reachable),
+        (Some(1), Some(1))
+    );
+
     let valid: serde_json::Value = serde_json::from_str(CLUSTER_SUMMARY).unwrap();
+    // A manager that didn't answer leaves both counts unknown, not zero.
+    let mut silent_manager = valid.clone();
+    silent_manager["managersTotal"] = json!(null);
+    silent_manager["managersReachable"] = json!(null);
+    let server = TestServer::plain(vec![respond(200, &silent_manager.to_string())]).await;
+    let summary = plain_client(&server)
+        .cluster_summary(&access(), &CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(
+        (summary.managers_total, summary.managers_reachable),
+        (None, None)
+    );
+
     let mut extra = valid.clone();
     extra["secret"] = json!("canary");
     let mut miscounted = valid.clone();
@@ -245,6 +264,10 @@ async fn sample_series_keep_null_buckets_and_validate_ranges_locally() {
         ("1h", "60"),
         ("1h", "1d"),
         ("1h", ""),
+        // A multi-byte last character once panicked mid-slice.
+        ("1h", "60µ"),
+        ("1h", "é"),
+        ("1h", "µs"),
     ] {
         assert_eq!(
             client
@@ -709,7 +732,6 @@ async fn get_operation_reads_the_bounded_snapshot() {
     assert_eq!(snapshot.state, OperationState::Running);
     assert!(!snapshot.recoverable);
     assert!(!snapshot.uncertain);
-    assert_eq!(snapshot.last_event_sequence, 3);
     assert_eq!(snapshot.last_error_code, None);
     assert_eq!(
         snapshot
@@ -857,7 +879,7 @@ fn default_limits_are_the_documented_bounds() {
 }
 
 /// Paths covered by the client's read surface, with their documented method.
-const READ_OPENAPI_PATHS: [(&str, &str); 13] = [
+const READ_OPENAPI_PATHS: [(&str, &str); 12] = [
     ("/api/v1/nodes", "get"),
     ("/api/v1/nodes/{nodeId}/samples", "get"),
     ("/api/v1/cluster/samples", "get"),
@@ -871,11 +893,10 @@ const READ_OPENAPI_PATHS: [(&str, &str); 13] = [
     ),
     ("/api/v1/containers/actions/bulk", "post"),
     ("/api/v1/operations/{operation_id}", "get"),
-    ("/api/v1/operations/{operation_id}/events", "get"),
     ("/api/v1/operations/{operation_id}/cancel", "post"),
     ("/api/v1/operations/noop", "post"),
 ];
-const READ_OPENAPI_SCHEMAS: [&str; 29] = [
+const READ_OPENAPI_SCHEMAS: [&str; 27] = [
     "NodeListResponse",
     "NodeResponse",
     "AgentStatusResponse",
@@ -901,8 +922,6 @@ const READ_OPENAPI_SCHEMAS: [&str; 29] = [
     "OperationResponse",
     "OperationStateResponse",
     "NodeErrorResponse",
-    "OperationEventResponse",
-    "OperationEventsResponse",
     "AdmittedResponse",
     "AdmissionErrorResponse",
 ];

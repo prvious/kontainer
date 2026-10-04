@@ -234,8 +234,12 @@ pub struct ClusterSummaryResponse {
     pub nodes_active: u32,
     pub nodes_degraded: u32,
     pub nodes_down: u32,
-    pub managers_total: u32,
-    pub managers_reachable: u32,
+    /// Null when the manager did not answer: unknown, not zero.
+    #[schema(required = true)]
+    pub managers_total: Option<u32>,
+    /// Null when the manager did not answer.
+    #[schema(required = true)]
+    pub managers_reachable: Option<u32>,
     /// `healthy` when the manager answers and every manager is ready and reachable.
     pub quorum: QuorumStateResponse,
     /// Mean over online nodes with a sample; null when there are none.

@@ -3,13 +3,12 @@ import fixture from "../fixtures/operations-ipc.json";
 import inventory from "../fixtures/inventory-ipc.json";
 import { ipcFixture } from "../ipc-fixture";
 import { INVENTORY_ERROR_CODES } from "@/types/inventory";
-import { isTerminal, progressCounts, type AdmittedOperation, type OperationEventView, type OperationView } from "@/types/operations";
+import { isTerminal, progressCounts, type AdmittedOperation, type OperationView } from "@/types/operations";
 import { operationMeta, operationPhase, operationSummary, operationTrack } from "@/components/operations/operation-meta";
 
 // The shared fixture must fit the views Rust's own tests serialize to it.
 const running = ipcFixture<OperationView>(fixture.operation);
 const failed = ipcFixture<OperationView>(fixture.failedOperation);
-ipcFixture<OperationEventView[]>(fixture.events);
 ipcFixture<AdmittedOperation>(fixture.admitted);
 
 describe("operations IPC contract", () => {

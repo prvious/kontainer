@@ -103,6 +103,37 @@ async fn stack_lists_that_break_the_contract_are_rejected() {
     }
 }
 
+#[tokio::test]
+async fn stack_lists_show_any_displayable_name() {
+    let valid: serde_json::Value = serde_json::from_str(STACK_LIST).unwrap();
+    let with_name = |name: &str| {
+        let mut body = valid.clone();
+        body["items"][0]["name"] = json!(name);
+        body.to_string()
+    };
+    // A label Kontainer would never create still lists: only the display rule applies.
+    for odd in ["my stack", "-dash", "Ünïcode", &"x".repeat(512)] {
+        let server = TestServer::plain(vec![respond(200, &with_name(odd))]).await;
+        let list = plain_client(&server)
+            .list_stacks(&access(), &CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(list.items[0].name, odd);
+        assert!(StackName::parse(odd).is_err(), "{odd} is not creatable");
+    }
+    for bad in ["", "tab\there", "bell\u{7}", &"x".repeat(513)] {
+        let server = TestServer::plain(vec![respond(200, &with_name(bad))]).await;
+        assert_eq!(
+            plain_client(&server)
+                .list_stacks(&access(), &CancellationToken::new())
+                .await
+                .err(),
+            Some(NativeClientError::InvalidResponse),
+            "{bad:?}"
+        );
+    }
+}
+
 const STACK_OPENAPI_PATHS: [(&str, &str); 3] = [
     ("/api/v1/stacks", "get"),
     ("/api/v1/stacks/{name}/plan", "get"),

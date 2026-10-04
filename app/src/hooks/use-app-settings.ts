@@ -3,7 +3,7 @@ import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/r
 import { DEFAULT_APP_SETTINGS, type AppSettings } from "@/types/settings";
 
 /** App-level (not profile-scoped) data lives under `["app", ...]` and survives sign-in changes. */
-export const appSettingsQuery = queryOptions({
+const appSettingsQuery = queryOptions({
     queryKey: ["app", "settings"] as const,
     queryFn: async () => ({ ...DEFAULT_APP_SETTINGS, ...(await invoke<Partial<AppSettings>>("load_app_settings")) }),
     staleTime: Infinity,

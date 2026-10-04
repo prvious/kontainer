@@ -37,17 +37,15 @@ vi.mock("@tauri-apps/plugin-opener", () => ({
     openUrl: vi.fn(),
 }));
 
-// Mock useSettings so hooks that read polling and terminal defaults work in tests
+// Mock useSettings so hooks that read terminal defaults work in tests
 vi.mock("@/hooks/use-settings", () => ({
     useSettings: vi.fn(() => ({
-        refreshInterval: 5000,
         terminalDefaults: {
             shell: "",
             fontSize: 13,
             fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, Monaco, 'Courier New', monospace",
             scrollback: 1000,
         },
-        isLoading: false,
     })),
 }));
 
@@ -55,7 +53,6 @@ vi.mock("@/hooks/use-settings", () => ({
 vi.mock("@/hooks/use-appearance", () => ({
     useAppearance: vi.fn(() => ({
         scheme: "system",
-        setScheme: vi.fn(),
         resolvedScheme: "dark",
     })),
 }));

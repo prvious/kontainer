@@ -68,7 +68,5 @@ export function portsText(ports: string[]): string {
     return [...new Set(ports.map((port) => port.split(":")[0]))].join(", ");
 }
 
-export const isRunning = (row: Pick<ContainerRow, "state">) => row.state === "running";
-
 /** Running, paused, or restarting: Docker removes it only with `force`, which kills it first. */
 export const needsForce = (row: Pick<ContainerRow, "state">) => row.state === "running" || row.state === "paused" || row.state === "restarting";

@@ -2790,13 +2790,21 @@
             "description": "Mean over online nodes with a sample; null when there are none."
           },
           "managersReachable": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "format": "int32",
+            "description": "Null when the manager did not answer.",
             "minimum": 0
           },
           "managersTotal": {
-            "type": "integer",
+            "type": [
+              "integer",
+              "null"
+            ],
             "format": "int32",
+            "description": "Null when the manager did not answer: unknown, not zero.",
             "minimum": 0
           },
           "memoryTotalBytes": {

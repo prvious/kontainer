@@ -415,6 +415,44 @@ async fn upgrade(
 }
 
 #[tokio::test]
+async fn one_deadline_bounds_the_upgrade_and_the_open_frame() {
+    // A peer that accepts the connection and then never answers. The transport's own handshake
+    // timeout is 15 s; the caller's deadline covers the upgrade and the open send together, so
+    // it is what returns here.
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let silent = tokio::spawn(async move {
+        let (socket, _) = listener.accept().await.unwrap();
+        std::future::pending::<()>().await;
+        drop(socket);
+    });
+    let client = NativeClient::new(NativeClientConfig::new(format!("http://{address}"))).unwrap();
+    let open = LogMessage::Open(LogsOpen {
+        service_id: SERVICE.to_owned(),
+        since_unix_ms: None,
+        tail: Some(10),
+    })
+    .into_frame(1);
+
+    let started = std::time::Instant::now();
+    let result = client
+        .open_stream(
+            "/api/v1/ws/logs",
+            &AccessCredential::parse(ACCESS).unwrap(),
+            &open,
+            Duration::from_millis(200),
+            &CancellationToken::new(),
+        )
+        .await;
+    assert_eq!(result.err(), Some(NativeClientError::Unavailable));
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "the caller's deadline, not 15 s"
+    );
+    silent.abort();
+}
+
+#[tokio::test]
 async fn connect_logs_upgrades_with_the_bearer_and_opens_the_service() {
     let server = StreamServer::new(StreamLimits::default(), Arc::new(EchoOpen));
     let router = Router::new()

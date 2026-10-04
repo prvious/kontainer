@@ -1,4 +1,4 @@
-import { keepPreviousData, skipToken, useQuery } from "@tanstack/react-query";
+import { skipToken, useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { useQueriesPaused } from "@/hooks/use-queries-paused";
@@ -8,7 +8,7 @@ import { volumeRowId, VOLUME_NAME, type VolumeListView } from "@/types/volumes";
 import type { OperationView } from "@/types/operations";
 import { DEFAULT_APP_SETTINGS } from "@/types/settings";
 
-export const volumesKey = (profileId: string) => ["volumes", profileId] as const;
+const volumesKey = (profileId: string) => ["volumes", profileId] as const;
 
 /** Every volume on the cluster, one row per node and name, polled at the refresh interval. */
 export function useVolumes() {
@@ -22,7 +22,6 @@ export function useVolumes() {
         enabled: Boolean(session) && !paused,
         refetchInterval: settings.data?.refreshInterval ?? DEFAULT_APP_SETTINGS.refreshInterval ?? 5000,
         retry: false,
-        placeholderData: keepPreviousData,
     });
 }
 

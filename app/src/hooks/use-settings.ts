@@ -1,9 +1,9 @@
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { DEFAULT_APP_SETTINGS, DEFAULT_TERMINAL, type TerminalDefaults } from "@/types/settings";
 
-/** Polling interval and terminal defaults derived from the stored app settings. */
+/** Terminal defaults derived from the stored app settings. */
 export function useSettings() {
-    const { data, isPending } = useAppSettings();
+    const { data } = useAppSettings();
     const settings = data ?? DEFAULT_APP_SETTINGS;
     const terminalDefaults: TerminalDefaults = {
         shell: settings.terminalShell ?? DEFAULT_TERMINAL.shell,
@@ -12,9 +12,5 @@ export function useSettings() {
         scrollback: settings.terminalScrollback ?? DEFAULT_TERMINAL.scrollback,
     };
 
-    return {
-        refreshInterval: settings.refreshInterval === null ? (false as const) : settings.refreshInterval,
-        terminalDefaults,
-        isLoading: isPending,
-    };
+    return { terminalDefaults };
 }

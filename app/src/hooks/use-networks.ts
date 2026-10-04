@@ -1,4 +1,4 @@
-import { keepPreviousData, skipToken, useQuery } from "@tanstack/react-query";
+import { skipToken, useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { useQueriesPaused } from "@/hooks/use-queries-paused";
@@ -9,7 +9,7 @@ import { networkRowId, type AttachedContainerView, type NetworkListView, type Ne
 import type { OperationView } from "@/types/operations";
 import { DEFAULT_APP_SETTINGS } from "@/types/settings";
 
-export const networksKey = (profileId: string) => ["networks", profileId] as const;
+const networksKey = (profileId: string) => ["networks", profileId] as const;
 
 /** Every network on the cluster, polled at the refresh interval. */
 export function useNetworks() {
@@ -23,7 +23,6 @@ export function useNetworks() {
         enabled: Boolean(session) && !paused,
         refetchInterval: settings.data?.refreshInterval ?? DEFAULT_APP_SETTINGS.refreshInterval ?? 5000,
         retry: false,
-        placeholderData: keepPreviousData,
     });
 }
 

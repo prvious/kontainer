@@ -12,7 +12,6 @@ export interface OperationView {
     id: string;
     kind: string;
     state: OperationState;
-    lastEventSequence: number;
     errorCode: string | null;
     errorMessage: string | null;
     /** The kind's latest progress or result document, e.g. `{ total, done }`. */
@@ -22,15 +21,6 @@ export interface OperationView {
     startedAt: string | null;
     finishedAt: string | null;
     requestId: string | null;
-}
-
-export interface OperationEventView {
-    sequence: number;
-    state: OperationState;
-    errorCode: string | null;
-    message: string | null;
-    detail: Record<string, unknown> | null;
-    createdAt: string;
 }
 
 export interface AdmittedOperation {

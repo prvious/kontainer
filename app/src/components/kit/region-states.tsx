@@ -9,7 +9,6 @@ export interface RegionAction {
     label: string;
     icon?: LucideIcon;
     onClick?: () => void;
-    disabled?: boolean;
     /** Plain tooltip for a deferred action ("Not built yet"). */
     restricted?: { title: string; reason: string };
 }
@@ -40,24 +39,12 @@ export function EmptyState({
             {(primaryAction || secondaryAction) && (
                 <div className='flex items-center gap-2'>
                     {primaryAction && (
-                        <ActionButton
-                            variant='primary'
-                            icon={primaryAction.icon}
-                            onClick={primaryAction.onClick}
-                            disabled={primaryAction.disabled}
-                            restricted={primaryAction.restricted}
-                        >
+                        <ActionButton variant='primary' icon={primaryAction.icon} onClick={primaryAction.onClick} restricted={primaryAction.restricted}>
                             {primaryAction.label}
                         </ActionButton>
                     )}
                     {secondaryAction && (
-                        <ActionButton
-                            variant='outline'
-                            icon={secondaryAction.icon}
-                            onClick={secondaryAction.onClick}
-                            disabled={secondaryAction.disabled}
-                            restricted={secondaryAction.restricted}
-                        >
+                        <ActionButton variant='outline' icon={secondaryAction.icon} onClick={secondaryAction.onClick} restricted={secondaryAction.restricted}>
                             {secondaryAction.label}
                         </ActionButton>
                     )}
@@ -74,7 +61,6 @@ export function ErrorState({
     details,
     onRetry,
     retryLabel = "TRY AGAIN",
-    extra,
     className,
 }: {
     title: string;
@@ -82,7 +68,6 @@ export function ErrorState({
     details: ErrorDetails;
     onRetry?: () => void;
     retryLabel?: string;
-    extra?: ReactNode;
     className?: string;
 }) {
     async function copyDetails() {
@@ -108,7 +93,6 @@ export function ErrorState({
                 </span>
                 {details.requestId && <span className='text-muted-foreground'>req {details.requestId}</span>}
             </div>
-            {extra}
             <div className='flex items-center gap-2'>
                 {onRetry && (
                     <ActionButton variant='outline' icon={RefreshCw} onClick={onRetry}>

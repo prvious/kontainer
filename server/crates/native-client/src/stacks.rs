@@ -6,7 +6,9 @@ use reqwest::Method;
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
 
-use crate::client::{ErrorBodyPolicy, NativeClient, RetryPolicy, decode_json, parse_timestamp};
+use crate::client::{
+    ErrorBodyPolicy, NativeClient, RetryPolicy, decode_json, parse_timestamp, valid_display_name,
+};
 use crate::credentials::AccessCredential;
 use crate::error::NativeClientError;
 use crate::operations::{AdmittedOperation, IdempotencyKey};
@@ -113,7 +115,7 @@ impl StackListBody {
                 let cpu_ok = item
                     .cpu_percent
                     .is_none_or(|cpu| cpu.is_finite() && cpu >= 0.0);
-                if StackName::parse(&item.name).is_err() || !cpu_ok {
+                if !valid_display_name(&item.name) || !cpu_ok {
                     return Err(NativeClientError::InvalidResponse);
                 }
                 Ok(StackItem {

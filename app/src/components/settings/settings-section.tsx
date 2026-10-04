@@ -30,7 +30,6 @@ export function SettingsRow({
     description,
     changedFrom,
     error,
-    note,
     children,
 }: {
     id: string;
@@ -39,8 +38,6 @@ export function SettingsRow({
     /** The stored value when this row has a staged change. */
     changedFrom?: string | null;
     error?: string | null;
-    /** Extra line under the description, such as where a read-only value is set. */
-    note?: ReactNode;
     children: ReactNode;
 }) {
     return (
@@ -60,7 +57,6 @@ export function SettingsRow({
                         Changed from {changedFrom}
                     </p>
                 )}
-                {note}
             </div>
             <div className='flex shrink-0 flex-col items-end gap-1.5'>
                 {children}

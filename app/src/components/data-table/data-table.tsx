@@ -90,7 +90,6 @@ export interface DataTableProps<TData extends Record<string, unknown>> {
     emptyState?: ReactNode;
     /** Replaces the body when the region failed to load. */
     errorState?: ReactNode;
-    className?: string;
 }
 
 export function DataTable<TData extends Record<string, unknown>>({
@@ -112,7 +111,6 @@ export function DataTable<TData extends Record<string, unknown>>({
     stale,
     emptyState,
     errorState,
-    className,
 }: DataTableProps<TData>) {
     const selectable = rowSelection !== undefined;
     const tableColumns = useMemo(() => {
@@ -223,7 +221,7 @@ export function DataTable<TData extends Record<string, unknown>>({
     }
 
     return (
-        <section className={cn("flex flex-col overflow-hidden rounded-md border border-border bg-card", className)}>
+        <section className='flex flex-col overflow-hidden rounded-md border border-border bg-card'>
             <header className='flex h-11 items-center justify-between gap-3 border-b border-border px-4'>
                 <div className='flex items-center gap-3'>
                     <h2 className='font-mono text-2xs font-bold tracking-[1px] text-foreground uppercase'>{title}</h2>

@@ -1,4 +1,4 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { useQueriesPaused } from "@/hooks/use-queries-paused";
@@ -8,7 +8,7 @@ import type { ImageListView } from "@/types/images";
 import { DEFAULT_APP_SETTINGS } from "@/types/settings";
 import { containersKey } from "@/hooks/use-containers";
 
-export const imagesKey = (profileId: string) => ["images", profileId] as const;
+const imagesKey = (profileId: string) => ["images", profileId] as const;
 
 /** Every image on the cluster, merged by id, polled at the refresh interval. */
 export function useImages() {
@@ -22,7 +22,6 @@ export function useImages() {
         enabled: Boolean(session) && !paused,
         refetchInterval: settings.data?.refreshInterval ?? DEFAULT_APP_SETTINGS.refreshInterval ?? 5000,
         retry: false,
-        placeholderData: keepPreviousData,
     });
 }
 

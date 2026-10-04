@@ -1,7 +1,6 @@
 import { useState, type ComponentProps, type KeyboardEvent, type ReactNode } from "react";
 import { Bar, BarChart, Cell, YAxis } from "recharts";
 import { ChartTooltip, type ChartTooltipRow } from "@/components/charts/chart-tooltip";
-import { cn } from "@/lib/utils";
 
 export interface SparkBucket {
     /** Bucket start and end, epoch milliseconds. */
@@ -28,7 +27,6 @@ export function SparkBars({
     tooltipRows,
     tooltipTime,
     tooltipDelta,
-    className,
 }: {
     buckets: SparkBucket[];
     width?: number;
@@ -41,7 +39,6 @@ export function SparkBars({
     tooltipTime?: (bucket: SparkBucket) => string;
     /** A footer line under the rows, e.g. how many nodes contributed. */
     tooltipDelta?: (bucket: SparkBucket, index: number) => ComponentProps<typeof ChartTooltip>["delta"];
-    className?: string;
 }) {
     const [active, setActive] = useState<number | null>(null);
     const data = buckets.map((bucket, index) => ({ index, value: bucket.value }));
@@ -89,7 +86,7 @@ export function SparkBars({
             tabIndex={0}
             onKeyDown={onKeyDown}
             onBlur={() => setActive(null)}
-            className={cn("relative outline-none focus-visible:ring-2 focus-visible:ring-ring/50", className)}
+            className='relative outline-none focus-visible:ring-2 focus-visible:ring-ring/50'
             style={{ width, height }}
         >
             <BarChart

@@ -91,7 +91,7 @@ with the Shadcn CLI (`alert` at least; check `badge`, `tooltip`, `skeleton`, `di
 | `TableToolbar` | `w9xU5` | search box, "Filters (n)" button, sort dropdown, filter chips row with "Clear filters". |
 | `RowActions` | `KPhXT`, `Ulm5I` | icon buttons with tooltips plus a `⋮` dropdown menu. |
 | `DataTable` | table parts `gwEtM`, header/row styling from `WCBzg` | see below. |
-| Charts | `B64BE` | `SparkBars`, `Ring`, `Track`, `StackedTrack`, `StateCells` as thin Recharts wrappers. One accent series; status colours mean state, never quantity; every chart sits beside its number; gaps render as "no data", never 0. Hover snaps to the nearest bucket and dims the others (state `UWkEX`). |
+| Charts | `B64BE` | `SparkBars`, `Ring`, `Track`, `StackedTrack` as thin Recharts wrappers (`StateCells` waits for a screen that uses it). One accent series; status colours mean state, never quantity; every chart sits beside its number; gaps render as "no data", never 0. Hover snaps to the nearest bucket and dims the others (state `UWkEX`). |
 
 ### DataTable
 

@@ -13,23 +13,18 @@ export function FormField({
     error,
     helper,
     children,
-    trailing,
 }: {
     id: string;
     label: string;
     error?: string | null;
     helper?: ReactNode;
     children: ReactNode;
-    trailing?: ReactNode;
 }) {
     return (
         <div className='flex flex-col gap-2'>
-            <div className='flex items-center justify-between'>
-                <label htmlFor={id} className='font-mono text-3xs font-medium tracking-[1px] text-muted-foreground uppercase'>
-                    {label}
-                </label>
-                {trailing}
-            </div>
+            <label htmlFor={id} className='font-mono text-3xs font-medium tracking-[1px] text-muted-foreground uppercase'>
+                {label}
+            </label>
             {children}
             {error ? (
                 <p id={fieldHelperId(id)} role='alert' className='flex gap-1.5 font-mono text-2xs leading-normal text-destructive'>

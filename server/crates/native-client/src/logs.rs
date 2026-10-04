@@ -397,52 +397,20 @@ impl NativeClient {
         request: &LogOpenRequest,
         cancellation: &CancellationToken,
     ) -> Result<Box<dyn LogReceiver>, NativeClientError> {
-        // WebSockets verify with the public roots only; a custom bundle is refused, not ignored.
-        if self.custom_trust {
-            return Err(NativeClientError::InvalidConfiguration);
-        }
-        let mut endpoint = self.endpoint("/api/v1/ws/logs")?;
-        let scheme = if endpoint.scheme() == "https" {
-            "wss"
-        } else {
-            "ws"
-        };
-        endpoint
-            .set_scheme(scheme)
-            .map_err(|()| NativeClientError::InvalidConfiguration)?;
-        let limits = StreamLimits::default();
-        let mut client = NativeStreamClient::connect_with_bearer(
-            endpoint.as_str(),
-            Some(access.expose()),
-            limits,
-            cancellation,
-        )
-        .await
-        .map_err(|error| match error {
-            StreamClientError::HandshakeRejected { status: 401 } => NativeClientError::Unauthorized,
-            StreamClientError::HandshakeRejected { status: 429 } => NativeClientError::LimitReached,
-            StreamClientError::HandshakeRejected { status: 400 } => {
-                NativeClientError::InvalidRequest
-            }
-            StreamClientError::HandshakeRejected { status: 503 } => {
-                NativeClientError::ServiceUnavailable
-            }
-            StreamClientError::Cancelled => NativeClientError::Cancelled,
-            StreamClientError::InvalidEndpoint => NativeClientError::InvalidConfiguration,
-            _ => NativeClientError::Unavailable,
-        })?;
         let open = LogMessage::Open(LogsOpen {
             service_id: request.service_id.as_str().to_owned(),
             since_unix_ms: request.since_unix_ms,
             tail: Some(request.tail.min(MAX_LOG_TAIL)),
         });
-        client
-            .send_frame(&open.into_frame(1), cancellation)
-            .await
-            .map_err(|error| match error {
-                StreamClientError::Cancelled => NativeClientError::Cancelled,
-                _ => NativeClientError::Unavailable,
-            })?;
+        let client = self
+            .open_stream(
+                "/api/v1/ws/logs",
+                access,
+                &open.into_frame(1),
+                StreamLimits::default().handshake_deadline(),
+                cancellation,
+            )
+            .await?;
         Ok(Box::new(WebSocketLogReceiver(client)))
     }
 }

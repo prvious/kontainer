@@ -5,16 +5,19 @@ import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ActionButton } from "@/components/kit/action-button";
 import { ConfirmDialog } from "@/components/kit/confirm-dialog";
 import { RowActions } from "@/components/data-table/row-actions";
+import { useRunContainerAction } from "@/components/containers/use-run-container-action";
 import { AuthContext, type AuthContextValue } from "@/contexts/auth-context-value";
 import { ConnectivityProvider } from "@/contexts/connectivity-context";
-import { ConnectivityContext, type ConnectivityContextValue } from "@/contexts/connectivity-context-value";
+import { ConnectivityContext, PAUSED_OFFLINE, type ConnectivityContextValue } from "@/contexts/connectivity-context-value";
 import { OperationsProvider } from "@/contexts/operations-context";
 import { useCancelOperation } from "@/hooks/use-cancel-operation";
 import { useConnectivity } from "@/hooks/use-connectivity";
+import type { ContainerRow } from "@/hooks/use-containers";
 import { useStartOperation, withIdempotencyKey } from "@/hooks/use-operations";
 
 const offline: ConnectivityContextValue = { probe: { status: "unreachable" }, reachable: false, reconnectedAt: null, retry: () => {}, retrying: false };
@@ -90,10 +93,9 @@ describe("changes while the controller is unreachable", () => {
 describe("the shared change hooks while the controller is unreachable", () => {
     beforeEach(() => vi.clearAllMocks());
 
-    it("refuse a start or a cancel with controller_unreachable instead of sending or parking it", async () => {
+    function offlineChanges(queryClient = new QueryClient()) {
         const auth = { session: { profileId: "p1" }, expired: false, reportInventoryCustodyError: vi.fn() } as unknown as AuthContextValue;
-        const queryClient = new QueryClient();
-        const wrapper = ({ children }: { children: ReactNode }) => (
+        return ({ children }: { children: ReactNode }) => (
             <AuthContext value={auth}>
                 <QueryClientProvider client={queryClient}>
                     <ConnectivityContext value={offline}>
@@ -102,6 +104,11 @@ describe("the shared change hooks while the controller is unreachable", () => {
                 </QueryClientProvider>
             </AuthContext>
         );
+    }
+
+    it("refuse a start or a cancel with controller_unreachable instead of sending or parking it", async () => {
+        const queryClient = new QueryClient();
+        const wrapper = offlineChanges(queryClient);
         const { result } = renderHook(
             () => ({
                 start: useStartOperation<{ idempotencyKey: string }>({ command: "start_thing", scope: "services", title: () => "Thing", invalidate: [] }),
@@ -120,6 +127,18 @@ describe("the shared change hooks while the controller is unreachable", () => {
                 .getAll()
                 .some((mutation) => mutation.state.isPaused),
         ).toBe(false);
+    });
+
+    it("toast a refused change as never sent, not as one the controller turned down", async () => {
+        const failure = vi.spyOn(toast, "error").mockImplementation(() => "toast");
+        const { result } = renderHook(() => useRunContainerAction(), { wrapper: offlineChanges() });
+        act(() => result.current({ nodeId: "n1", containerId: "c1", name: "web" } as ContainerRow, "stop"));
+        await waitFor(() => expect(failure).toHaveBeenCalledOnce());
+        const [title, options] = failure.mock.calls[0];
+        expect(title).toBe("Couldn't stop web");
+        expect(options?.description).toBe(`${PAUSED_OFFLINE.reason}\ncontroller_unreachable`);
+        expect(invoke).not.toHaveBeenCalled();
+        failure.mockRestore();
     });
 
     it("stays unreachable while a retried probe is out, until one answers", async () => {

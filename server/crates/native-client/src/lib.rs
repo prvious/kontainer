@@ -85,10 +85,7 @@ pub use nodes::{
     NodeRole, NodeSample, NodeSummary, QuorumState, SAMPLE_WINDOWS, SamplePoint, SampleSeries,
     SwarmNodeStatus,
 };
-pub use operations::{
-    AdmittedOperation, IdempotencyKey, MAX_EVENT_PAGE, OperationEvent, OperationSnapshot,
-    OperationState,
-};
+pub use operations::{AdmittedOperation, IdempotencyKey, OperationSnapshot, OperationState};
 pub use probe::ProbeFailure;
 pub use services::{
     MAX_REPLICAS, MAX_SERVICES, ServiceAction, ServiceDetail, ServiceId, ServiceItem, ServiceList,

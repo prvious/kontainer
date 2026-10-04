@@ -1,11 +1,11 @@
 //! Operation IPC views and the admission path under rotation.
 
 use kontainer_native_client::{
-    AdmittedOperation, NativeClientError, OperationEvent, OperationSnapshot, OperationState,
+    AdmittedOperation, NativeClientError, OperationSnapshot, OperationState,
 };
 use uuid::Uuid;
 
-use crate::session::manager::{InventoryError, OperationEventView, OperationView};
+use crate::session::manager::{InventoryError, OperationView};
 
 use super::fakes::{future_ms, issued, Harness};
 
@@ -25,7 +25,6 @@ fn running() -> OperationSnapshot {
         state: OperationState::Running,
         recoverable: false,
         uncertain: false,
-        last_event_sequence: 3,
         last_error_code: None,
         created_at: "2026-09-28T12:00:00.000Z".parse().unwrap(),
         updated_at: "2026-09-28T12:00:01.000Z".parse().unwrap(),
@@ -42,7 +41,6 @@ fn failed() -> OperationSnapshot {
         id: Uuid::parse_str("018f2e34-0000-7000-8000-0000000000dd").unwrap(),
         kind: "service.scale".to_owned(),
         state: OperationState::Failed,
-        last_event_sequence: 4,
         last_error_code: Some("no_eligible_nodes".to_owned()),
         updated_at: "2026-09-28T12:00:09.000Z".parse().unwrap(),
         error_message: Some("No node satisfies the placement constraints.".to_owned()),
@@ -50,27 +48,6 @@ fn failed() -> OperationSnapshot {
         finished_at: Some("2026-09-28T12:00:09.000Z".parse().unwrap()),
         ..running()
     }
-}
-
-fn events() -> Vec<OperationEvent> {
-    vec![
-        OperationEvent {
-            sequence: 2,
-            state: OperationState::Running,
-            error_code: None,
-            message: None,
-            detail: None,
-            created_at: "2026-09-28T12:00:00.500Z".parse().unwrap(),
-        },
-        OperationEvent {
-            sequence: 3,
-            state: OperationState::Running,
-            error_code: None,
-            message: None,
-            detail: Some(serde_json::json!({"total": 3, "done": 1})),
-            created_at: "2026-09-28T12:00:01.000Z".parse().unwrap(),
-        },
-    ]
 }
 
 #[test]
@@ -84,8 +61,6 @@ fn operation_views_match_the_shared_fixture_and_commands_are_registered() {
         serde_json::to_value(OperationView::from(failed())).unwrap(),
         fixture["failedOperation"]
     );
-    let events: Vec<_> = events().into_iter().map(OperationEventView::from).collect();
-    assert_eq!(serde_json::to_value(events).unwrap(), fixture["events"]);
     for command in fixture["commands"].as_array().unwrap() {
         let name = command.as_str().unwrap();
         assert!(LIB_SOURCE.contains(&format!("actions::operations::{name}::{name}")));
@@ -93,13 +68,12 @@ fn operation_views_match_the_shared_fixture_and_commands_are_registered() {
 }
 
 #[tokio::test]
-async fn operations_read_poll_page_and_cancel_through_the_session() {
+async fn operations_read_poll_and_cancel_through_the_session() {
     let harness = Harness::new();
     let view = harness.login_ok().await;
     {
         let mut script = harness.controllers.script();
         script.operations.push_back(Ok(running()));
-        script.events.push_back(Ok(events()));
         script
             .operations
             .push_back(Err(NativeClientError::Conflict));
@@ -115,15 +89,6 @@ async fn operations_read_poll_page_and_cancel_through_the_session() {
     assert_eq!(
         serde_json::to_value(polled).unwrap(),
         fixture()["operation"]
-    );
-    assert_eq!(
-        harness
-            .manager
-            .operation_events(view.profile_id, RUNNING_ID, 1)
-            .await
-            .unwrap()
-            .len(),
-        2
     );
     assert_eq!(
         harness
@@ -150,10 +115,6 @@ async fn operations_read_poll_page_and_cancel_through_the_session() {
             .err(),
         Some(InventoryError::InvalidRequest)
     );
-    assert!(harness
-        .entries()
-        .iter()
-        .any(|entry| entry.ends_with(&format!(":{RUNNING_ID}:1"))));
 }
 
 #[tokio::test]

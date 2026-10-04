@@ -26,7 +26,6 @@ tauri-plugin-store = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri-plugin-window-state = "2.4.1"
-tokio-tungstenite = { version = "0.28.0", features = ["connect"] }
 # Desktop session custody: the UI-neutral controller client, the OS credential
 # vault, and the async/concurrency primitives the custody layer needs.
 kontainer-native-client = { path = "../../server/crates/native-client" }

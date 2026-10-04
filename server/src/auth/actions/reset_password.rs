@@ -9,7 +9,7 @@ use crate::auth::{
     domain::RevocationReason,
     entities::{password_credential, session_family},
     password,
-    validation::{FieldProblem, email_key, password_problem},
+    validation::{FieldProblem, password_problem},
 };
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
@@ -36,7 +36,7 @@ pub async fn execute(
     if let Some(problem) = password_problem(&new_password) {
         return Err(ResetPasswordError::InvalidPassword(problem));
     }
-    let (principal, credential) = find_by_email(database, &email_key(email))
+    let (principal, credential) = find_by_email(database, email)
         .await
         .map_err(|_| ResetPasswordError::Persistence)?
         .ok_or(ResetPasswordError::UnknownEmail)?;

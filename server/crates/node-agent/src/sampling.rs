@@ -11,7 +11,7 @@ use std::{
 };
 
 use futures_util::{StreamExt, stream};
-use kontainer_engine::{ContainerEngine, ContainerStats, EngineError, NodeInfo};
+use kontainer_engine::{ContainerEngine, ContainerStats, EngineError, NodeInfo, cpu_percent};
 use tokio_util::sync::CancellationToken;
 
 /// Stats reads in flight at once.
@@ -119,11 +119,12 @@ impl NodeSampler {
         self.ticks += 1;
         let info = self.engine.node_info(cancellation).await?;
         let running = self.engine.running_container_ids(cancellation).await?;
-        let current = self.read_stats(running, stats_deadline, cancellation).await;
+        let mut current = self.read_stats(running, stats_deadline, cancellation).await;
         let now = Instant::now();
         let elapsed = self.previous_at.map(|previous| now - previous);
         let previous = self.cache.snapshot();
         self.previous_at = Some(now);
+        container_cpu_percents(&previous, &mut current);
 
         let (rx_rate, tx_rate) = network_rates(&previous, &current, elapsed);
         let cpu_percent = node_cpu_percent(&current, info.cpu_cores);
@@ -191,12 +192,31 @@ impl NodeSampler {
     }
 }
 
+/// Each container's CPU percent from its counters' delta since the previous tick, like
+/// `network_rates`. Engine reads are one-shot, so a container without a previous reading (new,
+/// or missed last tick's deadline) has none this tick; on the agent's first tick that leaves
+/// every container out and the node reads 0 % once.
+fn container_cpu_percents(
+    previous: &HashMap<String, ContainerStats>,
+    current: &mut HashMap<String, ContainerStats>,
+) {
+    for (id, stats) in current.iter_mut() {
+        stats.cpu_percent = previous
+            .get(id)
+            .and_then(|before| cpu_percent(stats.cpu, before.cpu));
+    }
+}
+
 /// Sum of container CPU percent over cores: Docker reports 100 per fully used core.
 fn node_cpu_percent(stats: &HashMap<String, ContainerStats>, cpu_cores: u32) -> f64 {
     if cpu_cores == 0 {
         return 0.0;
     }
-    let total: f64 = stats.values().filter_map(|stats| stats.cpu_percent).sum();
+    // A fold from +0.0: an empty f64 `sum()` is -0.0, which would serialize as "-0".
+    let total = stats
+        .values()
+        .filter_map(|stats| stats.cpu_percent)
+        .fold(0.0, |total, percent| total + percent);
     (total / f64::from(cpu_cores)).clamp(0.0, 100.0)
 }
 
@@ -245,16 +265,22 @@ pub(crate) mod tests {
 
     use async_trait::async_trait;
     use kontainer_engine::{
-        ContainerEngine, ContainerStats, DiskUsage, EngineError, EngineErrorKind, EngineOperation,
-        NodeInfo,
+        ContainerEngine, ContainerStats, CpuCounters, DiskUsage, EngineError, EngineErrorKind,
+        EngineOperation, NodeInfo,
     };
     use tokio_util::sync::CancellationToken;
 
     use super::{
-        ContainerStatsCache, NodeSampler, VolumeSizeCache, network_rates, node_cpu_percent,
+        ContainerStatsCache, NodeSampler, VolumeSizeCache, container_cpu_percents, network_rates,
+        node_cpu_percent,
     };
 
-    /// Two running containers with known stats; network counters grow by `step` per read.
+    /// System CPU nanoseconds per round across the fake's 4 online CPUs.
+    const SYSTEM_STEP: u64 = 4_000_000_000;
+
+    /// Two running containers with known stats; per round of two reads, network counters grow
+    /// by `step` and each container's CPU counter by its `cpu.total_usage` (one-shot reads, like
+    /// the real engine: `cpu_percent` is left `None`).
     pub(crate) struct FakeNodeEngine {
         pub stats: HashMap<String, ContainerStats>,
         pub disk_reads: AtomicUsize,
@@ -267,8 +293,15 @@ pub(crate) mod tests {
 
     impl FakeNodeEngine {
         pub(crate) fn two_containers() -> Self {
-            let stats = |cpu, memory| ContainerStats {
-                cpu_percent: Some(cpu),
+            // `cores_busy` of the 4 CPUs per round: 1.5 cores is 150 % in Docker's terms.
+            let stats = |cores_busy: f64, memory| ContainerStats {
+                cpu_percent: None,
+                #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                cpu: CpuCounters {
+                    total_usage: (cores_busy / 4.0 * SYSTEM_STEP as f64) as u64,
+                    system_usage: SYSTEM_STEP,
+                    online_cpus: 4,
+                },
                 memory_used_bytes: Some(memory),
                 memory_limit_bytes: Some(1 << 30),
                 net_rx_bytes: 0,
@@ -276,8 +309,8 @@ pub(crate) mod tests {
             };
             Self {
                 stats: HashMap::from([
-                    ("a".repeat(64), stats(150.0, 100 << 20)),
-                    ("b".repeat(64), stats(50.0, 50 << 20)),
+                    ("a".repeat(64), stats(1.5, 100 << 20)),
+                    ("b".repeat(64), stats(0.5, 50 << 20)),
                 ]),
                 disk_reads: AtomicUsize::new(0),
                 reads: AtomicUsize::new(0),
@@ -345,9 +378,12 @@ pub(crate) mod tests {
             }
             let read = self.reads.fetch_add(1, Ordering::SeqCst) as u64;
             let mut stats = self.stats[container_id];
-            // Both containers' counters advance by `step` per round of two reads.
-            stats.net_rx_bytes = (read / 2) * self.step;
-            stats.net_tx_bytes = (read / 2) * self.step / 2;
+            // Both containers' counters advance per round of two reads.
+            let round = read / 2;
+            stats.net_rx_bytes = round * self.step;
+            stats.net_tx_bytes = round * self.step / 2;
+            stats.cpu.total_usage *= round + 1;
+            stats.cpu.system_usage *= round + 1;
             Ok(stats)
         }
 
@@ -366,20 +402,59 @@ pub(crate) mod tests {
         let cache = ContainerStatsCache::default();
         let mut sampler = NodeSampler::new(engine.clone(), cache.clone());
 
+        let first = sampler
+            .sample(Duration::from_secs(1), &CancellationToken::new())
+            .await
+            .unwrap();
+        assert_eq!(first.memory_used_bytes, 150 << 20);
+        assert_eq!(first.info.containers_running, 2);
+        assert_eq!(first.net_rx_bytes_per_sec, None, "no previous sample");
+        assert_eq!(
+            cache.get(&"a".repeat(64)).unwrap().cpu_percent,
+            None,
+            "CPU needs a previous reading"
+        );
+
         let reading = sampler
             .sample(Duration::from_secs(1), &CancellationToken::new())
             .await
             .unwrap();
         // (150 + 50) % of one core across 4 cores = 50 % of the node.
         assert_eq!(reading.cpu_percent, 50.0);
-        assert_eq!(reading.memory_used_bytes, 150 << 20);
-        assert_eq!(reading.info.containers_running, 2);
-        assert_eq!(reading.net_rx_bytes_per_sec, None, "no previous sample");
         assert_eq!(
             cache.get(&"a".repeat(64)).unwrap().cpu_percent,
             Some(150.0),
             "ListContainers reads the last tick"
         );
+    }
+
+    #[test]
+    fn container_cpu_comes_from_the_previous_readings_counters() {
+        let counters = |total_usage, system_usage| ContainerStats {
+            cpu: CpuCounters {
+                total_usage,
+                system_usage,
+                online_cpus: 2,
+            },
+            ..ContainerStats::default()
+        };
+        let previous = HashMap::from([
+            ("a".to_owned(), counters(1_000_000, 20_000_000)),
+            ("gone".to_owned(), counters(5, 5)),
+        ]);
+        let mut current = HashMap::from([
+            ("a".to_owned(), counters(3_000_000, 40_000_000)),
+            ("new".to_owned(), counters(9_000_000, 40_000_000)),
+        ]);
+        container_cpu_percents(&previous, &mut current);
+        // 2M of 20M system ticks across 2 CPUs = 20 % of one core, as `docker stats` shows.
+        assert_eq!(current["a"].cpu_percent, Some(20.0));
+        assert_eq!(current["new"].cpu_percent, None, "no previous reading");
+
+        // A restarted container's counters went backwards: unknown, never negative.
+        let mut restarted = HashMap::from([("a".to_owned(), counters(10, 50_000_000))]);
+        container_cpu_percents(&previous, &mut restarted);
+        assert_eq!(restarted["a"].cpu_percent, None);
     }
 
     #[tokio::test]
@@ -497,5 +572,9 @@ pub(crate) mod tests {
         assert_eq!(node_cpu_percent(&busy, 4), 100.0);
         assert_eq!(node_cpu_percent(&busy, 0), 0.0);
         assert_eq!(node_cpu_percent(&HashMap::new(), 4), 0.0);
+        assert!(
+            node_cpu_percent(&HashMap::new(), 4).is_sign_positive(),
+            "never -0"
+        );
     }
 }

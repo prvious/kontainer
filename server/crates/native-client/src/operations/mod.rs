@@ -6,11 +6,9 @@
 
 mod admit;
 mod cancel;
-mod events;
 mod get;
 
 pub use admit::{AdmittedOperation, IdempotencyKey};
-pub use events::{MAX_EVENT_PAGE, OperationEvent};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -50,8 +48,6 @@ pub struct OperationSnapshot {
     pub recoverable: bool,
     /// Whether the outcome is uncertain and requires inspection.
     pub uncertain: bool,
-    /// Highest persisted transition sequence.
-    pub last_event_sequence: i32,
     /// Stable error code of the last failure, when one exists.
     pub last_error_code: Option<String>,
     /// Admission time reported by the controller.
@@ -116,7 +112,6 @@ impl OperationBody {
             state: self.state,
             recoverable: self.recoverable,
             uncertain: self.uncertain,
-            last_event_sequence: self.last_event_sequence,
             last_error_code: self.last_error_code,
             created_at: parse_timestamp(&self.created_at)?,
             updated_at: parse_timestamp(&self.updated_at)?,

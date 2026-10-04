@@ -1,4 +1,4 @@
-import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { useQueriesPaused } from "@/hooks/use-queries-paused";
@@ -17,7 +17,7 @@ export interface ContainerRow extends ContainerView {
     lastSeenAt: string;
 }
 
-export interface ContainerSnapshot extends Omit<ContainerListView, "items"> {
+interface ContainerSnapshot extends Omit<ContainerListView, "items"> {
     items: ContainerRow[];
 }
 
@@ -49,7 +49,6 @@ export function useContainers() {
         enabled: Boolean(session) && !paused,
         refetchInterval: settings.data?.refreshInterval ?? DEFAULT_APP_SETTINGS.refreshInterval ?? 5000,
         retry: false,
-        placeholderData: keepPreviousData,
     });
 }
 

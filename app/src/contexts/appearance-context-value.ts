@@ -3,7 +3,6 @@ import type { ColorScheme } from "@/types/settings";
 
 export interface AppearanceContextValue {
     scheme: ColorScheme;
-    setScheme: (scheme: ColorScheme) => void;
     resolvedScheme: "light" | "dark";
 }
 

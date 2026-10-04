@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use chrono::{DateTime, Utc};
 use sea_orm::{
-    DatabaseConnection, DbErr, EntityTrait, QueryFilter, QueryOrder,
-    sea_query::{Expr, ExprTrait, Func, Query},
+    DatabaseConnection, DbErr, EntityTrait, FromQueryResult, QueryOrder,
+    sea_query::{Asterisk, Expr, ExprTrait, JoinType, Order, Query},
 };
 
 use super::database_now;
@@ -12,7 +12,14 @@ use crate::nodes::{
     entities::{node, node_sample},
 };
 
+const LATEST_SAMPLE: &str = "latest_sample";
+
 /// Whether a sample still describes the node: it was taken within the online window.
+///
+/// ponytail: `sampled_at` is the agent's clock (replaced only past 5 minutes of skew) and `now`
+/// is the database's, so agent clocks must sit within 15 s of the database clock or a healthy
+/// node reads degraded (ADR 0037). Swarm already needs synced clocks; stamp samples on arrival
+/// if that ever stops holding.
 fn is_fresh(sampled_at: DateTime<Utc>, now: DateTime<Utc>) -> bool {
     (now - sampled_at).num_milliseconds() <= ONLINE_WITHIN_SECONDS * 1000
 }
@@ -40,26 +47,35 @@ pub async fn execute(
         .order_by_asc(node::Column::Id)
         .all(database)
         .await?;
-    let latest = node_sample::Entity::find()
-        .filter(
-            Expr::tuple([
-                Expr::col(node_sample::Column::NodeId),
-                Expr::col(node_sample::Column::SampledAt),
-            ])
-            .in_subquery(
-                Query::select()
-                    .column(node_sample::Column::NodeId)
-                    .expr(Func::max(Expr::col(node_sample::Column::SampledAt)))
-                    .from(node_sample::Entity)
-                    .group_by_col(node_sample::Column::NodeId)
-                    .to_owned(),
-            ),
+    // Each node's newest sample through the `(node_id, sampled_at)` primary key: one backward
+    // index probe per node, however much history retention keeps.
+    let newest_per_node = Query::select()
+        .column((LATEST_SAMPLE, Asterisk))
+        .from(node::Entity)
+        .join_lateral(
+            JoinType::InnerJoin,
+            Query::select()
+                .column(Asterisk)
+                .from(node_sample::Entity)
+                .and_where(
+                    Expr::col((node_sample::Entity, node_sample::Column::NodeId))
+                        .equals((node::Entity, node::Column::Id)),
+                )
+                .order_by(node_sample::Column::SampledAt, Order::Desc)
+                .limit(1)
+                .to_owned(),
+            LATEST_SAMPLE,
+            Expr::val(true),
         )
-        .all(database)
-        .await?
-        .into_iter()
-        .map(|sample| (sample.node_id.clone(), sample))
-        .collect::<HashMap<_, _>>();
+        .to_owned();
+    let latest = node_sample::Model::find_by_statement(
+        database.get_database_backend().build(&newest_per_node),
+    )
+    .all(database)
+    .await?
+    .into_iter()
+    .map(|sample| (sample.node_id.clone(), sample))
+    .collect::<HashMap<_, _>>();
 
     let views = nodes
         .into_iter()

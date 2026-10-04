@@ -21,20 +21,15 @@ export function ChartTooltip({
     time,
     rows,
     delta,
-    className,
 }: {
     time: string;
     rows: ChartTooltipRow[];
     delta?: { text: string; tone: "success" | "warning" | "destructive" | "neutral" };
-    className?: string;
 }) {
     return (
         <div
             role='tooltip'
-            className={cn(
-                "pointer-events-none flex w-44 flex-col gap-1.5 rounded-md border border-border bg-popover px-2.5 py-2 font-mono shadow-lg",
-                className,
-            )}
+            className='pointer-events-none flex w-44 flex-col gap-1.5 rounded-md border border-border bg-popover px-2.5 py-2 font-mono shadow-lg'
         >
             <span className='text-3xs tracking-[0.5px] text-muted-foreground'>{time}</span>
             {rows.map((row) => (

@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use kontainer_native_client::{
     AccessCredential, AdmittedOperation, ContainerAction, ContainerActionOptions, ContainerList,
     ContainerTarget, ControllerSettings, ControllerStatus, IdempotencyKey, ImageList, ImageNodes,
-    NativeClientError, NodeId, NodeList, OperationEvent, OperationSnapshot, ProbeFailure,
-    RefreshCredential, SampleSeries, VolumeList, VolumeName, VolumeQuery, VolumeSpec,
+    NativeClientError, NodeId, NodeList, OperationSnapshot, ProbeFailure, RefreshCredential,
+    SampleSeries, VolumeList, VolumeName, VolumeQuery, VolumeSpec,
 };
 use kontainer_native_client::{
     AttachedContainer, NetworkId, NetworkList, NetworkPlacement, NetworkSpec,
@@ -388,7 +388,6 @@ pub(crate) struct Script {
     pub(crate) settings: VecDeque<Result<ControllerSettings, NativeClientError>>,
     pub(crate) statuses: VecDeque<Result<ControllerStatus, NativeClientError>>,
     pub(crate) operations: VecDeque<Result<OperationSnapshot, NativeClientError>>,
-    pub(crate) events: VecDeque<Result<Vec<OperationEvent>, NativeClientError>>,
     pub(crate) admissions: VecDeque<Result<AdmittedOperation, NativeClientError>>,
     pub(crate) containers: VecDeque<Result<ContainerList, NativeClientError>>,
     pub(crate) images: VecDeque<Result<ImageList, NativeClientError>>,
@@ -1222,30 +1221,6 @@ impl Controller for FakeController {
             .lock()
             .unwrap()
             .operations
-            .pop_front()
-            .unwrap_or(Err(NativeClientError::InvalidResponse));
-        Box::pin(async move { outcome })
-    }
-
-    fn list_operation_events<'a>(
-        &'a self,
-        access: &'a AccessCredential,
-        operation_id: Uuid,
-        after: u32,
-        _cancellation: &'a CancellationToken,
-    ) -> ControllerFuture<'a, Result<Vec<OperationEvent>, NativeClientError>> {
-        record(
-            &self.log,
-            format!(
-                "operation_events:{}:{operation_id}:{after}",
-                public_tag(access.expose())
-            ),
-        );
-        let outcome = self
-            .script
-            .lock()
-            .unwrap()
-            .events
             .pop_front()
             .unwrap_or(Err(NativeClientError::InvalidResponse));
         Box::pin(async move { outcome })

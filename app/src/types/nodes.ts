@@ -65,8 +65,9 @@ export interface ClusterSummary {
     nodesActive: number;
     nodesDegraded: number;
     nodesDown: number;
-    managersTotal: number;
-    managersReachable: number;
+    /** Null when the manager didn't answer: unknown, not zero. */
+    managersTotal: number | null;
+    managersReachable: number | null;
     quorum: QuorumState;
     /** Mean over online nodes with a sample; null when there are none. */
     cpuPercent: number | null;

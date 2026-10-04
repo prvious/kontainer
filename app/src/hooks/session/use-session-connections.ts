@@ -21,7 +21,7 @@ export function useForgetConnection() {
     });
 }
 
-export const MAX_PROBES_IN_FLIGHT = 3;
+const MAX_PROBES_IN_FLIGHT = 3;
 
 /** Probe every origin once, at most three at a time; one origin's failure never stops the rest. */
 export async function probeAll(origins: string[], limit = MAX_PROBES_IN_FLIGHT): Promise<Record<string, ProbeView>> {

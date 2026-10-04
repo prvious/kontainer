@@ -9,7 +9,7 @@ use std::{future::Future, pin::Pin};
 
 use kontainer_stream_protocol::{ExecMessage, ExecOpen, ExecResize, MAX_EXEC_DIMENSION};
 use kontainer_stream_transport::{
-    NativeStreamClient, NativeStreamReceiver, NativeStreamSender, StreamClientError, StreamLimits,
+    NativeStreamReceiver, NativeStreamSender, StreamClientError, StreamLimits,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -245,39 +245,6 @@ impl NativeClient {
         cancellation: &CancellationToken,
     ) -> Result<ExecConnection, NativeClientError> {
         request.validate()?;
-        // WebSockets verify with the public roots only; a custom bundle is refused, not ignored.
-        if self.custom_trust {
-            return Err(NativeClientError::InvalidConfiguration);
-        }
-        let mut endpoint = self.endpoint("/api/v1/ws/exec")?;
-        let scheme = if endpoint.scheme() == "https" {
-            "wss"
-        } else {
-            "ws"
-        };
-        endpoint
-            .set_scheme(scheme)
-            .map_err(|()| NativeClientError::InvalidConfiguration)?;
-        let mut client = NativeStreamClient::connect_with_bearer(
-            endpoint.as_str(),
-            Some(access.expose()),
-            StreamLimits::default(),
-            cancellation,
-        )
-        .await
-        .map_err(|error| match error {
-            StreamClientError::HandshakeRejected { status: 401 } => NativeClientError::Unauthorized,
-            StreamClientError::HandshakeRejected { status: 429 } => NativeClientError::LimitReached,
-            StreamClientError::HandshakeRejected { status: 400 } => {
-                NativeClientError::InvalidRequest
-            }
-            StreamClientError::HandshakeRejected { status: 503 } => {
-                NativeClientError::ServiceUnavailable
-            }
-            StreamClientError::Cancelled => NativeClientError::Cancelled,
-            StreamClientError::InvalidEndpoint => NativeClientError::InvalidConfiguration,
-            _ => NativeClientError::Unavailable,
-        })?;
         let open = ExecMessage::Open(ExecOpen {
             node_id: request.node_id.as_str().to_owned(),
             container_id: request.container_id.clone(),
@@ -285,13 +252,15 @@ impl NativeClient {
             cols: request.cols,
             rows: request.rows,
         });
-        client
-            .send_frame(&open.into_frame(1), cancellation)
-            .await
-            .map_err(|error| match error {
-                StreamClientError::Cancelled => NativeClientError::Cancelled,
-                _ => NativeClientError::Unavailable,
-            })?;
+        let client = self
+            .open_stream(
+                "/api/v1/ws/exec",
+                access,
+                &open.into_frame(1),
+                StreamLimits::default().handshake_deadline(),
+                cancellation,
+            )
+            .await?;
         let (sender, receiver) = client.split();
         Ok(ExecConnection {
             input: Box::new(WebSocketExecInput {

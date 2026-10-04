@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { AppearanceContext } from "@/contexts/appearance-context-value";
-import { useAppSettings, useSaveAppSettings } from "@/hooks/use-app-settings";
-import { colorSchemeFrom, type ColorScheme } from "@/types/settings";
+import { useAppSettings } from "@/hooks/use-app-settings";
+import { colorSchemeFrom } from "@/types/settings";
 
 /** The OS appearance as the native window reports it; dark until it answers (the design's default mode). */
 function useOsColorScheme(): "light" | "dark" {
@@ -27,7 +27,6 @@ function useOsColorScheme(): "light" | "dark" {
 
 export function AppearanceProvider({ children }: { children: React.ReactNode }) {
     const { data: settings } = useAppSettings();
-    const save = useSaveAppSettings();
     const scheme = colorSchemeFrom(settings?.scheme);
     const osScheme = useOsColorScheme();
     const resolvedScheme = scheme === "system" ? osScheme : scheme;
@@ -45,9 +44,5 @@ export function AppearanceProvider({ children }: { children: React.ReactNode }) 
             .catch(() => {});
     }, [settings, scheme]);
 
-    function setScheme(next: ColorScheme) {
-        if (settings) save.mutate({ ...settings, scheme: next });
-    }
-
-    return <AppearanceContext value={{ scheme, setScheme, resolvedScheme }}>{children}</AppearanceContext>;
+    return <AppearanceContext value={{ scheme, resolvedScheme }}>{children}</AppearanceContext>;
 }

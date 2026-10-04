@@ -59,8 +59,9 @@ pub(crate) struct ClusterSummaryView {
     nodes_active: u32,
     nodes_degraded: u32,
     nodes_down: u32,
-    managers_total: u32,
-    managers_reachable: u32,
+    /// `None` when the manager did not answer.
+    managers_total: Option<u32>,
+    managers_reachable: Option<u32>,
     quorum: QuorumState,
     cpu_percent: Option<f64>,
     memory_used_bytes: u64,

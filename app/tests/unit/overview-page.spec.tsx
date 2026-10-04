@@ -155,6 +155,21 @@ describe("Overview page", () => {
         await act(async () => release(containers.containerList));
     });
 
+    it("says the manager is unreachable when its counts are unknown, and no manager only for zero", async () => {
+        mockCommands({
+            get_cluster_summary: () => ({ ...nodes.clusterSummary, quorum: "degraded", managersTotal: null, managersReachable: null }),
+        });
+        const { unmount } = renderPage();
+        expect(await screen.findByText(/^for Production · 3 nodes · manager unreachable · synced/)).toBeInTheDocument();
+        unmount();
+
+        mockCommands({
+            get_cluster_summary: () => ({ ...nodes.clusterSummary, quorum: "degraded", managersTotal: 0, managersReachable: 0 }),
+        });
+        renderPage();
+        expect(await screen.findByText(/^for Production · 3 nodes · no swarm manager · synced/)).toBeInTheDocument();
+    });
+
     it("shows an error, not skeletons forever, when the summary fails before its first answer", async () => {
         let failing = true;
         mockCommands({

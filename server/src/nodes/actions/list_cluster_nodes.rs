@@ -40,10 +40,14 @@ pub async fn execute(
     };
     let (agents, swarm) = tokio::join!(list_nodes::execute(database), swarm);
     let (agents, snapshot_at) = agents?;
-    let swarm_answered = swarm.is_ok();
+    let swarm = swarm
+        .inspect_err(|error| {
+            tracing::warn!(%error, "Swarm manager did not answer: Swarm fields and manager counts are unknown");
+        })
+        .ok();
     Ok(ClusterNodes {
-        nodes: join_nodes(agents, swarm.unwrap_or_default()),
-        swarm_answered,
+        swarm_answered: swarm.is_some(),
+        nodes: join_nodes(agents, swarm),
         snapshot_at,
     })
 }

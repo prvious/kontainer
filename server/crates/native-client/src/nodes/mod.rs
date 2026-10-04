@@ -120,8 +120,9 @@ pub struct ClusterSummary {
     pub nodes_active: u32,
     pub nodes_degraded: u32,
     pub nodes_down: u32,
-    pub managers_total: u32,
-    pub managers_reachable: u32,
+    /// `None` when the manager did not answer: unknown, not zero.
+    pub managers_total: Option<u32>,
+    pub managers_reachable: Option<u32>,
     pub quorum: QuorumState,
     pub cpu_percent: Option<f64>,
     pub memory_used_bytes: u64,
@@ -163,12 +164,11 @@ pub const SAMPLE_WINDOWS: [&str; 5] = ["5m", "15m", "1h", "24h", "7d"];
 /// Validate a window and bucket locally before any request: a known window, and a bucket of a
 /// positive whole number of `s`, `m`, or `h`. The controller still checks divisibility.
 pub(crate) fn validate_range(window: &str, bucket: &str) -> Result<(), NativeClientError> {
-    let unit = bucket.chars().last().unwrap_or_default();
-    let digits = &bucket[..bucket.len().saturating_sub(1)];
-    let bucket_ok = matches!(unit, 's' | 'm' | 'h')
-        && (1..=6).contains(&digits.len())
-        && !digits.starts_with('0')
-        && digits.bytes().all(|byte| byte.is_ascii_digit());
+    let bucket_ok = bucket.strip_suffix(['s', 'm', 'h']).is_some_and(|digits| {
+        (1..=6).contains(&digits.len())
+            && !digits.starts_with('0')
+            && digits.bytes().all(|byte| byte.is_ascii_digit())
+    });
     if SAMPLE_WINDOWS.contains(&window) && bucket_ok {
         Ok(())
     } else {
@@ -215,8 +215,8 @@ pub(crate) struct ClusterSummaryBody {
     nodes_active: u32,
     nodes_degraded: u32,
     nodes_down: u32,
-    managers_total: u32,
-    managers_reachable: u32,
+    managers_total: Option<u32>,
+    managers_reachable: Option<u32>,
     quorum: QuorumState,
     cpu_percent: Option<f64>,
     memory_used_bytes: u64,
@@ -342,9 +342,11 @@ impl ClusterSummaryBody {
         let health_total = u64::from(self.nodes_active)
             + u64::from(self.nodes_degraded)
             + u64::from(self.nodes_down);
-        if health_total != u64::from(self.nodes_total)
-            || self.managers_reachable > self.managers_total
-        {
+        let reachable_within_total = self
+            .managers_reachable
+            .zip(self.managers_total)
+            .is_none_or(|(reachable, total)| reachable <= total);
+        if health_total != u64::from(self.nodes_total) || !reachable_within_total {
             return Err(NativeClientError::InvalidResponse);
         }
         Ok(ClusterSummary {

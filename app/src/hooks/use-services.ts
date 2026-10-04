@@ -1,4 +1,4 @@
-import { keepPreviousData, skipToken, useQuery } from "@tanstack/react-query";
+import { skipToken, useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/hooks/use-auth";
 import { useAppSettings } from "@/hooks/use-app-settings";
 import { useQueriesPaused } from "@/hooks/use-queries-paused";
@@ -29,7 +29,6 @@ export function useServices() {
         enabled: Boolean(session) && !paused,
         refetchInterval: (query) => (query.state.status === "error" ? QUORUM_RETRY_MS : interval),
         retry: false,
-        placeholderData: keepPreviousData,
     });
 }
 

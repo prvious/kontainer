@@ -1,5 +1,6 @@
 import { toast } from "sonner";
 import { errorDetailsText, type ErrorDetails } from "@/components/kit/error-details";
+import { CONTROLLER_UNREACHABLE, PAUSED_OFFLINE } from "@/contexts/connectivity-context-value";
 
 interface ToastAction {
     label: string;
@@ -17,8 +18,12 @@ export const notify = {
     warning(title: string, options: { description?: string; action?: ToastAction; id?: string | number } = {}) {
         return toast.warning(title, { description: options.description, action: options.action, id: options.id, duration: 5000 });
     },
-    /** Failure toast: reason code, message, and request id, with COPY DETAILS unless another action is given. */
-    error(title: string, details: ErrorDetails, options: { action?: ToastAction; id?: string | number } = {}) {
+    /**
+     * Failure toast: reason code, message, and request id, with COPY DETAILS unless another action is given.
+     * A change refused unsent because the controller is unreachable says so, whatever the caller's message.
+     */
+    error(title: string, reported: ErrorDetails, options: { action?: ToastAction; id?: string | number } = {}) {
+        const details = reported.code === CONTROLLER_UNREACHABLE ? { ...reported, message: PAUSED_OFFLINE.reason } : reported;
         const description = [details.message, [details.code, details.requestId ? `req ${details.requestId}` : null].filter(Boolean).join(" · ")].join("\n");
         return toast.error(title, {
             description,
@@ -32,8 +37,5 @@ export const notify = {
     },
     loading(title: string, options: { description?: string; action?: ToastAction; id?: string | number } = {}) {
         return toast.loading(title, { description: options.description, action: options.action, id: options.id, duration: Infinity });
-    },
-    dismiss(id?: string | number) {
-        toast.dismiss(id);
     },
 };

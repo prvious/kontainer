@@ -40,7 +40,6 @@ describe("service status and summary", () => {
             id: "op",
             kind: "service.scale",
             state: "running",
-            lastEventSequence: 2,
             errorCode: null,
             errorMessage: null,
             progress: { desired: 5, running: 4, phase: "converging" },

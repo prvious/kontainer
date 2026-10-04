@@ -79,7 +79,7 @@ pub(crate) use logs::log_connect_error;
 
 #[path = "manager_operations.rs"]
 mod operations;
-pub(crate) use operations::{AdmittedView, OperationEventView, OperationView};
+pub(crate) use operations::{AdmittedView, OperationView};
 
 /// The one published session plus whatever work is in flight.
 struct SessionSlots {

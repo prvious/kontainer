@@ -189,8 +189,8 @@ fn cluster_summary() -> ClusterSummary {
         nodes_active: 1,
         nodes_degraded: 1,
         nodes_down: 1,
-        managers_total: 1,
-        managers_reachable: 1,
+        managers_total: Some(1),
+        managers_reachable: Some(1),
         quorum: QuorumState::Healthy,
         cpu_percent: Some(12.5),
         memory_used_bytes: 1 << 30,
@@ -307,6 +307,20 @@ fn node_and_settings_ipc_views_match_shared_fixture() {
             "{name} is registered"
         );
     }
+}
+
+#[test]
+fn unknown_manager_counts_cross_ipc_as_null() {
+    let silent_manager = ClusterSummary {
+        managers_total: None,
+        managers_reachable: None,
+        ..cluster_summary()
+    };
+    let view = serde_json::to_value(super::super::manager::ClusterSummaryView::from(
+        silent_manager,
+    ))
+    .unwrap();
+    assert!(view["managersTotal"].is_null() && view["managersReachable"].is_null());
 }
 
 #[test]

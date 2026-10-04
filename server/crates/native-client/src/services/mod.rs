@@ -7,7 +7,7 @@ mod calls;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::client::parse_timestamp;
+use crate::client::{parse_timestamp, valid_display_name};
 use crate::error::NativeClientError;
 
 /// The most services one list may carry.
@@ -155,7 +155,7 @@ impl ServiceItemBody {
     fn into_item(self) -> Result<ServiceItem, NativeClientError> {
         let bounded = |value: &str| value.len() <= 512;
         if ServiceId::parse(&self.id).is_err()
-            || !bounded(&self.name)
+            || !valid_display_name(&self.name)
             || !bounded(&self.image_reference)
             || self.ports.len() > 64
         {

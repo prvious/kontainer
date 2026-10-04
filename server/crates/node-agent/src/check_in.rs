@@ -132,7 +132,9 @@ impl Default for CheckInTiming {
     fn default() -> Self {
         Self {
             initial_interval: DEFAULT_CHECK_IN_INTERVAL,
-            max_backoff: Duration::from_secs(30),
+            // Inside the controller's 15 s online window: after a controller restart, agents
+            // check back in within 10 s instead of up to 30 s.
+            max_backoff: Duration::from_secs(10),
         }
     }
 }
@@ -281,13 +283,14 @@ mod tests {
     }
 
     #[test]
-    fn backoff_doubles_from_the_interval_and_caps_at_thirty_seconds() {
-        let cap = Duration::from_secs(30);
+    fn backoff_doubles_from_the_interval_and_caps_inside_the_online_window() {
+        let cap = CheckInTiming::default().max_backoff;
+        assert_eq!(cap, Duration::from_secs(10));
         let interval = Duration::from_secs(5);
-        let delays: Vec<_> = (1..=6)
+        let delays: Vec<_> = (1..=4)
             .map(|n| backoff(interval, n, cap).as_secs())
             .collect();
-        assert_eq!(delays, vec![5, 10, 20, 30, 30, 30]);
+        assert_eq!(delays, vec![5, 10, 10, 10]);
         assert_eq!(backoff(interval, u32::MAX, cap), cap);
     }
 
@@ -336,7 +339,11 @@ mod tests {
         assert_eq!(first.swarm_node_id, "tj42rq5nzwf8");
         assert_eq!(first.cpu_cores, 4);
         let sample = first.sample.as_ref().unwrap();
-        assert_eq!(sample.cpu_percent, 50.0);
+        assert_eq!(
+            seen[1].sample.as_ref().unwrap().cpu_percent,
+            50.0,
+            "CPU from the second tick on"
+        );
         assert_eq!(sample.containers_running, 2);
         assert_eq!(sample.containers_exited, 1);
         assert!(

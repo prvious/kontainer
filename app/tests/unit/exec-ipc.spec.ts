@@ -40,7 +40,7 @@ describe("exec buffer", () => {
         const stop = buffer.onOutput((bytes) => seen.push(new TextDecoder().decode(bytes)));
         buffer.apply({ type: "started", shell: "/bin/sh" }, 0);
         buffer.apply(output("ok\r\n"), 0);
-        expect(buffer.getSnapshot()).toMatchObject({ status: "active", shell: "/bin/sh" });
+        expect(buffer.getSnapshot()).toMatchObject({ status: "active" });
         expect(seen).toEqual(["ok\r\n"]);
         expect(buffer.replay().map((bytes) => new TextDecoder().decode(bytes))).toEqual(["early", "ok\r\n"]);
 

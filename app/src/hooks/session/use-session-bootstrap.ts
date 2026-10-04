@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { invokeLogin } from "./invoke-login";
 
-export const sessionBootstrapKey = (origin: string) => ["session", "bootstrap", origin] as const;
+const sessionBootstrapKey = (origin: string) => ["session", "bootstrap", origin] as const;
 
 /** Whether the controller at `origin` has its owner; `null` origin disables the check. */
 export function useSessionBootstrap(origin: string | null) {

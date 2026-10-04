@@ -33,11 +33,11 @@ export const DEFAULT_LOG_SCROLLBACK = 10_000;
 
 export interface LogLevel {
     label: "FATAL" | "ERROR" | "WARN" | "INFO" | "DEBUG" | "TRACE" | "ERR";
-    tone: Tone;
+    tone: Extract<Tone, "destructive" | "warning" | "neutral">;
 }
 
 const LEVEL = /\b(FATAL|ERROR|WARN(?:ING)?|INFO|DEBUG|TRACE)\b/i;
-const LEVEL_TONES: Record<Exclude<LogLevel["label"], "ERR">, Tone> = {
+const LEVEL_TONES: Record<Exclude<LogLevel["label"], "ERR">, LogLevel["tone"]> = {
     FATAL: "destructive",
     ERROR: "destructive",
     WARN: "warning",

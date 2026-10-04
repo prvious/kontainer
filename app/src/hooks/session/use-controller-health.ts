@@ -2,11 +2,11 @@ import { useQuery } from "@tanstack/react-query";
 import { invokeSession } from "./invoke-session";
 import type { ProbeView } from "@/types/session";
 
-export const controllerHealthKey = ["session", "health"] as const;
-export const HEALTH_INTERVAL_MS = 15_000;
+const controllerHealthKey = ["session", "health"] as const;
+const HEALTH_INTERVAL_MS = 15_000;
 /** Three unreachable attempts in a row, 1 s apart, mark the controller unreachable (spec 14). */
-export const PROBE_ATTEMPTS = 3;
-export const PROBE_RETRY_DELAY_MS = 1_000;
+const PROBE_ATTEMPTS = 3;
+const PROBE_RETRY_DELAY_MS = 1_000;
 
 /**
  * The signed-in controller's `/health/ready`, every 15 s. An unreachable answer throws the probe,

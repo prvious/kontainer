@@ -20,7 +20,7 @@ use crate::{
     EngineApiVersion, EngineCapabilities, EngineDescription, EngineError, EngineErrorKind,
     EngineOperation, ImageSummary, NodeInfo, PullEvent, PullProgress, PullStream,
     SERVICE_NAME_LABEL, STACK_NAMESPACE_LABEL, TASK_ID_LABEL, UnsupportedCapabilityReason,
-    bounded_label, bounded_message, canonical_display_name, cpu_percent, format_page_token,
+    bounded_label, bounded_message, canonical_display_name, format_page_token,
     is_plausible_reference, is_valid_container_id, is_valid_image_id, memory_used,
     parse_docker_time, truncate_status_text,
 };
@@ -39,6 +39,9 @@ use crate::{
 
 const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_CONTAINER_NETWORKS: usize = 16;
+/// Ports, tags, or digests kept per item. Readers reject more, so one container with a wide port
+/// range would otherwise fail its node's whole list.
+const MAX_ITEM_VALUES: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalEngineOptions {
@@ -410,10 +413,12 @@ impl ContainerEngine for LocalDockerEngine {
             ));
         }
         let client = self.negotiate(cancellation).await?;
-        // Not one-shot: the daemon waits for a second reading so `precpu_stats` is populated.
+        // One-shot: answers at once instead of waiting a second for `precpu_stats`, so a busy
+        // node's sampler reads every container inside its deadline. CPU percent comes from the
+        // caller's previous reading.
         let options = StatsOptionsBuilder::default()
             .stream(false)
-            .one_shot(false)
+            .one_shot(true)
             .build();
         let mut stream = client.stats(container_id, Some(options));
         let response = self
@@ -1347,12 +1352,14 @@ fn map_image(image: bollard::models::ImageSummary, used: &HashMap<String, u32>) 
         .repo_tags
         .into_iter()
         .filter(|tag| tag != "<none>:<none>")
+        .take(MAX_ITEM_VALUES)
         .map(|tag| bounded_message(&tag))
         .collect();
     let repo_digests: Vec<String> = image
         .repo_digests
         .into_iter()
         .filter(|digest| digest != "<none>@<none>")
+        .take(MAX_ITEM_VALUES)
         .map(|digest| bounded_message(&digest))
         .collect();
     ImageSummary {
@@ -1443,10 +1450,8 @@ fn map_container_stats(response: ContainerStatsResponse) -> ContainerStats {
                 )
             });
     ContainerStats {
-        cpu_percent: cpu_percent(
-            cpu_counters(response.cpu_stats.as_ref()),
-            cpu_counters(response.precpu_stats.as_ref()),
-        ),
+        cpu_percent: None,
+        cpu: cpu_counters(response.cpu_stats.as_ref()),
         memory_used_bytes: memory
             .usage
             .map(|usage| memory_used(usage, &memory.stats.clone().unwrap_or_default())),
@@ -1508,6 +1513,7 @@ fn map_service(service: bollard::models::Service) -> Option<ServiceSummary> {
         .collect();
     ports.sort();
     ports.dedup();
+    ports.truncate(MAX_ITEM_VALUES);
     let labels = spec.labels.unwrap_or_default();
     let update = service.update_status.unwrap_or_default();
     Some(ServiceSummary {
@@ -1813,7 +1819,7 @@ fn container_networks(summary: &bollard::models::ContainerSummary) -> Vec<String
 }
 
 /// `host:container/proto` for each published port, once each (IPv4 and IPv6 bindings of one port
-/// collapse), sorted.
+/// collapse), sorted, and at most [`MAX_ITEM_VALUES`].
 fn published_ports(ports: &[bollard::models::PortSummary]) -> Vec<String> {
     let mut published: Vec<String> = ports
         .iter()
@@ -1829,6 +1835,7 @@ fn published_ports(ports: &[bollard::models::PortSummary]) -> Vec<String> {
         .collect();
     published.sort();
     published.dedup();
+    published.truncate(MAX_ITEM_VALUES);
     published
 }
 
@@ -1900,9 +1907,9 @@ mod tests {
         map_volume,
     };
     use crate::{
-        CapabilityStatus, ContainerEngine, ContainerPageRequest, ContainerState, EngineAccessScope,
-        EngineErrorKind, EngineOperation, SwarmAvailability, SwarmNode, SwarmNodeState, SwarmRole,
-        UnsupportedCapabilityReason,
+        CapabilityStatus, ContainerEngine, ContainerPageRequest, ContainerState, CpuCounters,
+        EngineAccessScope, EngineErrorKind, EngineOperation, SwarmAvailability, SwarmNode,
+        SwarmNodeState, SwarmRole, UnsupportedCapabilityReason,
     };
 
     #[test]
@@ -2632,6 +2639,70 @@ mod tests {
     }
 
     #[test]
+    fn a_wide_port_range_or_tag_list_is_truncated_not_fatal() {
+        use bollard::models::{PortSummary, PortSummaryTypeEnum};
+
+        let wide = bollard::models::ContainerSummary {
+            id: Some("a".repeat(64)),
+            names: Some(vec!["/relay".to_owned()]),
+            image: Some("coturn:latest".to_owned()),
+            created: Some(1_700_000_000),
+            ports: Some(
+                (40_000..40_200)
+                    .map(|port| PortSummary {
+                        private_port: port,
+                        public_port: Some(port),
+                        typ: Some(PortSummaryTypeEnum::UDP),
+                        ip: None,
+                    })
+                    .collect(),
+            ),
+            ..Default::default()
+        };
+        let mapped = map_container_summary(&wide).unwrap();
+        assert_eq!(mapped.published_ports.len(), 64);
+        assert_eq!(mapped.published_ports[0], "40000:40000/udp");
+
+        let tagged = super::map_image(
+            bollard::models::ImageSummary {
+                id: format!("sha256:{}", "c".repeat(64)),
+                repo_tags: (0..100).map(|tag| format!("app:{tag}")).collect(),
+                repo_digests: (0..100)
+                    .map(|tag| format!("app@sha256:{tag:064}"))
+                    .collect(),
+                ..Default::default()
+            },
+            &std::collections::HashMap::new(),
+        );
+        assert_eq!(
+            (tagged.repo_tags.len(), tagged.repo_digests.len()),
+            (64, 64)
+        );
+
+        let service = super::map_service(bollard::models::Service {
+            id: Some("s".repeat(25)),
+            spec: Some(bollard::models::ServiceSpec {
+                name: Some("relay".to_owned()),
+                ..Default::default()
+            }),
+            endpoint: Some(bollard::models::ServiceEndpoint {
+                ports: Some(
+                    (40_000..40_200)
+                        .map(|port| bollard::models::EndpointPortConfig {
+                            published_port: Some(port),
+                            target_port: Some(port),
+                            ..Default::default()
+                        })
+                        .collect(),
+                ),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        assert_eq!(service.map(|service| service.ports.len()), Some(64));
+    }
+
+    #[test]
     fn pull_messages_become_typed_events_with_registry_errors_verbatim() {
         use crate::PullEvent;
         use bollard::models::{CreateImageInfo, ErrorDetail, ProgressDetail};
@@ -2695,7 +2766,6 @@ mod tests {
         };
         let response = ContainerStatsResponse {
             cpu_stats: Some(cpu(3_000_000, 40_000_000)),
-            precpu_stats: Some(cpu(1_000_000, 20_000_000)),
             memory_stats: Some(ContainerMemoryStats {
                 usage: Some(5000),
                 limit: Some(100_000),
@@ -2714,7 +2784,16 @@ mod tests {
         };
 
         let stats = map_container_stats(response);
-        assert_eq!(stats.cpu_percent, Some(20.0));
+        assert_eq!(
+            stats.cpu,
+            CpuCounters {
+                total_usage: 3_000_000,
+                system_usage: 40_000_000,
+                online_cpus: 2,
+            },
+            "raw counters; the sampler derives percent from its previous reading"
+        );
+        assert_eq!(stats.cpu_percent, None, "a one-shot read has no delta");
         assert_eq!(stats.memory_used_bytes, Some(4000));
         assert_eq!(stats.memory_limit_bytes, Some(100_000));
         assert_eq!((stats.net_rx_bytes, stats.net_tx_bytes), (150, 15));

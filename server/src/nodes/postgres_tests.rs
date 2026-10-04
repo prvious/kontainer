@@ -221,6 +221,54 @@ async fn postgres_status_boundaries_follow_the_database_clock() -> Result<(), Bo
     Ok(())
 }
 
+#[tokio::test]
+async fn postgres_list_nodes_reads_each_nodes_newest_sample() -> Result<(), Box<dyn Error>> {
+    let Some(database) = PostgresTestDatabase::create(true).await? else {
+        return Ok(());
+    };
+    let evidence = async {
+        let db = &database.connection;
+        let now = database_now(db).await?;
+        // Newer rows first, so the read cannot lean on insertion order.
+        for (node_id, newest_cpu, older_cpu) in [("alpha", 11.0, 91.0), ("beta", 22.0, 92.0)] {
+            record_check_in::execute(
+                db,
+                "development",
+                check_in(node_id, Some(reading(now, newest_cpu, None))),
+            )
+            .await?;
+            record_check_in::execute(
+                db,
+                "development",
+                check_in(
+                    node_id,
+                    Some(reading(now - Duration::seconds(5), older_cpu, None)),
+                ),
+            )
+            .await?;
+        }
+        assert_eq!(node_sample::Entity::find().all(db).await?.len(), 4);
+
+        let (nodes, _) = list_nodes::execute(db).await?;
+        let newest: Vec<_> = nodes
+            .iter()
+            .map(|node| {
+                (
+                    node.id.as_str(),
+                    node.latest_sample.map(|sample| sample.cpu_percent),
+                )
+            })
+            .collect();
+        assert_eq!(newest, vec![("alpha", Some(11.0)), ("beta", Some(22.0))]);
+        Ok::<_, Box<dyn Error>>(())
+    }
+    .await;
+    let removed = database.cleanup().await?;
+    evidence?;
+    assert!(removed);
+    Ok(())
+}
+
 /// A manager that lists fixed Swarm members, or fails the way a manager without quorum does.
 struct FakeManager(std::sync::Mutex<Result<Vec<kontainer_engine::SwarmNode>, ManagerError>>);
 
@@ -460,7 +508,10 @@ async fn postgres_nodes_join_swarm_members_and_summarize_the_cluster() -> Result
         let (_, summary) =
             authorized_json(&router, "/api/v1/cluster/summary", &authorization).await?;
         assert_eq!(summary["quorum"], "degraded");
-        assert_eq!(summary["managersReachable"], 0);
+        assert!(
+            summary["managersTotal"].is_null() && summary["managersReachable"].is_null(),
+            "unknown, not zero"
+        );
         assert_eq!(summary["nodesActive"], 0);
         Ok::<_, Box<dyn Error>>(())
     }

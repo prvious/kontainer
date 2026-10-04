@@ -1,6 +1,82 @@
 {
   "paths": {
     "/api/v1/volumes": {
+      "get": {
+        "operationId": "list_volumes",
+        "parameters": [
+          {
+            "description": "Only this member node",
+            "in": "query",
+            "name": "node",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Only volumes with this exact name (the create dialog's conflict check)",
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VolumeListResponse"
+                }
+              }
+            },
+            "description": "Volumes on every answering node, one row per node and name, and one outcome per member"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FieldErrorResponse"
+                }
+              }
+            },
+            "description": "`invalid_request` naming the query field"
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "No such member node"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "Agent RPC not configured, persistence unavailable, or controller draining"
+          }
+        },
+        "security": [
+          {
+            "access_session": []
+          }
+        ],
+        "tags": [
+          "super::volumes"
+        ]
+      },
       "post": {
         "operationId": "create_volume",
         "parameters": [

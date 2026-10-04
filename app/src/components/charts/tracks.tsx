@@ -62,23 +62,3 @@ export function StackedTrack({ segments, height = 4, label }: { segments: { key:
         />
     );
 }
-
-/** Heat strip from F2 `B64BE`: one cell per window slot; a cell is a state, never an amount. */
-export function StateCells({ cells, width = 260, height = 16, label }: { cells: (Tone | null)[]; width?: number; height?: number; label: string }) {
-    const data = cells.map((tone, index) => ({ index, value: 1, fill: tone ? toneFill[tone] : "var(--secondary)" }));
-    return (
-        <div role='img' aria-label={label} style={{ width, height }}>
-            <BarChart width={width} height={height} data={data} barCategoryGap={2} margin={{ top: 0, right: 0, bottom: 0, left: 0 }}>
-                <YAxis hide domain={[0, 1]} />
-                <Bar
-                    dataKey='value'
-                    isAnimationActive={false}
-                    shape={(props: unknown) => {
-                        const cell = props as { x: number; y: number; width: number; height: number; payload: { fill: string } };
-                        return <rect x={cell.x} y={cell.y} width={cell.width} height={cell.height} fill={cell.payload.fill} rx={1} />;
-                    }}
-                />
-            </BarChart>
-        </div>
-    );
-}

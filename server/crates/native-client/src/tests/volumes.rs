@@ -84,7 +84,7 @@ async fn volume_lists_that_break_the_contract_are_rejected() {
     let mut foreign = valid.clone();
     foreign["items"][0]["nodeId"] = json!("ghost");
     let mut bad_name = valid.clone();
-    bad_name["items"][0]["name"] = json!("-bad");
+    bad_name["items"][0]["name"] = json!("bad\nname");
     let mut extra = valid.clone();
     extra["items"][0]["options"] = json!({"device": "secret-canary"});
     let mut many_users = valid.clone();
@@ -109,6 +109,20 @@ async fn volume_lists_that_break_the_contract_are_rejected() {
             "{label}"
         );
     }
+
+    // A name Kontainer would never create still lists.
+    let mut odd_name = valid;
+    odd_name["items"][0]["name"] = json!("-legacy data");
+    let server = TestServer::plain(vec![respond(200, &odd_name.to_string())]).await;
+    let list = plain_client(&server)
+        .list_volumes(
+            &access(),
+            &VolumeQuery::default(),
+            &CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(list.items[0].name, "-legacy data");
 }
 
 #[tokio::test]

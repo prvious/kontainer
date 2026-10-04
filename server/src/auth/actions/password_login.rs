@@ -84,10 +84,12 @@ pub(crate) async fn create_if_credential_unchanged(
         })
 }
 
-/// Find a principal by email case-insensitively, with its password credential.
+/// Find a principal by email case-insensitively, with its password credential. PostgreSQL
+/// lowers both sides, the same way the unique index does: Rust and PostgreSQL disagree on some
+/// non-ASCII characters, and a mixed comparison could lock the owner out.
 pub(crate) async fn find_by_email(
     database: &DatabaseConnection,
-    key: &str,
+    email: &str,
 ) -> Result<Option<(principal::Model, Option<password_credential::Model>)>, sea_orm::DbErr> {
     principal::Entity::find()
         .filter(ExprTrait::eq(
@@ -95,7 +97,7 @@ pub(crate) async fn find_by_email(
                 principal::Entity,
                 principal::Column::Email,
             )))),
-            key,
+            Func::lower(Expr::val(email.trim())),
         ))
         .filter(principal::Column::Email.is_not_null())
         .find_also_related(password_credential::Entity)
@@ -122,7 +124,7 @@ pub async fn execute(
         return Err(PasswordLoginError::Invalid(errors));
     }
     let key = email_key(email);
-    let found = find_by_email(database, &key)
+    let found = find_by_email(database, email)
         .await
         .map_err(|_| PasswordLoginError::Persistence)?;
     let credential = found

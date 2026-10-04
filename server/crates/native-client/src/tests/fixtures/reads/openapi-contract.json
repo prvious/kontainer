@@ -684,70 +684,31 @@
         ]
       }
     },
-    "/api/v1/operations/{operation_id}/events": {
+    "/api/v1/settings": {
       "get": {
-        "operationId": "operation_events",
-        "parameters": [
-          {
-            "description": "Durable operation UUID",
-            "in": "path",
-            "name": "operation_id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Return events after this sequence (default 0)",
-            "in": "query",
-            "name": "after",
-            "required": false,
-            "schema": {
-              "format": "int32",
-              "minimum": 0,
-              "type": "integer"
-            }
-          },
-          {
-            "description": "At most this many events, 1–100 (default 100)",
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "format": "int32",
-              "minimum": 0,
-              "type": "integer"
-            }
-          }
-        ],
+        "operationId": "get_settings",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OperationEventsResponse"
+                  "$ref": "#/components/schemas/SettingsResponse"
                 }
               }
             },
-            "description": "Events in sequence order"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AdmissionErrorResponse"
-                }
-              }
-            },
-            "description": "Invalid operation identifier or query"
+            "description": "Controller settings"
           },
           "401": {
             "description": "Missing, malformed, expired, or revoked access credential"
           },
-          "404": {
-            "description": "Operation not found or not visible to the authenticated principal"
-          },
           "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeErrorResponse"
+                }
+              }
+            },
             "description": "Persistence unavailable or controller draining"
           }
         },
@@ -757,11 +718,9 @@
           }
         ],
         "tags": [
-          "super::operations"
+          "super::settings"
         ]
-      }
-    },
-    "/api/v1/settings": {
+      },
       "patch": {
         "operationId": "update_settings",
         "requestBody": {
@@ -911,14 +870,22 @@
           ]
         },
         "managersReachable": {
+          "description": "Null when the manager did not answer.",
           "format": "int32",
           "minimum": 0,
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "managersTotal": {
+          "description": "Null when the manager did not answer: unknown, not zero.",
           "format": "int32",
           "minimum": 0,
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "memoryTotalBytes": {
           "format": "int64",
@@ -1425,59 +1392,6 @@
         "containersExited",
         "netRxBytesPerSec",
         "netTxBytesPerSec"
-      ],
-      "type": "object"
-    },
-    "OperationEventResponse": {
-      "properties": {
-        "createdAt": {
-          "type": "string"
-        },
-        "detail": {
-          "type": [
-            "object",
-            "null"
-          ]
-        },
-        "errorCode": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "message": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "sequence": {
-          "format": "int32",
-          "type": "integer"
-        },
-        "state": {
-          "$ref": "#/components/schemas/OperationStateResponse"
-        }
-      },
-      "required": [
-        "sequence",
-        "state",
-        "createdAt"
-      ],
-      "type": "object"
-    },
-    "OperationEventsResponse": {
-      "properties": {
-        "items": {
-          "items": {
-            "$ref": "#/components/schemas/OperationEventResponse"
-          },
-          "maxItems": 100,
-          "type": "array"
-        }
-      },
-      "required": [
-        "items"
       ],
       "type": "object"
     },

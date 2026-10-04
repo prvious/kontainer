@@ -46,6 +46,7 @@ const NOT_BUILT = { title: "Not built yet", reason: "Deploying stacks from Konta
 const plural = (count: number, one: string) => `${count} ${one}${count === 1 ? "" : "s"}`;
 
 function swarmState(summary: ClusterSummary): string {
+    if (summary.managersTotal === null) return "manager unreachable";
     if (summary.managersTotal === 0) return "no swarm manager";
     return summary.quorum === "healthy" ? "swarm active" : "swarm degraded";
 }

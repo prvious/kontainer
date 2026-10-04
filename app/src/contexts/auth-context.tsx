@@ -163,7 +163,6 @@ function SessionAuthProvider({ children }: { children: React.ReactNode }) {
                 nextOrigin,
                 retryCommit,
                 retryRestore,
-                clearIssue: () => setActionError(null),
             }}
         >
             {children}

@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::client::parse_timestamp;
+use crate::client::{parse_timestamp, valid_display_name};
 use crate::containers::{NodeId, NodeOutcome, NodeOutcomeBody};
 use crate::error::NativeClientError;
 
@@ -142,7 +142,7 @@ impl VolumeListBody {
             .into_iter()
             .map(|item| {
                 if !members.contains(&item.node_id)
-                    || VolumeName::parse(&item.name).is_err()
+                    || !valid_display_name(&item.name)
                     || item.driver.len() > 512
                     || item.mount_point.len() > 4096
                     || !valid_labels(&item.labels)
