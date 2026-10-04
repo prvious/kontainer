@@ -46,6 +46,9 @@ impl Task for ResetPassword {
             Err(ResetPasswordError::UnknownEmail) => {
                 Err(Error::string("no account uses that email"))
             }
+            Err(ResetPasswordError::Busy) => Err(Error::string(
+                "the controller is busy checking passwords; nothing was changed, try again",
+            )),
             Err(ResetPasswordError::Persistence) => Err(Error::string(
                 "the database is unavailable; nothing was changed",
             )),

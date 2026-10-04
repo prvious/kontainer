@@ -1,10 +1,12 @@
 //! Sign-in throttling per lowercased email.
 //!
 //! Ten failures inside a fifteen-minute window lock the email for fifteen
-//! minutes. The counter lives in controller memory behind one mutex, so
-//! concurrent failures never undercount (ADR 0014). A password reset voids an
-//! active lock: sign-in passes the credential's `updated_at`, and an entry
-//! older than the latest reset is discarded.
+//! minutes. The counter lives in controller memory behind one mutex (ADR 0014).
+//! Each attempt is counted *before* its password is verified and refunded on
+//! success, so concurrent requests can't all slip under the cap while their
+//! verifications run. A password reset voids an active lock: sign-in passes the
+//! credential's `updated_at`, and an entry older than the latest reset is
+//! discarded.
 
 use std::{
     collections::HashMap,
@@ -57,55 +59,42 @@ impl LoginThrottle {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// `Some(retry_after_seconds)` while the email is locked.
-    pub fn locked(
+    /// Reserve one attempt before the password is verified. `Err(retry_after_seconds)` while the
+    /// email is locked; otherwise the attempt already counts as a failure and `Ok` says what to
+    /// report if it does fail. A successful sign-in calls [`Self::clear`].
+    pub fn begin_attempt(
         &self,
         key: &str,
         now: DateTime<Utc>,
         credential_changed_at: Option<DateTime<Utc>>,
-    ) -> Option<u32> {
-        let mut entries = self.entries();
-        let entry = *entries.get(key)?;
-        let superseded =
-            credential_changed_at.is_some_and(|changed| changed > entry.first_failure_at);
-        if entry.expired(now) || superseded {
-            entries.remove(key);
-            return None;
-        }
-        entry.locked_until.map(|until| seconds_until(until, now))
-    }
-
-    /// Count one failure. The tenth inside the window locks the email.
-    pub fn record_failure(&self, key: &str, now: DateTime<Utc>) -> FailureOutcome {
+    ) -> Result<FailureOutcome, u32> {
         let mut entries = self.entries();
         if entries.len() > PRUNE_ABOVE {
             entries.retain(|_, entry| !entry.expired(now));
         }
-        let entry = entries
-            .entry(key.to_owned())
-            .and_modify(|entry| {
-                if entry.expired(now) {
-                    *entry = Entry {
-                        failures: 0,
-                        first_failure_at: now,
-                        locked_until: None,
-                    };
-                }
-            })
-            .or_insert(Entry {
-                failures: 0,
-                first_failure_at: now,
-                locked_until: None,
-            });
+        let fresh = Entry {
+            failures: 0,
+            first_failure_at: now,
+            locked_until: None,
+        };
+        let entry = entries.entry(key.to_owned()).or_insert(fresh);
+        let superseded =
+            credential_changed_at.is_some_and(|changed| changed > entry.first_failure_at);
+        if entry.expired(now) || superseded {
+            *entry = fresh;
+        }
+        if let Some(until) = entry.locked_until {
+            return Err(seconds_until(until, now));
+        }
         entry.failures += 1;
         if entry.failures >= MAX_FAILURES {
             let until = now + LOCK_DURATION;
             entry.locked_until = Some(until);
-            FailureOutcome::Locked {
+            Ok(FailureOutcome::Locked {
                 retry_after_seconds: seconds_until(until, now),
-            }
+            })
         } else {
-            FailureOutcome::Remaining(MAX_FAILURES - entry.failures)
+            Ok(FailureOutcome::Remaining(MAX_FAILURES - entry.failures))
         }
     }
 
@@ -118,35 +107,35 @@ impl LoginThrottle {
 mod tests {
     use super::*;
 
+    const KEY: &str = "owner@example.com";
+
     #[test]
-    fn ten_failures_lock_and_the_lock_expires() {
+    fn ten_attempts_lock_and_the_lock_expires() {
         let throttle = LoginThrottle::default();
         let start = Utc::now();
         for attempt in 1..MAX_FAILURES {
             assert_eq!(
-                throttle.record_failure("owner@example.com", start),
-                FailureOutcome::Remaining(MAX_FAILURES - attempt)
+                throttle.begin_attempt(KEY, start, None),
+                Ok(FailureOutcome::Remaining(MAX_FAILURES - attempt))
             );
-            assert_eq!(throttle.locked("owner@example.com", start, None), None);
         }
         assert_eq!(
-            throttle.record_failure("owner@example.com", start),
-            FailureOutcome::Locked {
+            throttle.begin_attempt(KEY, start, None),
+            Ok(FailureOutcome::Locked {
                 retry_after_seconds: 900
-            }
+            })
         );
         assert_eq!(
-            throttle.locked("owner@example.com", start + Duration::minutes(5), None),
-            Some(600)
-        );
-        assert_eq!(throttle.locked("other@example.com", start, None), None);
-        assert_eq!(
-            throttle.locked("owner@example.com", start + LOCK_DURATION, None),
-            None
+            throttle.begin_attempt(KEY, start + Duration::minutes(5), None),
+            Err(600)
         );
         assert_eq!(
-            throttle.record_failure("owner@example.com", start + LOCK_DURATION),
-            FailureOutcome::Remaining(9)
+            throttle.begin_attempt("other@example.com", start, None),
+            Ok(FailureOutcome::Remaining(9))
+        );
+        assert_eq!(
+            throttle.begin_attempt(KEY, start + LOCK_DURATION, None),
+            Ok(FailureOutcome::Remaining(9))
         );
     }
 
@@ -154,16 +143,16 @@ mod tests {
     fn the_window_resets_the_count_and_success_clears_it() {
         let throttle = LoginThrottle::default();
         let start = Utc::now();
-        throttle.record_failure("owner@example.com", start);
+        throttle.begin_attempt(KEY, start, None).unwrap();
         assert_eq!(
-            throttle.record_failure("owner@example.com", start + WINDOW),
-            FailureOutcome::Remaining(9)
+            throttle.begin_attempt(KEY, start + WINDOW, None),
+            Ok(FailureOutcome::Remaining(9))
         );
-        throttle.record_failure("owner@example.com", start + WINDOW);
-        throttle.clear("owner@example.com");
+        throttle.begin_attempt(KEY, start + WINDOW, None).unwrap();
+        throttle.clear(KEY);
         assert_eq!(
-            throttle.record_failure("owner@example.com", start + WINDOW),
-            FailureOutcome::Remaining(9)
+            throttle.begin_attempt(KEY, start + WINDOW, None),
+            Ok(FailureOutcome::Remaining(9))
         );
     }
 
@@ -172,20 +161,32 @@ mod tests {
         let throttle = LoginThrottle::default();
         let start = Utc::now();
         for _ in 0..MAX_FAILURES {
-            throttle.record_failure("owner@example.com", start);
+            throttle.begin_attempt(KEY, start, None).unwrap();
         }
         assert!(
             throttle
-                .locked("owner@example.com", start, Some(start - Duration::days(1)))
-                .is_some()
+                .begin_attempt(KEY, start, Some(start - Duration::days(1)))
+                .is_err()
         );
         assert_eq!(
-            throttle.locked(
-                "owner@example.com",
-                start,
-                Some(start + Duration::seconds(1))
-            ),
-            None
+            throttle.begin_attempt(KEY, start, Some(start + Duration::seconds(1))),
+            Ok(FailureOutcome::Remaining(9))
         );
+    }
+
+    #[test]
+    fn concurrent_attempts_get_at_most_ten_verifications() {
+        let throttle = LoginThrottle::default();
+        let start = Utc::now();
+        let reserved = std::thread::scope(|scope| {
+            let attempts: Vec<_> = (0..50)
+                .map(|_| scope.spawn(|| throttle.begin_attempt(KEY, start, None).is_ok()))
+                .collect();
+            attempts
+                .into_iter()
+                .filter_map(|attempt| attempt.join().unwrap().then_some(()))
+                .count()
+        });
+        assert_eq!(reserved, MAX_FAILURES as usize);
     }
 }

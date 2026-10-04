@@ -51,6 +51,44 @@ impl Drop for RefreshCredential {
     }
 }
 
+/// The first-run setup code (ADR 0029). Generated at startup, printed once by `serve` while no
+/// owner exists, and required to register the owner, so the first network client to reach a
+/// fresh controller can't claim it. 128 bits of CSPRNG entropy as 32 lowercase hex characters.
+#[derive(Clone)]
+pub struct SetupCode(String);
+
+impl SetupCode {
+    #[must_use]
+    pub fn generate() -> Self {
+        Self(encode_hex(&random_secret()[..16]))
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    #[cfg(test)]
+    pub(crate) fn known(code: &str) -> Self {
+        Self(code.to_owned())
+    }
+
+    /// Constant-time comparison with what the owner typed, ignoring surrounding whitespace and
+    /// letter case.
+    #[must_use]
+    pub fn matches(&self, presented: &str) -> bool {
+        use subtle::ConstantTimeEq;
+        let presented = presented.trim().to_ascii_lowercase();
+        presented.len() == self.0.len() && bool::from(presented.as_bytes().ct_eq(self.0.as_bytes()))
+    }
+}
+
+impl std::fmt::Debug for SetupCode {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("SetupCode(<redacted>)")
+    }
+}
+
 fn random_secret() -> [u8; SECRET_BYTES] {
     let mut secret = [0u8; SECRET_BYTES];
     rustls::crypto::ring::default_provider()

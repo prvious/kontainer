@@ -1,6 +1,7 @@
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use sea_orm::{
-    ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter,
+    ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect, TransactionError,
+    TransactionTrait,
     sea_query::{Expr, ExprTrait, Func},
 };
 use uuid::Uuid;
@@ -31,8 +32,56 @@ pub enum PasswordLoginError {
     InvalidCredentials { attempts_remaining: u32 },
     #[error("sign-in is locked for this email")]
     Locked { retry_after_seconds: u32 },
+    /// Every Argon2id permit is in use; not counted against the email.
+    #[error("too many sign-ins are being checked")]
+    Busy,
     #[error("sign-in persistence failed")]
     Persistence,
+}
+
+const fn failed(outcome: FailureOutcome) -> PasswordLoginError {
+    match outcome {
+        FailureOutcome::Remaining(attempts_remaining) => {
+            PasswordLoginError::InvalidCredentials { attempts_remaining }
+        }
+        FailureOutcome::Locked {
+            retry_after_seconds,
+        } => PasswordLoginError::Locked {
+            retry_after_seconds,
+        },
+    }
+}
+
+/// Issue the session only if the password credential is still the one that was verified. The
+/// shared row lock orders this against a reset: a reset that commits first changes `updated_at`
+/// and the sign-in fails; one that commits after sees and revokes the new session.
+pub(crate) async fn create_if_credential_unchanged(
+    database: &DatabaseConnection,
+    principal_id: Uuid,
+    verified_at: DateTime<Utc>,
+) -> Result<Option<IssuedSession>, PasswordLoginError> {
+    database
+        .transaction(|transaction| {
+            Box::pin(async move {
+                let current = password_credential::Entity::find_by_id(principal_id)
+                    .lock_shared()
+                    .one(transaction)
+                    .await
+                    .map_err(|_| PasswordLoginError::Persistence)?;
+                if current.map(|credential| credential.updated_at) != Some(verified_at) {
+                    return Ok(None);
+                }
+                create_session::create_in_transaction(transaction, principal_id)
+                    .await
+                    .map(Some)
+                    .map_err(|_| PasswordLoginError::Persistence)
+            })
+        })
+        .await
+        .map_err(|error| match error {
+            TransactionError::Connection(_) => PasswordLoginError::Persistence,
+            TransactionError::Transaction(error) => error,
+        })
 }
 
 /// Find a principal by email case-insensitively, with its password credential.
@@ -54,8 +103,9 @@ pub(crate) async fn find_by_email(
         .await
 }
 
-/// Email and password sign-in with per-email throttling. Every failure costs
-/// one Argon2id verification, including an unknown email.
+/// Email and password sign-in with per-email throttling. Every attempt costs
+/// one Argon2id verification, including an unknown email, and is counted before
+/// that verification runs.
 pub async fn execute(
     database: &DatabaseConnection,
     throttle: &LoginThrottle,
@@ -66,6 +116,7 @@ pub async fn execute(
         email: email_problem(email),
         password: password_problem(password_input),
         display_name: None,
+        setup_code: None,
     };
     if !errors.is_empty() {
         return Err(PasswordLoginError::Invalid(errors));
@@ -74,41 +125,37 @@ pub async fn execute(
     let found = find_by_email(database, &key)
         .await
         .map_err(|_| PasswordLoginError::Persistence)?;
-    let credential_changed_at = found
+    let credential = found
         .as_ref()
-        .and_then(|(_, credential)| credential.as_ref().map(|credential| credential.updated_at));
-    if let Some(retry_after_seconds) = throttle.locked(&key, Utc::now(), credential_changed_at) {
-        return Err(PasswordLoginError::Locked {
-            retry_after_seconds,
-        });
-    }
+        .and_then(|(_, credential)| credential.as_ref());
+    let credential_changed_at = credential.map(|credential| credential.updated_at);
+    let stored_hash = credential.map(|credential| credential.password_hash.clone());
 
-    let stored_hash = found.as_ref().and_then(|(_, credential)| {
-        credential
-            .as_ref()
-            .map(|credential| credential.password_hash.clone())
-    });
-    let verified = password::verify(password_input.to_owned(), stored_hash).await;
+    // The permit comes first so a busy refusal is never counted against the email.
+    let permit = password::permit()
+        .await
+        .map_err(|_| PasswordLoginError::Busy)?;
+    let if_failed = throttle
+        .begin_attempt(&key, Utc::now(), credential_changed_at)
+        .map_err(|retry_after_seconds| PasswordLoginError::Locked {
+            retry_after_seconds,
+        })?;
+    let verified = password::verify(permit, password_input.to_owned(), stored_hash).await;
     let principal = found
         .map(|(principal, _)| principal)
         .filter(|principal| verified && principal.status == PrincipalStatus::Active.as_str());
-    let Some(principal) = principal else {
-        return Err(match throttle.record_failure(&key, Utc::now()) {
-            FailureOutcome::Remaining(attempts_remaining) => {
-                PasswordLoginError::InvalidCredentials { attempts_remaining }
-            }
-            FailureOutcome::Locked {
-                retry_after_seconds,
-            } => PasswordLoginError::Locked {
-                retry_after_seconds,
-            },
-        });
+    let (Some(principal), Some(verified_at)) = (principal, credential_changed_at) else {
+        return Err(failed(if_failed));
+    };
+
+    let Some(issued) = create_if_credential_unchanged(database, principal.id, verified_at)
+        .await
+        .inspect_err(|_| throttle.clear(&key))?
+    else {
+        // The password was reset while this one was being verified.
+        return Err(failed(if_failed));
     };
     throttle.clear(&key);
-
-    let issued = create_session::execute(database, principal.id)
-        .await
-        .map_err(|_| PasswordLoginError::Persistence)?;
     Ok(PasswordSession {
         issued,
         principal_id: principal.id,

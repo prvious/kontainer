@@ -15,7 +15,11 @@ use sea_orm::{DatabaseConnection, EntityTrait};
 use tokio::{sync::mpsc, time};
 use tokio_util::sync::CancellationToken;
 
+use uuid::Uuid;
+
 use crate::{
+    AUDIT_TARGET,
+    auth::{actions::session_family_active, domain::ACCESS_TTL},
     exec::domain::{ExecTiming, ExitReason, OUTPUT_CHUNK, client_error_code},
     nodes::{
         agents::{AgentDirectory, NodeEndpoint},
@@ -24,7 +28,7 @@ use crate::{
     rpc::{AgentClient, AgentExecEvent, AgentExecInput, AgentExecOpen},
 };
 
-/// Closed when the access credential the connection opened with expires.
+/// Closed when the session family behind the connection is revoked or past its lifetime.
 pub const ACCESS_EXPIRED: StreamClose = StreamClose::new(4401, "access expired");
 const RETRY_EVERY: Duration = Duration::from_millis(25);
 
@@ -57,6 +61,10 @@ pub struct ExecRelay {
     pub input: mpsc::Receiver<AgentExecInput>,
     pub closer: mpsc::Sender<AgentExecInput>,
     pub activity: Activity,
+    pub principal_id: Uuid,
+    pub family_id: Uuid,
+    /// When the access credential presented at upgrade expires; the family is re-checked then
+    /// and every access lifetime after, so a shell outlives one five-minute credential.
     pub access_expires_at: DateTime<Utc>,
     pub timing: ExecTiming,
     pub cancellation: CancellationToken,
@@ -153,16 +161,21 @@ impl ExecRelay {
             }
         };
         let Self {
+            database,
             outbound,
+            node_id,
             open,
             input,
             closer,
             activity,
+            principal_id,
+            family_id,
             access_expires_at,
             timing,
             cancellation,
             ..
         } = self;
+        let container_id = open.container_id.clone();
         let mut events = match client.exec(open, input, &cancellation).await {
             Ok(events) => events,
             Err(_) => {
@@ -185,6 +198,17 @@ impl ExecRelay {
                 () = cancellation.cancelled() => return,
                 () = outbound.closed() => return,
                 () = &mut expiry => {
+                    match session_family_active::execute(&database, family_id).await {
+                        Ok(true) => {
+                            let renew = ACCESS_TTL.to_std().unwrap_or(Duration::from_secs(300));
+                            expiry.as_mut().reset(time::Instant::now() + renew);
+                            continue;
+                        }
+                        Ok(false) => {}
+                        Err(error) => {
+                            tracing::warn!(%error, "exec session check failed; ending the shell");
+                        }
+                    }
                     let _ = closer.try_send(AgentExecInput::Close);
                     let _ = frames.send(ExecMessage::Error(ExecError {
                         code: "session_expired".to_owned(),
@@ -205,6 +229,16 @@ impl ExecRelay {
                 event = events.next() => {
                     let sent = match event {
                         Some(AgentExecEvent::Started { exec_id, shell }) => {
+                            tracing::info!(
+                                target: AUDIT_TARGET,
+                                event = "exec.started",
+                                principal = %principal_id,
+                                session = %family_id,
+                                node = %node_id,
+                                container = %container_id,
+                                exec_id = %exec_id,
+                                shell = %shell,
+                            );
                             frames.send(ExecMessage::Started(ExecStarted { exec_id, shell })).await
                         }
                         Some(AgentExecEvent::Output(bytes)) => {

@@ -71,6 +71,14 @@ fn deserialize_docker_host<'de, D: serde::Deserializer<'de>>(
 pub struct ManagerDockerHost(pub DockerHost);
 
 fn validate_docker_host(docker: &DockerSettings, environment: &Environment) -> Result<()> {
+    // Loco defaults to `development` when LOCO_ENV is unset, so the environment check alone
+    // fails open; plain-TCP Docker is unauthenticated, so never allow it off this machine.
+    if docker.host.is_remote_tcp() {
+        return Err(Error::Message(
+            "settings.docker.host may use tcp:// only for a loopback host (localhost, 127.0.0.0/8, ::1)"
+                .to_owned(),
+        ));
+    }
     if docker.host.is_tcp() && !matches!(environment, Environment::Development | Environment::Test)
     {
         return Err(Error::Message(format!(
@@ -271,6 +279,27 @@ impl std::fmt::Display for ServerKind {
     }
 }
 
+/// Print the first-run setup code to stdout (not the log) while no owner exists. If ownership
+/// can't be read, print it anyway: registration still refuses a second owner.
+async fn announce_setup_code(ctx: &AppContext) {
+    let Some(code) = ctx
+        .shared_store
+        .get::<crate::auth::credentials::SetupCode>()
+    else {
+        return;
+    };
+    if matches!(
+        crate::auth::actions::bootstrap_status::execute(&ctx.db).await,
+        Ok(true)
+    ) {
+        return;
+    }
+    println!(
+        "Kontainer setup code: {} — enter it on the Create owner screen. A new code is printed on each restart until the owner exists.",
+        code.as_str()
+    );
+}
+
 pub async fn serve(router: Router, ctx: &AppContext, params: &ServeParams) -> Result<()> {
     let settings = controller_settings(ctx)?;
     let http_listener = TcpListener::bind(format!("{}:{}", params.binding, params.port)).await?;
@@ -283,6 +312,9 @@ pub async fn serve(router: Router, ctx: &AppContext, params: &ServeParams) -> Re
         &ctx.config.server.host,
     )
     .await?;
+    // Only once startup can no longer fail on configuration, so the code isn't printed for a
+    // controller that never serves.
+    announce_setup_code(ctx).await;
     let agent_rpc = if settings.agent_rpc.enabled {
         let recorder = crate::rpc::PostgresCheckInRecorder::new(
             ctx.db.clone(),
@@ -794,6 +826,9 @@ pub fn init_shared_auth_state(ctx: &AppContext) -> Result<()> {
         .insert(ControllerClusterId(settings.agent_rpc.cluster_id.clone()));
     ctx.shared_store
         .insert(crate::auth::throttle::LoginThrottle::default());
+    // A fresh code per process; `serve` prints it while no owner exists (ADR 0029).
+    ctx.shared_store
+        .insert(crate::auth::credentials::SetupCode::generate());
 
     if settings.agent_rpc.enabled {
         let directory = crate::nodes::agents::MtlsAgentDirectory::new(
@@ -1254,6 +1289,21 @@ mod tests {
                 .to_string()
                 .contains("tcp:// only in development or test")
         );
+
+        let mut remote = valid_settings();
+        remote["docker"] = serde_json::json!({ "host": "tcp://10.0.0.5:2375" });
+        let settings = parse_controller_settings(remote).unwrap();
+        for environment in [
+            Environment::Development,
+            Environment::Test,
+            Environment::Production,
+        ] {
+            let error = super::validate_docker_host(&settings.docker, &environment).unwrap_err();
+            assert!(
+                error.to_string().contains("only for a loopback host"),
+                "{environment:?}"
+            );
+        }
 
         for invalid in ["http://localhost:2375", "localhost:2375", ""] {
             let mut settings = valid_settings();

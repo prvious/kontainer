@@ -14,11 +14,14 @@ use loco_rs::{
     config::Config,
     environment::Environment,
 };
+use sea_orm::EntityTrait;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
 use super::{
-    actions::{reset_password, validate_access},
+    actions::{password_login, reset_password, validate_access},
+    credentials::SetupCode,
+    entities::password_credential,
     request::require_access_session,
     throttle::MAX_FAILURES,
 };
@@ -26,11 +29,15 @@ use crate::{app::App, test_support::PostgresTestDatabase};
 
 const EMAIL: &str = "Owner@Example.com";
 const PASSWORD: &str = "correct horse battery staple";
+const SETUP_CODE: &str = "0123456789abcdef0123456789abcdef";
 
 async fn test_context(database: sea_orm::DatabaseConnection) -> Result<AppContext, Box<dyn Error>> {
     let config = Config::from_folder(&Environment::Test, Path::new("config"))?;
     let context = AppContext::builder(Environment::Test, database, config).build();
-    Ok(App::after_context(context).await?)
+    let context = App::after_context(context).await?;
+    // Replace the random startup code with one the tests can send.
+    context.shared_store.insert(SetupCode::known(SETUP_CODE));
+    Ok(context)
 }
 
 fn router(context: AppContext) -> Router {
@@ -105,7 +112,7 @@ async fn call(
 }
 
 fn registration() -> Value {
-    json!({ "displayName": "Ada Owner", "email": EMAIL, "password": PASSWORD })
+    json!({ "displayName": "Ada Owner", "email": EMAIL, "password": PASSWORD, "setupCode": SETUP_CODE })
 }
 
 fn login(email: &str, password: &str) -> Value {
@@ -171,7 +178,7 @@ async fn first_registration_creates_the_owner_and_the_second_is_refused()
             "POST",
             "/api/v1/auth/register",
             Some(
-                json!({ "displayName": "Mallory", "email": "m@example.com", "password": PASSWORD }),
+                json!({ "displayName": "Mallory", "email": "m@example.com", "password": PASSWORD, "setupCode": SETUP_CODE }),
             ),
             None,
         )
@@ -186,12 +193,126 @@ async fn first_registration_creates_the_owner_and_the_second_is_refused()
 }
 
 #[tokio::test]
+async fn registration_needs_the_setup_code_and_a_wrong_one_never_creates_the_owner()
+-> Result<(), Box<dyn Error>> {
+    with_app(|app, _| async move {
+        let mut wrong = registration();
+        wrong["setupCode"] = json!("ffffffffffffffffffffffffffffffff");
+        let (status, body, _) =
+            call(&app, "POST", "/api/v1/auth/register", Some(wrong), None).await;
+        assert_eq!(
+            (status, body),
+            (
+                StatusCode::BAD_REQUEST,
+                json!({ "error": "validation_failed", "fields": { "setupCode": "invalid" } })
+            )
+        );
+        let (_, body, _) = call(&app, "GET", "/api/v1/auth/bootstrap", None, None).await;
+        assert_eq!(body, json!({ "ownerExists": false }));
+
+        // Pasted with surrounding spaces or in capitals still matches.
+        let mut pasted = registration();
+        pasted["setupCode"] = json!(format!("  {}  ", SETUP_CODE.to_uppercase()));
+        let (status, _, _) = call(&app, "POST", "/api/v1/auth/register", Some(pasted), None).await;
+        assert_eq!(status, StatusCode::CREATED);
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn concurrent_wrong_logins_get_at_most_ten_verifications() -> Result<(), Box<dyn Error>> {
+    with_app(|app, _| async move {
+        call(
+            &app,
+            "POST",
+            "/api/v1/auth/register",
+            Some(registration()),
+            None,
+        )
+        .await;
+        let attempts = (0..20).map(|_| {
+            let app = app.clone();
+            async move {
+                call(
+                    &app,
+                    "POST",
+                    "/api/v1/auth/password/login",
+                    Some(login(EMAIL, "wrong horse battery staple")),
+                    None,
+                )
+                .await
+                .0
+            }
+        });
+        let statuses = futures_util::future::join_all(attempts).await;
+        let verified = statuses
+            .iter()
+            .filter(|status| **status == StatusCode::UNAUTHORIZED)
+            .count();
+        let refused = statuses
+            .iter()
+            .filter(|status| **status == StatusCode::TOO_MANY_REQUESTS)
+            .count();
+        assert!(verified <= MAX_FAILURES as usize, "{statuses:?}");
+        assert_eq!(verified + refused, 20, "{statuses:?}");
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn a_sign_in_verified_against_a_reset_password_gets_no_session() -> Result<(), Box<dyn Error>>
+{
+    with_app(|app, database| async move {
+        let (_, registered, _) = call(
+            &app,
+            "POST",
+            "/api/v1/auth/register",
+            Some(registration()),
+            None,
+        )
+        .await;
+        let principal_id: uuid::Uuid = registered["principalId"].as_str().unwrap().parse()?;
+        let verified_at = password_credential::Entity::find_by_id(principal_id)
+            .one(&database)
+            .await?
+            .unwrap()
+            .updated_at;
+
+        // The reset lands while the old password is being verified.
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        reset_password::execute(&database, EMAIL, "a brand new passphrase".to_owned())
+            .await
+            .unwrap();
+        let issued =
+            password_login::create_if_credential_unchanged(&database, principal_id, verified_at)
+                .await
+                .unwrap();
+        assert!(issued.is_none());
+
+        let current = password_credential::Entity::find_by_id(principal_id)
+            .one(&database)
+            .await?
+            .unwrap()
+            .updated_at;
+        let issued =
+            password_login::create_if_credential_unchanged(&database, principal_id, current)
+                .await
+                .unwrap();
+        assert!(issued.is_some());
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
 async fn registration_and_login_report_field_errors_without_echoing_input()
 -> Result<(), Box<dyn Error>> {
     with_app(|app, _| async move {
-        let (status, body, _) = call(&app, "POST", "/api/v1/auth/register", Some(json!({ "displayName": " ", "email": "not-an-email", "password": "short-pass" })), None).await;
+        let (status, body, _) = call(&app, "POST", "/api/v1/auth/register", Some(json!({ "displayName": " ", "email": "not-an-email", "password": "short-pass", "setupCode": " " })), None).await;
         assert_eq!(status, StatusCode::BAD_REQUEST);
-        assert_eq!(body, json!({ "error": "validation_failed", "fields": { "email": "invalid", "password": "too_short", "displayName": "empty" } }));
+        assert_eq!(body, json!({ "error": "validation_failed", "fields": { "email": "invalid", "password": "too_short", "displayName": "empty", "setupCode": "empty" } }));
         assert!(!body.to_string().contains("short-pass"));
 
         let long = "x".repeat(129);

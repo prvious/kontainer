@@ -294,12 +294,15 @@ pub(crate) struct PasswordLoginInput {
     pub label: Option<String>,
 }
 
-/// First-run owner registration; the password is handled as in sign-in.
+/// First-run owner registration. The password and the controller's one-time
+/// setup code are handled as the password is in sign-in: zeroed on drop,
+/// never stored, logged, or returned.
 pub(crate) struct RegisterOwnerInput {
     pub origin: String,
     pub display_name: String,
     pub email: String,
     pub password: Zeroizing<String>,
+    pub setup_code: Zeroizing<String>,
     pub label: Option<String>,
 }
 

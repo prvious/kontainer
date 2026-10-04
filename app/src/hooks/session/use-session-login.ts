@@ -9,9 +9,14 @@ export interface PasswordLoginVariables {
     label: string | null;
 }
 
-/** The password travels only in this invoke; Rust zeroes it after the request. */
+/**
+ * The password travels only in this invoke; Rust zeroes it after the request. TanStack keeps
+ * `variables` on the mutation, so `gcTime: 0` drops it from the cache as soon as the caller
+ * `reset()`s the observer (the auth provider does, after every attempt).
+ */
 export function useSessionLogin() {
     return useMutation({
         mutationFn: async (variables: PasswordLoginVariables) => sessionViewFromIpc(await invokeLogin<unknown>("session_login", { ...variables })),
+        gcTime: 0,
     });
 }

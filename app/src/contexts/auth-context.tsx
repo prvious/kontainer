@@ -73,6 +73,8 @@ function SessionAuthProvider({ children }: { children: React.ReactNode }) {
         throw error;
     }, []);
 
+    // Both commands reset after every attempt so the password (and setup code) never outlive it
+    // in the mutation's `variables`; the hooks' `gcTime: 0` then drops the cached mutation too.
     const login = useCallback(
         async ({ origin, email, password, label }: SignInInput) => {
             setActionError(null);
@@ -80,18 +82,22 @@ function SessionAuthProvider({ children }: { children: React.ReactNode }) {
                 publishSession(await loginCommand.mutateAsync({ origin, email, password, label: label ?? null }));
             } catch (error) {
                 rejectWith(error);
+            } finally {
+                loginCommand.reset();
             }
         },
         [loginCommand, publishSession, rejectWith],
     );
 
     const register = useCallback(
-        async ({ origin, displayName, email, password, label }: RegisterInput) => {
+        async ({ origin, displayName, email, password, setupCode, label }: RegisterInput) => {
             setActionError(null);
             try {
-                publishSession(await registerCommand.mutateAsync({ origin, displayName, email, password, label: label ?? null }));
+                publishSession(await registerCommand.mutateAsync({ origin, displayName, email, password, setupCode, label: label ?? null }));
             } catch (error) {
                 rejectWith(error);
+            } finally {
+                registerCommand.reset();
             }
         },
         [registerCommand, publishSession, rejectWith],

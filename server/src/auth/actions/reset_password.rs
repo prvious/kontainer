@@ -18,6 +18,8 @@ pub enum ResetPasswordError {
     InvalidPassword(FieldProblem),
     #[error("no account uses that email")]
     UnknownEmail,
+    #[error("the controller is busy checking passwords; try again")]
+    Busy,
     #[error("password reset persistence failed")]
     Persistence,
 }
@@ -38,7 +40,10 @@ pub async fn execute(
         .await
         .map_err(|_| ResetPasswordError::Persistence)?
         .ok_or(ResetPasswordError::UnknownEmail)?;
-    let password_hash = password::hash(new_password)
+    let permit = password::permit()
+        .await
+        .map_err(|_| ResetPasswordError::Busy)?;
+    let password_hash = password::hash(permit, new_password)
         .await
         .map_err(|_| ResetPasswordError::Persistence)?;
 

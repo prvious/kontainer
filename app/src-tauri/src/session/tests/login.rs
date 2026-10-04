@@ -15,6 +15,7 @@ use zeroize::Zeroizing;
 use super::fakes::{
     future_ms, issued, login_input, past_ms, redeemed, redeemed_for, Harness, CLUSTER,
     DISPLAY_NAME, EMAIL, ORIGIN, OTHER_ORIGIN, OTHER_PRINCIPAL_ID, PASSWORD, PRINCIPAL_ID,
+    SETUP_CODE,
 };
 
 #[tokio::test]
@@ -416,6 +417,65 @@ async fn login_metadata_write_failure_holds_the_commit() {
 }
 
 #[tokio::test]
+async fn an_unreadable_metadata_store_never_erases_saved_connections() {
+    let harness = Harness::new();
+    let mut saved = SessionDocument::new(None, None);
+    saved.touch_connection(OTHER_ORIGIN, Some("Home lab".to_owned()), 1);
+    harness.metadata.set_document(saved.clone());
+    harness
+        .controllers
+        .script()
+        .login
+        .push_back(Ok(redeemed(1)));
+
+    // A login commit whose document read fails holds the commit untouched.
+    harness.metadata.fail_reads.store(true, Ordering::SeqCst);
+    let error = harness
+        .manager
+        .login(login_input(ORIGIN))
+        .await
+        .expect_err("metadata read fails");
+    assert_eq!(error, SessionError::LocalStateFailed);
+    assert_eq!(harness.count("write_document"), 0);
+    assert_eq!(harness.metadata.document(), Some(saved));
+    assert_eq!(
+        harness.vault.anchor_state(),
+        Some(AnchorState::CommitPending)
+    );
+
+    harness.metadata.fail_reads.store(false, Ordering::SeqCst);
+    harness.manager.retry_commit().await.expect("commit retry");
+    let origins = |harness: &Harness| -> Vec<String> {
+        harness
+            .manager
+            .connections()
+            .into_iter()
+            .map(|connection| connection.origin)
+            .collect()
+    };
+    assert_eq!(origins(&harness), [ORIGIN, OTHER_ORIGIN]);
+
+    // Finishing a signed-out document on restore never rewrites from a failed read.
+    harness.controllers.script().logout.push_back(Ok(()));
+    harness.manager.logout().await.expect("logout");
+    let signed_out = harness.metadata.document();
+    let writes = harness.count("write_document");
+    harness.metadata.fail_reads.store(true, Ordering::SeqCst);
+    assert_eq!(
+        harness
+            .manager
+            .restore()
+            .await
+            .expect_err("metadata read fails"),
+        SessionError::LocalStateFailed
+    );
+    assert_eq!(harness.count("write_document"), writes);
+    assert_eq!(harness.metadata.document(), signed_out);
+    harness.metadata.fail_reads.store(false, Ordering::SeqCst);
+    assert_eq!(origins(&harness), [ORIGIN, OTHER_ORIGIN]);
+}
+
+#[tokio::test]
 async fn login_failure_before_commit_leaves_no_session() {
     let harness = Harness::new();
     harness
@@ -713,16 +773,24 @@ async fn registration_commits_the_owner_session_like_a_sign_in() {
             display_name: DISPLAY_NAME.to_owned(),
             email: EMAIL.to_owned(),
             password: Zeroizing::new(PASSWORD.to_owned()),
+            setup_code: Zeroizing::new(SETUP_CODE.to_owned()),
             label: Some("Home lab".to_owned()),
         })
         .await
         .expect("registered");
     assert_eq!(view.display_name, DISPLAY_NAME);
     assert_eq!(view.label.as_deref(), Some("Home lab"));
+    // The setup code reaches the controller and nothing else.
     assert_eq!(
-        harness.count("register_owner:Ada Owner:owner@example.com"),
+        harness.count("register_owner:Ada Owner:owner@example.com:true"),
         1
     );
+    let document = format!("{:?}", harness.metadata.document());
+    assert!(harness
+        .entries()
+        .iter()
+        .chain([&document])
+        .all(|entry| !entry.contains(SETUP_CODE) && !entry.contains(PASSWORD)));
     assert_eq!(harness.vault.anchor_state(), Some(AnchorState::Ready));
     assert_eq!(
         harness.manager.restore().await.expect("restore"),
@@ -742,6 +810,7 @@ async fn registration_commits_the_owner_session_like_a_sign_in() {
             display_name: DISPLAY_NAME.to_owned(),
             email: EMAIL.to_owned(),
             password: Zeroizing::new(PASSWORD.to_owned()),
+            setup_code: Zeroizing::new(SETUP_CODE.to_owned()),
             label: None,
         })
         .await

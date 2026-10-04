@@ -241,10 +241,12 @@ impl SessionManager {
                 &input.display_name,
                 &input.email,
                 &input.password,
+                &input.setup_code,
                 &CancellationToken::new(),
             )
             .await?;
         drop(input.password);
+        drop(input.setup_code);
         Ok(self
             .commit_login(controller.as_ref(), redeemed, input.label)
             .await?)
@@ -278,14 +280,10 @@ impl SessionManager {
         self.probe(&origin).await.ok()
     }
 
-    /// Saved connections, most recent first.
+    /// Saved connections, most recent first. A display read only: an
+    /// unreadable store shows an empty list but is never written back.
     pub(crate) fn connections(&self) -> Vec<SavedConnection> {
-        self.metadata
-            .read_document()
-            .ok()
-            .flatten()
-            .map(|document| document.connections)
-            .unwrap_or_default()
+        self.stored_connections().unwrap_or_default()
     }
 
     /// Drop one saved connection. Its origin stays usable; only the row goes.
@@ -325,8 +323,18 @@ impl SessionManager {
     }
 
     /// Saved connections carried into every document this manager rewrites.
-    fn stored_connections(&self) -> Vec<SavedConnection> {
-        self.connections()
+    ///
+    /// An unavailable store fails the rewrite instead of reading as empty, so
+    /// a transient read error can never erase the saved list.
+    fn stored_connections(&self) -> Result<Vec<SavedConnection>, SessionError> {
+        match self.metadata.read_document() {
+            Ok(document) => Ok(document
+                .map(|document| document.connections)
+                .unwrap_or_default()),
+            Err(MetadataError::Unavailable) => Err(SessionError::LocalStateFailed),
+            // A document that no longer matches the strict schema is replaced.
+            Err(MetadataError::Corrupt) => Ok(Vec::new()),
+        }
     }
 
     async fn ensure_login_allowed(&self) -> Result<(), SessionError> {
@@ -491,10 +499,13 @@ impl SessionManager {
             return Err(SessionError::VaultWriteFailed);
         }
         drop(payload);
-        let mut document = SessionDocument::new(None, Some(metadata_session_from(&view)))
-            .with_connections(self.stored_connections());
-        document.touch_connection(&view.origin, view.label.clone(), now_ms());
-        if self.metadata.write_document(&document).is_err() {
+        let document = self.stored_connections().map(|connections| {
+            let mut document = SessionDocument::new(None, Some(metadata_session_from(&view)))
+                .with_connections(connections);
+            document.touch_connection(&view.origin, view.label.clone(), now_ms());
+            document
+        });
+        if !document.is_ok_and(|document| self.metadata.write_document(&document).is_ok()) {
             self.hold(held(issued.take(), SessionError::LocalStateFailed));
             return Err(SessionError::LocalStateFailed);
         }
@@ -979,7 +990,7 @@ impl SessionManager {
             }),
             None,
         )
-        .with_connections(self.stored_connections());
+        .with_connections(self.stored_connections()?);
         match self.metadata.read_document() {
             Ok(Some(existing)) if existing == desired => Ok(()),
             _ => self

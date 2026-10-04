@@ -16,6 +16,20 @@ impl DockerHost {
     pub const fn is_tcp(&self) -> bool {
         matches!(self, Self::Tcp { .. })
     }
+
+    /// True for a `tcp://` host that is not this machine. Plain-TCP Docker has no
+    /// authentication, so callers refuse it whatever the environment.
+    #[must_use]
+    pub fn is_remote_tcp(&self) -> bool {
+        let Self::Tcp { host, .. } = self else {
+            return false;
+        };
+        let host = host.trim_start_matches('[').trim_end_matches(']');
+        !(host.eq_ignore_ascii_case("localhost")
+            || host
+                .parse::<std::net::IpAddr>()
+                .is_ok_and(|address| address.is_loopback()))
+    }
 }
 
 impl Default for DockerHost {
@@ -115,6 +129,35 @@ mod tests {
                 .is_tcp()
         );
         assert!(!DockerHost::default().is_tcp());
+    }
+
+    #[test]
+    fn only_loopback_tcp_hosts_are_local() {
+        for local in [
+            "tcp://localhost:2375",
+            "tcp://LOCALHOST:2375",
+            "tcp://127.0.0.1:2376",
+            "tcp://127.8.9.10:2378",
+            "tcp://[::1]:2375",
+            "unix:///var/run/docker.sock",
+        ] {
+            assert!(
+                !local.parse::<DockerHost>().unwrap().is_remote_tcp(),
+                "{local}"
+            );
+        }
+        for remote in [
+            "tcp://10.0.0.5:2375",
+            "tcp://172.29.0.10:2375",
+            "tcp://docker.example.com:2375",
+            "tcp://0.0.0.0:2375",
+            "tcp://[2001:db8::1]:2375",
+        ] {
+            assert!(
+                remote.parse::<DockerHost>().unwrap().is_remote_tcp(),
+                "{remote}"
+            );
+        }
     }
 
     #[test]

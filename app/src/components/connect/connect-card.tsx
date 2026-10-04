@@ -1,5 +1,5 @@
 import { useRef, useState, type FormEvent } from "react";
-import { Activity, Link as LinkIcon, LockKeyhole, LogIn, Mail, RefreshCw, User, UserPlus } from "lucide-react";
+import { Activity, KeyRound, Link as LinkIcon, LockKeyhole, LogIn, Mail, RefreshCw, User, UserPlus } from "lucide-react";
 import { ActionButton } from "@/components/kit/action-button";
 import { notify } from "@/components/kit/notify";
 import { LogoMark } from "@/components/logo";
@@ -17,6 +17,7 @@ import {
     originError,
     passwordError,
     serverFieldErrors,
+    setupCodeError,
     unreachableMessage,
     type ConnectErrors,
     type ConnectField as FieldName,
@@ -50,6 +51,7 @@ export function ConnectCard({ initialOrigin }: { initialOrigin?: string }) {
 
     const [originInput, setOriginInput] = useState<string | null>(null);
     const [committedOrigin, setCommittedOrigin] = useState<string | null>(null);
+    const [setupCode, setSetupCode] = useState("");
     const [displayName, setDisplayName] = useState("");
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
@@ -104,6 +106,7 @@ export function ConnectCard({ initialOrigin }: { initialOrigin?: string }) {
     function validate(): ConnectErrors {
         const next: ConnectErrors = { origin: originError(originText), email: emailError(email), password: passwordError(password) };
         if (variant === "create") {
+            next.setupCode = setupCodeError(setupCode);
             next.displayName = nameError(displayName);
             next.confirm = confirm === password ? undefined : "The passwords don't match.";
         }
@@ -156,10 +159,12 @@ export function ConnectCard({ initialOrigin }: { initialOrigin?: string }) {
         const label = connections.data?.find((connection) => connection.origin === origin)?.label ?? null;
         setSubmitting(true);
         try {
-            if (variant === "create") await auth.register({ origin, displayName: displayName.trim(), email: email.trim(), password, label });
+            if (variant === "create")
+                await auth.register({ origin, displayName: displayName.trim(), email: email.trim(), password, setupCode: setupCode.trim(), label });
             else await auth.login({ origin, email: email.trim(), password, label });
             setPassword("");
             setConfirm("");
+            setSetupCode("");
         } catch (error) {
             if (isLoginFailure(error)) handleFailure(error, origin);
         } finally {
@@ -222,6 +227,20 @@ export function ConnectCard({ initialOrigin }: { initialOrigin?: string }) {
                     </div>
                 )}
 
+                {variant === "create" && (
+                    <ConnectField
+                        id='setup-code'
+                        label='Setup code'
+                        icon={KeyRound}
+                        autoComplete='off'
+                        spellCheck={false}
+                        value={setupCode}
+                        error={errors.setupCode}
+                        helper='Printed by the controller when it starts. A new code is printed on each restart until the owner exists.'
+                        onChange={(event) => setSetupCode(event.target.value)}
+                        onBlur={() => setupCode && setFieldError("setupCode", setupCodeError(setupCode))}
+                    />
+                )}
                 {variant === "create" && (
                     <ConnectField
                         id='owner-name'

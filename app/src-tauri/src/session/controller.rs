@@ -70,6 +70,7 @@ pub(crate) trait Controller: Send + Sync + 'static {
         display_name: &'a str,
         email: &'a str,
         password: &'a str,
+        setup_code: &'a str,
         cancellation: &'a CancellationToken,
     ) -> ControllerFuture<'a, Result<RedeemedSession, LoginFailure>>;
 
@@ -414,11 +415,12 @@ impl Controller for NativeController {
         display_name: &'a str,
         email: &'a str,
         password: &'a str,
+        setup_code: &'a str,
         cancellation: &'a CancellationToken,
     ) -> ControllerFuture<'a, Result<RedeemedSession, LoginFailure>> {
         Box::pin(async move {
             self.client
-                .register_owner(display_name, email, password, cancellation)
+                .register_owner(display_name, email, password, setup_code, cancellation)
                 .await
                 .map(redeemed_from)
                 .map_err(map_account_failure)
@@ -851,12 +853,14 @@ pub(crate) fn map_account_failure(failure: Traced<NativeClientError>) -> LoginFa
                     email,
                     password,
                     display_name,
+                    setup_code,
                 },
         } => {
             mapped.fields = Some(FieldErrorsView {
                 email,
                 password,
                 display_name,
+                setup_code,
             });
         }
         _ => {}
@@ -939,6 +943,21 @@ mod tests {
         assert_eq!(
             failure.fields.and_then(|fields| fields.email),
             Some(FieldProblem::Invalid)
+        );
+
+        let failure = map_account_failure(traced(NativeClientError::ValidationFailed {
+            fields: AccountFieldErrors {
+                setup_code: Some(FieldProblem::Invalid),
+                ..AccountFieldErrors::default()
+            },
+        }));
+        assert_eq!(failure.code, SessionError::ValidationFailed);
+        assert_eq!(
+            failure.fields,
+            Some(FieldErrorsView {
+                setup_code: Some(FieldProblem::Invalid),
+                ..FieldErrorsView::default()
+            })
         );
 
         assert_eq!(

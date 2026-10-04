@@ -58,7 +58,7 @@ impl LogsSession {
         if let Some((service_id, cancellation)) = stopped {
             cancellation.cancel();
             tracing::info!(
-                target: "kontainer::audit",
+                target: crate::AUDIT_TARGET,
                 event = "logs.close",
                 principal = %self.session.principal_id,
                 session = %self.session.family_id,
@@ -91,7 +91,7 @@ impl StreamApplication for LogsSession {
                     *follow = Some((open.service_id.clone(), cancellation.clone()));
                 }
                 tracing::info!(
-                    target: "kontainer::audit",
+                    target: crate::AUDIT_TARGET,
                     event = "logs.open",
                     principal = %self.session.principal_id,
                     session = %self.session.family_id,

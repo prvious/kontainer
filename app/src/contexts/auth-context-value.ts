@@ -11,6 +11,8 @@ export interface SignInInput {
 
 export interface RegisterInput extends SignInInput {
     displayName: string;
+    /** The one-time code the controller prints at startup while it has no owner. */
+    setupCode: string;
 }
 
 export interface AuthContextValue {

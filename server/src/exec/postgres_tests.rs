@@ -240,6 +240,48 @@ async fn opened(agent: &FakeAgent) {
     panic!("the agent exec never opened");
 }
 
+/// Make the newest session family's access credential expire in 1.5 s; returns the family id.
+async fn expire_access_soon(
+    database: &sea_orm::DatabaseConnection,
+) -> Result<uuid::Uuid, Box<dyn Error>> {
+    let family = crate::auth::entities::session_family::Entity::find()
+        .all(database)
+        .await?
+        .into_iter()
+        .max_by_key(|family| family.created_at)
+        .unwrap();
+    let id = family.id;
+    let mut family: crate::auth::entities::session_family::ActiveModel = family.into();
+    family.access_expires_at = Set(Utc::now() + chrono::Duration::milliseconds(1500));
+    family.update(database).await?;
+    Ok(id)
+}
+
+async fn revoke_family(
+    database: &sea_orm::DatabaseConnection,
+    family_id: uuid::Uuid,
+) -> Result<(), Box<dyn Error>> {
+    let family = crate::auth::entities::session_family::Entity::find_by_id(family_id)
+        .one(database)
+        .await?
+        .unwrap();
+    let mut family: crate::auth::entities::session_family::ActiveModel = family.into();
+    family.revoked_at = Set(Some(Utc::now()));
+    family.update(database).await?;
+    Ok(())
+}
+
+/// Keep the shell producing output so the shortened idle limit doesn't end it first.
+fn keep_busy(agent: &FakeAgent) -> tokio::task::JoinHandle<()> {
+    let events = agent.events();
+    tokio::spawn(async move {
+        for _ in 0..40 {
+            let _ = events.send(AgentExecEvent::Output(b".".to_vec()));
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+}
+
 async fn wait_for(agent: &FakeAgent, count: usize) {
     for _ in 0..200 {
         if agent.received().len() >= count {
@@ -439,31 +481,34 @@ async fn postgres_exec_limits_sessions_and_ends_idle_expired_and_stalled_ones()
             "{closed:?}"
         );
 
-        // An access credential that expires mid-session ends it with the code, then 4401.
-        let expiring = Fixture::session(&database.connection).await?;
-        let family = crate::auth::entities::session_family::Entity::find()
-            .all(&database.connection)
-            .await?
-            .into_iter()
-            .max_by_key(|family| family.created_at)
-            .unwrap();
-        let mut family: crate::auth::entities::session_family::ActiveModel = family.into();
-        family.access_expires_at = Set(Utc::now() + chrono::Duration::milliseconds(1500));
-        family.update(&database.connection).await?;
         let fixture_idle = fixture.context.shared_store.get::<ExecStreams>().unwrap();
         assert!(fixture_idle.timing.idle < Duration::from_secs(1));
+
+        // The five-minute access credential expiring mid-session doesn't end the shell while its
+        // session family is live: the relay re-checks the family and keeps going.
+        let renewing = Fixture::session(&database.connection).await?;
+        expire_access_soon(&database.connection).await?;
+        let mut renewed = fixture.open(&renewing, "manager").await;
+        opened(&fixture.agent).await;
+        let keep = keep_busy(&fixture.agent);
+        let until = tokio::time::Instant::now() + Duration::from_millis(2500);
+        while tokio::time::Instant::now() < until {
+            let message = next(&mut renewed).await.unwrap();
+            assert!(
+                !matches!(message, ExecMessage::Error(_) | ExecMessage::Exit(_)),
+                "the shell outlives its access credential"
+            );
+        }
+        keep.abort();
+        drop(renewed);
+
+        // A revoked family ends the shell at the next check with the code, then 4401.
+        let expiring = Fixture::session(&database.connection).await?;
+        let family_id = expire_access_soon(&database.connection).await?;
         let mut expired = fixture.open(&expiring, "manager").await;
         opened(&fixture.agent).await;
-        // Keep it busy so the idle limit doesn't win.
-        let keep = tokio::spawn({
-            let events = fixture.agent.events();
-            async move {
-                for _ in 0..40 {
-                    let _ = events.send(AgentExecEvent::Output(b".".to_vec()));
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                }
-            }
-        });
+        revoke_family(&database.connection, family_id).await?;
+        let keep = keep_busy(&fixture.agent);
         let error = loop {
             if let ExecMessage::Error(error) = next(&mut expired).await.unwrap() {
                 break error;

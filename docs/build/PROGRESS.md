@@ -87,3 +87,9 @@ Append one line per work session: date, spec, what happened, what is next.
   placeholders reachable from Settings (ADR 0028). Every spec from 01 to 18 is done, and the
   full check set passed.
 - 2026-09-28 — spec 18 done (a0e3ac8). Build plan complete.
+- 2026-10-04 — PR 135 review, fix batch 1 (P0 and security/data-loss floors): exec shells follow
+  the session family and audit records reach the log (ADR 0030); atomic login throttle, bounded
+  Argon2id with 429 `busy`, a first-run setup code, and reset-safe sessions (ADR 0029); loopback-only
+  TCP Docker hosts and loopback-bound dev daemons; the password cleared from WebView mutation state,
+  saved connections kept on read errors, credential DTOs without `Debug`. Full check set passed
+  with PostgreSQL. Next: batch 2 (switching controllers, the manager engine, error wording).

@@ -29,13 +29,24 @@ pub struct FieldErrors {
     pub password: Option<FieldProblem>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub display_name: Option<FieldProblem>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub setup_code: Option<FieldProblem>,
 }
 
 impl FieldErrors {
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.email.is_none() && self.password.is_none() && self.display_name.is_none()
+        self.email.is_none()
+            && self.password.is_none()
+            && self.display_name.is_none()
+            && self.setup_code.is_none()
     }
+}
+
+/// Only presence is checked here; whether it matches is decided against the controller's code.
+#[must_use]
+pub fn setup_code_problem(setup_code: &str) -> Option<FieldProblem> {
+    setup_code.trim().is_empty().then_some(FieldProblem::Empty)
 }
 
 /// The comparison key for an email: trimmed and lowercased.

@@ -5,17 +5,22 @@ use sea_orm::{
 use uuid::Uuid;
 
 use crate::auth::{
-    actions::{claim_bootstrap_owner, create_session},
+    actions::{bootstrap_status, claim_bootstrap_owner, create_session},
+    credentials::SetupCode,
     domain::IssuedSession,
     entities::password_credential,
     password,
-    validation::{FieldErrors, display_name_problem, email_problem, password_problem},
+    validation::{
+        FieldErrors, FieldProblem, display_name_problem, email_problem, password_problem,
+        setup_code_problem,
+    },
 };
 
 pub struct OwnerRegistration {
     pub display_name: String,
     pub email: String,
     pub password: String,
+    pub setup_code: String,
 }
 
 impl std::fmt::Debug for OwnerRegistration {
@@ -23,6 +28,7 @@ impl std::fmt::Debug for OwnerRegistration {
         formatter
             .debug_struct("OwnerRegistration")
             .field("password", &"<redacted>")
+            .field("setup_code", &"<redacted>")
             .finish_non_exhaustive()
     }
 }
@@ -41,29 +47,50 @@ pub enum RegisterOwnerError {
     Invalid(FieldErrors),
     #[error("the owner already exists")]
     OwnerExists,
+    /// Every Argon2id permit is in use.
+    #[error("too many password checks are running")]
+    Busy,
     #[error("registration persistence failed")]
     Persistence,
 }
 
 /// First-run registration: create the owner with an Argon2id password, claim
 /// the bootstrap singleton, and issue a session, all in one transaction.
-/// Registration closes for good once an owner exists.
+/// Registration needs the controller's setup code and closes for good once an
+/// owner exists. Nothing reaches Argon2id until both of those checks pass.
 pub async fn execute(
     database: &DatabaseConnection,
     registration: OwnerRegistration,
+    expected_code: Option<&SetupCode>,
 ) -> Result<RegisteredOwner, RegisterOwnerError> {
     let errors = FieldErrors {
         email: email_problem(&registration.email),
         password: password_problem(&registration.password),
         display_name: display_name_problem(&registration.display_name),
+        setup_code: setup_code_problem(&registration.setup_code),
     };
     if !errors.is_empty() {
         return Err(RegisterOwnerError::Invalid(errors));
     }
+    if bootstrap_status::execute(database)
+        .await
+        .map_err(|_| RegisterOwnerError::Persistence)?
+    {
+        return Err(RegisterOwnerError::OwnerExists);
+    }
+    if !expected_code.is_some_and(|code| code.matches(&registration.setup_code)) {
+        return Err(RegisterOwnerError::Invalid(FieldErrors {
+            setup_code: Some(FieldProblem::Invalid),
+            ..FieldErrors::default()
+        }));
+    }
     let email = registration.email.trim().to_owned();
     let display_name = registration.display_name.trim().to_owned();
     // Hash before the transaction so the singleton lock is never held across Argon2id.
-    let password_hash = password::hash(registration.password)
+    let permit = password::permit()
+        .await
+        .map_err(|_| RegisterOwnerError::Busy)?;
+    let password_hash = password::hash(permit, registration.password)
         .await
         .map_err(|_| RegisterOwnerError::Persistence)?;
 

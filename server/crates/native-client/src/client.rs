@@ -433,6 +433,8 @@ async fn classify_account_error(response: Response) -> NativeClientError {
                     retry_after_seconds,
                 }
             }),
+        // Too many password checks are running; nothing about this email.
+        (429, "busy") => NativeClientError::ServiceUnavailable,
         _ => fallback,
     }
 }

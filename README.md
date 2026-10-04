@@ -96,14 +96,19 @@ PostgreSQL keeps its data; see below.
 ### Owner account and password reset
 
 The first sign-in on a fresh controller creates the owner (email, display name,
-password of 12–128 characters); registration then closes for good. Ten failed
-sign-ins for one email within fifteen minutes lock that email for fifteen minutes.
-There is no self-service reset. On the controller host, set a new password (read
-from stdin; every session is signed out and the lock is cleared):
+password of 12–128 characters); registration then closes for good. While no owner
+exists, the controller prints a setup code to its standard output when it starts
+(`Kontainer setup code: …`); the Create owner screen asks for it, so nobody else
+who reaches the controller first can claim it. A restart prints a new code.
+
+Ten failed sign-ins for one email within fifteen minutes lock that email for
+fifteen minutes. There is no self-service reset. On the controller host, set a new
+password; it is read from stdin, so `read -s` keeps it out of the terminal and the
+shell history, and every session is signed out and the lock is cleared:
 
 ```bash
 cd server
-printf '%s\n' 'the new passphrase' | cargo run --bin kontainer-controller -- task auth:reset-password email:owner@example.com
+read -rs PW && printf '%s\n' "$PW" | cargo run --bin kontainer-controller -- task auth:reset-password email:owner@example.com; unset PW
 ```
 
 ### Common Commands

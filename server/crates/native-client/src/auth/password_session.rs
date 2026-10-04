@@ -23,7 +23,8 @@ pub struct PasswordSession {
     pub credentials: SessionCredentials,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+// No `Debug`: this holds plaintext credentials and must never be formatted.
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct PasswordSessionReply {
     cluster_id: String,

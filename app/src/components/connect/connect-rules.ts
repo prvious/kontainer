@@ -1,4 +1,4 @@
-import type { AccountFieldErrors, FieldProblem, LoginFailure, ProbeView } from "@/types/session";
+import { ACCOUNT_FIELDS, type AccountFieldErrors, type FieldProblem, type LoginFailure, type ProbeView } from "@/types/session";
 import { clockTime } from "@/lib/time";
 
 export const DEFAULT_ORIGIN = "http://127.0.0.1:5150";
@@ -14,17 +14,25 @@ export function connectionHost(origin: string): string {
 export const PASSWORD_MIN = 12;
 export const PASSWORD_MAX = 128;
 export const NAME_MAX = 80;
+export const EMAIL_MAX = 254;
 
-export type ConnectField = "origin" | "displayName" | "email" | "password" | "confirm";
+export type ConnectField = "origin" | "setupCode" | "displayName" | "email" | "password" | "confirm";
 export type ConnectErrors = Partial<Record<ConnectField, string>>;
 
 const EMAIL_SHAPE = /^[^\s@]+@[^\s@.]+(\.[^\s@.]+)+$/;
+const SETUP_CODE_EMPTY = "Enter the setup code from the controller's startup output.";
+const SETUP_CODE_INVALID = "That setup code doesn't match. Check the controller's latest startup output.";
 
 export function emailError(email: string): string | undefined {
     const value = email.trim();
     if (!value) return "Enter the owner's email.";
+    if ([...value].length > EMAIL_MAX) return `Use at most ${EMAIL_MAX} characters.`;
     if (!EMAIL_SHAPE.test(value)) return "Enter an email like owner@example.com.";
     return undefined;
+}
+
+export function setupCodeError(setupCode: string): string | undefined {
+    return setupCode.trim() ? undefined : SETUP_CODE_EMPTY;
 }
 
 export function passwordError(password: string): string | undefined {
@@ -52,17 +60,20 @@ export function originError(origin: string): string | undefined {
     }
 }
 
-const SERVER_FIELD_MESSAGES: Record<FieldProblem, (field: string) => string> = {
-    invalid: (field) => (field === "email" ? "Enter an email like owner@example.com." : "This value isn't accepted."),
-    empty: (field) => (field === "displayName" ? "Enter your name." : "This field is required."),
+type AccountField = (typeof ACCOUNT_FIELDS)[number];
+
+const SERVER_FIELD_MESSAGES: Record<FieldProblem, (field: AccountField) => string> = {
+    invalid: (field) =>
+        field === "email" ? "Enter an email like owner@example.com." : field === "setupCode" ? SETUP_CODE_INVALID : "This value isn't accepted.",
+    empty: (field) => (field === "displayName" ? "Enter your name." : field === "setupCode" ? SETUP_CODE_EMPTY : "This field is required."),
     too_short: () => `Use at least ${PASSWORD_MIN} characters.`,
-    too_long: (field) => (field === "displayName" ? `Use at most ${NAME_MAX} characters.` : `Use at most ${PASSWORD_MAX} characters.`),
+    too_long: (field) => `Use at most ${field === "displayName" ? NAME_MAX : field === "email" ? EMAIL_MAX : PASSWORD_MAX} characters.`,
 };
 
 /** Field errors the controller returned (`validation_failed`), landed on their fields. */
 export function serverFieldErrors(fields: AccountFieldErrors | undefined): ConnectErrors {
     const errors: ConnectErrors = {};
-    for (const key of ["email", "password", "displayName"] as const) {
+    for (const key of ACCOUNT_FIELDS) {
         const problem = fields?.[key];
         if (problem) errors[key] = SERVER_FIELD_MESSAGES[problem](key);
     }

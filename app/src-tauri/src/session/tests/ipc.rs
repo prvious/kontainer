@@ -82,6 +82,17 @@ fn connection_probe_and_failure_shapes_match_the_shared_fixture() {
         serde_json::to_value(&failure).expect("serializes"),
         fixture()["loginFailure"]
     );
+    let setup_code_failure = LoginFailure {
+        fields: Some(FieldErrorsView {
+            setup_code: Some(FieldProblem::Invalid),
+            ..FieldErrorsView::default()
+        }),
+        ..SessionError::ValidationFailed.into()
+    };
+    assert_eq!(
+        serde_json::to_value(&setup_code_failure).expect("serializes"),
+        fixture()["setupCodeFailure"]
+    );
 }
 
 #[test]

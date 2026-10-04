@@ -1,6 +1,6 @@
 # 0014. Password authentication, throttling, and saved connections
 
-- Status: accepted
+- Status: accepted (amended by 0029)
 - Date: 2026-09-28
 - Spec: docs/build/04-auth-and-connect.md
 

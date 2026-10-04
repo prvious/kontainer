@@ -111,6 +111,8 @@ pub(crate) struct FieldErrorsView {
     pub password: Option<FieldProblem>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub display_name: Option<FieldProblem>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub setup_code: Option<FieldProblem>,
 }
 
 /// A failed sign-in, registration, or bootstrap check: the closed code plus

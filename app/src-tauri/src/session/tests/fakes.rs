@@ -52,6 +52,7 @@ pub(crate) const PROFILE_ID: Uuid = Uuid::from_u128(0xbb);
 pub(crate) const EMAIL: &str = "owner@example.com";
 pub(crate) const DISPLAY_NAME: &str = "Ada Owner";
 pub(crate) const PASSWORD: &str = "correct horse battery staple";
+pub(crate) const SETUP_CODE: &str = "setup-code-canary";
 
 pub(crate) fn new_log() -> OpLog {
     Arc::new(Mutex::new(Vec::new()))
@@ -1340,9 +1341,17 @@ impl Controller for FakeController {
         display_name: &'a str,
         email: &'a str,
         _password: &'a str,
+        setup_code: &'a str,
         _cancellation: &'a CancellationToken,
     ) -> ControllerFuture<'a, Result<RedeemedSession, LoginFailure>> {
-        record(&self.log, format!("register_owner:{display_name}:{email}"));
+        // Records only whether the code reached the controller, never its value.
+        record(
+            &self.log,
+            format!(
+                "register_owner:{display_name}:{email}:{}",
+                setup_code == SETUP_CODE
+            ),
+        );
         let outcome = self
             .script
             .lock()

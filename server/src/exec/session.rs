@@ -13,6 +13,7 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
+    AUDIT_TARGET,
     auth::domain::ValidatedSession,
     exec::{
         domain::{ExecTiming, valid_dimensions, validate_open},
@@ -116,7 +117,7 @@ impl StreamApplication for ExecSession {
                     };
                 }
                 tracing::info!(
-                    target: "kontainer::audit",
+                    target: AUDIT_TARGET,
                     event = "exec.open",
                     principal = %self.session.principal_id,
                     session = %self.session.family_id,
@@ -132,6 +133,8 @@ impl StreamApplication for ExecSession {
                     input: receiver,
                     closer: sender,
                     activity,
+                    principal_id: self.session.principal_id,
+                    family_id: self.session.family_id,
                     access_expires_at: self.session.access_expires_at,
                     timing: self.timing,
                     cancellation,
@@ -184,7 +187,7 @@ impl Drop for ExecSession {
             let _ = input.try_send(AgentExecInput::Close);
             cancellation.cancel();
             tracing::info!(
-                target: "kontainer::audit",
+                target: AUDIT_TARGET,
                 event = "exec.close",
                 principal = %self.session.principal_id,
                 session = %self.session.family_id,

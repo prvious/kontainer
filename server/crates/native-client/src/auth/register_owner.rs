@@ -14,22 +14,29 @@ pub(crate) struct RegisterOwnerBody<'a> {
     pub(crate) display_name: &'a str,
     pub(crate) email: &'a str,
     pub(crate) password: &'a str,
+    pub(crate) setup_code: &'a str,
 }
 
 impl NativeClient {
     /// Create the owner on first run and sign in. Never retried: a replayed
     /// registration could race another first-run client.
     ///
+    /// `setup_code` is the one-time code the controller prints at startup
+    /// while it has no owner. Like the password, it travels only in the JSON
+    /// body and is never logged.
+    ///
     /// # Errors
     ///
     /// [`NativeClientError::OwnerExists`] once registration has closed,
-    /// [`NativeClientError::ValidationFailed`] with field problems, plus the
-    /// shared transport, deadline, cancellation, and validation codes.
+    /// [`NativeClientError::ValidationFailed`] with field problems (including
+    /// a missing or mismatched setup code), plus the shared transport,
+    /// deadline, cancellation, and validation codes.
     pub async fn register_owner(
         &self,
         display_name: &str,
         email: &str,
         password: &str,
+        setup_code: &str,
         cancellation: &CancellationToken,
     ) -> Result<PasswordSession, Traced<NativeClientError>> {
         let url = self
@@ -43,6 +50,7 @@ impl NativeClient {
                 display_name,
                 email,
                 password,
+                setup_code,
             })
             .build()
             .map_err(|_| Traced::untraced(NativeClientError::InvalidConfiguration))?;

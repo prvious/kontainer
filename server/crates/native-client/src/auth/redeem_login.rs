@@ -16,7 +16,8 @@ pub(crate) struct RedeemLoginBody<'a> {
     pub(crate) code_verifier: &'a str,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+// No `Debug`: this holds plaintext credentials and must never be formatted.
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct RedeemLoginReply {
     cluster_id: String,

@@ -35,6 +35,10 @@
         "fields": { "password": "too_short" },
         "requestId": "01J9ZK4F3Q"
     },
+    "setupCodeFailure": {
+        "code": "validation_failed",
+        "fields": { "setupCode": "invalid" }
+    },
     "errorCodes": [
         "invalid_origin",
         "invalid_credentials",

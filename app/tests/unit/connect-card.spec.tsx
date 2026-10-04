@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
 import { AuthProvider } from "@/contexts/auth-context";
 import { ConnectCard } from "@/components/connect/connect-card";
+import { emailError, serverFieldErrors, setupCodeError } from "@/components/connect/connect-rules";
 import { probeAll } from "@/hooks/session/use-session-connections";
 import type { SavedConnection } from "@/types/session";
 
@@ -50,6 +51,13 @@ describe("Connect card", () => {
         expect(invoke).toHaveBeenCalledWith("session_bootstrap", { origin: "http://127.0.0.1:5150" });
         expect(screen.getByLabelText("Name")).toBeInTheDocument();
         expect(screen.getByLabelText("Confirm password")).toBeInTheDocument();
+        const setupCode = screen.getByLabelText("Setup code");
+        expect(setupCode).toHaveAttribute("autocomplete", "off");
+        expect(setupCode).toHaveAttribute("spellcheck", "false");
+        expect(setupCode).toHaveClass("font-mono");
+        expect(setupCode).toHaveAccessibleDescription(
+            "Printed by the controller when it starts. A new code is printed on each restart until the owner exists.",
+        );
         expect(screen.getByRole("button", { name: /Create owner account/ })).toBeInTheDocument();
         expect(screen.getByText("This account becomes the Owner. Registration closes once it exists.")).toBeInTheDocument();
         expect(screen.queryByText("Saved connections")).not.toBeInTheDocument();
@@ -66,6 +74,7 @@ describe("Connect card", () => {
         await user.tab();
         await waitFor(() => expect(screen.getByRole("button", { name: /Sign in/ })).toBeInTheDocument());
         expect(screen.queryByText("First-time setup")).not.toBeInTheDocument();
+        expect(screen.queryByLabelText("Setup code")).not.toBeInTheDocument();
     });
 
     it("validates on blur and on submit without calling the agent", async () => {
@@ -79,6 +88,8 @@ describe("Connect card", () => {
         await user.type(screen.getByLabelText("Password"), "short");
         await user.type(screen.getByLabelText("Confirm password"), "different");
         await user.click(screen.getByRole("button", { name: /Create owner account/ }));
+        expect(screen.getByText("Enter the setup code from the controller's startup output.")).toBeInTheDocument();
+        expect(screen.getByLabelText("Setup code")).toHaveAttribute("aria-invalid", "true");
         expect(screen.getByText("Enter your name.")).toBeInTheDocument();
         expect(screen.getByText("Use at least 12 characters.")).toBeInTheDocument();
         expect(screen.getByText("The passwords don't match.")).toBeInTheDocument();
@@ -94,6 +105,7 @@ describe("Connect card", () => {
         });
         renderCard();
         await screen.findByText("First-time setup");
+        await user.type(screen.getByLabelText("Setup code"), "  K7QF-2MXD  ");
         await user.type(screen.getByLabelText("Name"), "Ada");
         await user.type(screen.getByLabelText("Email"), "ada@example.com");
         await user.type(screen.getByLabelText("Password"), "correct horse battery");
@@ -105,8 +117,28 @@ describe("Connect card", () => {
             displayName: "Ada",
             email: "ada@example.com",
             password: "correct horse battery",
+            setupCode: "K7QF-2MXD",
             label: null,
         });
+    });
+
+    it("tells the owner to recheck the startup output when the setup code doesn't match", async () => {
+        const user = userEvent.setup();
+        mockCommands({
+            session_bootstrap: () => ({ ownerExists: false }),
+            session_register: () => Promise.reject({ code: "validation_failed", fields: { setupCode: "invalid" } }),
+        });
+        renderCard();
+        await screen.findByText("First-time setup");
+        await user.type(screen.getByLabelText("Setup code"), "stale-code");
+        await user.type(screen.getByLabelText("Name"), "Ada");
+        await user.type(screen.getByLabelText("Email"), "ada@example.com");
+        await user.type(screen.getByLabelText("Password"), "correct horse battery");
+        await user.type(screen.getByLabelText("Confirm password"), "correct horse battery");
+        await user.click(screen.getByRole("button", { name: /Create owner account/ }));
+        expect(await screen.findByText("That setup code doesn't match. Check the controller's latest startup output.")).toBeInTheDocument();
+        expect(screen.getByLabelText("Setup code")).toHaveAttribute("aria-invalid", "true");
+        expect(invoke).toHaveBeenCalledWith("session_register", expect.objectContaining({ setupCode: "stale-code" }));
     });
 
     it("02.S2: keeps the typed URL, names the failed step, and offers TRY AGAIN", async () => {
@@ -190,6 +222,29 @@ describe("Connect card", () => {
         renderCard();
         await waitFor(() => expect(screen.getByTestId("probe-c2")).toHaveAttribute("data-tone", "destructive"));
         expect(screen.getByTestId("probe-c1")).toHaveAttribute("data-tone", "success");
+    });
+});
+
+describe("connect rules", () => {
+    const longEmail = `${"a".repeat(243)}@example.com`; // 255 characters
+
+    it("caps the email at its own 254-character limit, not the password's", () => {
+        expect(emailError(`${"a".repeat(242)}@example.com`)).toBeUndefined();
+        expect(emailError(longEmail)).toBe("Use at most 254 characters.");
+        expect(serverFieldErrors({ email: "too_long" })).toEqual({ email: "Use at most 254 characters." });
+        expect(serverFieldErrors({ password: "too_long", displayName: "too_long" })).toEqual({
+            password: "Use at most 128 characters.",
+            displayName: "Use at most 80 characters.",
+        });
+    });
+
+    it("asks for the setup code and explains a mismatch", () => {
+        expect(setupCodeError("   ")).toBe("Enter the setup code from the controller's startup output.");
+        expect(setupCodeError("K7QF-2MXD")).toBeUndefined();
+        expect(serverFieldErrors({ setupCode: "empty" })).toEqual({ setupCode: "Enter the setup code from the controller's startup output." });
+        expect(serverFieldErrors({ setupCode: "invalid" })).toEqual({
+            setupCode: "That setup code doesn't match. Check the controller's latest startup output.",
+        });
     });
 });
 

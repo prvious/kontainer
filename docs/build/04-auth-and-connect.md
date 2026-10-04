@@ -47,13 +47,15 @@ Decisions: ADR 0001, ADR 0002.
 
 - `GET /api/v1/auth/bootstrap` → `{ ownerExists: bool }`. No auth. Cheap and unauthenticated on
   purpose; it reveals nothing beyond "setup done".
-- `POST /api/v1/auth/register` `{ displayName, email, password }` → 201 with the same body the
-  GitHub redeem returns (cluster id, principal id, credentials, expiries); 409 `owner_exists`;
-  400 `validation_failed` with field errors (`email` invalid, `password` under 12 or over 128,
-  `displayName` empty or over 80).
+- `POST /api/v1/auth/register` `{ displayName, email, password, setupCode }` → 201 with the same
+  body the GitHub redeem returns (cluster id, principal id, credentials, expiries); 409
+  `owner_exists`; 400 `validation_failed` with field errors (`email` invalid, `password` under 12
+  or over 128, `displayName` empty or over 80, `setupCode` empty or not the controller's code);
+  429 `busy` when every Argon2id permit is in use. The setup code is printed at startup while no
+  owner exists (ADR 0029).
 - `POST /api/v1/auth/password/login` `{ email, password }` → 200 same body; 401
-  `invalid_credentials` with `attemptsRemaining`; 429 `locked` with `retryAfterSeconds`; 400
-  validation.
+  `invalid_credentials` with `attemptsRemaining`; 429 `locked` with `retryAfterSeconds`; 429
+  `busy` (not counted against the email); 400 validation.
 - `GET /api/v1/auth/session` (protected) → `{ principalId, email, displayName }` for the titlebar
   and settings.
 - Existing refresh and logout routes are unchanged. GitHub routes remain and still return 503 while

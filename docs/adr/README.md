@@ -66,3 +66,5 @@ What becomes easier, what becomes harder, what must be revisited and when.
 | [0026](./0026-exec-sessions.md) | Exec sessions: protocol, agent RPC, relay, and the terminal | accepted |
 | [0027](./0027-staged-settings.md) | Staged Settings, the controller status, and switching agents | accepted |
 | [0028](./0028-integrations-placeholders.md) | Integrations hub and GitHub page as placeholders, and a kit breadcrumb | accepted |
+| [0029](./0029-first-run-setup-code-and-bounded-sign-in.md) | Require a setup code to register the owner, and bound unauthenticated sign-in work | accepted |
+| [0030](./0030-exec-sessions-follow-the-session-family.md) | End exec shells with the session family, not the access credential, and audit under the crate target | accepted |

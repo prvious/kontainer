@@ -1,6 +1,6 @@
 # 0001. Password authentication first, GitHub login later as an integration
 
-- Status: accepted
+- Status: accepted (amended by 0029)
 - Date: 2026-09-28
 - Spec: docs/build/04-auth-and-connect.md
 

@@ -88,6 +88,12 @@ impl AgentConfig {
     }
 
     fn validate(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+        if self.docker_host.is_remote_tcp() {
+            return Err(
+                "KONTAINER_DOCKER_HOST may select tcp:// only for a loopback host (localhost, 127.0.0.0/8, ::1)"
+                    .into(),
+            );
+        }
         if self.docker_host.is_tcp() && !self.environment.allows_tcp_docker_host() {
             return Err(
                 "KONTAINER_DOCKER_HOST may select tcp:// only when KONTAINER_ENV is development or test"
@@ -274,6 +280,15 @@ mod tests {
         config.environment = AgentEnvironment::Production;
         config.docker_host = "unix:///var/run/docker.sock".parse().unwrap();
         assert!(config.validate().is_ok());
+
+        config.docker_host = "tcp://192.168.1.20:2375".parse().unwrap();
+        for environment in [AgentEnvironment::Development, AgentEnvironment::Test] {
+            config.environment = environment;
+            assert_eq!(
+                config.validate().unwrap_err().to_string(),
+                "KONTAINER_DOCKER_HOST may select tcp:// only for a loopback host (localhost, 127.0.0.0/8, ::1)"
+            );
+        }
     }
 
     #[test]

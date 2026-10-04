@@ -7,6 +7,19 @@ import { AuthProvider } from "@/contexts/auth-context";
 import { useAuth } from "@/hooks/use-auth";
 import type { SessionView } from "@/types/session";
 
+/** The latest result each sign-in hook returned to the provider, to inspect what its observer still holds. */
+const sessionCommands = vi.hoisted(() => ({ login: null as { variables: unknown } | null, register: null as { variables: unknown } | null }));
+
+vi.mock("@/hooks/session/use-session-login", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("@/hooks/session/use-session-login")>();
+    return { ...actual, useSessionLogin: () => (sessionCommands.login = actual.useSessionLogin()) };
+});
+
+vi.mock("@/hooks/session/use-session-register", async (importOriginal) => {
+    const actual = await importOriginal<typeof import("@/hooks/session/use-session-register")>();
+    return { ...actual, useSessionRegister: () => (sessionCommands.register = actual.useSessionRegister()) };
+});
+
 const session: SessionView = {
     profileId: "9e91e40b-09d0-44b8-9e1b-329455b25617",
     origin: "https://controller.example/",
@@ -326,6 +339,68 @@ describe("AuthProvider custody", () => {
         await waitFor(() => expect(failure).toEqual({ code: "invalid_credentials", attemptsRemaining: 7, requestId: "req-1" }));
         expect(screen.getByTestId("issue")).toHaveTextContent("none");
         expect(screen.getByTestId("session")).toHaveTextContent("none");
+    });
+
+    it("drops the password from mutation state after a sign-in fails and after it succeeds", async () => {
+        let accept = false;
+        vi.mocked(invoke).mockImplementation(async (command: string) => {
+            if (command !== "session_login") return null;
+            if (!accept) throw { code: "invalid_credentials", attemptsRemaining: 7 };
+            return session;
+        });
+        renderAuth();
+        await restored();
+
+        for (const outcome of ["failure", "success"]) {
+            accept = outcome === "success";
+            vi.mocked(invoke).mockClear();
+            await act(async () => screen.getByText("Login").click());
+            await waitFor(() => expect(invoke).toHaveBeenCalledWith("session_login", expect.objectContaining({ password: "correct horse battery" })));
+            await waitFor(() => expect(activeQueryClient.getMutationCache().getAll()).toEqual([]));
+            expect(sessionCommands.login?.variables, outcome).toBeUndefined();
+        }
+        expect(screen.getByTestId("session")).toHaveTextContent(session.profileId);
+    });
+
+    it("drops the password and setup code from mutation state after a registration fails", async () => {
+        vi.mocked(invoke).mockImplementation(async (command: string) => {
+            if (command === "session_register") throw { code: "validation_failed", fields: { setupCode: "invalid" } };
+            return null;
+        });
+        let failure: unknown;
+        function Register() {
+            const auth = useAuth();
+            return (
+                <button
+                    onClick={() => {
+                        auth.register({
+                            origin: "https://controller.example",
+                            displayName: "Jane",
+                            email: "jane@example.com",
+                            password: "correct horse battery",
+                            setupCode: "setup-code-canary",
+                        }).catch((error: unknown) => {
+                            failure = error;
+                        });
+                    }}
+                >
+                    Register
+                </button>
+            );
+        }
+        render(
+            <AuthProvider>
+                <CaptureQueryClient />
+                <Register />
+                <TestConsumer />
+            </AuthProvider>,
+        );
+        await restored();
+        await act(async () => screen.getByText("Register").click());
+        await waitFor(() => expect(failure).toEqual({ code: "validation_failed", fields: { setupCode: "invalid" } }));
+        expect(invoke).toHaveBeenCalledWith("session_register", expect.objectContaining({ setupCode: "setup-code-canary" }));
+        await waitFor(() => expect(activeQueryClient.getMutationCache().getAll()).toEqual([]));
+        expect(sessionCommands.register?.variables).toBeUndefined();
     });
 
     it("logs in, restores after a React restart, and logs out through custody", async () => {

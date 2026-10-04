@@ -8,7 +8,7 @@ services:
     environment:
       DOCKER_TLS_CERTDIR: ""
     ports:
-      - "2375:2375"
+      - "127.0.0.1:2375:2375"
     networks:
       dind:
         ipv4_address: 172.29.0.10
@@ -30,7 +30,7 @@ services:
     environment:
       DOCKER_TLS_CERTDIR: ""
     ports:
-      - "2376:2375"
+      - "127.0.0.1:2376:2375"
     networks:
       dind:
         ipv4_address: 172.29.0.11
@@ -52,7 +52,7 @@ services:
     environment:
       DOCKER_TLS_CERTDIR: ""
     ports:
-      - "2378:2375"
+      - "127.0.0.1:2378:2375"
     networks:
       dind:
         ipv4_address: 172.29.0.12

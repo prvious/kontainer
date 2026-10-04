@@ -15,6 +15,7 @@ use utoipa::ToSchema;
 use crate::{
     auth::{
         actions::{bootstrap_status, password_login, register_owner},
+        credentials::SetupCode,
         domain::IssuedSession,
         throttle::LoginThrottle,
         validation::FieldErrors,
@@ -35,6 +36,8 @@ pub(crate) struct RegisterRequest {
     email: String,
     /// 12–128 characters. JSON body only; never logged or echoed.
     password: String,
+    /// The code the controller printed at startup (ADR 0029). Never logged or echoed.
+    setup_code: String,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -109,6 +112,11 @@ fn unavailable() -> Response {
     )
 }
 
+/// Every Argon2id permit is in use; the attempt was not counted.
+fn busy() -> Response {
+    json_no_store(StatusCode::TOO_MANY_REQUESTS, ErrorBody { error: "busy" })
+}
+
 fn validation_failed(fields: FieldErrors) -> Response {
     json_no_store(
         StatusCode::BAD_REQUEST,
@@ -167,8 +175,9 @@ pub(crate) async fn bootstrap(State(context): State<AppContext>) -> Response {
     request_body = RegisterRequest,
     responses(
         (status = 201, description = "Owner created and signed in; credentials returned once", body = PasswordSessionResponse),
-        (status = 400, description = "Field errors (`validation_failed`)", body = ValidationErrorResponse),
+        (status = 400, description = "Field errors (`validation_failed`); a missing or wrong setup code is `fields.setupCode`", body = ValidationErrorResponse),
         (status = 409, description = "An owner already exists (`owner_exists`); registration is closed"),
+        (status = 429, description = "Too many password checks are running (`busy`); try again"),
         (status = 503, description = "Persistence unavailable")
     ),
     security(())
@@ -180,12 +189,14 @@ pub(crate) async fn register(
     let Some(cluster) = context.shared_store.get::<ControllerClusterId>() else {
         return unavailable();
     };
+    let expected_code = context.shared_store.get::<SetupCode>();
     let registration = register_owner::OwnerRegistration {
         display_name: body.display_name,
         email: body.email,
         password: body.password,
+        setup_code: body.setup_code,
     };
-    match register_owner::execute(&context.db, registration).await {
+    match register_owner::execute(&context.db, registration, expected_code.as_ref()).await {
         Ok(owner) => session_response(
             StatusCode::CREATED,
             cluster,
@@ -200,6 +211,7 @@ pub(crate) async fn register(
                 error: "owner_exists",
             },
         ),
+        Err(register_owner::RegisterOwnerError::Busy) => busy(),
         Err(register_owner::RegisterOwnerError::Persistence) => unavailable(),
     }
 }
@@ -212,7 +224,7 @@ pub(crate) async fn register(
         (status = 200, description = "Signed in; credentials returned once", body = PasswordSessionResponse),
         (status = 400, description = "Field errors (`validation_failed`)", body = ValidationErrorResponse),
         (status = 401, description = "Email or password is incorrect", body = InvalidCredentialsResponse),
-        (status = 429, description = "Ten failures locked this email for fifteen minutes", body = LockedResponse),
+        (status = 429, description = "Ten failures locked this email for fifteen minutes (`locked`), or too many password checks are running (`busy`, not counted)", body = LockedResponse),
         (status = 503, description = "Persistence unavailable")
     ),
     security(())
@@ -260,6 +272,7 @@ pub(crate) async fn password_login(
             }
             response
         }
+        Err(password_login::PasswordLoginError::Busy) => busy(),
         Err(password_login::PasswordLoginError::Persistence) => unavailable(),
     }
 }

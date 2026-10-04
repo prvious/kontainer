@@ -64,11 +64,15 @@ export type SessionErrorCode = (typeof SESSION_ERROR_CODES)[number];
 
 export type FieldProblem = "invalid" | "empty" | "too_short" | "too_long";
 
+/** Mirrors `FieldErrorsView` in Rust. `setupCode` is only ever `empty` or `invalid`. */
 export interface AccountFieldErrors {
     email?: FieldProblem;
     password?: FieldProblem;
     displayName?: FieldProblem;
+    setupCode?: FieldProblem;
 }
+
+export const ACCOUNT_FIELDS = ["email", "password", "displayName", "setupCode"] as const satisfies readonly (keyof AccountFieldErrors)[];
 
 /** A failed sign-in, registration, or bootstrap check. Mirrors `LoginFailure` in Rust. */
 export interface LoginFailure {
@@ -167,7 +171,7 @@ export function loginFailureFromIpc(error: unknown): LoginFailure {
         if (typeof data.fields === "object" && data.fields !== null) {
             const fields = data.fields as Record<string, unknown>;
             failure.fields = {};
-            for (const key of ["email", "password", "displayName"] as const) {
+            for (const key of ACCOUNT_FIELDS) {
                 const problem = fieldProblem(fields[key]);
                 if (problem) failure.fields[key] = problem;
             }

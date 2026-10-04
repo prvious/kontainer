@@ -18,6 +18,7 @@ interface SessionIpcFixture {
     savedConnection: SavedConnection;
     probeView: ProbeView;
     loginFailure: LoginFailure;
+    setupCodeFailure: LoginFailure;
     errorCodes: string[];
 }
 
@@ -59,6 +60,7 @@ describe("session IPC contract fixture", () => {
         expect(probeViewFromIpc(fixture.probeView)).toEqual(fixture.probeView);
         expect(probeViewFromIpc({ status: "ready" })).toEqual({ status: "ready" });
         expect(loginFailureFromIpc(fixture.loginFailure)).toEqual(fixture.loginFailure);
+        expect(loginFailureFromIpc(fixture.setupCodeFailure)).toEqual(fixture.setupCodeFailure);
         // Plain SessionError strings still arrive from the non-login commands.
         expect(loginFailureFromIpc("profile_conflict")).toEqual({ code: "profile_conflict" });
     });

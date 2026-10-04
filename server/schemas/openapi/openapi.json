@@ -232,7 +232,7 @@
             }
           },
           "429": {
-            "description": "Ten failures locked this email for fifteen minutes",
+            "description": "Ten failures locked this email for fifteen minutes (`locked`), or too many password checks are running (`busy`, not counted)",
             "content": {
               "application/json": {
                 "schema": {
@@ -278,7 +278,7 @@
             }
           },
           "400": {
-            "description": "Field errors (`validation_failed`)",
+            "description": "Field errors (`validation_failed`); a missing or wrong setup code is `fields.setupCode`",
             "content": {
               "application/json": {
                 "schema": {
@@ -289,6 +289,9 @@
           },
           "409": {
             "description": "An owner already exists (`owner_exists`); registration is closed"
+          },
+          "429": {
+            "description": "Too many password checks are running (`busy`); try again"
           },
           "503": {
             "description": "Persistence unavailable"
@@ -3975,7 +3978,8 @@
         "required": [
           "displayName",
           "email",
-          "password"
+          "password",
+          "setupCode"
         ],
         "properties": {
           "displayName": {
@@ -3987,6 +3991,10 @@
           "password": {
             "type": "string",
             "description": "12–128 characters. JSON body only; never logged or echoed."
+          },
+          "setupCode": {
+            "type": "string",
+            "description": "The code the controller printed at startup (ADR 0029). Never logged or echoed."
           }
         },
         "additionalProperties": false

@@ -25,6 +25,7 @@ const BOOTSTRAP_RESPONSE: &str = include_str!("fixtures/auth/bootstrap-response.
 const ACCOUNT_RESPONSE: &str = include_str!("fixtures/auth/account-response.json");
 const EMAIL: &str = "owner@example.com";
 const PASSWORD: &str = "correct horse battery staple";
+const SETUP_CODE: &str = "setup-code-canary";
 const ACCESS_CANARY: &str = "kta_11111111111111111111111111111111.2222222222222222222222222222222222222222222222222222222222222222";
 
 fn with_request_id(status: u16, body: &str, request_id: &str) -> Behavior {
@@ -114,7 +115,8 @@ async fn sign_in_failures_carry_their_closed_details_and_the_request_id() {
             fields: AccountFieldErrors {
                 email: Some(FieldProblem::Invalid),
                 password: Some(FieldProblem::TooShort),
-                display_name: None
+                display_name: None,
+                setup_code: None,
             }
         }
     );
@@ -140,18 +142,71 @@ async fn register_owner_creates_the_session_or_reports_that_registration_closed(
     let client = plain_client(&server);
     let cancel = CancellationToken::new();
 
-    let session = wait(client.register_owner("Ada Owner", EMAIL, PASSWORD, &cancel))
+    let session = wait(client.register_owner("Ada Owner", EMAIL, PASSWORD, SETUP_CODE, &cancel))
         .await
         .expect("registered");
     assert_eq!(session.display_name, "Ada Owner");
     let requests = server.requests();
     assert_eq!(requests[0].target, "/api/v1/auth/register");
     assert_eq!(json_body(&requests[0].body), json_body(REGISTER_REQUEST));
+    // The setup code, like the password, travels only in the JSON body.
+    assert!(!requests[0].target.contains(SETUP_CODE));
 
-    let error = wait(client.register_owner("Ada Owner", EMAIL, PASSWORD, &cancel))
+    let error = wait(client.register_owner("Ada Owner", EMAIL, PASSWORD, SETUP_CODE, &cancel))
         .await
         .unwrap_err();
     assert_eq!(error.error, NativeClientError::OwnerExists);
+}
+
+#[tokio::test]
+async fn a_busy_controller_is_unavailable_for_sign_in_and_registration_and_not_retried() {
+    let busy = r#"{"error":"busy"}"#;
+    let server = TestServer::plain(vec![respond(429, busy), respond(429, busy)]).await;
+    let client = plain_client(&server);
+    let cancel = CancellationToken::new();
+
+    let error = wait(client.password_login(EMAIL, PASSWORD, &cancel))
+        .await
+        .unwrap_err();
+    assert_eq!(error.error, NativeClientError::ServiceUnavailable);
+    let error = wait(client.register_owner("Ada Owner", EMAIL, PASSWORD, SETUP_CODE, &cancel))
+        .await
+        .unwrap_err();
+    assert_eq!(error.error, NativeClientError::ServiceUnavailable);
+    assert_eq!(server.request_count(), 2, "a busy answer is never retried");
+}
+
+#[tokio::test]
+async fn register_owner_reports_an_empty_or_mismatched_setup_code_on_its_field() {
+    let server = TestServer::plain(vec![
+        respond(
+            400,
+            r#"{"error":"validation_failed","fields":{"setupCode":"empty"}}"#,
+        ),
+        respond(
+            400,
+            r#"{"error":"validation_failed","fields":{"setupCode":"invalid"}}"#,
+        ),
+    ])
+    .await;
+    let client = plain_client(&server);
+    let cancel = CancellationToken::new();
+
+    for (setup_code, problem) in [("", FieldProblem::Empty), ("wrong", FieldProblem::Invalid)] {
+        let error = wait(client.register_owner("Ada Owner", EMAIL, PASSWORD, setup_code, &cancel))
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.error,
+            NativeClientError::ValidationFailed {
+                fields: AccountFieldErrors {
+                    setup_code: Some(problem),
+                    ..AccountFieldErrors::default()
+                }
+            }
+        );
+    }
+    assert_eq!(server.request_count(), 2, "registration is never retried");
 }
 
 #[tokio::test]
@@ -303,7 +358,7 @@ fn openapi_password_contract_matches_the_checked_artifact() {
     );
     assert_eq!(
         response_statuses(&document, "/api/v1/auth/register", "post"),
-        BTreeSet::from(["201", "400", "409", "503"].map(str::to_owned))
+        BTreeSet::from(["201", "400", "409", "429", "503"].map(str::to_owned))
     );
 
     assert_schema_fields(
@@ -321,6 +376,7 @@ fn openapi_password_contract_matches_the_checked_artifact() {
             display_name: "fixture",
             email: "fixture",
             password: "fixture",
+            setup_code: "fixture",
         }),
     );
     assert_schema_fields(

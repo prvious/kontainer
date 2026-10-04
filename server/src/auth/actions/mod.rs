@@ -9,5 +9,6 @@ pub mod register_owner;
 pub mod reset_password;
 pub mod revoke_session_family;
 pub mod rotate_refresh;
+pub mod session_family_active;
 pub mod start_github_login;
 pub mod validate_access;

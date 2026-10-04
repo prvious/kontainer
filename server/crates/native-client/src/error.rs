@@ -37,6 +37,9 @@ pub struct AccountFieldErrors {
     /// Problem with the display name.
     #[serde(default)]
     pub display_name: Option<FieldProblem>,
+    /// Problem with the first-run setup code: `empty` or `invalid`.
+    #[serde(default)]
+    pub setup_code: Option<FieldProblem>,
 }
 
 /// An error plus the controller's `x-request-id` for the failed exchange,
