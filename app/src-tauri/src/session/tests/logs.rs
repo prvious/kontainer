@@ -271,7 +271,8 @@ async fn a_reload_or_window_close_ends_every_stream_and_shell() {
     assert!(
         window.contains("WindowEvent::Destroyed") && window.contains("end_page_streams(window)")
     );
-    let ends = lib_section("fn end_page_streams", "\n}\n");
+    // The closing brace at column 0; "\n}" matches LF and CRLF checkouts (Windows CI).
+    let ends = lib_section("fn end_page_streams", "\n}");
     assert!(ends.contains("LogStreams>()") && ends.contains("streams.cancel_all()"));
     assert!(ends.contains("ExecSessions>()") && ends.contains("shells.cancel_all()"));
 
