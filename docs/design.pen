@@ -1,5 +1,5 @@
 {
-  "version": "2.19",
+  "version": "2.20",
   "children": [
     {
       "type": "frame",
@@ -84535,7 +84535,7 @@
                                   "id": "degXB",
                                   "name": "Trend Label",
                                   "fill": "$--muted-foreground",
-                                  "content": "LAST 60s",
+                                  "content": "LAST 2m",
                                   "fontFamily": "$--font-mono",
                                   "fontSize": "$--text-3xs",
                                   "fontWeight": "700",
@@ -91153,7 +91153,7 @@
                                   "id": "cAtB5",
                                   "name": "Trend Label",
                                   "fill": "$--muted-foreground",
-                                  "content": "LAST 60s",
+                                  "content": "LAST 2m",
                                   "fontFamily": "$--font-mono",
                                   "fontSize": "$--text-3xs",
                                   "fontWeight": "700",
@@ -93210,7 +93210,7 @@
                                   "id": "iTXgh",
                                   "name": "Trend Label",
                                   "fill": "$--muted-foreground",
-                                  "content": "LAST 60s",
+                                  "content": "LAST 2m",
                                   "fontFamily": "$--font-mono",
                                   "fontSize": "$--text-3xs",
                                   "fontWeight": "700",
@@ -262421,7 +262421,7 @@
                                   "id": "a1e5i",
                                   "name": "Trend Label",
                                   "fill": "$--muted-foreground",
-                                  "content": "LAST 60s",
+                                  "content": "LAST 2m",
                                   "fontFamily": "$--font-mono",
                                   "fontSize": "$--text-3xs",
                                   "fontWeight": "700",
