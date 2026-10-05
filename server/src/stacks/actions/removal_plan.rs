@@ -1,8 +1,9 @@
+use kontainer_engine::STACK_NAMESPACE_LABEL;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
     services::actions::list_services::MANAGER_READ_DEADLINE,
-    stacks::domain::{RemovalPlan, STACK_LABEL},
+    stacks::domain::RemovalPlan,
     swarm::engine::{ManagerEngine, ManagerError},
 };
 
@@ -34,7 +35,13 @@ pub async fn execute(
             .list_networks(cancellation)
             .await?
             .into_iter()
-            .filter(|network| network.labels.get(STACK_LABEL).map(String::as_str) == Some(stack))
+            .filter(|network| {
+                network
+                    .labels
+                    .get(STACK_NAMESPACE_LABEL)
+                    .map(String::as_str)
+                    == Some(stack)
+            })
             .collect();
         let mut volumes: Vec<String> = services
             .iter()

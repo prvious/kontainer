@@ -59,8 +59,7 @@ pub fn latest_task_error(tasks: &[TaskSummary]) -> Option<String> {
 }
 
 /// What a service operation asks for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ServiceAction {
     Scale,
     Restart,

@@ -66,14 +66,6 @@ pub struct OperationSnapshot {
     pub request_id: Option<String>,
 }
 
-impl OperationState {
-    /// `succeeded`, `failed`, and `cancelled` never change again.
-    #[must_use]
-    pub const fn is_terminal(self) -> bool {
-        matches!(self, Self::Succeeded | Self::Failed | Self::Cancelled)
-    }
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct OperationBody {

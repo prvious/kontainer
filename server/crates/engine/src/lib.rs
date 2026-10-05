@@ -17,41 +17,34 @@ mod service_log;
 mod volume;
 
 pub use capability::{
-    CapabilityStatus, EngineAccessScope, EngineApiVersion, EngineApiVersionParseError,
-    EngineCapabilities, EngineDescription, UnsupportedCapabilityReason,
+    CapabilityStatus, EngineAccessScope, EngineApiVersion, EngineCapabilities, EngineDescription,
+    UnsupportedCapabilityReason,
 };
 pub use container::{
     ContainerAction, ContainerActionOptions, ContainerPage, ContainerPageRequest, ContainerState,
-    ContainerSummary, ContainerTimes, DEFAULT_CONTAINER_PAGE_SIZE, DEFAULT_STOP_TIMEOUT_SECONDS,
-    MAX_CONTAINER_PAGE_SIZE, MAX_CONTAINER_PAGE_TOKEN_LEN, MAX_CONTAINER_STATUS_LEN,
-    MAX_STOP_TIMEOUT_SECONDS, SERVICE_NAME_LABEL, STACK_NAMESPACE_LABEL, TASK_ID_LABEL,
-    bounded_label, canonical_display_name, format_page_token, is_valid_container_id,
-    parse_docker_time, parse_page_token, truncate_status_text,
+    ContainerSummary, ContainerTimes, DEFAULT_STOP_TIMEOUT_SECONDS, MAX_CONTAINER_PAGE_SIZE,
+    MAX_CONTAINER_PAGE_TOKEN_LEN, MAX_CONTAINER_STATUS_LEN, MAX_STOP_TIMEOUT_SECONDS,
+    STACK_NAMESPACE_LABEL, is_valid_container_id,
 };
 pub use error::{EngineError, EngineErrorKind, EngineOperation};
 pub use exec::{ExecAttachment, ExecInput, ExecOutput, ExecStatus, is_missing_shell_status};
-pub use host::{DEFAULT_DOCKER_SOCKET, DockerHost, DockerHostParseError};
+pub use host::DockerHost;
 pub use image::{
-    ImageSummary, PullEvent, PullProgress, PullStream, bounded_message, is_plausible_reference,
-    is_valid_image_id,
+    ImageSummary, PullEvent, PullProgress, PullStream, is_plausible_reference, is_valid_image_id,
 };
 pub use local::{LocalDockerEngine, LocalEngineOptions};
 pub use network::{
-    BUILTIN_NETWORKS, MAX_NETWORK_ENDPOINTS, MAX_NETWORK_NAME_LEN, NetworkCreate, NetworkDetail,
-    NetworkEndpoint, NetworkSummary, is_builtin_network, is_valid_cidr, is_valid_network_id,
-    is_valid_network_name,
+    MAX_NETWORK_ENDPOINTS, NetworkCreate, NetworkDetail, NetworkEndpoint, NetworkSummary,
+    is_builtin_network, is_valid_cidr, is_valid_network_id, is_valid_network_name,
 };
-pub use node::{ContainerStats, CpuCounters, DiskUsage, NodeInfo, cpu_percent, memory_used};
+pub use node::{ContainerStats, CpuCounters, DiskUsage, NodeInfo, cpu_percent};
 pub use service::{
     ServiceMode, ServiceSummary, SwarmAvailability, SwarmNode, SwarmNodeState, SwarmRole,
-    SwarmStatus, TaskSummary, image_without_digest, is_valid_swarm_id,
+    TaskSummary, image_without_digest, is_valid_swarm_id,
 };
-pub use service_log::{
-    LogSource, ServiceLogLine, ServiceLogRequest, ServiceLogStream, parse_service_log_line,
-};
+pub use service_log::{LogSource, ServiceLogLine, ServiceLogRequest, ServiceLogStream};
 pub use volume::{
-    MAX_VOLUME_LABELS, MAX_VOLUME_NAME_LEN, MAX_VOLUME_USERS, VolumeCreate, VolumeSummary,
-    are_valid_volume_labels, is_valid_volume_name,
+    MAX_VOLUME_USERS, VolumeCreate, VolumeSummary, are_valid_volume_labels, is_valid_volume_name,
 };
 
 #[async_trait]
@@ -172,8 +165,8 @@ pub trait ContainerEngine: Send + Sync {
         ))
     }
 
-    /// Every volume on the node with the containers that mount it. Sizes are left `None`: they
-    /// come from [`ContainerEngine::disk_usage`], which callers sample sparingly.
+    /// Every volume on the node with the containers that mount it. Sizes aren't here: they come
+    /// from [`ContainerEngine::disk_usage`], which callers sample sparingly.
     async fn list_volumes(
         &self,
         _cancellation: &CancellationToken,
@@ -334,11 +327,8 @@ pub trait ContainerEngine: Send + Sync {
         ))
     }
 
-    /// Whether this daemon is a manager that can reach the Swarm's majority.
-    async fn swarm_status(
-        &self,
-        _cancellation: &CancellationToken,
-    ) -> Result<SwarmStatus, EngineError> {
+    /// Answers once this daemon answers `docker info`: a cheap check that it still responds.
+    async fn swarm_status(&self, _cancellation: &CancellationToken) -> Result<(), EngineError> {
         Err(EngineError::new(
             EngineErrorKind::UnsupportedCapability,
             EngineOperation::ReadSwarm,

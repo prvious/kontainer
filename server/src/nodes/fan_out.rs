@@ -33,7 +33,6 @@ impl From<AgentClientError> for NodeFailure {
             AgentClientError::InvalidResponse => Self::Error("invalid_response"),
             AgentClientError::InvalidPagination => Self::Error("invalid_pagination"),
             AgentClientError::NotFound => Self::Error("not_found"),
-            AgentClientError::AlreadyInState => Self::Error("already_in_state"),
             AgentClientError::ContainerRunning => Self::Error("container_running"),
             AgentClientError::EngineError => Self::Error("engine_error"),
             AgentClientError::ImageInUse => Self::Error("image_in_use"),
@@ -159,7 +158,7 @@ mod tests {
     use super::{FanOutResponse, NodeFailure, fan_out};
     use crate::{
         nodes::agents::{AgentDirectory, NodeEndpoint},
-        rpc::{AgentClient, AgentClientError, AgentContainerPage, AgentDescription},
+        rpc::{AgentClient, AgentClientError, AgentContainerPage},
     };
 
     #[derive(Debug)]
@@ -177,33 +176,20 @@ mod tests {
 
     #[async_trait::async_trait]
     impl AgentClient for FakeAgent {
-        async fn describe(
-            &self,
-            _: &CancellationToken,
-        ) -> Result<AgentDescription, AgentClientError> {
-            match self.behaviour {
-                Behaviour::Answer => Ok(AgentDescription {
-                    node_id: self.node_id.clone(),
-                    agent_version: "test".to_owned(),
-                    architecture: "test".to_owned(),
-                    docker_connected: true,
-                }),
-                Behaviour::Hang => std::future::pending().await,
-                Behaviour::Refuse => Err(AgentClientError::Unavailable),
-            }
-        }
-
         async fn list_containers(
             &self,
             _: u32,
             _: String,
             _: &CancellationToken,
         ) -> Result<AgentContainerPage, AgentClientError> {
-            Err(AgentClientError::InvalidResponse)
-        }
-
-        fn node_id(&self) -> &str {
-            &self.node_id
+            match self.behaviour {
+                Behaviour::Answer => Ok(AgentContainerPage {
+                    containers: Vec::new(),
+                    next_page_token: Some(self.node_id.clone()),
+                }),
+                Behaviour::Hang => std::future::pending().await,
+                Behaviour::Refuse => Err(AgentClientError::Unavailable),
+            }
         }
     }
 
@@ -241,7 +227,11 @@ mod tests {
             Duration::from_millis(100),
             |client| async move {
                 let cancellation = CancellationToken::new();
-                client.describe(&cancellation).await.map(|d| d.node_id)
+                // The fake answers with its own node id as the cursor.
+                client
+                    .list_containers(1, String::new(), &cancellation)
+                    .await
+                    .map(|page| page.next_page_token.unwrap_or_default())
             },
         )
         .await;
@@ -286,7 +276,11 @@ mod tests {
             nodes,
             &FakeDirectory,
             Duration::from_millis(100),
-            |client| async move { client.describe(&CancellationToken::new()).await },
+            |client| async move {
+                client
+                    .list_containers(1, String::new(), &CancellationToken::new())
+                    .await
+            },
         )
         .await;
         assert_eq!(outcomes.len(), 16);

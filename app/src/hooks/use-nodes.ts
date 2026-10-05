@@ -6,9 +6,6 @@ import { authenticatedInvoke, type ReportCustodyError as Report } from "@/hooks/
 import type { ClusterSummary, ControllerSettings, ControllerStatusView, NodeList, SampleSeries, SampleWindow } from "@/types/nodes";
 import { DEFAULT_APP_SETTINGS } from "@/types/settings";
 
-/** The controller serves only the cluster-wide series (ADR 0039). */
-type SampleScope = "cluster";
-
 export const nodesQueries = {
     all: (profileId: string) => ["nodes", profileId] as const,
     list: (profileId: string, report: Report) =>
@@ -21,9 +18,10 @@ export const nodesQueries = {
             queryKey: [...nodesQueries.all(profileId), "summary"] as const,
             queryFn: () => authenticatedInvoke<ClusterSummary>("get_cluster_summary", profileId, {}, report),
         }),
-    samples: (profileId: string, scope: SampleScope, window: SampleWindow, bucket: string, report: Report) =>
+    /** The controller serves only the cluster-wide series (ADR 0039). */
+    samples: (profileId: string, window: SampleWindow, bucket: string, report: Report) =>
         queryOptions({
-            queryKey: [...nodesQueries.all(profileId), "samples", scope, window, bucket] as const,
+            queryKey: [...nodesQueries.all(profileId), "samples", window, bucket] as const,
             queryFn: () => authenticatedInvoke<SampleSeries>("get_cluster_samples", profileId, { window, bucket }, report),
         }),
 };
@@ -64,13 +62,13 @@ export function useClusterSummary() {
     });
 }
 
-export function useSamples(scope: SampleScope, window: SampleWindow, bucket: string) {
+export function useSamples(window: SampleWindow, bucket: string) {
     const { session, reportInventoryCustodyError } = useAuth();
     const paused = useQueriesPaused();
     const interval = useRefreshInterval();
     const profileId = session?.profileId ?? "";
     return useQuery({
-        ...nodesQueries.samples(profileId, scope, window, bucket, reportInventoryCustodyError),
+        ...nodesQueries.samples(profileId, window, bucket, reportInventoryCustodyError),
         enabled: Boolean(session) && !paused,
         refetchInterval: interval,
         retry: false,

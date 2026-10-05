@@ -61,10 +61,10 @@ describe("node membership queries", () => {
     it("reads the cluster series under the samples key", async () => {
         mockCommands({ get_cluster_samples: () => fixture.clusterSamples });
         const { queryClient, wrapper } = createWrapper();
-        const cluster = renderHook(() => useSamples("cluster", "5m", "60s"), { wrapper });
+        const cluster = renderHook(() => useSamples("5m", "60s"), { wrapper });
         await waitFor(() => expect(cluster.result.current.data).toBeDefined());
         expect(invoke).toHaveBeenCalledWith("get_cluster_samples", { profileId, window: "5m", bucket: "60s" });
-        expect(queryClient.getQueryData(["nodes", profileId, "samples", "cluster", "5m", "60s"])).toEqual(fixture.clusterSamples);
+        expect(queryClient.getQueryData(["nodes", profileId, "samples", "5m", "60s"])).toEqual(fixture.clusterSamples);
     });
 
     it("pauses while the session-expired dialog is up", async () => {

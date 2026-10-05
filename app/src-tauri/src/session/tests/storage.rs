@@ -4,8 +4,8 @@ use serde_json::json;
 
 use crate::session::models::{
     decode_anchor, decode_profile, encode_anchor, encode_profile, sanitize_label, AnchorRecord,
-    AnchorState, LoginHint, ProfileRecord, SessionDocument, ANCHOR_VERSION, MAX_LABEL_CHARS,
-    MAX_RECORD_BYTES, METADATA_VERSION, PROFILE_VERSION,
+    AnchorState, ProfileRecord, SessionDocument, ANCHOR_VERSION, MAX_LABEL_CHARS, MAX_RECORD_BYTES,
+    METADATA_VERSION, PROFILE_VERSION,
 };
 
 use super::fakes::{fake_refresh, ORIGIN, PRINCIPAL_ID, PROFILE_ID};
@@ -110,13 +110,8 @@ fn profile_record_debug_redacts_the_credential() {
 
 #[test]
 fn metadata_document_uses_a_strict_versioned_schema() {
-    let document = SessionDocument::new(
-        Some(LoginHint {
-            origin: ORIGIN.to_owned(),
-            label: Some("Default".to_owned()),
-        }),
-        None,
-    );
+    let mut document = SessionDocument::new(None);
+    document.touch_connection(ORIGIN, Some("Default".to_owned()), 1);
     let value = serde_json::to_value(&document).expect("serializes");
     assert_eq!(value["version"], json!(METADATA_VERSION));
     assert_eq!(
@@ -131,6 +126,38 @@ fn metadata_document_uses_a_strict_versioned_schema() {
     let mut missing = value;
     missing.as_object_mut().expect("object").remove("version");
     assert!(serde_json::from_value::<SessionDocument>(missing).is_err());
+}
+
+#[test]
+fn a_document_with_the_removed_hint_still_decodes_and_is_rewritten_without_it() {
+    for hint in [
+        json!({ "origin": ORIGIN, "label": "Default" }),
+        serde_json::Value::Null,
+    ] {
+        let stored = json!({
+            "version": METADATA_VERSION,
+            "hint": hint,
+            "session": null,
+            "connections": [{
+                "id": "018f2e34-0000-7000-8000-0000000000c1",
+                "origin": ORIGIN,
+                "label": "Default",
+                "lastUsedAtUnixMs": 1
+            }]
+        });
+        let document: SessionDocument =
+            serde_json::from_value(stored).expect("an older document is not corrupt");
+        assert_eq!(document.connections.len(), 1);
+        assert_eq!(document.connections[0].origin, ORIGIN);
+
+        let rewritten = serde_json::to_value(&document).expect("serializes");
+        assert!(rewritten.get("hint").is_none(), "{rewritten}");
+        assert_eq!(rewritten["connections"][0]["origin"], json!(ORIGIN));
+        assert_eq!(
+            serde_json::from_value::<SessionDocument>(rewritten).expect("round trips"),
+            SessionDocument::new(None).with_connections(document.connections)
+        );
+    }
 }
 
 #[test]

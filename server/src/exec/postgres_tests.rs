@@ -30,8 +30,8 @@ use crate::{
         postgres_tests::check_in,
     },
     rpc::{
-        AgentClient, AgentClientError, AgentContainerPage, AgentDescription, AgentExecEvent,
-        AgentExecInput, AgentExecOpen, AgentExecStream,
+        AgentClient, AgentClientError, AgentContainerPage, AgentExecEvent, AgentExecInput,
+        AgentExecOpen, AgentExecStream,
     },
     test_support::PostgresTestDatabase,
 };
@@ -65,10 +65,6 @@ struct SharedAgent(Arc<FakeAgent>);
 
 #[async_trait::async_trait]
 impl AgentClient for SharedAgent {
-    async fn describe(&self, _: &CancellationToken) -> Result<AgentDescription, AgentClientError> {
-        Err(AgentClientError::Unavailable)
-    }
-
     async fn list_containers(
         &self,
         _: u32,
@@ -76,10 +72,6 @@ impl AgentClient for SharedAgent {
         _: &CancellationToken,
     ) -> Result<AgentContainerPage, AgentClientError> {
         Err(AgentClientError::Unavailable)
-    }
-
-    fn node_id(&self) -> &str {
-        "manager"
     }
 
     async fn exec(

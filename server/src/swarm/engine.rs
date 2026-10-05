@@ -12,8 +12,8 @@ use std::{
 use async_trait::async_trait;
 use kontainer_engine::{
     CapabilityStatus, ContainerEngine, DockerHost, EngineErrorKind, LocalDockerEngine,
-    LocalEngineOptions, NetworkCreate, NetworkDetail, NetworkSummary, ServiceLogRequest,
-    ServiceLogStream, ServiceSummary, SwarmNode, SwarmStatus, TaskSummary,
+    LocalEngineOptions, NetworkCreate, NetworkSummary, ServiceLogRequest, ServiceLogStream,
+    ServiceSummary, SwarmNode, TaskSummary,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -60,9 +60,7 @@ impl From<kontainer_engine::EngineError> for ManagerError {
             EngineErrorKind::QuorumUnavailable => Self::QuorumUnavailable,
             EngineErrorKind::VersionConflict => Self::VersionConflict,
             EngineErrorKind::NotAManager => Self::NotAManager,
-            EngineErrorKind::Conflict
-            | EngineErrorKind::DaemonRejected
-            | EngineErrorKind::NotModified => Self::Rejected,
+            EngineErrorKind::Conflict | EngineErrorKind::DaemonRejected => Self::Rejected,
             _ => Self::Unavailable,
         }
     }
@@ -75,13 +73,6 @@ pub trait ManagerEngine: Send + Sync {
         &self,
         cancellation: &CancellationToken,
     ) -> Result<Vec<NetworkSummary>, ManagerError>;
-
-    /// One network with the manager's own endpoints on it.
-    async fn inspect_network(
-        &self,
-        id: &str,
-        cancellation: &CancellationToken,
-    ) -> Result<NetworkDetail, ManagerError>;
 
     /// Create a swarm-scope network and return its id.
     async fn create_network(
@@ -141,10 +132,8 @@ pub trait ManagerEngine: Send + Sync {
         Err(ManagerError::Unavailable)
     }
 
-    async fn swarm_status(
-        &self,
-        _cancellation: &CancellationToken,
-    ) -> Result<SwarmStatus, ManagerError> {
+    /// Answers once the manager answers `docker info`.
+    async fn swarm_status(&self, _cancellation: &CancellationToken) -> Result<(), ManagerError> {
         Err(ManagerError::Unavailable)
     }
 
@@ -249,15 +238,6 @@ impl<E: ContainerEngine> ManagerEngine for DockerManagerEngine<E> {
         Ok(engine.list_networks(cancellation).await?)
     }
 
-    async fn inspect_network(
-        &self,
-        id: &str,
-        cancellation: &CancellationToken,
-    ) -> Result<NetworkDetail, ManagerError> {
-        let engine = self.manager(cancellation).await?;
-        Ok(engine.inspect_network(id, cancellation).await?)
-    }
-
     async fn create_network(
         &self,
         network: &NetworkCreate,
@@ -333,10 +313,7 @@ impl<E: ContainerEngine> ManagerEngine for DockerManagerEngine<E> {
             .await?)
     }
 
-    async fn swarm_status(
-        &self,
-        cancellation: &CancellationToken,
-    ) -> Result<SwarmStatus, ManagerError> {
+    async fn swarm_status(&self, cancellation: &CancellationToken) -> Result<(), ManagerError> {
         let engine = self.manager(cancellation).await?;
         Ok(engine.swarm_status(cancellation).await?)
     }

@@ -27,9 +27,7 @@ async fn logout_revokes_before_deleting_and_reports_logged_out() {
 
     let document = harness.metadata.document().expect("document");
     assert!(document.session.is_none());
-    let hint = document.hint.expect("hint");
-    assert_eq!(hint.origin, ORIGIN);
-    assert_eq!(hint.label.as_deref(), Some("Default"));
+    assert_eq!(document.connections[0].origin, ORIGIN);
 }
 
 #[tokio::test]
@@ -272,9 +270,8 @@ async fn logout_without_memory_rotates_and_revokes() {
     assert!(position(&entries, "logout") < position(&entries, "delete_profile"));
     assert!(!harness.vault.has_profile(anchor.profile_id));
     assert_eq!(harness.vault.anchor_state(), Some(AnchorState::LoggedOut));
-    let hint = harness.hint().expect("hint");
-    assert_eq!(hint.origin, ORIGIN);
-    assert_eq!(hint.label.as_deref(), Some("Default"));
+    let document = harness.metadata.document().expect("document");
+    assert!(document.session.is_none());
 }
 
 #[tokio::test]

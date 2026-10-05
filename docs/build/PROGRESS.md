@@ -93,3 +93,35 @@ Append one line per work session: date, spec, what happened, what is next.
   TCP Docker hosts and loopback-bound dev daemons; the password cleared from WebView mutation state,
   saved connections kept on read errors, credential DTOs without `Debug`. Full check set passed
   with PostgreSQL. Next: batch 2 (switching controllers, the manager engine, error wording).
+- 2026-10-04 — PR 135 review, fix batches 2–8, which completes every approved item (PT-01–PT-68)
+  and owner decision (D1–D11):
+  - **Batch 2 (d3080ce):**
+    - The manager engine checks its Swarm role per call (ADR 0031).
+    - Conflict wording is fixed, and idempotent replays work.
+    - A second controller can be signed in.
+    - The TypeScript IPC decoders are gone (ADR 0032).
+  - **Batch 3 (63be1a9):** log and exec stream lifecycles, transport deadlines and pings, and
+    abandoned shells (ADR 0033).
+  - **Batch 4 (6d401d3):** service verdicts come from Swarm's update status (ADR 0034); also
+    stacks, DataTable, stale snapshots, and the list pages.
+  - **Batch 5 (7928e13):**
+    - Operation budgets, and timeouts recorded as uncertain (ADR 0035).
+    - Connectivity, and the node health strip as LAST 2m.
+    - Typed confirmation when data can be lost (ADR 0036).
+  - **Batch 6 (26de9ec):**
+    - One-shot stats, and the lateral latest-sample read.
+    - Departed nodes, and null manager counts (ADR 0037).
+    - The contract snapshot fix, and the desktop operation-events chain removed (ADR 0038).
+  - **PT-66 (e5bf954):** utoipa collects the schemas and security is inherited.
+  - **Batch 7 (99249a2):**
+    - Unread node, metrics, service and list data dropped (ADRs 0039, 0040).
+    - Doc corrections (ADR 0041).
+    - The controller's deployment requirement documented (ADR 0042).
+  - **Batch 8 (this commit):**
+    - Idempotent start/stop, and chrono for Docker times (ADR 0043).
+    - The remaining dead code.
+    - Test-only identities gated behind `test-util`.
+    - A 2 s `df` deadline.
+    - The vestigial session `hint` dropped.
+
+  Every batch passed the full check set (rule 8) with PostgreSQL.

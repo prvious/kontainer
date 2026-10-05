@@ -20,7 +20,6 @@ pub struct NetworkRow {
     /// Running containers attached, summed across nodes.
     pub containers: u32,
     pub created_at_seconds: Option<i64>,
-    pub labels: BTreeMap<String, String>,
     pub attachable: bool,
     pub builtin: bool,
     /// Local: its node. Swarm: the nodes with endpoints on it.
@@ -46,7 +45,6 @@ impl NetworkRow {
             subnets: network.subnets,
             containers: network.containers,
             created_at_seconds: network.created_at_seconds,
-            labels: network.labels,
             attachable: network.attachable,
             builtin: network.builtin,
             node_ids,
@@ -63,7 +61,6 @@ impl NetworkRow {
             subnets: network.subnets,
             containers: 0,
             created_at_seconds: network.created_at_seconds,
-            labels: network.labels,
             attachable: network.attachable,
             node_ids: Vec::new(),
         }

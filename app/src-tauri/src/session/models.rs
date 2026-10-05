@@ -149,27 +149,28 @@ pub(crate) fn decode_profile(bytes: &[u8]) -> Result<ProfileRecord, RecordDecode
 }
 
 /// Non-secret metadata persisted in `session.json`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct SessionDocument {
     pub version: u32,
-    /// Unauthenticated login hint (previously used origin and label).
-    pub hint: Option<LoginHint>,
     /// The session summary, valid only while it matches the vault anchor.
     pub session: Option<MetadataSession>,
     /// Controllers signed in to before, most recent first (at most ten).
     #[serde(default)]
     pub connections: Vec<SavedConnection>,
+    /// Older documents carry a removed `hint`: accept and drop it so they don't read as corrupt.
+    #[serde(default, skip_serializing, rename = "hint")]
+    legacy_hint: Option<serde::de::IgnoredAny>,
 }
 
 impl SessionDocument {
     /// A document that always carries the current schema version.
-    pub(crate) fn new(hint: Option<LoginHint>, session: Option<MetadataSession>) -> Self {
+    pub(crate) fn new(session: Option<MetadataSession>) -> Self {
         Self {
             version: METADATA_VERSION,
-            hint,
             session,
             connections: Vec::new(),
+            legacy_hint: None,
         }
     }
 
@@ -228,14 +229,6 @@ pub(crate) struct SavedConnection {
 pub(crate) struct ConnectionSummary {
     pub nodes: u32,
     pub services: u32,
-}
-
-/// A non-secret origin/label hint for the login screen.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct LoginHint {
-    pub origin: String,
-    pub label: Option<String>,
 }
 
 /// The non-secret session summary; never authority on its own.

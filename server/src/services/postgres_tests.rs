@@ -16,7 +16,7 @@ use axum::{
     http::{Request, StatusCode, header},
 };
 use chrono::Utc;
-use kontainer_engine::{ServiceMode, ServiceSummary, SwarmStatus, TaskSummary};
+use kontainer_engine::{ServiceMode, ServiceSummary, TaskSummary};
 use loco_rs::{
     app::{AppContext, Hooks},
     config::Config,
@@ -237,14 +237,6 @@ impl ManagerEngine for FakeSwarm {
         Ok(Vec::new())
     }
 
-    async fn inspect_network(
-        &self,
-        _: &str,
-        _: &CancellationToken,
-    ) -> Result<kontainer_engine::NetworkDetail, ManagerError> {
-        Err(ManagerError::NotFound)
-    }
-
     async fn create_network(
         &self,
         _: &kontainer_engine::NetworkCreate,
@@ -321,13 +313,8 @@ impl ManagerEngine for FakeSwarm {
         })
     }
 
-    async fn swarm_status(&self, _: &CancellationToken) -> Result<SwarmStatus, ManagerError> {
-        self.check()?;
-        Ok(SwarmStatus {
-            control_available: true,
-            managers: 1,
-            nodes: 3,
-        })
+    async fn swarm_status(&self, _: &CancellationToken) -> Result<(), ManagerError> {
+        self.check()
     }
 }
 

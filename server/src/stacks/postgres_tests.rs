@@ -44,7 +44,7 @@ use crate::{
     },
     rpc::{
         AgentClient, AgentClientError, AgentContainerPage, AgentContainerState,
-        AgentContainerSummary, AgentDescription,
+        AgentContainerSummary,
     },
     stacks::operations::remove::RemoveStackExecutor,
     swarm::engine::{ManagerEngine, ManagerError, SharedManagerEngine},
@@ -151,14 +151,6 @@ impl ManagerEngine for FakeSwarm {
         _: &CancellationToken,
     ) -> Result<Vec<NetworkSummary>, ManagerError> {
         Ok(self.networks.lock().unwrap().clone())
-    }
-
-    async fn inspect_network(
-        &self,
-        _: &str,
-        _: &CancellationToken,
-    ) -> Result<kontainer_engine::NetworkDetail, ManagerError> {
-        Err(ManagerError::NotFound)
     }
 
     async fn create_network(
@@ -272,10 +264,6 @@ struct FakeAgent;
 
 #[async_trait::async_trait]
 impl AgentClient for FakeAgent {
-    async fn describe(&self, _: &CancellationToken) -> Result<AgentDescription, AgentClientError> {
-        Err(AgentClientError::Unavailable)
-    }
-
     async fn list_containers(
         &self,
         _: u32,
@@ -309,10 +297,6 @@ impl AgentClient for FakeAgent {
             ],
             next_page_token: None,
         })
-    }
-
-    fn node_id(&self) -> &str {
-        "manager"
     }
 }
 

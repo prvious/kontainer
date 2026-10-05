@@ -64,14 +64,6 @@ impl TaskSummary {
     }
 }
 
-/// Whether this manager can answer cluster questions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct SwarmStatus {
-    pub control_available: bool,
-    pub managers: u32,
-    pub nodes: u32,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SwarmRole {
     Manager,

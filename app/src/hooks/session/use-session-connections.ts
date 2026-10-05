@@ -24,7 +24,7 @@ export function useForgetConnection() {
 const MAX_PROBES_IN_FLIGHT = 3;
 
 /** Probe every origin once, at most three at a time; one origin's failure never stops the rest. */
-export async function probeAll(origins: string[], limit = MAX_PROBES_IN_FLIGHT): Promise<Record<string, ProbeView>> {
+export async function probeAll(origins: string[]): Promise<Record<string, ProbeView>> {
     const results: Record<string, ProbeView> = {};
     let next = 0;
     async function worker() {
@@ -37,7 +37,7 @@ export async function probeAll(origins: string[], limit = MAX_PROBES_IN_FLIGHT):
             }
         }
     }
-    await Promise.all(Array.from({ length: Math.min(limit, origins.length) }, worker));
+    await Promise.all(Array.from({ length: Math.min(MAX_PROBES_IN_FLIGHT, origins.length) }, worker));
     return results;
 }
 

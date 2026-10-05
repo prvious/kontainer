@@ -117,10 +117,6 @@ pub(crate) fn action_failure(
             "not_found",
             "The container no longer exists on that node.".to_owned(),
         ),
-        AgentClientError::AlreadyInState => (
-            "already_in_state",
-            format!("The container was already {}.", settled_state(action)),
-        ),
         // Docker's 409: only a removal has a forced form to suggest.
         AgentClientError::ContainerRunning => (
             "container_running",
@@ -166,17 +162,6 @@ pub(crate) fn action_failure(
         ),
     };
     ExecutionFailure::new(code, message)
-}
-
-const fn settled_state(action: AgentContainerAction) -> &'static str {
-    match action {
-        AgentContainerAction::Start
-        | AgentContainerAction::Restart
-        | AgentContainerAction::Unpause => "running",
-        AgentContainerAction::Stop => "stopped",
-        AgentContainerAction::Pause => "paused",
-        AgentContainerAction::Remove => "removed",
-    }
 }
 
 #[cfg(test)]

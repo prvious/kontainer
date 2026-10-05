@@ -13,9 +13,10 @@ service ControllerIntake {
 service NodeAgent {
   rpc Describe(DescribeRequest) returns (DescribeResponse);
   rpc ListContainers(ListContainersRequest) returns (ListContainersResponse);
-  // Lifecycle action on one local container. Failures are statuses whose
-  // message is a stable code: NOT_FOUND `not_found`, FAILED_PRECONDITION
-  // `already_in_state` or `container_running`, UNAVAILABLE `engine_error`.
+  // Lifecycle action on one local container. Starting a running container or
+  // stopping a stopped one succeeds (Docker's 304 is not an error). Failures
+  // are statuses whose message is a stable code: NOT_FOUND `not_found`,
+  // FAILED_PRECONDITION `container_running`, UNAVAILABLE `engine_error`.
   rpc ContainerAction(ContainerActionRequest) returns (ContainerActionResponse);
   rpc ListImages(ListImagesRequest) returns (ListImagesResponse);
   // Failure codes as for ContainerAction; an in-use image is FAILED_PRECONDITION `image_in_use`.
@@ -190,7 +191,9 @@ message ImageSummary {
   int64 created_at_unix_seconds = 5;
   // Containers on this node (any state) created from this image.
   uint32 used_by = 6;
-  bool dangling = 7;
+  // Dropped unread: an untagged image has no `repo_tags`.
+  reserved 7;
+  reserved "dangling";
 }
 
 message ListImagesResponse {
@@ -270,8 +273,9 @@ message NetworkSummary {
   optional int64 created_at_unix_seconds = 7;
   map<string, string> labels = 8;
   bool attachable = 9;
-  bool ingress = 10;
-  bool internal = 11;
+  // Dropped unread: built-in networks are matched by name (`builtin`).
+  reserved 10, 11;
+  reserved "ingress", "internal";
   bool builtin = 12;
 }
 
@@ -289,7 +293,9 @@ message NetworkEndpoint {
 }
 
 message InspectNetworkResponse {
-  NetworkSummary network = 1;
+  // Dropped unread: the controller asks only for the endpoints.
+  reserved 1;
+  reserved "network";
   repeated NetworkEndpoint endpoints = 2;
 }
 

@@ -7,8 +7,8 @@ use crate::session::controller::RedeemedSession;
 use crate::session::errors::LoginFailure;
 use crate::session::errors::SessionError;
 use crate::session::models::{
-    AnchorState, ConnectionSummary, PasswordLoginInput, ProbeDiagnostic, ProbeStatus,
-    RegisterOwnerInput, SessionDocument,
+    AnchorState, ConnectionSummary, ProbeDiagnostic, ProbeStatus, RegisterOwnerInput,
+    SessionDocument,
 };
 use kontainer_native_client::ProbeFailure;
 use zeroize::Zeroizing;
@@ -63,7 +63,6 @@ async fn login_commits_record_metadata_and_anchor_before_publishing() {
     assert_eq!(anchor.origin, ORIGIN);
     assert!(harness.vault.has_profile(view.profile_id));
     let document = harness.metadata.document().expect("document exists");
-    assert!(document.hint.is_none());
     assert!(document.session.is_some());
     assert_eq!(document.connections.len(), 1);
     assert_eq!(document.connections[0].origin, ORIGIN);
@@ -226,33 +225,6 @@ async fn rejected_login_reports_cleanup_uncertain_when_revoke_fails() {
             .expect_err("restart stays pending"),
         SessionError::CleanupUncertain
     );
-}
-
-#[tokio::test]
-async fn login_uses_the_stored_label_and_clears_the_hint_once_committed() {
-    let harness = Harness::new();
-    harness.metadata.set_document(SessionDocument::new(
-        Some(crate::session::models::LoginHint {
-            origin: ORIGIN.to_owned(),
-            label: Some("Hinted".to_owned()),
-        }),
-        None,
-    ));
-    harness
-        .controllers
-        .script()
-        .login
-        .push_back(Ok(redeemed(1)));
-    let view = harness
-        .manager
-        .login(PasswordLoginInput {
-            label: None,
-            ..login_input(ORIGIN)
-        })
-        .await
-        .expect("login succeeds");
-    assert_eq!(view.label.as_deref(), Some("Hinted"));
-    assert!(harness.hint().is_none());
 }
 
 #[tokio::test]
@@ -426,7 +398,7 @@ async fn login_metadata_write_failure_holds_the_commit() {
 #[tokio::test]
 async fn an_unreadable_metadata_store_never_erases_saved_connections() {
     let harness = Harness::new();
-    let mut saved = SessionDocument::new(None, None);
+    let mut saved = SessionDocument::new(None);
     saved.touch_connection(OTHER_ORIGIN, Some("Home lab".to_owned()), 1);
     harness.metadata.set_document(saved.clone());
     harness
@@ -941,7 +913,7 @@ async fn bootstrap_and_probes_answer_for_any_origin() {
 #[tokio::test]
 async fn connections_are_most_recent_first_capped_at_ten_and_survive_sign_out() {
     let harness = Harness::new();
-    let mut document = SessionDocument::new(None, None);
+    let mut document = SessionDocument::new(None);
     for index in 0..10 {
         document.touch_connection(&format!("https://c{index}.example/"), None, index);
     }

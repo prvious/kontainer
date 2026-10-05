@@ -25,8 +25,6 @@ pub struct NetworkSummary {
     pub created_at_seconds: Option<i64>,
     pub labels: BTreeMap<String, String>,
     pub attachable: bool,
-    pub ingress: bool,
-    pub internal: bool,
 }
 
 impl NetworkSummary {

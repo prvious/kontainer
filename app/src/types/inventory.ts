@@ -7,7 +7,6 @@ export const INVENTORY_ERROR_CODES = [
     "local_state_failed",
     "cleanup_uncertain",
     "invalid_node_id",
-    "invalid_pagination",
     "invalid_request",
     "node_not_found",
     "not_found",

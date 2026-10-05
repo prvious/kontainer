@@ -29,7 +29,7 @@ use super::errors::{LoginFailure, SessionError};
 use super::metadata::{MetadataError, SessionMetadataStore};
 use super::models::{
     decode_anchor, decode_profile, encode_anchor, encode_profile, sanitize_label, AnchorRecord,
-    AnchorState, BootstrapView, ConnectionSummary, LoginHint, MetadataSession, PasswordLoginInput,
+    AnchorState, BootstrapView, ConnectionSummary, MetadataSession, PasswordLoginInput,
     ProbeDiagnostic, ProbeStatus, ProbeView, ProfileRecord, RegisterOwnerInput, SavedConnection,
     SessionDocument, SessionView, ANCHOR_VERSION, PROFILE_VERSION,
 };
@@ -381,8 +381,7 @@ impl SessionManager {
         match anchor.state {
             AnchorState::Ready => self.restore_ready(anchor).await.map(Some),
             AnchorState::LoggedOut => {
-                let label = self.stored_label();
-                self.finish_logged_out_document(&anchor, label)?;
+                self.finish_logged_out_document()?;
                 Ok(None)
             }
             // A rotation or logout stopped mid-flight: the stored credential
@@ -500,7 +499,7 @@ impl SessionManager {
         }
         drop(payload);
         let document = self.stored_connections().map(|connections| {
-            let mut document = SessionDocument::new(None, Some(metadata_session_from(&view)))
+            let mut document = SessionDocument::new(Some(metadata_session_from(&view)))
                 .with_connections(connections);
             document.touch_connection(&view.origin, view.label.clone(), now_ms());
             document
@@ -525,11 +524,6 @@ impl SessionManager {
         // transient vault failure leaves the retryable state untouched.
         let anchor = self.load_anchor().await?;
         let mut memory = self.take_memory();
-        let label = memory
-            .active
-            .as_ref()
-            .and_then(|session| session.view.label.clone())
-            .or_else(|| self.stored_label());
 
         let memory_cleanup_marked = match anchor.as_ref() {
             Some(anchor) if anchor.state == AnchorState::LogoutPending => true,
@@ -572,7 +566,7 @@ impl SessionManager {
             AnchorState::LoggedOut | AnchorState::CleanupPending => {
                 self.revoke_held(&mut memory).await?;
                 memory.active = None;
-                let result = self.finish_logout_local(&anchor, label).await;
+                let result = self.finish_logout_local(&anchor).await;
                 memory.finish(result)
             }
             AnchorState::Ready | AnchorState::CommitPending | AnchorState::LogoutPending => {
@@ -588,7 +582,7 @@ impl SessionManager {
                 let controller = match self.controllers.for_origin(&anchor.origin) {
                     Ok(controller) => controller,
                     Err(_) if memory.active.is_none() => {
-                        self.finish_uncertain_logout(&anchor, label).await?;
+                        self.finish_uncertain_logout(&anchor).await?;
                         return Err(SessionError::CleanupUncertain);
                     }
                     Err(_) => return Err(SessionError::CleanupUncertain),
@@ -609,7 +603,7 @@ impl SessionManager {
                             {
                                 Ok(()) => {
                                     memory.active = None;
-                                    let result = self.finish_logout_local(&anchor, label).await;
+                                    let result = self.finish_logout_local(&anchor).await;
                                     return memory.finish(result);
                                 }
                                 Err(SessionError::ReloginRequired) => memory.active = None,
@@ -623,7 +617,7 @@ impl SessionManager {
                             }
                         }
                         let result = self
-                            .logout_record(controller.as_ref(), &anchor, &record, label)
+                            .logout_record(controller.as_ref(), &anchor, &record)
                             .await;
                         memory.finish(result)
                     }
@@ -635,18 +629,18 @@ impl SessionManager {
                             {
                                 Ok(()) => {
                                     memory.active = None;
-                                    let result = self.finish_logout_local(&anchor, label).await;
+                                    let result = self.finish_logout_local(&anchor).await;
                                     return memory.finish(result);
                                 }
                                 Err(SessionError::ReloginRequired) => {
                                     memory.active = None;
-                                    self.finish_uncertain_logout(&anchor, label).await?;
+                                    self.finish_uncertain_logout(&anchor).await?;
                                     return Err(SessionError::CleanupUncertain);
                                 }
                                 Err(_) => return Err(SessionError::RevokeFailed),
                             }
                         }
-                        self.finish_uncertain_logout(&anchor, label).await?;
+                        self.finish_uncertain_logout(&anchor).await?;
                         Err(SessionError::CleanupUncertain)
                     }
                 }
@@ -776,7 +770,7 @@ impl SessionManager {
     async fn restore_ready(&self, anchor: AnchorRecord) -> Result<SessionView, SessionError> {
         let controller = match self.controllers.for_origin(&anchor.origin) {
             Ok(controller) => controller,
-            Err(_) => return Err(self.invalidate_to_relogin(&anchor, None).await),
+            Err(_) => return Err(self.invalidate_to_relogin(&anchor).await),
         };
 
         // The metadata document must agree with the trusted anchor before the
@@ -788,20 +782,11 @@ impl SessionManager {
             Err(MetadataError::Unavailable) => return Err(SessionError::LocalStateFailed),
             Err(MetadataError::Corrupt) => None,
         };
-        let Some(session) = document
-            .as_ref()
-            .and_then(|document| document.session.clone())
-        else {
-            let label = document
-                .as_ref()
-                .and_then(|document| document.hint.as_ref())
-                .and_then(|hint| hint.label.clone());
-            return Err(self.invalidate_to_relogin(&anchor, label).await);
+        let Some(session) = document.and_then(|document| document.session) else {
+            return Err(self.invalidate_to_relogin(&anchor).await);
         };
         if !session.matches_anchor(&anchor) {
-            return Err(self
-                .invalidate_to_relogin(&anchor, session.label.clone())
-                .await);
+            return Err(self.invalidate_to_relogin(&anchor).await);
         }
 
         let record = match self.load_profile(anchor.profile_id).await? {
@@ -811,15 +796,11 @@ impl SessionManager {
                 record
             }
             _ => {
-                return Err(self
-                    .invalidate_to_relogin(&anchor, session.label.clone())
-                    .await);
+                return Err(self.invalidate_to_relogin(&anchor).await);
             }
         };
         if record.refresh_expires_at_unix_ms <= now_ms() {
-            return Err(self
-                .invalidate_to_relogin(&anchor, session.label.clone())
-                .await);
+            return Err(self.invalidate_to_relogin(&anchor).await);
         }
 
         // Ordered rotation: pending anchor, one refresh, successor, commit.
@@ -829,9 +810,7 @@ impl SessionManager {
         })
         .await?;
         let Some(refresh) = record_refresh(&record) else {
-            return Err(self
-                .invalidate_to_relogin(&anchor, session.label.clone())
-                .await);
+            return Err(self.invalidate_to_relogin(&anchor).await);
         };
         let credentials = match controller
             .refresh_session(&refresh, &CancellationToken::new())
@@ -839,9 +818,7 @@ impl SessionManager {
         {
             Ok(issued) => issued,
             Err(SessionError::ReloginRequired) => {
-                return Err(self
-                    .invalidate_to_relogin(&anchor, session.label.clone())
-                    .await);
+                return Err(self.invalidate_to_relogin(&anchor).await);
             }
             // Whether or not the controller consumed the credential is
             // unknowable; restore never sends it again. Only an explicit
@@ -882,7 +859,6 @@ impl SessionManager {
         controller: &dyn Controller,
         anchor: &AnchorRecord,
         record: &ProfileRecord,
-        label: Option<String>,
     ) -> Result<(), SessionError> {
         let Some(refresh) = record_refresh(record) else {
             // The caller already verified the record parses; this is a guard
@@ -902,23 +878,19 @@ impl SessionManager {
                 }
                 match controller.logout(&issued.access, &cancellation).await {
                     Ok(()) | Err(SessionError::ReloginRequired) => {
-                        self.finish_logout_local(anchor, label).await
+                        self.finish_logout_local(anchor).await
                     }
                     Err(_) => Err(SessionError::RevokeFailed),
                 }
             }
-            Err(SessionError::ReloginRequired) => self.finish_logout_local(anchor, label).await,
+            Err(SessionError::ReloginRequired) => self.finish_logout_local(anchor).await,
             Err(_) => Err(SessionError::RevokeFailed),
         }
     }
 
     /// Delete local custody and report an explicit cleanup failure if the
     /// platform store refuses the deletion.
-    async fn finish_logout_local(
-        &self,
-        anchor: &AnchorRecord,
-        label: Option<String>,
-    ) -> Result<(), SessionError> {
+    async fn finish_logout_local(&self, anchor: &AnchorRecord) -> Result<(), SessionError> {
         if self.vault.delete_profile(anchor.profile_id).await.is_err() {
             let cleanup_pending = AnchorRecord {
                 state: AnchorState::CleanupPending,
@@ -932,30 +904,22 @@ impl SessionManager {
             ..anchor.clone()
         };
         self.write_anchor(&logged_out).await?;
-        self.finish_logged_out_document(&logged_out, label)
+        self.finish_logged_out_document()
     }
 
     /// Remove unusable local material without claiming remote revocation.
-    async fn finish_uncertain_logout(
-        &self,
-        anchor: &AnchorRecord,
-        label: Option<String>,
-    ) -> Result<(), SessionError> {
+    async fn finish_uncertain_logout(&self, anchor: &AnchorRecord) -> Result<(), SessionError> {
         self.vault
             .delete_profile(anchor.profile_id)
             .await
             .map_err(|_| SessionError::LocalCleanupFailed)?;
-        self.finish_logged_out_document(anchor, label)
+        self.finish_logged_out_document()
     }
 
     /// Local-only invalidation after a session the desktop will not trust:
     /// tampering, expiry, or a refresh the controller rejected. It never reads
     /// the UUID-keyed credential and never makes a network call.
-    async fn invalidate_to_relogin(
-        &self,
-        anchor: &AnchorRecord,
-        label: Option<String>,
-    ) -> SessionError {
+    async fn invalidate_to_relogin(&self, anchor: &AnchorRecord) -> SessionError {
         if self.vault.delete_profile(anchor.profile_id).await.is_err() {
             // The credential may still be readable: keep custody
             // non-restorable rather than claiming the invalidation succeeded.
@@ -964,7 +928,7 @@ impl SessionManager {
                 ..anchor.clone()
             };
             let stored = self.write_anchor(&cleanup_pending).await.is_ok();
-            let _ = self.finish_logged_out_document(&cleanup_pending, label);
+            let _ = self.finish_logged_out_document();
             return if stored {
                 SessionError::CleanupUncertain
             } else {
@@ -978,25 +942,14 @@ impl SessionManager {
         if self.write_anchor(&logged_out).await.is_err() {
             return SessionError::VaultWriteFailed;
         }
-        match self.finish_logged_out_document(&logged_out, label) {
+        match self.finish_logged_out_document() {
             Ok(()) => SessionError::ReloginRequired,
             Err(error) => error,
         }
     }
 
-    fn finish_logged_out_document(
-        &self,
-        anchor: &AnchorRecord,
-        label: Option<String>,
-    ) -> Result<(), SessionError> {
-        let desired = SessionDocument::new(
-            Some(LoginHint {
-                origin: anchor.origin.clone(),
-                label,
-            }),
-            None,
-        )
-        .with_connections(self.stored_connections()?);
+    fn finish_logged_out_document(&self) -> Result<(), SessionError> {
+        let desired = SessionDocument::new(None).with_connections(self.stored_connections()?);
         match self.metadata.read_document() {
             Ok(Some(existing)) if existing == desired => Ok(()),
             _ => self
@@ -1015,8 +968,7 @@ impl SessionManager {
         };
         match existing {
             Some(document) if document.session.is_some() => {
-                let cleared = SessionDocument::new(document.hint, None)
-                    .with_connections(document.connections);
+                let cleared = SessionDocument::new(None).with_connections(document.connections);
                 self.metadata
                     .write_document(&cleared)
                     .map_err(|_| SessionError::LocalStateFailed)
@@ -1183,19 +1135,14 @@ impl SessionManager {
         Ok(())
     }
 
-    /// The last stored display label: the active session's first, then whatever
-    /// the previous logout left as a login hint.
+    /// The stored session's display label, if any.
     fn stored_label(&self) -> Option<String> {
         self.metadata
             .read_document()
             .ok()
             .flatten()
-            .and_then(|document| {
-                document
-                    .session
-                    .and_then(|session| session.label)
-                    .or_else(|| document.hint.and_then(|hint| hint.label))
-            })
+            .and_then(|document| document.session)
+            .and_then(|session| session.label)
     }
 }
 

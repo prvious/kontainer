@@ -15,7 +15,7 @@ use async_trait::async_trait;
 use chrono::Utc;
 use kontainer_engine::{
     EngineError, EngineErrorKind, EngineOperation, LogSource, ServiceLogLine, ServiceLogRequest,
-    ServiceLogStream, ServiceSummary, SwarmStatus,
+    ServiceLogStream, ServiceSummary,
 };
 use kontainer_stream_protocol::{LogEndReason, LogMessage, LogStreamKind, LogsOpen};
 use kontainer_stream_transport::{NativeStreamClient, StreamClientError, StreamLimits};
@@ -71,14 +71,6 @@ impl ManagerEngine for FakeManager {
         Ok(Vec::new())
     }
 
-    async fn inspect_network(
-        &self,
-        _: &str,
-        _: &CancellationToken,
-    ) -> Result<kontainer_engine::NetworkDetail, ManagerError> {
-        Err(ManagerError::NotFound)
-    }
-
     async fn create_network(
         &self,
         _: &kontainer_engine::NetworkCreate,
@@ -91,16 +83,12 @@ impl ManagerEngine for FakeManager {
         Err(ManagerError::Rejected)
     }
 
-    async fn swarm_status(&self, _: &CancellationToken) -> Result<SwarmStatus, ManagerError> {
+    async fn swarm_status(&self, _: &CancellationToken) -> Result<(), ManagerError> {
         if self.silent.load(Ordering::SeqCst) {
             // A paused manager: the call never answers inside the deadline.
             tokio::time::sleep(Duration::from_secs(60)).await;
         }
-        Ok(SwarmStatus {
-            control_available: true,
-            managers: 1,
-            nodes: 3,
-        })
+        Ok(())
     }
 
     async fn list_services(

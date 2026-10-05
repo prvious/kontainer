@@ -40,7 +40,7 @@ use crate::{
     },
     rpc::{
         AgentClient, AgentClientError, AgentContainerAction, AgentContainerPage,
-        AgentContainerState, AgentContainerSummary, AgentDescription,
+        AgentContainerState, AgentContainerSummary,
     },
     test_support::PostgresTestDatabase,
 };
@@ -57,10 +57,6 @@ struct FakeAgent {
 
 #[async_trait::async_trait]
 impl AgentClient for FakeAgent {
-    async fn describe(&self, _: &CancellationToken) -> Result<AgentDescription, AgentClientError> {
-        Err(AgentClientError::Unavailable)
-    }
-
     async fn list_containers(
         &self,
         page_size: u32,
@@ -102,10 +98,6 @@ impl AgentClient for FakeAgent {
             return Err(AgentClientError::ContainerRunning);
         }
         Ok(())
-    }
-
-    fn node_id(&self) -> &str {
-        &self.node_id
     }
 }
 

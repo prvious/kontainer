@@ -105,7 +105,6 @@ async fn dev_cluster_volume_lifecycle_with_sizes_and_in_use_refusal() {
     assert!(volume.created_at_seconds.is_some());
     let usage = worker.disk_usage(&cancellation).await.unwrap();
     assert_eq!(usage.volume_sizes.get(&name), Some(&0));
-    assert!(usage.total_bytes.is_some());
 
     let address = host.to_string().replace("tcp://", "http://");
     let docker =
@@ -205,7 +204,7 @@ async fn dev_cluster_network_lifecycle_on_the_manager_and_a_worker() {
         .iter()
         .find(|network| network.name == "ingress")
         .unwrap();
-    assert!(ingress.builtin() && ingress.ingress);
+    assert!(ingress.builtin());
     assert_eq!(
         manager
             .remove_network(&ingress.id, &cancellation)
@@ -563,9 +562,7 @@ async fn dev_cluster_services_scale_with_versions_on_the_manager() {
         "tcp://localhost:2375",
     ));
     let cancellation = CancellationToken::new();
-    let status = manager.swarm_status(&cancellation).await.unwrap();
-    assert!(status.control_available);
-    assert_eq!(status.nodes, 3);
+    manager.swarm_status(&cancellation).await.unwrap();
 
     let services = manager.list_services(&cancellation).await.unwrap();
     let collector = services

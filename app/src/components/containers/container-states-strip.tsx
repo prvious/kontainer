@@ -16,7 +16,7 @@ export function ContainerStatesStrip({ rows }: { rows: ContainerRow[] }) {
     const running = live.filter((row) => row.state === "running").length;
     const paused = live.filter((row) => row.state === "paused").length;
     const exited = live.filter((row) => row.state === "exited" || row.state === "dead").length;
-    const samples = useSamples("cluster", "24h", "15m");
+    const samples = useSamples("24h", "15m");
     const buckets: SparkBucket[] = (samples.data?.points ?? []).map((point) => {
         const start = Date.parse(point.at);
         return { start, end: start + BUCKET_MS, value: point.containersRunning === null ? null : Math.round(point.containersRunning) };

@@ -4,7 +4,7 @@ use std::pin::Pin;
 
 use futures_util::Stream;
 
-use crate::{EngineError, parse_docker_time};
+use crate::{EngineError, container::parse_docker_instant};
 
 /// What to read: history since a time and at most `tail` lines of it, then optionally follow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,7 +44,7 @@ pub fn parse_service_log_line(source: LogSource, bytes: &[u8]) -> Option<Service
     let raw = raw.strip_suffix('\n').unwrap_or(&raw);
     let raw = raw.strip_suffix('\r').unwrap_or(raw);
     let (timestamp, rest) = raw.split_once(' ').unwrap_or((raw, ""));
-    let timestamp_unix_ms = timestamp_millis(timestamp)?;
+    let timestamp_unix_ms = parse_docker_instant(timestamp)?.timestamp_millis();
     let (details, text) = match rest.split_once(' ') {
         Some((first, text)) if is_details(first) => (first, text),
         None if is_details(rest) => (rest, ""),
@@ -72,24 +72,6 @@ fn is_details(token: &str) -> bool {
     token.starts_with("com.docker.swarm.") && token.contains('=')
 }
 
-/// Milliseconds since the epoch for an RFC 3339 time with an optional fraction.
-fn timestamp_millis(value: &str) -> Option<i64> {
-    let seconds = parse_docker_time(value)?;
-    let fraction = value
-        .get(19..)
-        .and_then(|rest| rest.strip_prefix('.'))
-        .map_or("", |rest| {
-            rest.split(|character: char| !character.is_ascii_digit())
-                .next()
-                .unwrap_or("")
-        });
-    let millis = format!("{fraction:0<3}")
-        .get(..3)
-        .and_then(|digits| digits.parse::<i64>().ok())
-        .unwrap_or(0);
-    Some(seconds * 1000 + millis)
-}
-
 #[cfg(test)]
 mod tests {
     use super::{LogSource, ServiceLogLine, parse_service_log_line};
@@ -111,6 +93,10 @@ mod tests {
                 text: "2026/09/28 16:17:54 Starting up on port 80".to_owned(),
             }
         );
+        let offset =
+            parse_service_log_line(LogSource::Stdout, b"2026-09-28T18:17:54.397779085+02:00 x")
+                .unwrap();
+        assert_eq!(offset.timestamp_unix_ms, line.timestamp_unix_ms);
     }
 
     #[test]

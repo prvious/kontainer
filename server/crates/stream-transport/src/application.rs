@@ -39,8 +39,10 @@ impl OutboundSender {
         self.sender.closed().await;
     }
 
-    /// Close the session with `close` after the frames already queued are written. Later
-    /// frames are refused; a close already under way wins.
+    /// Close the session with `close` once the writer has drained the queue (within the shutdown
+    /// grace); a close already under way wins. This doesn't refuse later frames: one sent before
+    /// the drain finishes is still written, and `try_send` fails with
+    /// [`OutboundFrameError::SessionClosed`] only after the writer stops.
     pub fn close(&self, close: StreamClose) {
         self.signal.send_if_modified(|current| {
             if *current == SessionSignal::Running {

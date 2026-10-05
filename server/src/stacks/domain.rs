@@ -7,9 +7,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::{containers::domain::ContainerItem, services::domain::ServiceRow};
 
-/// Docker's label for the stack a service, network, or volume belongs to.
-pub const STACK_LABEL: &str = "com.docker.stack.namespace";
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StackStatus {
     /// Every service converged.
@@ -113,12 +110,6 @@ pub struct RemovalPlan {
 #[serde(rename_all = "camelCase")]
 pub struct StackRemovePayload {
     pub name: String,
-}
-
-/// Stack names as Docker allows them.
-#[must_use]
-pub fn is_valid_stack_name(value: &str) -> bool {
-    kontainer_engine::is_valid_network_name(value)
 }
 
 #[cfg(test)]

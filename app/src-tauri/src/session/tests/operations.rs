@@ -1,18 +1,17 @@
-//! Operation IPC views and the admission path under rotation.
+//! Operation and admission IPC views, and operation reads through the session.
 
 use kontainer_native_client::{
     AdmittedOperation, NativeClientError, OperationSnapshot, OperationState,
 };
 use uuid::Uuid;
 
-use crate::session::manager::{InventoryError, OperationView};
+use crate::session::manager::{AdmittedView, InventoryError, OperationView};
 
-use super::fakes::{future_ms, issued, Harness};
+use super::fakes::Harness;
 
 const FIXTURE: &str = include_str!("../../../../tests/fixtures/operations-ipc.json");
 const LIB_SOURCE: &str = include_str!("../../lib.rs");
 const RUNNING_ID: &str = "018f2e34-0000-7000-8000-0000000000cc";
-const KEY: &str = "018f2e34-0000-7000-8000-0000000000aa";
 
 fn fixture() -> serde_json::Value {
     serde_json::from_str(FIXTURE).unwrap()
@@ -60,6 +59,14 @@ fn operation_views_match_the_shared_fixture_and_commands_are_registered() {
     assert_eq!(
         serde_json::to_value(OperationView::from(failed())).unwrap(),
         fixture["failedOperation"]
+    );
+    assert_eq!(
+        serde_json::to_value(AdmittedView::from(AdmittedOperation {
+            operation_id: Uuid::parse_str(RUNNING_ID).unwrap(),
+            replayed: false,
+        }))
+        .unwrap(),
+        fixture["admitted"]
     );
     for command in fixture["commands"].as_array().unwrap() {
         let name = command.as_str().unwrap();
@@ -115,62 +122,4 @@ async fn operations_read_poll_and_cancel_through_the_session() {
             .err(),
         Some(InventoryError::InvalidRequest)
     );
-}
-
-#[tokio::test]
-async fn admission_retries_a_401_with_the_same_key_and_body() {
-    let harness = Harness::new();
-    let view = harness.login_ok().await;
-    {
-        let mut script = harness.controllers.script();
-        script
-            .admissions
-            .push_back(Err(NativeClientError::Unauthorized));
-        script
-            .refresh
-            .push_back(Ok(issued(2, future_ms(), future_ms())));
-        script.admissions.push_back(Ok(AdmittedOperation {
-            operation_id: Uuid::parse_str(RUNNING_ID).unwrap(),
-            replayed: false,
-        }));
-    }
-    let admitted = harness
-        .manager
-        .admit(
-            view.profile_id,
-            "/api/v1/operations/noop",
-            KEY,
-            serde_json::json!({"steps": 2}),
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        serde_json::to_value(admitted).unwrap(),
-        fixture()["admitted"]
-    );
-    let admissions: Vec<_> = harness
-        .entries()
-        .into_iter()
-        .filter(|entry| entry.starts_with("admit:"))
-        .collect();
-    assert_eq!(admissions.len(), 2);
-    assert!(admissions
-        .iter()
-        .all(|entry| entry.ends_with(&format!(":/api/v1/operations/noop:{KEY}:{{\"steps\":2}}"))));
-
-    assert_eq!(
-        harness
-            .manager
-            .admit(
-                view.profile_id,
-                "/api/v1/operations/noop",
-                "short",
-                serde_json::json!({})
-            )
-            .await
-            .err(),
-        Some(InventoryError::InvalidRequest),
-        "a malformed key never leaves the app"
-    );
-    assert_eq!(harness.count("admit:"), 2);
 }

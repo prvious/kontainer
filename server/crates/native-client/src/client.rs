@@ -529,7 +529,6 @@ async fn classify_inventory_error(response: Response) -> NativeClientError {
         return fallback;
     };
     match (status.as_u16(), body.error.as_str()) {
-        (400, "invalid_pagination") => NativeClientError::InvalidPagination,
         (503, "agent_unavailable") => NativeClientError::AgentUnavailable,
         (503, "quorum_unavailable") => NativeClientError::QuorumUnavailable {
             retry_after_seconds: body.retry_after_seconds.unwrap_or(10).clamp(1, 300),

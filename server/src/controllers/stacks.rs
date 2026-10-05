@@ -8,6 +8,7 @@ use axum::{
     response::Response,
 };
 use chrono::{DateTime, SecondsFormat, Utc};
+use kontainer_engine::is_valid_network_name;
 use loco_rs::{app::AppContext, controller::Routes, prelude::delete};
 use serde::Serialize;
 use utoipa::ToSchema;
@@ -26,7 +27,7 @@ use crate::{
     operations::domain::OperationKind,
     stacks::{
         actions::{list_stacks, removal_plan},
-        domain::{RemovalPlan, StackRemovePayload, StackRow, is_valid_stack_name},
+        domain::{RemovalPlan, StackRemovePayload, StackRow},
     },
 };
 
@@ -141,7 +142,8 @@ pub(crate) async fn plan(
     _principal: PrincipalContext,
     Path(name): Path<String>,
 ) -> Response {
-    if !is_valid_stack_name(&name) {
+    // Stack names follow Docker's network-name rule.
+    if !is_valid_network_name(&name) {
         return field_error("name", "invalid");
     }
     let manager = match manager(&context) {
@@ -179,7 +181,7 @@ pub(crate) async fn remove(
     key: IdempotencyKey,
     AdmittingRequestId(request_id): AdmittingRequestId,
 ) -> Response {
-    if !is_valid_stack_name(&name) {
+    if !is_valid_network_name(&name) {
         return field_error("name", "invalid");
     }
     let scope = format!("/stacks/{name}");

@@ -25,8 +25,6 @@ pub struct VolumeSummary {
     pub used_by: u32,
     /// Their names, at most [`MAX_VOLUME_USERS`].
     pub users: Vec<String>,
-    /// From the last `docker system df`; `None` until it ran or when the driver can't say.
-    pub size_bytes: Option<u64>,
 }
 
 /// What `create_volume` makes. Only the `local` driver is offered for now.

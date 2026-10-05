@@ -1,6 +1,6 @@
 # 0017. Cluster container list, container actions, and the container DTO
 
-- Status: accepted
+- Status: accepted (amended by 0043)
 - Date: 2026-09-28
 - Spec: docs/build/07-containers.md
 

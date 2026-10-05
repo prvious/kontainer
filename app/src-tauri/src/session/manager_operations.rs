@@ -1,12 +1,9 @@
-//! Durable operations as credential-free IPC views, and the admission path every mutation
-//! command uses.
+//! Durable operations and their admissions as credential-free IPC views.
 //!
 //! Mirrors `app/src/types/operations.ts`; the shared fixture
 //! `app/tests/fixtures/operations-ipc.json` keeps both sides in sync.
 
-use kontainer_native_client::{
-    AdmittedOperation, IdempotencyKey, OperationSnapshot, OperationState,
-};
+use kontainer_native_client::{AdmittedOperation, OperationSnapshot, OperationState};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -110,29 +107,5 @@ impl SessionManager {
             .await
             .map_err(operation_error)?;
         Ok(snapshot.into())
-    }
-
-    /// Admit one mutation. The key comes from the user gesture in React, so a retried command
-    /// replays instead of mutating twice; a rotated credential retries with the same key.
-    // Specs 08 to 12 call this from their mutation commands.
-    #[allow(dead_code)]
-    pub(crate) async fn admit(
-        &self,
-        profile_id: Uuid,
-        path: &str,
-        idempotency_key: &str,
-        body: serde_json::Value,
-    ) -> Result<AdmittedView, InventoryError> {
-        let key = IdempotencyKey::parse(idempotency_key)?;
-        let admitted = self
-            .authenticated(
-                profile_id,
-                &(path, key, body),
-                |controller, access, cancellation, (path, key, body)| {
-                    controller.admit(access, path, key, body, cancellation)
-                },
-            )
-            .await?;
-        Ok(admitted.into())
     }
 }

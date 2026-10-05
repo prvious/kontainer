@@ -14,7 +14,7 @@ use axum::{
     http::{Request, StatusCode, header},
 };
 use chrono::Utc;
-use kontainer_engine::{NetworkCreate, NetworkDetail, NetworkSummary};
+use kontainer_engine::{NetworkCreate, NetworkSummary};
 use loco_rs::{
     app::{AppContext, Hooks},
     config::Config,
@@ -39,8 +39,8 @@ use crate::{
         worker::{Worker, WorkerSettings},
     },
     rpc::{
-        AgentClient, AgentClientError, AgentContainerPage, AgentDescription, AgentNetwork,
-        AgentNetworkCreate, AgentNetworkDetail, AgentNetworkEndpoint, NetworkRemoval,
+        AgentClient, AgentClientError, AgentContainerPage, AgentNetwork, AgentNetworkCreate,
+        AgentNetworkDetail, AgentNetworkEndpoint, NetworkRemoval,
     },
     swarm::engine::{ManagerEngine, ManagerError, SharedManagerEngine},
     test_support::PostgresTestDatabase,
@@ -75,7 +75,6 @@ fn swarm_network(fill: char, name: &str) -> NetworkSummary {
         driver: "overlay".to_owned(),
         scope: "swarm".to_owned(),
         attachable: true,
-        ingress: name == "ingress",
         created_at_seconds: Some(1_790_000_000),
         ..NetworkSummary::default()
     }
@@ -95,24 +94,6 @@ impl ManagerEngine for FakeManager {
         _: &CancellationToken,
     ) -> Result<Vec<NetworkSummary>, ManagerError> {
         Ok(self.networks.lock().unwrap().clone())
-    }
-
-    async fn inspect_network(
-        &self,
-        network: &str,
-        _: &CancellationToken,
-    ) -> Result<NetworkDetail, ManagerError> {
-        self.networks
-            .lock()
-            .unwrap()
-            .iter()
-            .find(|candidate| candidate.id == network)
-            .cloned()
-            .map(|network| NetworkDetail {
-                network,
-                endpoints: Vec::new(),
-            })
-            .ok_or(ManagerError::NotFound)
     }
 
     async fn create_network(
@@ -155,14 +136,6 @@ impl ManagerEngine for WorkerHost {
         Err(ManagerError::NotAManager)
     }
 
-    async fn inspect_network(
-        &self,
-        _: &str,
-        _: &CancellationToken,
-    ) -> Result<NetworkDetail, ManagerError> {
-        Err(ManagerError::NotAManager)
-    }
-
     async fn create_network(
         &self,
         _: &NetworkCreate,
@@ -178,7 +151,6 @@ impl ManagerEngine for WorkerHost {
 
 #[derive(Debug)]
 struct FakeAgent {
-    node_id: String,
     networks: Vec<AgentNetwork>,
     endpoints: HashMap<String, Vec<&'static str>>,
     created: Mutex<Vec<AgentNetworkCreate>>,
@@ -187,10 +159,6 @@ struct FakeAgent {
 
 #[async_trait::async_trait]
 impl AgentClient for FakeAgent {
-    async fn describe(&self, _: &CancellationToken) -> Result<AgentDescription, AgentClientError> {
-        Err(AgentClientError::Unavailable)
-    }
-
     async fn list_containers(
         &self,
         _: u32,
@@ -212,12 +180,13 @@ impl AgentClient for FakeAgent {
         network: &str,
         _: &CancellationToken,
     ) -> Result<AgentNetworkDetail, AgentClientError> {
-        let found = self
+        if !self
             .networks
             .iter()
-            .find(|candidate| candidate.id == network)
-            .cloned()
-            .ok_or(AgentClientError::NotFound)?;
+            .any(|candidate| candidate.id == network)
+        {
+            return Err(AgentClientError::NotFound);
+        }
         let endpoints = self
             .endpoints
             .get(network)
@@ -232,10 +201,7 @@ impl AgentClient for FakeAgent {
                     .collect()
             })
             .unwrap_or_default();
-        Ok(AgentNetworkDetail {
-            network: found,
-            endpoints,
-        })
+        Ok(AgentNetworkDetail { endpoints })
     }
 
     async fn create_network(
@@ -268,10 +234,6 @@ impl AgentClient for FakeAgent {
         }
         self.removed.lock().unwrap().push(network.to_owned());
         Ok(NetworkRemoval::Removed)
-    }
-
-    fn node_id(&self) -> &str {
-        &self.node_id
     }
 }
 
@@ -310,7 +272,6 @@ async fn fixture(
         (
             node_id.to_owned(),
             Arc::new(FakeAgent {
-                node_id: node_id.to_owned(),
                 networks,
                 endpoints,
                 created: Mutex::new(Vec::new()),

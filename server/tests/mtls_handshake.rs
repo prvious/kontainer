@@ -277,7 +277,7 @@ impl ContainerEngine for SlowStopEngine {
     ) -> Result<(), EngineError> {
         if container_id.starts_with('b') {
             return Err(EngineError::new(
-                EngineErrorKind::NotModified,
+                EngineErrorKind::Conflict,
                 EngineOperation::ContainerAction,
             ));
         }
@@ -313,14 +313,14 @@ async fn production_client_actions_outlast_the_read_timeout_and_keep_their_codes
         client
             .container_action(
                 &"b".repeat(64),
-                AgentContainerAction::Start,
+                AgentContainerAction::Remove,
                 false,
                 None,
                 &CancellationToken::new()
             )
             .await
             .unwrap_err(),
-        AgentClientError::AlreadyInState
+        AgentClientError::ContainerRunning
     );
     node_agent.stop().await;
 }

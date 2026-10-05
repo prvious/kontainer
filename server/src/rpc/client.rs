@@ -394,7 +394,6 @@ impl NodeAgentClientConfig {
                     size_bytes: image.size_bytes,
                     created_at_seconds: image.created_at_unix_seconds.max(0),
                     used_by: image.used_by,
-                    dangling: image.dangling,
                 })
             })
             .collect()
@@ -682,10 +681,6 @@ impl NodeAgentClientConfig {
         if response.endpoints.len() > MAX_NETWORK_ENDPOINTS {
             return Err(AgentClientError::InvalidResponse);
         }
-        let network = response
-            .network
-            .ok_or(AgentClientError::InvalidResponse)
-            .and_then(agent_network)?;
         let endpoints = response
             .endpoints
             .into_iter()
@@ -699,7 +694,7 @@ impl NodeAgentClientConfig {
                 })
             })
             .collect::<Result<_, _>>()?;
-        Ok(AgentNetworkDetail { network, endpoints })
+        Ok(AgentNetworkDetail { endpoints })
     }
 
     /// Create a local bridge network on this node and return its id.
@@ -767,12 +762,6 @@ impl NodeAgentClientConfig {
             NetworkRemoval::InUse(response.in_use_by)
         })
     }
-
-    /// Expected node ID, for shared-store diagnostics without exposing TLS.
-    #[must_use]
-    pub fn node_id(&self) -> &str {
-        self.expected.node_id().unwrap_or_default()
-    }
 }
 
 /// Controller-owned `Describe` result, distinct from protobuf types.
@@ -832,7 +821,6 @@ pub struct AgentImage {
     pub size_bytes: u64,
     pub created_at_seconds: i64,
     pub used_by: u32,
-    pub dangling: bool,
 }
 
 /// One pull event from a node.
@@ -947,10 +935,7 @@ pub struct AgentNetwork {
     /// Running containers on this node with an endpoint on it.
     pub containers: u32,
     pub created_at_seconds: Option<i64>,
-    pub labels: std::collections::BTreeMap<String, String>,
     pub attachable: bool,
-    pub ingress: bool,
-    pub internal: bool,
     pub builtin: bool,
 }
 
@@ -962,7 +947,6 @@ pub struct AgentNetworkEndpoint {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentNetworkDetail {
-    pub network: AgentNetwork,
     pub endpoints: Vec<AgentNetworkEndpoint>,
 }
 
@@ -991,11 +975,6 @@ fn agent_network(network: ProtoNetworkSummary) -> Result<AgentNetwork, AgentClie
         || !matches!(network.scope.as_str(), "local" | "swarm" | "global")
         || network.subnets.len() > 16
         || !network.subnets.iter().all(|subnet| subnet.len() <= 64)
-        || network.labels.len() > 64
-        || !network
-            .labels
-            .iter()
-            .all(|(key, value)| bounded(key) && bounded(value))
     {
         return Err(AgentClientError::InvalidResponse);
     }
@@ -1009,10 +988,7 @@ fn agent_network(network: ProtoNetworkSummary) -> Result<AgentNetwork, AgentClie
         created_at_seconds: network
             .created_at_unix_seconds
             .filter(|seconds| *seconds >= 0),
-        labels: network.labels.into_iter().collect(),
         attachable: network.attachable,
-        ingress: network.ingress,
-        internal: network.internal,
         builtin: network.builtin,
     })
 }
@@ -1141,11 +1117,6 @@ pub struct AgentContainerPage {
 /// a fake. No request input can select an endpoint, DNS name, or identity.
 #[async_trait::async_trait]
 pub trait AgentClient: std::fmt::Debug + Send + Sync {
-    async fn describe(
-        &self,
-        cancellation: &CancellationToken,
-    ) -> Result<AgentDescription, AgentClientError>;
-
     async fn list_containers(
         &self,
         page_size: u32,
@@ -1250,8 +1221,6 @@ pub trait AgentClient: std::fmt::Debug + Send + Sync {
     ) -> Result<VolumeRemoval, AgentClientError> {
         Err(AgentClientError::Unavailable)
     }
-
-    fn node_id(&self) -> &str;
 }
 
 #[async_trait::async_trait]
@@ -1263,13 +1232,6 @@ impl AgentClient for NodeAgentClientConfig {
         cancellation: &CancellationToken,
     ) -> Result<AgentExecStream, AgentClientError> {
         NodeAgentClientConfig::exec(self, open, input, cancellation).await
-    }
-
-    async fn describe(
-        &self,
-        cancellation: &CancellationToken,
-    ) -> Result<AgentDescription, AgentClientError> {
-        NodeAgentClientConfig::describe(self, cancellation).await
     }
 
     async fn list_containers(
@@ -1377,10 +1339,6 @@ impl AgentClient for NodeAgentClientConfig {
     ) -> Result<VolumeRemoval, AgentClientError> {
         NodeAgentClientConfig::remove_volume(self, name, cancellation).await
     }
-
-    fn node_id(&self) -> &str {
-        NodeAgentClientConfig::node_id(self)
-    }
 }
 
 /// Stable, redacted call failures. No endpoint, address, TLS, or daemon
@@ -1402,8 +1360,6 @@ pub enum AgentClientError {
     InvalidPagination,
     /// The container does not exist on that node.
     NotFound,
-    /// The container is already in the requested state.
-    AlreadyInState,
     /// Removing a running container needs `force`.
     ContainerRunning,
     /// The node's Docker Engine refused or failed.
@@ -1426,7 +1382,6 @@ impl std::fmt::Display for AgentClientError {
             Self::InvalidResponse => formatter.write_str("agent response was invalid"),
             Self::InvalidPagination => formatter.write_str("pagination is invalid"),
             Self::NotFound => formatter.write_str("container not found"),
-            Self::AlreadyInState => formatter.write_str("container is already in that state"),
             Self::ContainerRunning => formatter.write_str("container is running"),
             Self::EngineError => formatter.write_str("engine failed the action"),
             Self::ImageInUse => formatter.write_str("image is in use"),
@@ -1533,7 +1488,6 @@ fn map_action_status(status: &tonic::Status) -> AgentClientError {
     use tonic::Code;
     match (status.code(), status.message()) {
         (Code::NotFound, _) => AgentClientError::NotFound,
-        (Code::FailedPrecondition, "already_in_state") => AgentClientError::AlreadyInState,
         (Code::FailedPrecondition, "container_running") => AgentClientError::ContainerRunning,
         (Code::FailedPrecondition, "image_in_use") => AgentClientError::ImageInUse,
         (Code::AlreadyExists, "volume_exists") => AgentClientError::VolumeExists,

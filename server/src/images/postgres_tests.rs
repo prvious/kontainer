@@ -35,8 +35,8 @@ use crate::{
         worker::{Worker, WorkerSettings},
     },
     rpc::{
-        AgentClient, AgentClientError, AgentContainerPage, AgentDescription, AgentImage,
-        AgentPullEvent, AgentPullStream,
+        AgentClient, AgentClientError, AgentContainerPage, AgentImage, AgentPullEvent,
+        AgentPullStream,
     },
     test_support::PostgresTestDatabase,
 };
@@ -59,17 +59,12 @@ enum Behaviour {
 
 #[derive(Debug)]
 struct FakeAgent {
-    node_id: String,
     images: Vec<AgentImage>,
     behaviour: Behaviour,
 }
 
 #[async_trait::async_trait]
 impl AgentClient for FakeAgent {
-    async fn describe(&self, _: &CancellationToken) -> Result<AgentDescription, AgentClientError> {
-        Err(AgentClientError::Unavailable)
-    }
-
     async fn list_containers(
         &self,
         _: u32,
@@ -139,10 +134,6 @@ impl AgentClient for FakeAgent {
         }
         Ok(Box::pin(futures_util::stream::iter(events)))
     }
-
-    fn node_id(&self) -> &str {
-        &self.node_id
-    }
 }
 
 #[derive(Debug)]
@@ -166,7 +157,6 @@ fn image(fill: char, tags: &[&str], used_by: u32) -> AgentImage {
         size_bytes: 42_000_000,
         created_at_seconds: 1_700_000_000,
         used_by,
-        dangling: tags.is_empty(),
     }
 }
 
@@ -185,11 +175,7 @@ async fn fixture(database: &sea_orm::DatabaseConnection) -> Result<Fixture, Box<
     let agent = |node_id: &str, images, behaviour| {
         (
             node_id.to_owned(),
-            Arc::new(FakeAgent {
-                node_id: node_id.to_owned(),
-                images,
-                behaviour,
-            }),
+            Arc::new(FakeAgent { images, behaviour }),
         )
     };
     // `worker-3` and `worker-4` have agents but are members only once a test checks them in.

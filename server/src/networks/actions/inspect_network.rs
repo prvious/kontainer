@@ -70,12 +70,12 @@ pub async fn execute(
                         }),
                 )
             }
-            // A swarm network only exists on the nodes running its tasks.
-            Err(crate::nodes::fan_out::NodeFailure::Error("not_found")) if node.is_none() => {}
+            // A swarm network only exists on the nodes running its tasks, and the nodes that
+            // don't answer are left out.
+            Err(_) if node.is_none() => {}
             Err(crate::nodes::fan_out::NodeFailure::Error("not_found")) => {
                 return Err(InspectNetworkError::NotFound);
             }
-            Err(_) if node.is_none() => {}
             Err(crate::nodes::fan_out::NodeFailure::Timeout) => {
                 return Err(InspectNetworkError::Agent(AgentClientError::TimedOut));
             }

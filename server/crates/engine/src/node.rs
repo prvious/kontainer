@@ -32,11 +32,9 @@ pub struct ContainerStats {
     pub net_tx_bytes: u64,
 }
 
-/// `docker system df`: images, containers, volumes, and build cache summed. `None` when the
-/// daemon reported no category totals (old API versions only send per-item sizes).
+/// What a verbose `docker system df` tells about this node's volumes.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DiskUsage {
-    pub total_bytes: Option<u64>,
     /// Bytes per volume name, for the volumes whose driver reports a size.
     pub volume_sizes: std::collections::BTreeMap<String, u64>,
 }

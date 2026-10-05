@@ -21,7 +21,8 @@ Design: Containers `2rYBA` (light `tRaXy`); states `VfepO` (03.S4 partial result
 - New unary RPC `ContainerAction(container_id, action)` with `START | STOP | RESTART | PAUSE |
   UNPAUSE | REMOVE`, `force` for remove, `timeout_seconds` for stop and restart (default 10).
   Engine trait gains the matching methods. Errors map to stable codes: `not_found`,
-  `already_in_state`, `engine_error`.
+  `engine_error`. Starting a running container or stopping a stopped one succeeds, as Docker's
+  304 does (ADR 0043).
 
 ### Controller
 
@@ -85,8 +86,8 @@ Design: Containers `2rYBA` (light `tRaXy`); states `VfepO` (03.S4 partial result
 
 ## Tests
 
-- Agent: action mapping with the fake engine, `already_in_state`, remove without force on a
-  running container fails.
+- Agent: action mapping with the fake engine, an action already in effect succeeds, remove
+  without force on a running container fails.
 - Controller: merged list with partial outcomes; 413 over the cap; action admission and executor
   with a fake agent; bulk detail after partial failure.
 - Real cluster: list shows seed stack containers on all three nodes; restart one; stop and start

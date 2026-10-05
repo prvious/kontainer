@@ -302,10 +302,6 @@ fn unknown_manager_counts_cross_ipc_as_null() {
 fn native_failures_map_to_specific_closed_ipc_codes() {
     for (native, expected) in [
         (
-            NativeClientError::InvalidPagination,
-            InventoryError::InvalidPagination,
-        ),
-        (
             NativeClientError::InvalidRequest,
             InventoryError::InvalidRequest,
         ),

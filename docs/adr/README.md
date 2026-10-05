@@ -80,3 +80,4 @@ What becomes easier, what becomes harder, what must be revisited and when.
 | [0040](./0040-trim-the-service-detail-and-unread-fields.md) | Trim the service detail, unread fields, and the unsent log close | accepted |
 | [0041](./0041-corrections-to-adrs-0015-0024-and-0028.md) | Correct factual errors in ADRs 0015, 0024 and 0028 | accepted |
 | [0042](./0042-the-controller-runs-on-a-swarm-manager.md) | Run the controller on a Swarm manager with its Docker socket | accepted |
+| [0043](./0043-idempotent-container-actions-and-chrono-times.md) | Idempotent start and stop, Docker times through chrono, and the agent RPC's last unread fields | accepted |

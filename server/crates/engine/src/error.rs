@@ -16,8 +16,6 @@ pub enum EngineErrorKind {
     DependencyFailure,
     /// The daemon has no such object (404).
     NotFound,
-    /// Already in the requested state (304).
-    NotModified,
     /// The object's state forbids the request, e.g. removing a running container (409).
     Conflict,
     /// The Swarm has no leader: too few managers are reachable to change or read cluster state.
@@ -157,9 +155,6 @@ fn classify_bollard_error(error: &BollardError) -> EngineErrorKind {
         BollardError::DockerResponseServerError {
             status_code: 404, ..
         } => EngineErrorKind::NotFound,
-        BollardError::DockerResponseServerError {
-            status_code: 304, ..
-        } => EngineErrorKind::NotModified,
         BollardError::DockerResponseServerError { message, .. }
             if message.to_ascii_lowercase().contains("not a swarm manager") =>
         {

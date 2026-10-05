@@ -38,8 +38,8 @@ use crate::{
         worker::{Worker, WorkerSettings},
     },
     rpc::{
-        AgentClient, AgentClientError, AgentContainerPage, AgentDescription, AgentVolume,
-        AgentVolumeCreate, VolumeRemoval,
+        AgentClient, AgentClientError, AgentContainerPage, AgentVolume, AgentVolumeCreate,
+        VolumeRemoval,
     },
     test_support::PostgresTestDatabase,
 };
@@ -62,17 +62,12 @@ fn volume(name: &str, users: &[&str], size: Option<u64>) -> AgentVolume {
 
 #[derive(Debug)]
 struct FakeAgent {
-    node_id: String,
     volumes: Mutex<Vec<AgentVolume>>,
     created: Mutex<Vec<AgentVolumeCreate>>,
 }
 
 #[async_trait::async_trait]
 impl AgentClient for FakeAgent {
-    async fn describe(&self, _: &CancellationToken) -> Result<AgentDescription, AgentClientError> {
-        Err(AgentClientError::Unavailable)
-    }
-
     async fn list_containers(
         &self,
         _: u32,
@@ -122,10 +117,6 @@ impl AgentClient for FakeAgent {
         volumes.remove(index);
         Ok(VolumeRemoval::Removed)
     }
-
-    fn node_id(&self) -> &str {
-        &self.node_id
-    }
 }
 
 #[derive(Debug)]
@@ -157,7 +148,6 @@ async fn fixture(database: &sea_orm::DatabaseConnection) -> Result<Fixture, Box<
         (
             node_id.to_owned(),
             Arc::new(FakeAgent {
-                node_id: node_id.to_owned(),
                 volumes: Mutex::new(volumes),
                 created: Mutex::new(Vec::new()),
             }),

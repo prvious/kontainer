@@ -73,7 +73,6 @@ fn client_errors_are_credential_free_by_construction() {
         NativeClientError::InvalidOrigin,
         NativeClientError::InvalidConfiguration,
         NativeClientError::InvalidNodeId,
-        NativeClientError::InvalidPagination,
         NativeClientError::Cancelled,
         NativeClientError::DeadlineExceeded,
         NativeClientError::Unavailable,

@@ -6,6 +6,8 @@
 //! handling. Bollard conversion lives in `local.rs` so wire types never
 //! escape the adapter.
 
+use chrono::{DateTime, Datelike, FixedOffset};
+
 use crate::{EngineError, EngineErrorKind, EngineOperation};
 
 /// Default page size for container inventory.
@@ -135,46 +137,15 @@ pub struct ContainerActionOptions {
 /// "never" (`0001-01-01T00:00:00Z`) and anything unparsable become `None`.
 #[must_use]
 pub fn parse_docker_time(value: &str) -> Option<i64> {
-    let bytes = value.as_bytes();
-    if bytes.len() < 20 || bytes[4] != b'-' || bytes[7] != b'-' || bytes[10] != b'T' {
-        return None;
-    }
-    let number =
-        |range: std::ops::Range<usize>| -> Option<i64> { value.get(range)?.parse::<i64>().ok() };
-    let (year, month, day) = (number(0..4)?, number(5..7)?, number(8..10)?);
-    let (hour, minute, second) = (number(11..13)?, number(14..16)?, number(17..19)?);
-    if year < 1970
-        || !(1..=12).contains(&month)
-        || !(1..=31).contains(&day)
-        || hour > 23
-        || minute > 59
-        || second > 60
-    {
-        return None;
-    }
-    let rest = &value[19..];
-    let rest = rest.strip_prefix('.').map_or(rest, |fraction| {
-        fraction.trim_start_matches(|character: char| character.is_ascii_digit())
-    });
-    let offset = match rest {
-        "Z" => 0,
-        zone if zone.len() == 6 && (zone.starts_with('+') || zone.starts_with('-')) => {
-            let hours: i64 = zone.get(1..3)?.parse().ok()?;
-            let minutes: i64 = zone.get(4..6)?.parse().ok()?;
-            let sign = if zone.starts_with('-') { -1 } else { 1 };
-            sign * (hours * 3600 + minutes * 60)
-        }
-        _ => return None,
-    };
-    // Days from civil (Howard Hinnant), valid for the proleptic Gregorian calendar.
-    let shifted_year = if month <= 2 { year - 1 } else { year };
-    let era = shifted_year.div_euclid(400);
-    let year_of_era = shifted_year - era * 400;
-    let month_index = (month + 9) % 12;
-    let day_of_year = (153 * month_index + 2) / 5 + day - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    let days = era * 146_097 + day_of_era - 719_468;
-    Some(days * 86_400 + hour * 3600 + minute * 60 + second - offset)
+    parse_docker_instant(value).map(|time| time.timestamp())
+}
+
+/// Docker's RFC 3339 time, or `None` for its "never" (any year before 1970) and anything
+/// unparsable.
+pub(crate) fn parse_docker_instant(value: &str) -> Option<DateTime<FixedOffset>> {
+    DateTime::parse_from_rfc3339(value)
+        .ok()
+        .filter(|time| time.year() >= 1970)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

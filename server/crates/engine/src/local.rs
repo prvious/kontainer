@@ -19,13 +19,17 @@ use crate::{
     CpuCounters, DEFAULT_STOP_TIMEOUT_SECONDS, DiskUsage, DockerHost, EngineAccessScope,
     EngineApiVersion, EngineCapabilities, EngineDescription, EngineError, EngineErrorKind,
     EngineOperation, ImageSummary, NodeInfo, PullEvent, PullProgress, PullStream,
-    SERVICE_NAME_LABEL, STACK_NAMESPACE_LABEL, TASK_ID_LABEL, UnsupportedCapabilityReason,
-    bounded_label, bounded_message, canonical_display_name, format_page_token,
-    is_plausible_reference, is_valid_container_id, is_valid_image_id, memory_used,
-    parse_docker_time, truncate_status_text,
+    STACK_NAMESPACE_LABEL, UnsupportedCapabilityReason,
+    container::{
+        SERVICE_NAME_LABEL, TASK_ID_LABEL, bounded_label, canonical_display_name,
+        format_page_token, parse_docker_time, truncate_status_text,
+    },
+    image::bounded_message,
+    is_plausible_reference, is_valid_container_id, is_valid_image_id,
+    node::memory_used,
 };
 use crate::{ExecAttachment, ExecInput, ExecStatus};
-use crate::{LogSource, ServiceLogRequest, ServiceLogStream, parse_service_log_line};
+use crate::{LogSource, ServiceLogRequest, ServiceLogStream, service_log::parse_service_log_line};
 use crate::{
     MAX_NETWORK_ENDPOINTS, MAX_VOLUME_USERS, NetworkCreate, NetworkDetail, NetworkEndpoint,
     NetworkSummary, VolumeCreate, VolumeSummary, are_valid_volume_labels, is_builtin_network,
@@ -34,7 +38,7 @@ use crate::{
 };
 use crate::{
     ServiceMode, ServiceSummary, SwarmAvailability, SwarmNode, SwarmNodeState, SwarmRole,
-    SwarmStatus, TaskSummary, is_valid_swarm_id,
+    TaskSummary, is_valid_swarm_id,
 };
 
 const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(10);
@@ -656,7 +660,7 @@ impl ContainerEngine for LocalDockerEngine {
         use bollard::query_parameters::DataUsageOptionsBuilder;
 
         let client = self.negotiate(cancellation).await?;
-        // Verbose keeps the category totals and adds each volume's size.
+        // Verbose adds each volume's size.
         let usage = self
             .execute(
                 EngineOperation::ReadDiskUsage,
@@ -664,7 +668,9 @@ impl ContainerEngine for LocalDockerEngine {
                 client.df(Some(DataUsageOptionsBuilder::new().verbose(true).build())),
             )
             .await?;
-        Ok(map_disk_usage(&usage))
+        Ok(DiskUsage {
+            volume_sizes: volume_sizes(&usage),
+        })
     }
 
     async fn list_services(
@@ -793,25 +799,11 @@ impl ContainerEngine for LocalDockerEngine {
         .await
     }
 
-    async fn swarm_status(
-        &self,
-        cancellation: &CancellationToken,
-    ) -> Result<SwarmStatus, EngineError> {
+    async fn swarm_status(&self, cancellation: &CancellationToken) -> Result<(), EngineError> {
         let client = self.negotiate(cancellation).await?;
-        let info = self
-            .execute(EngineOperation::ReadSwarm, cancellation, client.info())
+        self.execute(EngineOperation::ReadSwarm, cancellation, client.info())
             .await?;
-        let swarm = info.swarm.unwrap_or_default();
-        let count = |value: Option<i64>| {
-            value
-                .and_then(|value| u32::try_from(value).ok())
-                .unwrap_or(0)
-        };
-        Ok(SwarmStatus {
-            control_available: swarm.control_available.unwrap_or(false),
-            managers: count(swarm.managers),
-            nodes: count(swarm.nodes),
-        })
+        Ok(())
     }
 
     async fn exec_create(
@@ -1078,7 +1070,7 @@ impl ContainerEngine for LocalDockerEngine {
                     network.ipam,
                     network.created,
                     network.labels,
-                    [network.attachable, network.ingress, network.internal],
+                    network.attachable,
                     containers,
                 ))
             })
@@ -1129,7 +1121,7 @@ impl ContainerEngine for LocalDockerEngine {
             network.ipam,
             network.created,
             network.labels,
-            [network.attachable, network.ingress, network.internal],
+            network.attachable,
             count,
         );
         Ok(NetworkDetail {
@@ -1363,7 +1355,6 @@ fn map_image(image: bollard::models::ImageSummary, used: &HashMap<String, u32>) 
         .map(|digest| bounded_message(&digest))
         .collect();
     ImageSummary {
-        dangling: repo_tags.is_empty(),
         used_by: used.get(&image.id).copied().unwrap_or(0),
         image_id: image.id,
         repo_tags,
@@ -1653,7 +1644,7 @@ fn map_network(
     ipam: Option<bollard::models::Ipam>,
     created: Option<String>,
     labels: Option<HashMap<String, String>>,
-    [attachable, ingress, internal]: [Option<bool>; 3],
+    attachable: Option<bool>,
     containers: u32,
 ) -> NetworkSummary {
     let subnets = ipam
@@ -1673,8 +1664,6 @@ fn map_network(
         created_at_seconds: created.as_deref().and_then(parse_docker_time),
         labels: bounded_labels(labels.unwrap_or_default()),
         attachable: attachable.unwrap_or(false),
-        ingress: ingress.unwrap_or(false),
-        internal: internal.unwrap_or(false),
     }
 }
 
@@ -1684,7 +1673,6 @@ fn map_volume(volume: bollard::models::Volume, users: &[String]) -> VolumeSummar
         labels: bounded_labels(volume.labels),
         used_by: u32::try_from(users.len()).unwrap_or(u32::MAX),
         users: users.iter().take(MAX_VOLUME_USERS).cloned().collect(),
-        size_bytes: None,
         driver: bounded_message(&volume.driver),
         mountpoint: bounded_message(&volume.mountpoint),
         name: volume.name,
@@ -1705,36 +1693,6 @@ fn volume_sizes(usage: &SystemDataUsageResponse) -> std::collections::BTreeMap<S
             Some((name.to_owned(), u64::try_from(size).ok()?))
         })
         .collect()
-}
-
-fn map_disk_usage(usage: &SystemDataUsageResponse) -> DiskUsage {
-    let totals = [
-        usage
-            .image_usage
-            .as_ref()
-            .and_then(|usage| usage.total_size),
-        usage
-            .container_usage
-            .as_ref()
-            .and_then(|usage| usage.total_size),
-        usage
-            .volume_usage
-            .as_ref()
-            .and_then(|usage| usage.total_size),
-        usage
-            .build_cache_usage
-            .as_ref()
-            .and_then(|usage| usage.total_size),
-    ];
-    let reported: Vec<u64> = totals
-        .into_iter()
-        .flatten()
-        .filter_map(|size| u64::try_from(size).ok())
-        .collect();
-    DiskUsage {
-        total_bytes: (!reported.is_empty()).then(|| reported.iter().sum()),
-        volume_sizes: volume_sizes(usage),
-    }
 }
 
 fn parse_required_api_version(
@@ -1903,8 +1861,8 @@ mod tests {
 
     use super::{
         LocalDockerEngine, LocalEngineOptions, capabilities_from_swarm, map_container_state,
-        map_container_stats, map_container_summary, map_disk_usage, map_node_info, map_swarm_node,
-        map_volume,
+        map_container_stats, map_container_summary, map_node_info, map_swarm_node, map_volume,
+        volume_sizes,
     };
     use crate::{
         CapabilityStatus, ContainerEngine, ContainerPageRequest, ContainerState, CpuCounters,
@@ -2592,7 +2550,6 @@ mod tests {
         };
         for (code, kind) in [
             (404, EngineErrorKind::NotFound),
-            (304, EngineErrorKind::NotModified),
             (409, EngineErrorKind::Conflict),
             (500, EngineErrorKind::DaemonRejected),
         ] {
@@ -2623,7 +2580,6 @@ mod tests {
             &used,
         );
         assert_eq!(mapped.used_by, 2);
-        assert!(!mapped.dangling);
         assert_eq!(mapped.size_bytes, 42_000_000);
         let dangling = super::map_image(
             bollard::models::ImageSummary {
@@ -2634,7 +2590,7 @@ mod tests {
             },
             &used,
         );
-        assert!(dangling.dangling && dangling.repo_tags.is_empty());
+        assert!(dangling.repo_tags.is_empty());
         assert_eq!((dangling.used_by, dangling.size_bytes), (0, 0));
     }
 
@@ -2804,31 +2760,6 @@ mod tests {
         assert_eq!(empty.memory_limit_bytes, None);
     }
 
-    #[test]
-    fn disk_usage_sums_reported_categories_and_is_absent_otherwise() {
-        use bollard::models::{
-            ContainersDiskUsage, ImagesDiskUsage, SystemDataUsageResponse, VolumesDiskUsage,
-        };
-
-        let usage = SystemDataUsageResponse {
-            image_usage: Some(ImagesDiskUsage {
-                total_size: Some(1000),
-                ..Default::default()
-            }),
-            container_usage: Some(ContainersDiskUsage {
-                total_size: Some(24),
-                ..Default::default()
-            }),
-            volume_usage: Some(VolumesDiskUsage::default()),
-            build_cache_usage: None,
-        };
-        assert_eq!(map_disk_usage(&usage).total_bytes, Some(1024));
-        assert_eq!(
-            map_disk_usage(&SystemDataUsageResponse::default()).total_bytes,
-            None
-        );
-    }
-
     /// A verbose `df` volume item, built through the JSON value type bollard exposes.
     fn volume_item<V>(name: &str, size: Option<i64>) -> V
     where
@@ -2857,7 +2788,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        let sizes = map_disk_usage(&usage).volume_sizes;
+        let sizes = volume_sizes(&usage);
         assert_eq!(
             sizes.into_iter().collect::<Vec<_>>(),
             vec![("pg-data".to_owned(), 4096)]
@@ -2883,7 +2814,6 @@ mod tests {
             mapped.labels.get("app").map(String::as_str),
             Some("billing")
         );
-        assert_eq!(mapped.size_bytes, None);
     }
 
     #[test]

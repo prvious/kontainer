@@ -18,6 +18,10 @@ use tokio_util::sync::CancellationToken;
 const STATS_CONCURRENCY: usize = 8;
 /// `docker system df` runs on every twelfth sample, only to refresh [`VolumeSizeCache`].
 pub const DISK_SAMPLE_EVERY: u64 = 12;
+/// How long a sample waits for `docker system df`. It runs before the reading is stamped, so a
+/// slow one would make the check-in late and the sample stale; past this the sizes stay as they
+/// were.
+const DISK_USAGE_DEADLINE: Duration = Duration::from_secs(2);
 
 /// The last tick's per-container stats. `ListContainers` reads it so the list carries CPU and
 /// memory without extra Docker calls.
@@ -83,6 +87,7 @@ pub struct NodeSampler {
     engine: Arc<dyn ContainerEngine>,
     cache: ContainerStatsCache,
     volume_sizes: VolumeSizeCache,
+    disk_usage_deadline: Duration,
     ticks: u64,
     previous_at: Option<Instant>,
 }
@@ -94,6 +99,7 @@ impl NodeSampler {
             engine,
             cache,
             volume_sizes: VolumeSizeCache::default(),
+            disk_usage_deadline: DISK_USAGE_DEADLINE,
             ticks: 0,
             previous_at: None,
         }
@@ -131,10 +137,19 @@ impl NodeSampler {
             .values()
             .filter_map(|stats| stats.memory_used_bytes)
             .fold(0_u64, u64::saturating_add);
-        if tick.is_multiple_of(DISK_SAMPLE_EVERY)
-            && let Ok(usage) = self.engine.disk_usage(cancellation).await
-        {
-            self.volume_sizes.replace(usage.volume_sizes);
+        if tick.is_multiple_of(DISK_SAMPLE_EVERY) {
+            match tokio::time::timeout(
+                self.disk_usage_deadline,
+                self.engine.disk_usage(cancellation),
+            )
+            .await
+            {
+                Ok(Ok(usage)) => self.volume_sizes.replace(usage.volume_sizes),
+                Ok(Err(_)) => {}
+                Err(_) => tracing::debug!(
+                    "docker system df missed its deadline; volume sizes stay as they were"
+                ),
+            }
         }
         self.cache.replace(current);
 
@@ -281,6 +296,7 @@ pub(crate) mod tests {
         pub slow: Mutex<Option<String>>,
         pub info_fails: bool,
         pub listing_fails: bool,
+        pub disk_hangs: bool,
     }
 
     impl FakeNodeEngine {
@@ -310,6 +326,7 @@ pub(crate) mod tests {
                 slow: Mutex::new(None),
                 info_fails: false,
                 listing_fails: false,
+                disk_hangs: false,
             }
         }
     }
@@ -381,8 +398,10 @@ pub(crate) mod tests {
 
         async fn disk_usage(&self, _: &CancellationToken) -> Result<DiskUsage, EngineError> {
             self.disk_reads.fetch_add(1, Ordering::SeqCst);
+            if self.disk_hangs {
+                std::future::pending::<()>().await;
+            }
             Ok(DiskUsage {
-                total_bytes: Some(5 << 30),
                 volume_sizes: std::collections::BTreeMap::from([("pg-data".to_owned(), 4096)]),
             })
         }
@@ -470,6 +489,35 @@ pub(crate) mod tests {
         assert_eq!(with_df, vec![0, 12, 24]);
         assert_eq!(sizes.get("pg-data"), Some(4096));
         assert_eq!(sizes.get("other"), None);
+    }
+
+    #[tokio::test]
+    async fn a_df_that_never_answers_still_yields_the_sample_and_keeps_the_sizes() {
+        let mut engine = FakeNodeEngine::two_containers();
+        engine.disk_hangs = true;
+        let engine = Arc::new(engine);
+        let sizes = VolumeSizeCache::default();
+        sizes.replace(std::collections::BTreeMap::from([(
+            "pg-data".to_owned(),
+            1,
+        )]));
+        let mut sampler = NodeSampler::new(engine.clone(), ContainerStatsCache::default())
+            .with_volume_sizes(sizes.clone());
+        sampler.disk_usage_deadline = Duration::from_millis(50);
+
+        let started = std::time::Instant::now();
+        let reading = sampler
+            .sample(Duration::from_secs(1), &CancellationToken::new())
+            .await
+            .unwrap();
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert_eq!(
+            engine.disk_reads.load(Ordering::SeqCst),
+            1,
+            "the df was asked"
+        );
+        assert_eq!(reading.memory_used_bytes, 150 << 20);
+        assert_eq!(sizes.get("pg-data"), Some(1), "the previous sizes stay");
     }
 
     #[tokio::test]

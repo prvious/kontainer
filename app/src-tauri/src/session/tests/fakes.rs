@@ -36,7 +36,7 @@ use crate::session::manager::SessionManager;
 use crate::session::metadata::{MetadataError, SessionMetadataStore};
 use crate::session::models::{
     decode_anchor, decode_profile, encode_anchor, encode_profile, AnchorRecord, AnchorState,
-    LoginHint, MetadataSession, PasswordLoginInput, ProfileRecord, SessionDocument, SessionView,
+    MetadataSession, PasswordLoginInput, ProfileRecord, SessionDocument, SessionView,
     ANCHOR_VERSION,
 };
 use crate::session::vault::{CredentialVault, VaultError, VaultFuture};
@@ -1244,32 +1244,6 @@ impl Controller for FakeController {
         Box::pin(async move { outcome })
     }
 
-    fn admit<'a>(
-        &'a self,
-        access: &'a AccessCredential,
-        path: &'a str,
-        key: &'a IdempotencyKey,
-        body: &'a serde_json::Value,
-        _cancellation: &'a CancellationToken,
-    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
-        record(
-            &self.log,
-            format!(
-                "admit:{}:{path}:{}:{body}",
-                public_tag(access.expose()),
-                key.as_str()
-            ),
-        );
-        let outcome = self
-            .script
-            .lock()
-            .unwrap()
-            .admissions
-            .pop_front()
-            .unwrap_or(Err(NativeClientError::InvalidResponse));
-        Box::pin(async move { outcome })
-    }
-
     fn bootstrap_status<'a>(
         &'a self,
         _cancellation: &'a CancellationToken,
@@ -1492,9 +1466,8 @@ impl Harness {
         };
         self.vault.seed_anchor(&anchor);
         self.vault.seed_profile(&record);
-        self.metadata.set_document(SessionDocument::new(
-            None,
-            Some(MetadataSession {
+        self.metadata
+            .set_document(SessionDocument::new(Some(MetadataSession {
                 profile_id: anchor.profile_id,
                 origin: anchor.origin.clone(),
                 cluster_id: anchor.cluster_id.clone(),
@@ -1502,14 +1475,8 @@ impl Harness {
                 email: EMAIL.to_owned(),
                 display_name: DISPLAY_NAME.to_owned(),
                 label: Some("Default".to_owned()),
-            }),
-        ));
+            })));
         anchor
-    }
-
-    /// The login hint currently stored for the login screen.
-    pub(crate) fn hint(&self) -> Option<LoginHint> {
-        self.metadata.document().and_then(|document| document.hint)
     }
 
     /// The trusted profile UUID currently held by the vault anchor.

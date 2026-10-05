@@ -4,7 +4,7 @@
 use std::sync::atomic::Ordering;
 
 use crate::session::errors::SessionError;
-use crate::session::models::{AnchorState, ConnectionSummary, SessionDocument};
+use crate::session::models::{AnchorState, ConnectionSummary};
 
 use super::fakes::{
     future_ms, issued, past_ms, Harness, CLUSTER, OTHER_ORIGIN, OTHER_PRINCIPAL_ID,
@@ -198,8 +198,8 @@ async fn restore_refresh_rejection_cleans_up_and_requires_relogin() {
     assert_eq!(harness.count("refresh"), 1);
     assert!(!harness.vault.has_profile(anchor.profile_id));
     assert_eq!(harness.vault.anchor_state(), Some(AnchorState::LoggedOut));
-    let hint = harness.hint().expect("hint survives");
-    assert_eq!(hint.origin, anchor.origin);
+    let document = harness.metadata.document().expect("document");
+    assert!(document.session.is_none());
 }
 
 #[tokio::test]
@@ -401,9 +401,6 @@ async fn restore_logged_out_anchor_returns_none_and_clears_stale_metadata() {
     assert_eq!(harness.manager.restore().await.expect("restore"), None);
     let document = harness.metadata.document().expect("document");
     assert!(document.session.is_none());
-    let hint = document.hint.expect("hint");
-    assert_eq!(hint.origin, anchor.origin);
-    assert_eq!(hint.label.as_deref(), Some("Default"));
 }
 
 #[tokio::test]
@@ -493,24 +490,7 @@ async fn session_document_keeps_the_same_shape_after_a_failed_restore() {
     let _ = harness.manager.restore().await;
     let document = harness.metadata.document().expect("document");
     assert_eq!(document.version, crate::session::models::METADATA_VERSION);
-    assert!(document.hint.is_some());
     assert!(document.session.is_none());
-}
-
-#[tokio::test]
-async fn restore_without_an_anchor_keeps_the_login_hint() {
-    let harness = Harness::new();
-    let hint_origin = OTHER_ORIGIN.to_owned();
-    harness.metadata.set_document(SessionDocument::new(
-        Some(crate::session::models::LoginHint {
-            origin: hint_origin.clone(),
-            label: Some("Hinted".to_owned()),
-        }),
-        None,
-    ));
-    assert_eq!(harness.manager.restore().await.expect("restore"), None);
-    let document = harness.metadata.document().expect("document");
-    assert_eq!(document.hint.expect("hint").origin, hint_origin);
 }
 
 #[tokio::test]

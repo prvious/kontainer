@@ -15,8 +15,6 @@ pub struct ImageSummary {
     pub created_at_seconds: i64,
     /// Containers on this node (any state) created from this image.
     pub used_by: u32,
-    /// No tag: an intermediate or superseded image.
-    pub dangling: bool,
 }
 
 /// One progress message from the daemon, e.g. `Downloading` for a layer with bytes so far.

@@ -58,42 +58,33 @@ pub use client::{
 };
 pub use containers::{
     ContainerAction, ContainerActionOptions, ContainerItem, ContainerList, ContainerState,
-    ContainerTarget, MAX_BULK_TARGETS, MAX_CONTAINERS, MAX_STOP_TIMEOUT_SECONDS, NodeId,
-    NodeOutcome, NodeOutcomeStatus,
+    ContainerTarget, NodeId, NodeOutcome, NodeOutcomeStatus,
 };
 pub use credentials::{AccessCredential, CredentialError, LoginVerifier, RefreshCredential};
 pub use error::{AccountFieldErrors, FieldProblem, NativeClientError, Traced};
 pub use exec::{
     ExecClosedReason, ExecConnection, ExecEvent, ExecEventFuture, ExecEventSource, ExecInputFrame,
-    ExecInputSink, ExecOpenRequest, ExecSendFuture, MAX_EXEC_INPUT,
+    ExecInputSink, ExecOpenRequest, ExecSendFuture,
 };
-pub use images::{
-    ImageItem, ImageList, ImageNodes, MAX_IMAGE_REFERENCE_LEN, MAX_IMAGE_TARGET_NODES, MAX_IMAGES,
-};
+pub use images::{ImageItem, ImageList, ImageNodes};
 pub use logs::{
-    ACCESS_EXPIRED_CLOSE, FIRST_RECONNECT_DELAY, LogConnectError, LogConnectFuture, LogConnector,
-    LogDisconnect, LogEndKind, LogEvent, LogFollower, LogFrame, LogFrameFuture, LogLineItem,
-    LogOpenRequest, LogReceiver, LogStream, MAX_RECONNECT_DELAY, Overlap, RECONNECT_OVERLAP_MS,
-    reconnect_delay,
+    LogConnectError, LogConnectFuture, LogConnector, LogDisconnect, LogEndKind, LogEvent,
+    LogFollower, LogFrame, LogFrameFuture, LogLineItem, LogOpenRequest, LogReceiver, LogStream,
 };
 pub use networks::{
-    AttachedContainer, MAX_NETWORKS, ManagerStatus, NetworkId, NetworkItem, NetworkList,
-    NetworkPlacement, NetworkScope, NetworkSpec,
+    AttachedContainer, ManagerStatus, NetworkId, NetworkItem, NetworkList, NetworkPlacement,
+    NetworkScope, NetworkSpec,
 };
 pub use nodes::{
-    AgentStatus, ClusterSummary, MAX_SAMPLE_POINTS, NodeAvailability, NodeHealth, NodeList,
-    NodeRole, NodeSample, NodeSummary, QuorumState, SAMPLE_WINDOWS, SamplePoint, SampleSeries,
+    AgentStatus, ClusterSummary, NodeAvailability, NodeHealth, NodeList, NodeRole, NodeSample,
+    NodeSummary, QuorumState, SamplePoint, SampleSeries,
 };
 pub use operations::{AdmittedOperation, IdempotencyKey, OperationSnapshot, OperationState};
 pub use probe::ProbeFailure;
 pub use services::{
-    MAX_REPLICAS, MAX_SERVICES, ServiceAction, ServiceDetail, ServiceId, ServiceItem, ServiceList,
-    ServiceMode,
+    ServiceAction, ServiceDetail, ServiceId, ServiceItem, ServiceList, ServiceMode,
 };
-pub use settings::{ControllerSettings, RETENTION_DAYS};
+pub use settings::ControllerSettings;
 pub use stacks::{StackItem, StackList, StackName, StackRemovalPlan, StackStatus};
 pub use status::ControllerStatus;
-pub use volumes::{
-    LOCAL_VOLUME_DRIVER, MAX_VOLUME_LABELS, MAX_VOLUMES, VolumeItem, VolumeList, VolumeName,
-    VolumeQuery, VolumeSpec,
-};
+pub use volumes::{VolumeItem, VolumeList, VolumeName, VolumeQuery, VolumeSpec};

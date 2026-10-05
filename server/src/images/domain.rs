@@ -405,7 +405,6 @@ mod tests {
             size_bytes: 1000,
             created_at_seconds: created,
             used_by,
-            dangling: tags.is_empty(),
         }
     }
 

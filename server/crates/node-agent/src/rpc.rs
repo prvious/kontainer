@@ -80,9 +80,7 @@ impl NodeAgentService {
 
     fn volume_to_proto(&self, volume: VolumeSummary) -> ProtoVolumeSummary {
         ProtoVolumeSummary {
-            size_bytes: volume
-                .size_bytes
-                .or_else(|| self.volume_sizes.get(&volume.name)),
+            size_bytes: self.volume_sizes.get(&volume.name),
             name: volume.name,
             driver: volume.driver,
             mountpoint: volume.mountpoint,
@@ -149,7 +147,6 @@ impl NodeAgent for NodeAgentService {
                     size_bytes: image.size_bytes,
                     created_at_unix_seconds: image.created_at_seconds,
                     used_by: image.used_by,
-                    dangling: image.dangling,
                 })
                 .collect(),
         }))
@@ -221,7 +218,6 @@ impl NodeAgent for NodeAgentService {
             })?,
         };
         Ok(Response::new(InspectNetworkResponse {
-            network: Some(network_to_proto(detail.network)),
             endpoints: detail
                 .endpoints
                 .into_iter()
@@ -624,15 +620,12 @@ fn network_to_proto(network: NetworkSummary) -> ProtoNetworkSummary {
         created_at_unix_seconds: network.created_at_seconds,
         labels: network.labels.into_iter().collect(),
         attachable: network.attachable,
-        ingress: network.ingress,
-        internal: network.internal,
     }
 }
 
 fn action_error_to_status(error: &EngineError) -> Status {
     match error.kind() {
         EngineErrorKind::NotFound => Status::not_found("not_found"),
-        EngineErrorKind::NotModified => Status::failed_precondition("already_in_state"),
         EngineErrorKind::Conflict => Status::failed_precondition("container_running"),
         EngineErrorKind::InvalidInput => Status::invalid_argument("invalid_container"),
         EngineErrorKind::DeadlineExceeded => Status::deadline_exceeded("engine_timeout"),
@@ -656,7 +649,6 @@ fn engine_error_to_status(error: &EngineError) -> Status {
             Status::internal("engine response was invalid")
         }
         EngineErrorKind::NotFound
-        | EngineErrorKind::NotModified
         | EngineErrorKind::Conflict
         | EngineErrorKind::QuorumUnavailable
         | EngineErrorKind::VersionConflict
@@ -774,7 +766,7 @@ mod tests {
 
     type SeenAction = (String, kontainer_engine::ContainerAction, bool, Option<u32>);
 
-    /// Running containers refuse start (304) and plain remove (409); unknown ids are 404.
+    /// Running containers refuse a plain remove (409); unknown ids are 404.
     struct LifecycleEngine {
         running: String,
         seen: std::sync::Mutex<Vec<SeenAction>>,
@@ -805,7 +797,6 @@ mod tests {
                 return error(EngineErrorKind::NotFound);
             }
             match action {
-                ContainerAction::Start => error(EngineErrorKind::NotModified),
                 ContainerAction::Remove if !options.force => error(EngineErrorKind::Conflict),
                 _ => Ok(()),
             }
@@ -853,12 +844,14 @@ mod tests {
                 .await
                 .is_ok()
         );
+        assert!(
+            service
+                .container_action(authenticated(request(&running, Proto::Start, false, None)))
+                .await
+                .is_ok(),
+            "starting a running container succeeds, as Docker's 304 does"
+        );
         for (req, code, message) in [
-            (
-                request(&running, Proto::Start, false, None),
-                tonic::Code::FailedPrecondition,
-                "already_in_state",
-            ),
             (
                 request(&running, Proto::Remove, false, None),
                 tonic::Code::FailedPrecondition,

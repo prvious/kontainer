@@ -66,7 +66,7 @@ function OverviewPage() {
     const { session } = useAuth();
     const summary = useClusterSummary();
     const nodes = useNodes();
-    const hour = useSamples("cluster", "1h", "60s");
+    const hour = useSamples("1h", "60s");
     const containers = useContainers();
     const connectivity = useConnectivity();
     const tracked = useTrackedOperations("containers");

@@ -82,9 +82,6 @@ pub enum NativeClientError {
     /// The node ID is not a canonical controller node identifier.
     #[error("node ID is not valid")]
     InvalidNodeId,
-    /// The page size or cursor is outside the documented bounds.
-    #[error("pagination is not valid")]
-    InvalidPagination,
     /// The caller's cancellation token fired before the call completed.
     #[error("request was cancelled")]
     Cancelled,

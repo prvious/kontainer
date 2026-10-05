@@ -39,7 +39,6 @@ async fn cancel_posts_once_and_maps_not_cancellable_to_conflict() {
         .await
         .unwrap();
     assert_eq!(snapshot.state, OperationState::Cancelled);
-    assert!(snapshot.state.is_terminal());
     assert!(snapshot.finished_at.is_some());
     assert_eq!(
         client

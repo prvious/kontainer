@@ -1,6 +1,6 @@
 # 0040. Trim the service detail, unread fields, and the unsent log close
 
-- Status: accepted
+- Status: accepted (amended by 0043)
 - Date: 2026-10-04
 - Spec: docs/build/06-operations.md, docs/build/08-images.md, docs/build/10-networks.md,
   docs/build/11-services.md, docs/build/12-stacks.md, docs/build/15-logs.md

@@ -24,7 +24,6 @@ pub(crate) enum InventoryError {
     LocalStateFailed,
     CleanupUncertain,
     InvalidNodeId,
-    InvalidPagination,
     InvalidRequest,
     NodeNotFound,
     NotFound,
@@ -51,7 +50,6 @@ impl InventoryError {
         Self::LocalStateFailed,
         Self::CleanupUncertain,
         Self::InvalidNodeId,
-        Self::InvalidPagination,
         Self::InvalidRequest,
         Self::NodeNotFound,
         Self::NotFound,
@@ -90,7 +88,6 @@ impl From<NativeClientError> for InventoryError {
     fn from(error: NativeClientError) -> Self {
         match error {
             NativeClientError::InvalidNodeId => Self::InvalidNodeId,
-            NativeClientError::InvalidPagination => Self::InvalidPagination,
             NativeClientError::InvalidRequest => Self::InvalidRequest,
             NativeClientError::Unauthorized => Self::ReloginRequired,
             NativeClientError::Forbidden => Self::Forbidden,
@@ -189,7 +186,7 @@ impl SessionManager {
         if anchor.profile_id != profile_id {
             return Err(InventoryError::Unauthenticated);
         }
-        let refreshed = self.restore_ready(anchor).await?;
+        self.restore_ready(anchor).await?;
         custody.active = self.slots().active.take();
         let active = custody
             .active
@@ -211,9 +208,6 @@ impl SessionManager {
             .load_anchor()
             .await?
             .ok_or(InventoryError::LocalStateFailed)?;
-        Err(self
-            .invalidate_to_relogin(&anchor, refreshed.label)
-            .await
-            .into())
+        Err(self.invalidate_to_relogin(&anchor).await.into())
     }
 }

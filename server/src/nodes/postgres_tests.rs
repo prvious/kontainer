@@ -268,14 +268,6 @@ impl ManagerEngine for FakeManager {
         Ok(Vec::new())
     }
 
-    async fn inspect_network(
-        &self,
-        _: &str,
-        _: &CancellationToken,
-    ) -> Result<kontainer_engine::NetworkDetail, ManagerError> {
-        Err(ManagerError::NotFound)
-    }
-
     async fn create_network(
         &self,
         _: &kontainer_engine::NetworkCreate,

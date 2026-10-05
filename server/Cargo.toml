@@ -122,6 +122,7 @@ uuid.workspace = true
 
 [dev-dependencies]
 kontainer-node-agent = { path = "crates/node-agent" }
+kontainer-rpc-auth = { path = "crates/rpc-auth", features = ["test-util"] }
 rcgen = "0.14.9"
 tempfile = "3.27.0"
 

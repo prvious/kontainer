@@ -19,6 +19,9 @@ tonic.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 
+[dev-dependencies]
+kontainer-rpc-auth = { path = "../rpc-auth", features = ["test-util"] }
+
 [[bin]]
 name = "kontainer-node-agent"
 path = "src/main.rs"

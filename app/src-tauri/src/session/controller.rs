@@ -312,16 +312,6 @@ pub(crate) trait Controller: Send + Sync + 'static {
         operation_id: Uuid,
         cancellation: &'a CancellationToken,
     ) -> ControllerFuture<'a, Result<OperationSnapshot, NativeClientError>>;
-
-    /// POST one mutation with its idempotency key.
-    fn admit<'a>(
-        &'a self,
-        access: &'a AccessCredential,
-        path: &'a str,
-        key: &'a IdempotencyKey,
-        body: &'a serde_json::Value,
-        cancellation: &'a CancellationToken,
-    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>>;
 }
 
 /// Builds a controller for a validated controller origin.
@@ -771,17 +761,6 @@ impl Controller for NativeController {
             self.client
                 .cancel_operation(access, operation_id, cancellation),
         )
-    }
-
-    fn admit<'a>(
-        &'a self,
-        access: &'a AccessCredential,
-        path: &'a str,
-        key: &'a IdempotencyKey,
-        body: &'a serde_json::Value,
-        cancellation: &'a CancellationToken,
-    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
-        Box::pin(self.client.admit(access, path, key, body, cancellation))
     }
 }
 
