@@ -160,8 +160,7 @@ fn node_query(raw: Option<&str>) -> Result<Option<String>, String> {
         (status = 200, description = "Swarm-scope networks once, local ones per node, and one outcome per member", body = NetworkListResponse),
         (status = 401, description = "Missing, malformed, expired, or revoked access credential"),
         (status = 503, description = "Agent RPC not configured, persistence unavailable, or controller draining", body = super::admission::AdmissionErrorResponse)
-    ),
-    security(("access_session" = []))
+    )
 )]
 pub(crate) async fn index(
     State(context): State<AppContext>,
@@ -201,8 +200,7 @@ pub(crate) async fn index(
         (status = 401, description = "Missing, malformed, expired, or revoked access credential"),
         (status = 404, description = "No such member node, or the node doesn't have it", body = super::admission::AdmissionErrorResponse),
         (status = 503, description = "Agent RPC not configured, agent or persistence unavailable", body = super::admission::AdmissionErrorResponse)
-    ),
-    security(("access_session" = []))
+    )
 )]
 pub(crate) async fn show(
     State(context): State<AppContext>,
@@ -282,8 +280,7 @@ pub struct CreateNetworkRequest {
         (status = 401, description = "Missing, malformed, expired, or revoked access credential"),
         (status = 409, description = "`idempotency_conflict`", body = super::admission::AdmissionErrorResponse),
         (status = 503, description = "`not_a_manager` for an overlay without a Swarm manager, persistence unavailable, or draining", body = super::admission::AdmissionErrorResponse)
-    ),
-    security(("access_session" = []))
+    )
 )]
 pub(crate) async fn create(
     State(context): State<AppContext>,
@@ -384,8 +381,7 @@ pub(crate) async fn create(
         (status = 404, description = "No such network (on that node)", body = super::admission::AdmissionErrorResponse),
         (status = 409, description = "`idempotency_conflict`", body = super::admission::AdmissionErrorResponse),
         (status = 503, description = "`not_a_manager` for a swarm network without a Swarm manager, persistence unavailable, or draining", body = super::admission::AdmissionErrorResponse)
-    ),
-    security(("access_session" = []))
+    )
 )]
 pub(crate) async fn remove(
     State(context): State<AppContext>,

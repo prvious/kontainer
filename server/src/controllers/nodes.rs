@@ -384,8 +384,7 @@ fn optional_manager(context: &AppContext) -> Option<SharedManagerEngine> {
         (status = 200, description = "Every node that checked in or that Swarm lists, joined by Swarm node id, with derived health and latest sample. Swarm fields are unknown when the manager does not answer.", body = NodeListResponse),
         (status = 401, description = "Missing, malformed, expired, or revoked access credential"),
         (status = 503, description = "Persistence unavailable or controller draining", body = NodeErrorResponse)
-    ),
-    security(("access_session" = []))
+    )
 )]
 pub(crate) async fn index(
     State(context): State<AppContext>,
@@ -419,8 +418,7 @@ pub(crate) async fn index(
         (status = 200, description = "Node counts by health, manager reachability and quorum, and load summed over online nodes", body = ClusterSummaryResponse),
         (status = 401, description = "Missing, malformed, expired, or revoked access credential"),
         (status = 503, description = "Persistence unavailable or controller draining", body = NodeErrorResponse)
-    ),
-    security(("access_session" = []))
+    )
 )]
 pub(crate) async fn cluster_summary(
     State(context): State<AppContext>,
@@ -511,8 +509,7 @@ fn point_response(point: SamplePoint) -> SamplePointResponse {
         (status = 401, description = "Missing, malformed, expired, or revoked access credential"),
         (status = 404, description = "Unknown node", body = NodeErrorResponse),
         (status = 503, description = "Persistence unavailable or controller draining", body = NodeErrorResponse)
-    ),
-    security(("access_session" = []))
+    )
 )]
 pub(crate) async fn samples(
     State(context): State<AppContext>,
@@ -546,8 +543,7 @@ pub(crate) async fn samples(
         (status = 400, description = "Invalid window or bucket", body = NodeErrorResponse),
         (status = 401, description = "Missing, malformed, expired, or revoked access credential"),
         (status = 503, description = "Persistence unavailable or controller draining", body = NodeErrorResponse)
-    ),
-    security(("access_session" = []))
+    )
 )]
 pub(crate) async fn cluster_samples(
     State(context): State<AppContext>,

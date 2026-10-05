@@ -138,8 +138,7 @@ fn parse_filter(raw: Option<&str>) -> Result<ListQuery, QueryProblem> {
         (status = 401, description = "Missing, malformed, expired, or revoked access credential"),
         (status = 404, description = "No such member node", body = super::admission::AdmissionErrorResponse),
         (status = 503, description = "Agent RPC not configured, persistence unavailable, or controller draining", body = super::admission::AdmissionErrorResponse)
-    ),
-    security(("access_session" = []))
+    )
 )]
 pub(crate) async fn index(
     State(context): State<AppContext>,
@@ -209,8 +208,7 @@ pub struct CreateVolumeRequest {
         (status = 401, description = "Missing, malformed, expired, or revoked access credential"),
         (status = 409, description = "`idempotency_conflict`", body = super::admission::AdmissionErrorResponse),
         (status = 503, description = "Persistence unavailable or controller draining")
-    ),
-    security(("access_session" = []))
+    )
 )]
 pub(crate) async fn create(
     State(context): State<AppContext>,
@@ -272,8 +270,7 @@ pub(crate) async fn create(
         (status = 401, description = "Missing, malformed, expired, or revoked access credential"),
         (status = 409, description = "`idempotency_conflict`", body = super::admission::AdmissionErrorResponse),
         (status = 503, description = "Persistence unavailable or controller draining")
-    ),
-    security(("access_session" = []))
+    )
 )]
 pub(crate) async fn remove(
     State(context): State<AppContext>,

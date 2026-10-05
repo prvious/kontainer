@@ -28,11 +28,6 @@
             "description": "Agent RPC not configured, persistence unavailable, or controller draining"
           }
         },
-        "security": [
-          {
-            "access_session": []
-          }
-        ],
         "tags": [
           "super::images"
         ]
@@ -100,11 +95,6 @@
             "description": "Persistence unavailable or controller draining"
           }
         },
-        "security": [
-          {
-            "access_session": []
-          }
-        ],
         "tags": [
           "super::images"
         ]
@@ -181,11 +171,6 @@
             "description": "Persistence unavailable or controller draining"
           }
         },
-        "security": [
-          {
-            "access_session": []
-          }
-        ],
         "tags": [
           "super::images"
         ]

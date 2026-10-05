@@ -28,11 +28,6 @@
             "description": "`quorum_unavailable` or `not_a_manager`"
           }
         },
-        "security": [
-          {
-            "access_session": []
-          }
-        ],
         "tags": [
           "super::stacks"
         ]
@@ -116,11 +111,6 @@
             "description": "`quorum_unavailable` (nothing admitted) or `not_a_manager`"
           }
         },
-        "security": [
-          {
-            "access_session": []
-          }
-        ],
         "tags": [
           "super::stacks"
         ]
@@ -185,11 +175,6 @@
             "description": "`quorum_unavailable` or `not_a_manager`"
           }
         },
-        "security": [
-          {
-            "access_session": []
-          }
-        ],
         "tags": [
           "super::stacks"
         ]

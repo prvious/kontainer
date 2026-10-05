@@ -58,11 +58,6 @@
             "description": "Persistence unavailable or controller draining"
           }
         },
-        "security": [
-          {
-            "access_session": []
-          }
-        ],
         "tags": [
           "super::nodes"
         ]
@@ -96,11 +91,6 @@
             "description": "Persistence unavailable or controller draining"
           }
         },
-        "security": [
-          {
-            "access_session": []
-          }
-        ],
         "tags": [
           "super::nodes"
         ]
@@ -175,11 +165,6 @@
             "description": "Agent RPC not configured, persistence unavailable, or controller draining"
           }
         },
-        "security": [
-          {
-            "access_session": []
-          }
-        ],
         "tags": [
           "super::containers"
         ]
@@ -247,11 +232,6 @@
             "description": "Persistence unavailable or controller draining"
           }
         },
-        "security": [
-          {
-            "access_session": []
-          }
-        ],
         "tags": [
           "super::containers"
         ]
@@ -363,11 +343,6 @@
             "description": "Persistence unavailable or controller draining"
           }
         },
-        "security": [
-          {
-            "access_session": []
-          }
-        ],
         "tags": [
           "super::containers"
         ]
@@ -401,11 +376,6 @@
             "description": "Persistence unavailable or controller draining"
           }
         },
-        "security": [
-          {
-            "access_session": []
-          }
-        ],
         "tags": [
           "super::nodes"
         ]
@@ -488,11 +458,6 @@
             "description": "Persistence unavailable or controller draining"
           }
         },
-        "security": [
-          {
-            "access_session": []
-          }
-        ],
         "tags": [
           "super::nodes"
         ]
@@ -563,11 +528,6 @@
             "description": "Persistence unavailable or controller draining"
           }
         },
-        "security": [
-          {
-            "access_session": []
-          }
-        ],
         "tags": [
           "super::operations"
         ]
@@ -674,11 +634,6 @@
             "description": "Persistence unavailable or controller draining"
           }
         },
-        "security": [
-          {
-            "access_session": []
-          }
-        ],
         "tags": [
           "super::operations"
         ]
@@ -712,11 +667,6 @@
             "description": "Persistence unavailable or controller draining"
           }
         },
-        "security": [
-          {
-            "access_session": []
-          }
-        ],
         "tags": [
           "super::settings"
         ]
@@ -778,11 +728,6 @@
             "description": "Persistence unavailable or controller draining"
           }
         },
-        "security": [
-          {
-            "access_session": []
-          }
-        ],
         "tags": [
           "super::settings"
         ]

@@ -446,12 +446,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "access_session": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/cluster/summary": {
@@ -484,12 +479,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "access_session": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/containers": {
@@ -563,12 +553,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "access_session": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/containers/actions/bulk": {
@@ -635,12 +620,7 @@
           "503": {
             "description": "Persistence unavailable or controller draining"
           }
-        },
-        "security": [
-          {
-            "access_session": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/containers/{nodeId}/{containerId}/actions/{action}": {
@@ -751,12 +731,7 @@
           "503": {
             "description": "Persistence unavailable or controller draining"
           }
-        },
-        "security": [
-          {
-            "access_session": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/images": {
@@ -789,12 +764,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "access_session": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/images/pulls": {
@@ -861,12 +831,7 @@
           "503": {
             "description": "Persistence unavailable or controller draining"
           }
-        },
-        "security": [
-          {
-            "access_session": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/images/{imageId}": {
@@ -942,12 +907,7 @@
           "503": {
             "description": "Persistence unavailable or controller draining"
           }
-        },
-        "security": [
-          {
-            "access_session": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/networks": {
@@ -980,12 +940,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "access_session": []
-          }
-        ]
+        }
       },
       "post": {
         "tags": [
@@ -1057,12 +1012,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "access_session": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/networks/{networkId}": {
@@ -1135,12 +1085,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "access_session": []
-          }
-        ]
+        }
       },
       "delete": {
         "tags": [
@@ -1230,12 +1175,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "access_session": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/nodes": {
@@ -1268,12 +1208,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "access_session": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/nodes/{nodeId}/samples": {
@@ -1355,12 +1290,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "access_session": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/operations/noop": {
@@ -1430,12 +1360,7 @@
           "503": {
             "description": "Persistence unavailable or controller draining"
           }
-        },
-        "security": [
-          {
-            "access_session": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/operations/{operation_id}": {
@@ -1541,12 +1466,7 @@
           "503": {
             "description": "Persistence unavailable or controller draining"
           }
-        },
-        "security": [
-          {
-            "access_session": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/operations/{operation_id}/events": {
@@ -1618,12 +1538,7 @@
           "503": {
             "description": "Persistence unavailable or controller draining"
           }
-        },
-        "security": [
-          {
-            "access_session": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/services": {
@@ -1677,12 +1592,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "access_session": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/services/{serviceId}": {
@@ -1746,12 +1656,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "access_session": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/services/{serviceId}/actions/{action}": {
@@ -1853,12 +1758,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "access_session": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/settings": {
@@ -1891,12 +1791,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "access_session": []
-          }
-        ]
+        }
       },
       "patch": {
         "tags": [
@@ -1957,12 +1852,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "access_session": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/stacks": {
@@ -1995,12 +1885,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "access_session": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/stacks/{name}": {
@@ -2083,12 +1968,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "access_session": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/stacks/{name}/plan": {
@@ -2152,12 +2032,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "access_session": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/status": {
@@ -2207,12 +2082,7 @@
           "503": {
             "description": "Controller draining new work or session persistence unavailable; the body is either HealthResponse or a generic error"
           }
-        },
-        "security": [
-          {
-            "access_session": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/volumes": {
@@ -2285,12 +2155,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "access_session": []
-          }
-        ]
+        }
       },
       "post": {
         "tags": [
@@ -2355,12 +2220,7 @@
           "503": {
             "description": "Persistence unavailable or controller draining"
           }
-        },
-        "security": [
-          {
-            "access_session": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/volumes/{nodeId}/{name}": {
@@ -2435,12 +2295,7 @@
           "503": {
             "description": "Persistence unavailable or controller draining"
           }
-        },
-        "security": [
-          {
-            "access_session": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/ws/exec": {
@@ -2486,12 +2341,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "access_session": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/ws/logs": {
@@ -2537,12 +2387,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "access_session": []
-          }
-        ]
+        }
       }
     },
     "/health/live": {

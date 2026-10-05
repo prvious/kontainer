@@ -3,11 +3,6 @@ use serde::Serialize;
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi, ToSchema};
 
-use super::containers::{
-    BulkActionRequest, ContainerActionRequest, ContainerListResponse, ContainerResponse,
-    ContainerStateResponse, TooManyContainersResponse,
-};
-use super::operations::{OperationResponse, OperationStateResponse};
 use crate::auth::domain::PrincipalContext;
 use crate::server::ControllerRuntime;
 
@@ -128,79 +123,6 @@ impl Modify for AccessSessionSecurity {
         super::health::startup,
         super::health::ready
     ),
-    components(schemas(
-        StatusResponse,
-        deep::DeepStatusResponse,
-        deep::BuildResponse,
-        deep::MigrationState,
-        deep::DatabaseState,
-        OperationResponse,
-        OperationStateResponse,
-        super::operations::OperationEventResponse,
-        super::operations::OperationEventsResponse,
-        super::admission::AdmittedResponse,
-        super::admission::AdmissionErrorResponse,
-        ContainerListResponse,
-        ContainerResponse,
-        ContainerStateResponse,
-        TooManyContainersResponse,
-        ContainerActionRequest,
-        BulkActionRequest,
-        super::images::ImageListResponse,
-        super::images::ImageResponse,
-        super::admission::FieldErrorResponse,
-        super::images::RemoveImageRequest,
-        super::images::PullImageRequest,
-        super::volumes::VolumeListResponse,
-        super::volumes::VolumeResponse,
-        super::volumes::CreateVolumeRequest,
-        super::networks::NetworkListResponse,
-        super::networks::NetworkResponse,
-        super::networks::NetworkContainersResponse,
-        super::networks::AttachedContainerResponse,
-        super::networks::CreateNetworkRequest,
-        super::services::ServiceListResponse,
-        super::services::ServiceResponse,
-        super::services::ServiceDetailResponse,
-        super::services::TaskResponse,
-        super::services::QuorumUnavailableResponse,
-        super::services::ServiceActionRequest,
-        super::stacks::StackListResponse,
-        super::stacks::StackResponse,
-        super::stacks::StackPlanResponse,
-        crate::nodes::fan_out::NodeOutcomeResponse,
-        crate::nodes::fan_out::NodeOutcomeStatus,
-        super::nodes::NodeListResponse,
-        super::nodes::NodeResponse,
-        super::nodes::AgentStatusResponse,
-        super::nodes::NodeHealthResponse,
-        super::nodes::NodeRoleResponse,
-        super::nodes::NodeAvailabilityResponse,
-        super::nodes::SwarmNodeStatusResponse,
-        super::nodes::ClusterSummaryResponse,
-        super::nodes::QuorumStateResponse,
-        super::nodes::NodeSampleResponse,
-        super::nodes::SampleSeriesResponse,
-        super::nodes::SamplePointResponse,
-        super::nodes::NodeErrorResponse,
-        super::settings::SettingsResponse,
-        super::settings::SettingsPatchRequest,
-        super::sessions::RefreshRequest,
-        super::sessions::SessionTokenResponse,
-        super::password_auth::BootstrapResponse,
-        super::password_auth::RegisterRequest,
-        super::password_auth::PasswordLoginRequest,
-        super::password_auth::PasswordSessionResponse,
-        super::password_auth::ValidationErrorResponse,
-        super::password_auth::InvalidCredentialsResponse,
-        super::password_auth::LockedResponse,
-        super::account::AccountResponse,
-        super::github_login::StartLoginRequest,
-        super::github_login::StartLoginResponse,
-        super::github_login::RedeemLoginRequest,
-        super::github_login::GithubLoginResponse,
-        super::health::HealthResponse
-    )),
     modifiers(&AccessSessionSecurity),
     security(("access_session" = []))
 )]
@@ -311,8 +233,10 @@ mod tests {
         assert!(route["responses"]["401"].is_object());
         assert!(route["responses"]["503"].is_object());
         assert_eq!(route["operationId"], "deep_status");
+        // No per-route override, so the document's access-session requirement applies.
+        assert!(route.get("security").is_none());
         assert_eq!(
-            route["security"],
+            document["security"],
             serde_json::json!([{"access_session": []}])
         );
 
@@ -363,10 +287,8 @@ mod tests {
         ] {
             let route = &document["paths"][path][method];
             assert_eq!(route["operationId"], operation, "{path}");
-            assert_eq!(
-                route["security"],
-                serde_json::json!([{"access_session": []}])
-            );
+            // No override: the document's access-session requirement applies.
+            assert!(route.get("security").is_none(), "{path}");
             assert!(route["responses"]["401"].is_object(), "{path}");
         }
         assert!(document["paths"]["/api/v1/nodes/configured"].is_null());

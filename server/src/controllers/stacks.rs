@@ -95,8 +95,7 @@ fn plan_response(plan: RemovalPlan) -> StackPlanResponse {
         (status = 200, description = "Stacks grouped from service labels, with summed task counts and container figures", body = StackListResponse),
         (status = 401, description = "Missing, malformed, expired, or revoked access credential"),
         (status = 503, description = "`quorum_unavailable` or `not_a_manager`", body = super::services::QuorumUnavailableResponse)
-    ),
-    security(("access_session" = []))
+    )
 )]
 pub(crate) async fn index(
     State(context): State<AppContext>,
@@ -137,8 +136,7 @@ pub(crate) async fn index(
         (status = 401, description = "Missing, malformed, expired, or revoked access credential"),
         (status = 404, description = "No service carries this stack name", body = super::admission::AdmissionErrorResponse),
         (status = 503, description = "`quorum_unavailable` or `not_a_manager`", body = super::services::QuorumUnavailableResponse)
-    ),
-    security(("access_session" = []))
+    )
 )]
 pub(crate) async fn plan(
     State(context): State<AppContext>,
@@ -174,8 +172,7 @@ pub(crate) async fn plan(
         (status = 404, description = "No service carries this stack name", body = super::admission::AdmissionErrorResponse),
         (status = 409, description = "`idempotency_conflict`", body = super::admission::AdmissionErrorResponse),
         (status = 503, description = "`quorum_unavailable` (nothing admitted) or `not_a_manager`", body = super::services::QuorumUnavailableResponse)
-    ),
-    security(("access_session" = []))
+    )
 )]
 pub(crate) async fn remove(
     State(context): State<AppContext>,

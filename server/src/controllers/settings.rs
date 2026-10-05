@@ -44,8 +44,7 @@ pub struct SettingsPatchRequest {
         (status = 200, description = "Controller settings", body = SettingsResponse),
         (status = 401, description = "Missing, malformed, expired, or revoked access credential"),
         (status = 503, description = "Persistence unavailable or controller draining", body = NodeErrorResponse)
-    ),
-    security(("access_session" = []))
+    )
 )]
 pub(crate) async fn show(
     State(context): State<AppContext>,
@@ -68,8 +67,7 @@ pub(crate) async fn show(
         (status = 401, description = "Missing, malformed, expired, or revoked access credential"),
         (status = 422, description = "metricsRetentionDays outside 1–365", body = NodeErrorResponse),
         (status = 503, description = "Persistence unavailable or controller draining", body = NodeErrorResponse)
-    ),
-    security(("access_session" = []))
+    )
 )]
 pub(crate) async fn update(
     State(context): State<AppContext>,

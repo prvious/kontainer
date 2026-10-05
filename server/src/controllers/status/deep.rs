@@ -64,8 +64,7 @@ pub enum DatabaseState {
         (status = 200, description = "Authenticated dependency diagnostic; component failures are states, not HTTP errors", body = DeepStatusResponse),
         (status = 401, description = "Missing, malformed, expired, or revoked access credential"),
         (status = 503, description = "Controller draining new work or session persistence unavailable; the body is either HealthResponse or a generic error")
-    ),
-    security(("access_session" = []))
+    )
 )]
 pub(super) async fn show(
     State(context): State<AppContext>,

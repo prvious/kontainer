@@ -179,8 +179,7 @@ fn parse_node_filter(raw: Option<&str>) -> Result<Option<String>, ()> {
         (status = 404, description = "No such member node", body = super::admission::AdmissionErrorResponse),
         (status = 413, description = "`too_many_containers`: more than 2,000; filter by node", body = TooManyContainersResponse),
         (status = 503, description = "Agent RPC not configured, persistence unavailable, or controller draining", body = super::admission::AdmissionErrorResponse)
-    ),
-    security(("access_session" = []))
+    )
 )]
 pub(crate) async fn index(
     State(context): State<AppContext>,
@@ -291,8 +290,7 @@ async fn is_member(context: &AppContext, node_id: &str) -> Option<bool> {
         (status = 404, description = "No such member node", body = super::admission::AdmissionErrorResponse),
         (status = 409, description = "`idempotency_conflict`", body = super::admission::AdmissionErrorResponse),
         (status = 503, description = "Persistence unavailable or controller draining")
-    ),
-    security(("access_session" = []))
+    )
 )]
 pub(crate) async fn action(
     State(context): State<AppContext>,
@@ -372,8 +370,7 @@ pub struct BulkActionRequest {
         (status = 401, description = "Missing, malformed, expired, or revoked access credential"),
         (status = 409, description = "`idempotency_conflict`", body = super::admission::AdmissionErrorResponse),
         (status = 503, description = "Persistence unavailable or controller draining")
-    ),
-    security(("access_session" = []))
+    )
 )]
 pub(crate) async fn bulk(
     State(context): State<AppContext>,

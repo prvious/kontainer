@@ -207,8 +207,7 @@ pub(super) fn shutdown_token(context: &AppContext) -> CancellationToken {
         (status = 400, description = "`invalid_request` naming the query field", body = super::admission::FieldErrorResponse),
         (status = 401, description = "Missing, malformed, expired, or revoked access credential"),
         (status = 503, description = "`quorum_unavailable` (retry after `retryAfterSeconds`) or `not_a_manager`", body = QuorumUnavailableResponse)
-    ),
-    security(("access_session" = []))
+    )
 )]
 pub(crate) async fn index(
     State(context): State<AppContext>,
@@ -258,8 +257,7 @@ pub(crate) async fn index(
         (status = 401, description = "Missing, malformed, expired, or revoked access credential"),
         (status = 404, description = "No such service", body = super::admission::AdmissionErrorResponse),
         (status = 503, description = "`quorum_unavailable` or `not_a_manager`", body = QuorumUnavailableResponse)
-    ),
-    security(("access_session" = []))
+    )
 )]
 pub(crate) async fn show(
     State(context): State<AppContext>,
@@ -319,8 +317,7 @@ pub struct ServiceActionRequest {
         (status = 404, description = "No such service or action", body = super::admission::AdmissionErrorResponse),
         (status = 409, description = "`version_conflict` or `idempotency_conflict`", body = super::admission::AdmissionErrorResponse),
         (status = 503, description = "`quorum_unavailable` (nothing admitted) or `not_a_manager`", body = QuorumUnavailableResponse)
-    ),
-    security(("access_session" = []))
+    )
 )]
 pub(crate) async fn action(
     State(context): State<AppContext>,

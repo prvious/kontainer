@@ -93,8 +93,7 @@ fn image_response(row: ImageRow) -> ImageResponse {
         (status = 200, description = "Images merged by id across answering nodes, one outcome per member", body = ImageListResponse),
         (status = 401, description = "Missing, malformed, expired, or revoked access credential"),
         (status = 503, description = "Agent RPC not configured, persistence unavailable, or controller draining", body = super::admission::AdmissionErrorResponse)
-    ),
-    security(("access_session" = []))
+    )
 )]
 pub(crate) async fn index(
     State(context): State<AppContext>,
@@ -183,8 +182,7 @@ pub struct RemoveImageRequest {
         (status = 401, description = "Missing, malformed, expired, or revoked access credential"),
         (status = 409, description = "`idempotency_conflict`", body = super::admission::AdmissionErrorResponse),
         (status = 503, description = "Persistence unavailable or controller draining")
-    ),
-    security(("access_session" = []))
+    )
 )]
 pub(crate) async fn remove(
     State(context): State<AppContext>,
@@ -260,8 +258,7 @@ fn reference_problem(error: ReferenceError) -> &'static str {
         (status = 401, description = "Missing, malformed, expired, or revoked access credential"),
         (status = 409, description = "`idempotency_conflict`", body = super::admission::AdmissionErrorResponse),
         (status = 503, description = "Persistence unavailable or controller draining")
-    ),
-    security(("access_session" = []))
+    )
 )]
 pub(crate) async fn pull(
     State(context): State<AppContext>,

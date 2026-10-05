@@ -28,11 +28,6 @@
             "description": "Agent RPC not configured, persistence unavailable, or controller draining"
           }
         },
-        "security": [
-          {
-            "access_session": []
-          }
-        ],
         "tags": [
           "super::networks"
         ]
@@ -105,11 +100,6 @@
             "description": "`not_a_manager` for an overlay without a Swarm manager, persistence unavailable, or draining"
           }
         },
-        "security": [
-          {
-            "access_session": []
-          }
-        ],
         "tags": [
           "super::networks"
         ]
@@ -202,11 +192,6 @@
             "description": "`not_a_manager` for a swarm network without a Swarm manager, persistence unavailable, or draining"
           }
         },
-        "security": [
-          {
-            "access_session": []
-          }
-        ],
         "tags": [
           "super::networks"
         ]
@@ -278,11 +263,6 @@
             "description": "Agent RPC not configured, agent or persistence unavailable"
           }
         },
-        "security": [
-          {
-            "access_session": []
-          }
-        ],
         "tags": [
           "super::networks"
         ]

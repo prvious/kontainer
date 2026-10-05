@@ -201,8 +201,7 @@ fn parse_event_query(raw: Option<&str>) -> Option<(i32, u64)> {
         (status = 401, description = "Missing, malformed, expired, or revoked access credential"),
         (status = 404, description = "Operation not found or not visible to the authenticated principal"),
         (status = 503, description = "Persistence unavailable or controller draining")
-    ),
-    security(("access_session" = []))
+    )
 )]
 pub(crate) async fn events(
     State(context): State<AppContext>,
@@ -246,8 +245,7 @@ pub(crate) async fn events(
         (status = 404, description = "Operation not found or not visible to the authenticated principal"),
         (status = 409, description = "`not_cancellable`: the operation already started or finished", body = super::admission::AdmissionErrorResponse),
         (status = 503, description = "Persistence unavailable or controller draining")
-    ),
-    security(("access_session" = []))
+    )
 )]
 pub(crate) async fn cancel(
     State(context): State<AppContext>,
@@ -290,8 +288,7 @@ pub(crate) async fn cancel(
         (status = 404, description = "Not available outside development and test"),
         (status = 409, description = "`idempotency_conflict`: the key was used for a different request", body = super::admission::AdmissionErrorResponse),
         (status = 503, description = "Persistence unavailable or controller draining")
-    ),
-    security(("access_session" = []))
+    )
 )]
 pub(crate) async fn admit_noop(
     State(context): State<AppContext>,

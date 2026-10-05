@@ -29,8 +29,7 @@ use crate::{
         (status = 401, description = "Missing, malformed, expired, or revoked access credential; refused before the upgrade"),
         (status = 429, description = "`limit_reached`: this session already has eight log connections open", body = super::admission::AdmissionErrorResponse),
         (status = 503, description = "`manager_unavailable` when the Swarm manager doesn't answer, `not_a_manager`, or `unavailable` while the controller drains", body = super::admission::AdmissionErrorResponse)
-    ),
-    security(("access_session" = []))
+    )
 )]
 pub(crate) async fn stream(
     State(context): State<AppContext>,
