@@ -74,12 +74,10 @@ mod tests {
             os: "linux".to_owned(),
             cpu_cores: 4,
             memory_total_bytes: 8 << 30,
-            agent_started_at_unix_ms: 1_760_000_000_000,
             sample: Some(NodeSample {
                 sampled_at_unix_ms: 1_760_000_005_000,
                 cpu_percent: 12.5,
                 memory_used_bytes: 1 << 30,
-                disk_used_bytes: None,
                 containers_running: 5,
                 containers_paused: 1,
                 containers_exited: 2,
@@ -90,8 +88,7 @@ mod tests {
         let decoded = CheckInRequest::decode(request.encode_to_vec().as_slice()).unwrap();
         assert_eq!(decoded, request);
         let sample = decoded.sample.unwrap();
-        assert_eq!(sample.disk_used_bytes, None, "absent, not zero");
-        assert_eq!(sample.net_tx_bytes_per_sec, None);
+        assert_eq!(sample.net_tx_bytes_per_sec, None, "absent, not zero");
 
         let response = CheckInResponse {
             controller_version: "0.1.0".to_owned(),
@@ -136,5 +133,37 @@ mod tests {
         )
         .unwrap();
         assert_eq!(summary.cpu_percent, None);
+    }
+
+    #[test]
+    fn a_check_in_still_carrying_the_reserved_fields_decodes() {
+        // An agent built before ADR 0039 sends tag 11 and the sample's tag 4.
+        #[derive(Clone, PartialEq, prost::Message)]
+        struct OlderSample {
+            #[prost(double, tag = "2")]
+            cpu_percent: f64,
+            #[prost(uint64, optional, tag = "4")]
+            disk_used_bytes: Option<u64>,
+        }
+        #[derive(Clone, PartialEq, prost::Message)]
+        struct OlderCheckIn {
+            #[prost(string, tag = "1")]
+            agent_id: String,
+            #[prost(int64, tag = "11")]
+            agent_started_at_unix_ms: i64,
+            #[prost(message, optional, tag = "12")]
+            sample: Option<OlderSample>,
+        }
+        let older = OlderCheckIn {
+            agent_id: "node-1".to_owned(),
+            agent_started_at_unix_ms: 1_760_000_000_000,
+            sample: Some(OlderSample {
+                cpu_percent: 12.5,
+                disk_used_bytes: Some(5 << 30),
+            }),
+        };
+        let decoded = CheckInRequest::decode(older.encode_to_vec().as_slice()).unwrap();
+        assert_eq!(decoded.agent_id, "node-1");
+        assert_eq!(decoded.sample.unwrap().cpu_percent, 12.5);
     }
 }

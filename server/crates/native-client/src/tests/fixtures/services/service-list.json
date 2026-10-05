@@ -13,8 +13,7 @@
       "updatedAt": "2026-09-27T10:00:00.000Z",
       "version": 7,
       "stack": "webapp",
-      "updateState": null,
-      "updateMessage": null
+      "updateState": null
     },
     {
       "id": "monitoring000000000000000",
@@ -29,8 +28,7 @@
       "updatedAt": null,
       "version": 3,
       "stack": "monitoring",
-      "updateState": "completed",
-      "updateMessage": "update completed"
+      "updateState": "completed"
     }
   ],
   "snapshotAt": "2026-09-28T09:00:00.000Z"

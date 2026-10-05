@@ -1,7 +1,8 @@
 use sea_orm_migration::{prelude::*, schema::*};
 
-/// Executable operations (ADR 0009): the admitted payload, execution times, and the admitting
-/// request id on `operations`; progress detail and failure messages on `operation_events`.
+/// Executable operations (ADR 0009): the admitted payload, the finish time, and the admitting
+/// request id on `operations`; progress detail and failure messages on `operation_events`. The
+/// start time is `claimed_at` (ADR 0040).
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
@@ -13,7 +14,6 @@ impl MigrationTrait for Migration {
                 Table::alter()
                     .table(Operation::Table)
                     .add_column(json_binary(Operation::Payload).default(Expr::cust("'{}'::jsonb")))
-                    .add_column(timestamp_with_time_zone_null(Operation::StartedAt))
                     .add_column(timestamp_with_time_zone_null(Operation::FinishedAt))
                     .add_column(string_len_null(Operation::RequestId, 128))
                     .to_owned(),
@@ -65,7 +65,6 @@ impl MigrationTrait for Migration {
                     .table(Operation::Table)
                     .drop_column(Operation::RequestId)
                     .drop_column(Operation::FinishedAt)
-                    .drop_column(Operation::StartedAt)
                     .drop_column(Operation::Payload)
                     .to_owned(),
             )
@@ -80,7 +79,6 @@ enum Operation {
     State,
     UpdatedAt,
     Payload,
-    StartedAt,
     FinishedAt,
     RequestId,
 }

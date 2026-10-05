@@ -1,13 +1,13 @@
-//! Node membership and per-node samples.
+//! Node membership, the cluster summary, and the cluster sample series.
 
 use axum::{
     Json,
-    extract::{Path, RawQuery, State},
+    extract::{RawQuery, State},
     http::{StatusCode, header},
     response::{IntoResponse, Response},
 };
 use chrono::{DateTime, SecondsFormat, Utc};
-use kontainer_engine::{SwarmAvailability, SwarmNodeState};
+use kontainer_engine::SwarmAvailability;
 use loco_rs::{app::AppContext, controller::Routes};
 use serde::Serialize;
 use utoipa::ToSchema;
@@ -17,7 +17,7 @@ use crate::{
     auth::domain::PrincipalContext,
     metrics::{
         actions::node_samples,
-        domain::{SamplePoint, SampleRange, SampleScope},
+        domain::{SamplePoint, SampleRange},
     },
     nodes::{
         actions::{cluster_summary, list_cluster_nodes},
@@ -106,35 +106,12 @@ impl From<SwarmAvailability> for NodeAvailabilityResponse {
     }
 }
 
-/// What the manager last heard from the node; `unknown` when it did not answer or does not
-/// know the node.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum SwarmNodeStatusResponse {
-    Ready,
-    Down,
-    Unknown,
-}
-
-impl From<SwarmNodeState> for SwarmNodeStatusResponse {
-    fn from(state: SwarmNodeState) -> Self {
-        match state {
-            SwarmNodeState::Ready => Self::Ready,
-            SwarmNodeState::Down => Self::Down,
-            SwarmNodeState::Unknown => Self::Unknown,
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct NodeSampleResponse {
-    pub sampled_at: String,
     /// 0–100 of the node.
     pub cpu_percent: f32,
     pub memory_used_bytes: i64,
-    #[schema(required = true)]
-    pub disk_used_bytes: Option<i64>,
     pub containers_running: i32,
     pub containers_paused: i32,
     pub containers_exited: i32,
@@ -157,9 +134,6 @@ pub struct NodeResponse {
     pub is_leader: bool,
     #[schema(required = true)]
     pub availability: Option<NodeAvailabilityResponse>,
-    pub swarm_status: SwarmNodeStatusResponse,
-    #[schema(required = true)]
-    pub swarm_node_id: Option<String>,
     /// The address the manager sees the node at.
     #[schema(required = true)]
     pub address: Option<String>,
@@ -171,10 +145,6 @@ pub struct NodeResponse {
     pub arch: String,
     pub cpu_cores: u32,
     pub memory_total_bytes: u64,
-    #[schema(required = true)]
-    pub agent_started_at: Option<String>,
-    #[schema(required = true)]
-    pub first_seen_at: Option<String>,
     #[schema(required = true)]
     pub last_check_in_at: Option<String>,
     #[schema(required = true)]
@@ -199,8 +169,6 @@ pub struct SamplePointResponse {
     #[schema(required = true)]
     pub memory_used_bytes: Option<f64>,
     #[schema(required = true)]
-    pub disk_used_bytes: Option<f64>,
-    #[schema(required = true)]
     pub containers_running: Option<f64>,
     #[schema(required = true)]
     pub net_rx_bytes_per_sec: Option<f64>,
@@ -213,10 +181,7 @@ pub struct SamplePointResponse {
 #[derive(Debug, Clone, PartialEq, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SampleSeriesResponse {
-    pub window: String,
-    pub bucket: String,
     pub points: Vec<SamplePointResponse>,
-    pub snapshot_at: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ToSchema)]
@@ -249,7 +214,6 @@ pub struct ClusterSummaryResponse {
     pub memory_used_bytes: u64,
     pub memory_total_bytes: u64,
     pub containers_running: u64,
-    pub snapshot_at: String,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -276,10 +240,8 @@ pub(crate) fn error(status: StatusCode, code: &str) -> Response {
 
 fn sample_response(sample: LatestSample) -> NodeSampleResponse {
     NodeSampleResponse {
-        sampled_at: timestamp(sample.sampled_at),
         cpu_percent: sample.cpu_percent,
         memory_used_bytes: sample.memory_used_bytes,
-        disk_used_bytes: sample.disk_used_bytes,
         containers_running: sample.containers_running,
         containers_paused: sample.containers_paused,
         containers_exited: sample.containers_exited,
@@ -292,7 +254,6 @@ fn node_response(node: ClusterNode) -> NodeResponse {
     let agent_status = node.agent_status().into();
     let health = node.health().into();
     let role = node.role().into();
-    let swarm_status = node.swarm_state().into();
     let ClusterNode { agent, swarm } = node;
     let is_leader = swarm.as_ref().is_some_and(|swarm| swarm.is_leader);
     let availability = swarm
@@ -309,8 +270,6 @@ fn node_response(node: ClusterNode) -> NodeResponse {
             role,
             is_leader,
             availability,
-            swarm_status,
-            swarm_node_id: agent.swarm_node_id,
             address,
             agent_version: Some(agent.agent_version),
             docker_version: agent.docker_version,
@@ -321,13 +280,10 @@ fn node_response(node: ClusterNode) -> NodeResponse {
                 .or(swarm.as_ref().and_then(|swarm| swarm.cpu_cores))
                 .unwrap_or(0),
             memory_total_bytes: u64::try_from(agent.memory_total_bytes).unwrap_or(0),
-            agent_started_at: Some(timestamp(agent.agent_started_at)),
-            first_seen_at: Some(timestamp(agent.first_seen_at)),
             last_check_in_at: Some(timestamp(agent.last_check_in_at)),
             latest_sample: agent.latest_sample.map(sample_response),
         },
         (None, Some(swarm)) => NodeResponse {
-            swarm_node_id: Some(swarm.id.clone()),
             id: swarm.id,
             hostname: swarm.hostname,
             agent_status,
@@ -335,7 +291,6 @@ fn node_response(node: ClusterNode) -> NodeResponse {
             role,
             is_leader,
             availability,
-            swarm_status,
             address,
             agent_version: None,
             docker_version: swarm.docker_version.unwrap_or_default(),
@@ -343,8 +298,6 @@ fn node_response(node: ClusterNode) -> NodeResponse {
             arch: swarm.architecture.unwrap_or_default(),
             cpu_cores: swarm.cpu_cores.unwrap_or(0),
             memory_total_bytes: swarm.memory_total_bytes.unwrap_or(0),
-            agent_started_at: None,
-            first_seen_at: None,
             last_check_in_at: None,
             latest_sample: None,
         },
@@ -352,7 +305,7 @@ fn node_response(node: ClusterNode) -> NodeResponse {
     }
 }
 
-fn summary_response(summary: ClusterSummary, now: DateTime<Utc>) -> ClusterSummaryResponse {
+fn summary_response(summary: ClusterSummary) -> ClusterSummaryResponse {
     ClusterSummaryResponse {
         nodes_total: summary.nodes_total,
         nodes_active: summary.nodes_active,
@@ -368,7 +321,6 @@ fn summary_response(summary: ClusterSummary, now: DateTime<Utc>) -> ClusterSumma
         memory_used_bytes: summary.memory_used_bytes,
         memory_total_bytes: summary.memory_total_bytes,
         containers_running: summary.containers_running,
-        snapshot_at: timestamp(now),
     }
 }
 
@@ -433,13 +385,13 @@ pub(crate) async fn cluster_summary(
     )
     .await
     {
-        Ok((summary, now)) => json_no_store(StatusCode::OK, summary_response(summary, now)),
+        Ok(summary) => json_no_store(StatusCode::OK, summary_response(summary)),
         Err(_) => error(StatusCode::SERVICE_UNAVAILABLE, "persistence_unavailable"),
     }
 }
 
 /// Strict `window` and `bucket` query: both required, nothing else allowed.
-pub(crate) fn parse_range(raw: Option<&str>) -> Result<(SampleRange, String, String), ()> {
+fn parse_range(raw: Option<&str>) -> Result<SampleRange, ()> {
     let mut window = None;
     let mut bucket = None;
     for (key, value) in url::form_urlencoded::parse(raw.unwrap_or_default().as_bytes()) {
@@ -455,30 +407,7 @@ pub(crate) fn parse_range(raw: Option<&str>) -> Result<(SampleRange, String, Str
     let (Some(window), Some(bucket)) = (window, bucket) else {
         return Err(());
     };
-    let range = SampleRange::parse(&window, &bucket).map_err(|_| ())?;
-    Ok((range, window, bucket))
-}
-
-pub(crate) async fn sample_series(
-    context: &AppContext,
-    scope: SampleScope,
-    query: Option<&str>,
-) -> Response {
-    let Ok((range, window, bucket)) = parse_range(query) else {
-        return error(StatusCode::BAD_REQUEST, "invalid_range");
-    };
-    match node_samples::execute(&context.db, &scope, range).await {
-        Ok((points, now)) => json_no_store(
-            StatusCode::OK,
-            SampleSeriesResponse {
-                window,
-                bucket,
-                points: points.into_iter().map(point_response).collect(),
-                snapshot_at: timestamp(now),
-            },
-        ),
-        Err(_) => error(StatusCode::SERVICE_UNAVAILABLE, "persistence_unavailable"),
-    }
+    SampleRange::parse(&window, &bucket).map_err(|_| ())
 }
 
 fn point_response(point: SamplePoint) -> SamplePointResponse {
@@ -486,48 +415,11 @@ fn point_response(point: SamplePoint) -> SamplePointResponse {
         at: timestamp(point.at),
         cpu_percent: point.cpu_percent,
         memory_used_bytes: point.memory_used_bytes,
-        disk_used_bytes: point.disk_used_bytes,
         containers_running: point.containers_running,
         net_rx_bytes_per_sec: point.net_rx_bytes_per_sec,
         net_tx_bytes_per_sec: point.net_tx_bytes_per_sec,
         nodes: point.nodes,
     }
-}
-
-#[utoipa::path(
-    get,
-    path = "/api/v1/nodes/{nodeId}/samples",
-    operation_id = "node_samples",
-    params(
-        ("nodeId" = String, Path, description = "Node id"),
-        ("window" = String, Query, description = "One of 5m, 15m, 1h, 24h, 7d"),
-        ("bucket" = String, Query, description = "Bucket width such as 5s, 60s, 15m; at most 200 points")
-    ),
-    responses(
-        (status = 200, description = "Averages per bucket; buckets without samples are null", body = SampleSeriesResponse),
-        (status = 400, description = "Invalid window or bucket", body = NodeErrorResponse),
-        (status = 401, description = "Missing, malformed, expired, or revoked access credential"),
-        (status = 404, description = "Unknown node", body = NodeErrorResponse),
-        (status = 503, description = "Persistence unavailable or controller draining", body = NodeErrorResponse)
-    )
-)]
-pub(crate) async fn samples(
-    State(context): State<AppContext>,
-    _principal: PrincipalContext,
-    Path(node_id): Path<String>,
-    RawQuery(query): RawQuery,
-) -> Response {
-    use sea_orm::EntityTrait;
-
-    match crate::nodes::entities::node::Entity::find_by_id(node_id.clone())
-        .one(&context.db)
-        .await
-    {
-        Ok(Some(_)) => {}
-        Ok(None) => return error(StatusCode::NOT_FOUND, "not_found"),
-        Err(_) => return error(StatusCode::SERVICE_UNAVAILABLE, "persistence_unavailable"),
-    }
-    sample_series(&context, SampleScope::Node(node_id), query.as_deref()).await
 }
 
 #[utoipa::path(
@@ -550,13 +442,23 @@ pub(crate) async fn cluster_samples(
     _principal: PrincipalContext,
     RawQuery(query): RawQuery,
 ) -> Response {
-    sample_series(&context, SampleScope::Cluster, query.as_deref()).await
+    let Ok(range) = parse_range(query.as_deref()) else {
+        return error(StatusCode::BAD_REQUEST, "invalid_range");
+    };
+    match node_samples::execute(&context.db, range).await {
+        Ok(points) => json_no_store(
+            StatusCode::OK,
+            SampleSeriesResponse {
+                points: points.into_iter().map(point_response).collect(),
+            },
+        ),
+        Err(_) => error(StatusCode::SERVICE_UNAVAILABLE, "persistence_unavailable"),
+    }
 }
 
 pub fn routes() -> Routes {
     Routes::new()
         .get("/nodes", index)
-        .get("/nodes/{nodeId}/samples", samples)
         .get("/cluster/samples", cluster_samples)
         .get("/cluster/summary", cluster_summary)
 }
@@ -567,9 +469,10 @@ mod tests {
 
     #[test]
     fn ranges_require_exactly_window_and_bucket() {
-        let (range, window, bucket) = parse_range(Some("window=24h&bucket=15m")).unwrap();
-        assert_eq!(range.points(), 96);
-        assert_eq!((window.as_str(), bucket.as_str()), ("24h", "15m"));
+        assert_eq!(
+            parse_range(Some("window=24h&bucket=15m")).unwrap().points(),
+            96
+        );
 
         for invalid in [
             None,

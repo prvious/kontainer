@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 use crate::session::manager::{InventoryError, ServiceDetailView, SessionManager};
 
-/// One service with its newest tasks and the newest task error.
+/// One service's newest task error, for the replica tooltip.
 #[tauri::command]
 pub async fn get_service(
     state: State<'_, SessionManager>,

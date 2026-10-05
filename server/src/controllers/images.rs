@@ -54,7 +54,6 @@ pub struct ImageResponse {
     pub created_at: String,
     /// Containers using it, summed across nodes.
     pub used_by: u32,
-    pub dangling: bool,
     pub node_ids: Vec<String>,
 }
 
@@ -80,7 +79,6 @@ fn image_response(row: ImageRow) -> ImageResponse {
         repo_digests: row.repo_digests,
         size_bytes: row.size_bytes,
         used_by: row.used_by,
-        dangling: row.dangling,
         node_ids: row.node_ids,
     }
 }

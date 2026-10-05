@@ -613,21 +613,16 @@ impl Controller for FakeController {
         Box::pin(async move { outcome })
     }
 
-    fn samples<'a>(
+    fn cluster_samples<'a>(
         &'a self,
         access: &'a AccessCredential,
-        node_id: Option<&'a NodeId>,
         window: &'a str,
         bucket: &'a str,
         _cancellation: &'a CancellationToken,
     ) -> ControllerFuture<'a, Result<SampleSeries, NativeClientError>> {
         record(
             &self.log,
-            format!(
-                "samples:{}:{}:{window}:{bucket}",
-                public_tag(access.expose()),
-                node_id.map_or_else(|| "cluster".to_owned(), ToString::to_string),
-            ),
+            format!("samples:{}:{window}:{bucket}", public_tag(access.expose())),
         );
         let outcome = self
             .script

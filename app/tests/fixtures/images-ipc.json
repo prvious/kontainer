@@ -13,7 +13,6 @@
                 "sizeBytes": 192000000,
                 "createdAt": "2026-09-01T10:00:00.000Z",
                 "usedBy": 3,
-                "dangling": false,
                 "nodeIds": ["manager", "worker-1"]
             },
             {
@@ -23,7 +22,6 @@
                 "sizeBytes": 7800000,
                 "createdAt": "2026-08-20T08:30:00.000Z",
                 "usedBy": 0,
-                "dangling": true,
                 "nodeIds": ["manager"]
             }
         ],

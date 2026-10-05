@@ -60,7 +60,7 @@ function mockCommands(overrides: Record<string, (args: Record<string, unknown>) 
             case "list_nodes":
                 return twoOnline;
             case "get_cluster_samples":
-                return { ...nodes.clusterSamples, window: "24h", bucket: "15m" };
+                return nodes.clusterSamples;
             case "load_app_settings":
                 return { refreshInterval: 60_000 };
             case "controller_health":

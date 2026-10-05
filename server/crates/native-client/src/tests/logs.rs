@@ -373,7 +373,6 @@ impl StreamApplication for EchoOpen {
             };
             outbound.try_send(
                 LogMessage::Line(LogLine {
-                    seq: 1,
                     ts_unix_ms: 1_790_000_000_000,
                     stream: LogStreamKind::Stderr,
                     task_id: "task".to_owned(),
@@ -381,7 +380,7 @@ impl StreamApplication for EchoOpen {
                     line: format!("{service_id} tail={tail:?}"),
                     truncated: false,
                 })
-                .into_frame(1),
+                .into_frame(),
             )?;
             outbound.try_send(
                 LogMessage::End(LogEnd {
@@ -389,7 +388,7 @@ impl StreamApplication for EchoOpen {
                     code: "service_removed".to_owned(),
                     message: String::new(),
                 })
-                .into_frame(2),
+                .into_frame(),
             )
         }
     }
@@ -432,7 +431,7 @@ async fn one_deadline_bounds_the_upgrade_and_the_open_frame() {
         since_unix_ms: None,
         tail: Some(10),
     })
-    .into_frame(1);
+    .into_frame();
 
     let started = std::time::Instant::now();
     let result = client

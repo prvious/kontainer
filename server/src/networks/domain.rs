@@ -22,8 +22,6 @@ pub struct NetworkRow {
     pub created_at_seconds: Option<i64>,
     pub labels: BTreeMap<String, String>,
     pub attachable: bool,
-    pub ingress: bool,
-    pub internal: bool,
     pub builtin: bool,
     /// Local: its node. Swarm: the nodes with endpoints on it.
     pub node_ids: Vec<String>,
@@ -50,8 +48,6 @@ impl NetworkRow {
             created_at_seconds: network.created_at_seconds,
             labels: network.labels,
             attachable: network.attachable,
-            ingress: network.ingress,
-            internal: network.internal,
             builtin: network.builtin,
             node_ids,
         }
@@ -69,8 +65,6 @@ impl NetworkRow {
             created_at_seconds: network.created_at_seconds,
             labels: network.labels,
             attachable: network.attachable,
-            ingress: network.ingress,
-            internal: network.internal,
             node_ids: Vec::new(),
         }
     }

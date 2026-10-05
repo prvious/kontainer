@@ -16,9 +16,10 @@ G19 (load more history). Decisions: ADR 0006. Research: `docs/v2/logging.md`.
   request, validated with the existing `validate_access` action; missing or invalid → 401 before
   upgrade. Expiry mid-stream closes with code 4401. No ticket fallback is built.
 - Protocol (extend `kontainer-stream-protocol` additively, one payload per frame kind):
-  - client → `LogsOpen { service_id, since_unix_ms?, tail (default 500, max 5000) }`,
-    `LogsClose`;
-  - server → `LogLine { seq, ts_unix_ms, stream (stdout | stderr), task_id, node_id, line, truncated }`,
+  - client → `LogsOpen { service_id, since_unix_ms?, tail (default 500, max 5000) }`; closing the
+    socket ends the stream, and frame kind 4 (once `LogsClose`) is reserved (ADR 0040);
+  - server → `LogLine { ts_unix_ms, stream (stdout | stderr), task_id, node_id, line, truncated }`
+    (field 1, once `seq`, is reserved; the desktop numbers the lines it delivers),
     `LogGap { dropped }`, `LogEnd { reason (service_removed | error), code, message }`.
 - Source: manager engine `service_logs(service_id, since, tail, follow, timestamps, details)`
   decoding the Docker multiplexed stream; task and node ids from the details prefix. One
@@ -35,8 +36,8 @@ G19 (load more history). Decisions: ADR 0006. Research: `docs/v2/logging.md`.
   `since = last_ts − 1s` and dropping lines whose `ts` and content match ones already delivered in
   the overlap window; emits `reconnecting { attempt, next_retry_ms }`, `reconnected`, `gap`,
   `ended`.
-- Commands: `logs_open(serviceId, since?, tail, channel) -> streamId`, `logs_close(streamId)`,
-  `logs_retry_now(streamId)`. Channel events, batched every 25 ms:
+- Commands: `logs_open(serviceId, since?, tail, channel) -> streamId`, `logs_close(streamId)`
+  (cancels the follow, which closes the socket), `logs_retry_now(streamId)`. Channel events, batched every 25 ms:
   `{ type: "lines", lines: [{ seq, ts, stream, taskId, nodeId, text, truncated }] }`,
   `{ type: "gap", dropped }`, `{ type: "reconnecting", attempt, nextRetryMs }`,
   `{ type: "reconnected" }`, `{ type: "ended", reason, code, message }`.

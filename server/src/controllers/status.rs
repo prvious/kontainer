@@ -84,7 +84,6 @@ impl Modify for AccessSessionSecurity {
         super::operations::cancel,
         super::operations::admit_noop,
         super::nodes::index,
-        super::nodes::samples,
         super::nodes::cluster_samples,
         super::nodes::cluster_summary,
         super::logs::stream,
@@ -279,7 +278,6 @@ mod tests {
         let document = serde_json::to_value(ApiDoc::openapi()).unwrap();
         for (path, method, operation) in [
             ("/api/v1/nodes", "get", "list_nodes"),
-            ("/api/v1/nodes/{nodeId}/samples", "get", "node_samples"),
             ("/api/v1/cluster/samples", "get", "cluster_samples"),
             ("/api/v1/cluster/summary", "get", "cluster_summary"),
             ("/api/v1/settings", "get", "get_settings"),
@@ -292,6 +290,7 @@ mod tests {
             assert!(route["responses"]["401"].is_object(), "{path}");
         }
         assert!(document["paths"]["/api/v1/nodes/configured"].is_null());
+        assert!(document["paths"]["/api/v1/nodes/{nodeId}/samples"].is_null());
         let schemas = &document["components"]["schemas"];
         assert_eq!(
             schemas["AgentStatusResponse"]["enum"],

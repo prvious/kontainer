@@ -36,8 +36,7 @@
                 "memoryBytes": null,
                 "lastDeployed": null
             }
-        ],
-        "snapshotAt": "2026-09-28T12:05:00.000Z"
+        ]
     },
     "plan": {
         "services": ["toolbox_alpine", "toolbox_nginx", "toolbox_redis"],

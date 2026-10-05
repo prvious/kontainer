@@ -49,7 +49,6 @@ fn stack_list() -> StackList {
             },
             stack("idle", StackStatus::Stopped, 1, 0, 1),
         ],
-        snapshot_at: "2026-09-28T12:05:00.000Z".parse().unwrap(),
     }
 }
 

@@ -90,21 +90,13 @@ fn parse_duration(value: &str) -> Option<i64> {
     Some(amount * unit_seconds)
 }
 
-/// Whether the series covers one node or the whole cluster.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SampleScope {
-    Node(String),
-    Cluster,
-}
-
-/// One bucket. Figures are `None` when no sample landed in it, never 0. For the cluster, CPU is
-/// the mean over contributing nodes (0–100 of the cluster) and the other figures are sums.
+/// One cluster bucket. Figures are `None` when no sample landed in it, never 0. CPU is the mean
+/// over contributing nodes (0–100 of the cluster) and the other figures are sums.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SamplePoint {
     pub at: DateTime<Utc>,
     pub cpu_percent: Option<f64>,
     pub memory_used_bytes: Option<f64>,
-    pub disk_used_bytes: Option<f64>,
     pub containers_running: Option<f64>,
     pub net_rx_bytes_per_sec: Option<f64>,
     pub net_tx_bytes_per_sec: Option<f64>,
@@ -119,7 +111,6 @@ impl SamplePoint {
             at,
             cpu_percent: None,
             memory_used_bytes: None,
-            disk_used_bytes: None,
             containers_running: None,
             net_rx_bytes_per_sec: None,
             net_tx_bytes_per_sec: None,

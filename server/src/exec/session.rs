@@ -94,7 +94,7 @@ impl StreamApplication for ExecSession {
                             code: "invalid_request".to_owned(),
                             message: "The exec request was refused.".to_owned(),
                         })
-                        .into_frame(1),
+                        .into_frame(),
                     )?;
                     outbound.close(StreamClose::NORMAL);
                     return Ok(());

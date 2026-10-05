@@ -85,7 +85,6 @@ impl LogStream {
         tokio::pin!(expiry);
         let mut liveness = time::interval_at(time::Instant::now() + self.liveness, self.liveness);
         let mut flush = time::interval(FLUSH_EVERY);
-        let mut seq = 0_u64;
         loop {
             tokio::select! {
                 biased;
@@ -103,8 +102,7 @@ impl LogStream {
                 },
                 item = lines.next() => match item {
                     Some(Ok(line)) => {
-                        seq += 1;
-                        frames.backlog.push(log_line(seq, line));
+                        frames.backlog.push(log_line(line));
                         if frames.flush().is_err() {
                             return;
                         }
@@ -147,40 +145,24 @@ impl LogStream {
     }
 }
 
-/// Numbers envelopes for one connection.
-struct FrameSender {
-    outbound: OutboundSender,
-    sequence: u64,
-}
-
-impl FrameSender {
-    fn send(&mut self, message: LogMessage) -> Result<(), OutboundFrameError> {
-        self.outbound
-            .try_send(message.into_frame(self.sequence + 1))?;
-        self.sequence += 1;
-        Ok(())
-    }
-}
-
 /// The connection's sender and the lines waiting for room in it.
 struct Frames {
-    sender: FrameSender,
+    outbound: OutboundSender,
     backlog: Backlog,
 }
 
 impl Frames {
     fn new(outbound: OutboundSender) -> Self {
         Self {
-            sender: FrameSender {
-                outbound,
-                sequence: 0,
-            },
+            outbound,
             backlog: Backlog::new(BACKLOG_LINES),
         }
     }
 
     fn flush(&mut self) -> Result<Flush, OutboundFrameError> {
-        self.backlog.flush(|message| self.sender.send(message))
+        let outbound = &self.outbound;
+        self.backlog
+            .flush(|message| outbound.try_send(message.into_frame()))
     }
 
     async fn end_removed(&mut self) {
@@ -211,7 +193,7 @@ impl Frames {
         let _ = time::timeout(END_GRACE, async {
             loop {
                 match self.flush() {
-                    Ok(Flush::Drained) => match self.sender.send(end.clone()) {
+                    Ok(Flush::Drained) => match self.outbound.try_send(end.clone().into_frame()) {
                         Ok(()) => return,
                         Err(OutboundFrameError::QueueOverloaded) => {}
                         Err(_) => return,
@@ -223,14 +205,13 @@ impl Frames {
             }
         })
         .await;
-        self.sender.outbound.close(StreamClose::NORMAL);
+        self.outbound.close(StreamClose::NORMAL);
     }
 }
 
-fn log_line(seq: u64, line: ServiceLogLine) -> LogLine {
+fn log_line(line: ServiceLogLine) -> LogLine {
     let (text, truncated) = truncate_line(line.text);
     LogLine {
-        seq,
         ts_unix_ms: line.timestamp_unix_ms,
         stream: match line.source {
             LogSource::Stdout => LogStreamKind::Stdout,

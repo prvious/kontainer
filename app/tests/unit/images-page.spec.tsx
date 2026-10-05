@@ -179,7 +179,7 @@ describe("Images page", () => {
 
     it("forces the delete of an unused image tagged more than once, which Docker otherwise refuses", async () => {
         const [, unused] = images.imageList.items;
-        const twiceTagged = { ...unused!, repoTags: ["redis:7", "redis:latest"], dangling: false };
+        const twiceTagged = { ...unused!, repoTags: ["redis:7", "redis:latest"] };
         mockCommands({
             list_images: () => ({ ...images.imageList, items: [twiceTagged] }),
             remove_image: () => ({ operationId: FIRST, replayed: false }),

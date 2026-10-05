@@ -1,4 +1,4 @@
-//! Swarm services: the list with running counts, one service with its tasks, and scale /
+//! Swarm services: the list with running counts, one service's newest task error, and scale /
 //! restart / rollback as admitted operations. A manager that can't answer is
 //! [`NativeClientError::QuorumUnavailable`](crate::NativeClientError::QuorumUnavailable).
 
@@ -14,7 +14,6 @@ use crate::error::NativeClientError;
 pub const MAX_SERVICES: usize = 2_000;
 /// Replicas one scale may ask for.
 pub const MAX_REPLICAS: u64 = 1_000;
-const MAX_TASKS: usize = 50;
 
 /// A Swarm service id: 25 lowercase alphanumerics.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -62,7 +61,6 @@ pub struct ServiceItem {
     pub version: u64,
     pub stack: Option<String>,
     pub update_state: Option<String>,
-    pub update_message: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,23 +69,9 @@ pub struct ServiceList {
     pub snapshot_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TaskItem {
-    pub id: String,
-    pub slot: Option<u64>,
-    pub swarm_node_id: Option<String>,
-    pub state: String,
-    pub desired_state: String,
-    pub error: Option<String>,
-    pub message: Option<String>,
-    pub updated_at: Option<DateTime<Utc>>,
-    pub container_id: Option<String>,
-}
-
+/// What the replica tooltip asks of one service.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServiceDetail {
-    pub service: ServiceItem,
-    pub tasks: Vec<TaskItem>,
     pub latest_error: Option<String>,
 }
 
@@ -122,29 +106,12 @@ pub(crate) struct ServiceItemBody {
     version: u64,
     stack: Option<String>,
     update_state: Option<String>,
-    update_message: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct ServiceDetailBody {
-    service: ServiceItemBody,
-    tasks: Vec<TaskItemBody>,
     latest_error: Option<String>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct TaskItemBody {
-    id: String,
-    slot: Option<u64>,
-    swarm_node_id: Option<String>,
-    state: String,
-    desired_state: String,
-    error: Option<String>,
-    message: Option<String>,
-    updated_at: Option<String>,
-    container_id: Option<String>,
 }
 
 fn optional_time(value: Option<&str>) -> Result<Option<DateTime<Utc>>, NativeClientError> {
@@ -175,7 +142,6 @@ impl ServiceItemBody {
             version: self.version,
             stack: self.stack,
             update_state: self.update_state,
-            update_message: self.update_message,
         })
     }
 }
@@ -197,31 +163,9 @@ impl ServiceListBody {
 }
 
 impl ServiceDetailBody {
-    pub(crate) fn into_detail(self) -> Result<ServiceDetail, NativeClientError> {
-        if self.tasks.len() > MAX_TASKS {
-            return Err(NativeClientError::InvalidResponse);
-        }
-        let tasks = self
-            .tasks
-            .into_iter()
-            .map(|task| {
-                Ok(TaskItem {
-                    updated_at: optional_time(task.updated_at.as_deref())?,
-                    id: task.id,
-                    slot: task.slot,
-                    swarm_node_id: task.swarm_node_id,
-                    state: task.state,
-                    desired_state: task.desired_state,
-                    error: task.error,
-                    message: task.message,
-                    container_id: task.container_id,
-                })
-            })
-            .collect::<Result<_, NativeClientError>>()?;
-        Ok(ServiceDetail {
-            service: self.service.into_item()?,
-            tasks,
+    pub(crate) fn into_detail(self) -> ServiceDetail {
+        ServiceDetail {
             latest_error: self.latest_error,
-        })
+        }
     }
 }

@@ -26,7 +26,6 @@ pub enum StreamFrameKind {
     Data,
     Acknowledgement,
     LogsOpen,
-    LogsClose,
     LogLine,
     LogGap,
     LogEnd,
@@ -46,7 +45,6 @@ impl StreamFrameKind {
             Self::Data => wire::FrameKind::Data,
             Self::Acknowledgement => wire::FrameKind::Acknowledgement,
             Self::LogsOpen => wire::FrameKind::LogsOpen,
-            Self::LogsClose => wire::FrameKind::LogsClose,
             Self::LogLine => wire::FrameKind::LogLine,
             Self::LogGap => wire::FrameKind::LogGap,
             Self::LogEnd => wire::FrameKind::LogEnd,
@@ -67,7 +65,6 @@ impl StreamFrameKind {
             wire::FrameKind::Data => Self::Data,
             wire::FrameKind::Acknowledgement => Self::Acknowledgement,
             wire::FrameKind::LogsOpen => Self::LogsOpen,
-            wire::FrameKind::LogsClose => Self::LogsClose,
             wire::FrameKind::LogLine => Self::LogLine,
             wire::FrameKind::LogGap => Self::LogGap,
             wire::FrameKind::LogEnd => Self::LogEnd,
@@ -203,6 +200,19 @@ mod tests {
         assert_eq!(
             StreamFrame::decode(&unknown_kind),
             Err(StreamProtocolError::UnknownFrameKind(99))
+        );
+
+        // The retired LogsClose kind stays reserved.
+        let logs_close = wire::StreamEnvelope {
+            protocol_version: PROTOCOL_VERSION,
+            sequence: 0,
+            kind: 4,
+            payload: Vec::new(),
+        }
+        .encode_to_vec();
+        assert_eq!(
+            StreamFrame::decode(&logs_close),
+            Err(StreamProtocolError::UnknownFrameKind(4))
         );
     }
 }

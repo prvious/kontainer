@@ -12,9 +12,10 @@ certificate), `MjblZ` (04.S6 add node, deferred); captions `mxibR`, `WF3UC`. Gap
 
 - Extend spec 05's `GET /api/v1/nodes`: join each membership row to the manager's Swarm node by
   `swarm_node_id` (manager engine `list_swarm_nodes` from spec 11): `role` manager/worker,
-  `isLeader`, `availability`, `swarmStatus` (ready/down/unknown), `address`. A Swarm node with no
-  agent appears with `agentStatus: "no-agent"`; an agent whose Swarm node is unknown appears with
-  role `unknown`.
+  `isLeader`, `availability`, `address`. A Swarm node with no agent appears with
+  `agentStatus: "no-agent"`; an agent whose Swarm node is unknown appears with role `unknown`.
+  Swarm's ready/down/unknown state feeds `health` but is not a response field, and neither is
+  `swarmNodeId`; no screen read them (ADR 0039).
 - Departed nodes (ADR 0037): once the manager has answered, an offline agent row whose
   `swarm_node_id` Swarm no longer lists (a removed or replaced node) is left out. An offline row
   that never named a Swarm id stays: an agent that never joined is a real problem. When several
@@ -30,7 +31,9 @@ certificate), `MjblZ` (04.S6 add node, deferred); captions `mxibR`, `WF3UC`. Gap
   says `manager unreachable`, and `no swarm manager` only for zero managers); quorum state
   (`healthy` when the manager answers and every manager is ready, else `degraded`);
   aggregate CPU percent (average over online nodes), memory used and total (sums), containers
-  running (sum). Used by this page's strip, the Overview (spec 14), and the status bar.
+  running (sum). Used by this page's strip, the Overview (spec 14), and the status bar. It
+  carries no `snapshotAt`, and the cluster series carries neither `snapshotAt` nor the
+  `window`/`bucket` echo; the node list keeps its `snapshotAt` (ADR 0039).
 
 ## Desktop
 

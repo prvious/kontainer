@@ -224,9 +224,6 @@
         "createdAt": {
           "type": "string"
         },
-        "dangling": {
-          "type": "boolean"
-        },
         "imageId": {
           "description": "`sha256:<64 hex>`.",
           "type": "string"
@@ -269,7 +266,6 @@
         "sizeBytes",
         "createdAt",
         "usedBy",
-        "dangling",
         "nodeIds"
       ],
       "type": "object"

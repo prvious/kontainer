@@ -15,17 +15,13 @@ export const NODE_ROLES = ["manager", "worker", "unknown"] as const;
 export type NodeRole = (typeof NODE_ROLES)[number];
 export const NODE_AVAILABILITIES = ["active", "pause", "drain"] as const;
 export type NodeAvailability = (typeof NODE_AVAILABILITIES)[number];
-export const SWARM_NODE_STATUSES = ["ready", "down", "unknown"] as const;
-export type SwarmNodeStatus = (typeof SWARM_NODE_STATUSES)[number];
 export const QUORUM_STATES = ["healthy", "degraded"] as const;
 export type QuorumState = (typeof QUORUM_STATES)[number];
 
 export interface NodeSample {
-    sampledAt: string;
     /** 0–100 of the node. */
     cpuPercent: number;
     memoryUsedBytes: number;
-    diskUsedBytes: number | null;
     containersRunning: number;
     containersPaused: number;
     containersExited: number;
@@ -43,8 +39,6 @@ export interface NodeSummary {
     role: NodeRole;
     isLeader: boolean;
     availability: NodeAvailability | null;
-    swarmStatus: SwarmNodeStatus;
-    swarmNodeId: string | null;
     /** The address the manager sees the node at. */
     address: string | null;
     agentVersion: string | null;
@@ -53,8 +47,6 @@ export interface NodeSummary {
     arch: string;
     cpuCores: number;
     memoryTotalBytes: number;
-    agentStartedAt: string | null;
-    firstSeenAt: string | null;
     lastCheckInAt: string | null;
     latestSample: NodeSample | null;
 }
@@ -74,7 +66,6 @@ export interface ClusterSummary {
     memoryUsedBytes: number;
     memoryTotalBytes: number;
     containersRunning: number;
-    snapshotAt: string;
 }
 
 export interface NodeList {
@@ -87,7 +78,6 @@ export interface SamplePoint {
     at: string;
     cpuPercent: number | null;
     memoryUsedBytes: number | null;
-    diskUsedBytes: number | null;
     containersRunning: number | null;
     netRxBytesPerSec: number | null;
     netTxBytesPerSec: number | null;
@@ -95,11 +85,9 @@ export interface SamplePoint {
     nodes: number;
 }
 
+/** The cluster series: per bucket, mean CPU over contributing nodes and summed figures. */
 export interface SampleSeries {
-    window: SampleWindow;
-    bucket: string;
     points: SamplePoint[];
-    snapshotAt: string;
 }
 
 export const SAMPLE_WINDOWS = ["5m", "15m", "1h", "24h", "7d"] as const;

@@ -87,8 +87,8 @@ Use the action-per-file pattern for discrete operations.
 
 Run the relevant checks for the code you changed:
 
-- Frontend: `pnpm --filter app test`, `pnpm types`, `pnpm lint`, `pnpm fmt`
+- Frontend: `pnpm --filter app test`, `pnpm types`, `pnpm lint`, `pnpm --filter app fmt:check` (`pnpm fmt` fixes; it can't fail)
 - Server workspace: `cargo fmt --manifest-path server/Cargo.toml --all -- --check`, `cargo check --manifest-path server/Cargo.toml --workspace --all-targets`, `cargo clippy --manifest-path server/Cargo.toml --workspace --all-targets -- -D warnings`, `cargo test --manifest-path server/Cargo.toml --workspace`
-- Tauri/Rust: `cargo fmt`, `cargo test`
+- Tauri/Rust: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test`
 
 Keep this file short. If guidance becomes tutorial-like, move it into a skill.

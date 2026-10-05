@@ -31,17 +31,15 @@ pub(crate) fn check_in(node_id: &str, sample: Option<SampleReading>) -> CheckIn 
         os: "Alpine Linux".to_owned(),
         cpu_cores: 4,
         memory_total_bytes: 8 << 30,
-        agent_started_at: Utc::now(),
         sample,
     }
 }
 
-pub(crate) fn reading(at: chrono::DateTime<Utc>, cpu: f32, disk: Option<u64>) -> SampleReading {
+pub(crate) fn reading(at: chrono::DateTime<Utc>, cpu: f32) -> SampleReading {
     SampleReading {
         sampled_at: at,
         cpu_percent: cpu,
         memory_used_bytes: 1 << 30,
-        disk_used_bytes: disk,
         containers_running: 3,
         containers_paused: 0,
         containers_exited: 1,
@@ -51,7 +49,7 @@ pub(crate) fn reading(at: chrono::DateTime<Utc>, cpu: f32, disk: Option<u64>) ->
 }
 
 #[tokio::test]
-async fn postgres_check_in_upserts_the_node_and_carries_disk_forward() -> Result<(), Box<dyn Error>>
+async fn postgres_check_in_upserts_the_node_and_records_its_samples() -> Result<(), Box<dyn Error>>
 {
     let Some(database) = PostgresTestDatabase::create(true).await? else {
         return Ok(());
@@ -62,15 +60,12 @@ async fn postgres_check_in_upserts_the_node_and_carries_disk_forward() -> Result
         record_check_in::execute(
             db,
             "development",
-            check_in("manager", Some(reading(now, 10.0, Some(5 << 30)))),
+            check_in("manager", Some(reading(now, 10.0))),
         )
         .await?;
         let first = node::Entity::find_by_id("manager").one(db).await?.unwrap();
 
-        let mut update = check_in(
-            "manager",
-            Some(reading(now + Duration::seconds(5), 20.0, None)),
-        );
+        let mut update = check_in("manager", Some(reading(now + Duration::seconds(5), 20.0)));
         update.hostname = "manager-renamed".to_owned();
         update.swarm_node_id = Some(String::new());
         record_check_in::execute(db, "development", update).await?;
@@ -86,7 +81,6 @@ async fn postgres_check_in_upserts_the_node_and_carries_disk_forward() -> Result
             second.swarm_node_id, None,
             "empty Swarm id is stored as null"
         );
-        assert_eq!(second.first_seen_at, first.first_seen_at);
         assert!(second.last_check_in_at >= first.last_check_in_at);
 
         let samples = node_sample::Entity::find()
@@ -95,14 +89,13 @@ async fn postgres_check_in_upserts_the_node_and_carries_disk_forward() -> Result
             .all(db)
             .await?;
         assert_eq!(samples.len(), 2);
-        assert_eq!(samples[1].disk_used_bytes, Some(5 << 30), "carried forward");
         assert_eq!(samples[1].cpu_percent, 20.0);
 
         // A retry of the same sample time keeps the first row.
         record_check_in::execute(
             db,
             "development",
-            check_in("manager", Some(reading(now, 99.0, None))),
+            check_in("manager", Some(reading(now, 99.0))),
         )
         .await?;
         let retried = node_sample::Entity::find()
@@ -116,10 +109,7 @@ async fn postgres_check_in_upserts_the_node_and_carries_disk_forward() -> Result
         record_check_in::execute(
             db,
             "development",
-            check_in(
-                "manager",
-                Some(reading(now + Duration::hours(1), 1.0, None)),
-            ),
+            check_in("manager", Some(reading(now + Duration::hours(1), 1.0))),
         )
         .await?;
         let latest = node_sample::Entity::find()
@@ -172,16 +162,13 @@ async fn postgres_status_boundaries_follow_the_database_clock() -> Result<(), Bo
         record_check_in::execute(
             db,
             "development",
-            check_in(
-                "fresh",
-                Some(reading(now - Duration::seconds(10), 5.0, None)),
-            ),
+            check_in("fresh", Some(reading(now - Duration::seconds(10), 5.0))),
         )
         .await?;
         record_check_in::execute(
             db,
             "development",
-            check_in("fresh", Some(reading(now, 7.5, None))),
+            check_in("fresh", Some(reading(now, 7.5))),
         )
         .await?;
 
@@ -234,7 +221,7 @@ async fn postgres_list_nodes_reads_each_nodes_newest_sample() -> Result<(), Box<
             record_check_in::execute(
                 db,
                 "development",
-                check_in(node_id, Some(reading(now, newest_cpu, None))),
+                check_in(node_id, Some(reading(now, newest_cpu))),
             )
             .await?;
             record_check_in::execute(
@@ -242,7 +229,7 @@ async fn postgres_list_nodes_reads_each_nodes_newest_sample() -> Result<(), Box<
                 "development",
                 check_in(
                     node_id,
-                    Some(reading(now - Duration::seconds(5), older_cpu, None)),
+                    Some(reading(now - Duration::seconds(5), older_cpu)),
                 ),
             )
             .await?;
@@ -414,7 +401,7 @@ async fn postgres_nodes_join_swarm_members_and_summarize_the_cluster() -> Result
             ("worker-1", Some(WORKER_SWARM_ID), 10.0),
             ("standalone", None, 50.0),
         ] {
-            let mut check_in = check_in(node_id, Some(reading(at, cpu, None)));
+            let mut check_in = check_in(node_id, Some(reading(at, cpu)));
             check_in.swarm_node_id = swarm_id.map(str::to_owned);
             record_check_in::execute(db, "development", check_in).await?;
         }
@@ -460,22 +447,29 @@ async fn postgres_nodes_join_swarm_members_and_summarize_the_cluster() -> Result
         );
         let manager = &body["items"][0];
         assert_eq!(manager["isLeader"], true);
-        assert_eq!(manager["swarmStatus"], "ready");
         assert_eq!(manager["address"], "10.0.1.10");
         assert_eq!(manager["os"], "Alpine Linux", "agent facts win");
+        // Unread fields dropped by ADR 0039.
+        for dropped in [
+            "swarmStatus",
+            "swarmNodeId",
+            "agentStartedAt",
+            "firstSeenAt",
+        ] {
+            assert!(manager.get(dropped).is_none(), "{dropped}");
+        }
+        for dropped in ["sampledAt", "diskUsedBytes"] {
+            assert!(manager["latestSample"].get(dropped).is_none(), "{dropped}");
+        }
         assert_eq!(body["items"][1]["availability"], "drain");
         let lone = &body["items"][2];
         assert_eq!(lone["hostname"], "worker-3");
-        assert_eq!(lone["swarmNodeId"], LONE_SWARM_ID);
         assert!(lone["agentVersion"].is_null() && lone["lastCheckInAt"].is_null());
         assert_eq!(lone["cpuCores"], 2, "Swarm fills what it knows");
-        assert_eq!(body["items"][3]["swarmStatus"], "unknown");
 
         let (status, summary) =
             authorized_json(&router, "/api/v1/cluster/summary", &authorization).await?;
         assert_eq!(status, axum::http::StatusCode::OK);
-        let snapshot = summary["snapshotAt"].clone();
-        assert!(snapshot.is_string());
         assert_eq!(
             summary,
             serde_json::json!({
@@ -490,7 +484,6 @@ async fn postgres_nodes_join_swarm_members_and_summarize_the_cluster() -> Result
                 "memoryUsedBytes": 2_u64 << 30,
                 "memoryTotalBytes": 16_u64 << 30,
                 "containersRunning": 6,
-                "snapshotAt": snapshot,
             })
         );
 
@@ -503,7 +496,7 @@ async fn postgres_nodes_join_swarm_members_and_summarize_the_cluster() -> Result
                 .as_array()
                 .unwrap()
                 .iter()
-                .all(|node| node["swarmStatus"] == "unknown" && node["role"] == "unknown")
+                .all(|node| node["role"] == "unknown" && node["health"] != "active")
         );
         let (_, summary) =
             authorized_json(&router, "/api/v1/cluster/summary", &authorization).await?;

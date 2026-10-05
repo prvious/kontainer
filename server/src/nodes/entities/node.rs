@@ -16,11 +16,7 @@ pub struct Model {
     pub arch: String,
     pub cpu_cores: i32,
     pub memory_total_bytes: i64,
-    pub agent_started_at: DateTimeUtc,
-    pub first_seen_at: DateTimeUtc,
     pub last_check_in_at: DateTimeUtc,
-    pub created_at: DateTimeUtc,
-    pub updated_at: DateTimeUtc,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

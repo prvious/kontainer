@@ -49,7 +49,7 @@ impl NativeClient {
         decode_json::<ServiceListBody>(&body)?.into_list()
     }
 
-    /// One service with its newest tasks and the newest task error.
+    /// One service's newest task error.
     pub async fn get_service(
         &self,
         access: &AccessCredential,
@@ -67,7 +67,7 @@ impl NativeClient {
                 ErrorBodyPolicy::Inventory,
             )
             .await?;
-        decode_json::<ServiceDetailBody>(&body)?.into_detail()
+        Ok(decode_json::<ServiceDetailBody>(&body)?.into_detail())
     }
 
     /// Admit one scale, restart, or rollback based on `version`.

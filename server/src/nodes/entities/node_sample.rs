@@ -10,7 +10,6 @@ pub struct Model {
     pub sampled_at: DateTimeUtc,
     pub cpu_percent: f32,
     pub memory_used_bytes: i64,
-    pub disk_used_bytes: Option<i64>,
     pub containers_running: i32,
     pub containers_paused: i32,
     pub containers_exited: i32,

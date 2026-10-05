@@ -51,7 +51,7 @@ function mockCommands(overrides: Record<string, (args: unknown) => unknown> = {}
             case "list_nodes":
                 return nodes.nodeList;
             case "get_cluster_samples":
-                return { ...nodes.clusterSamples, window: "24h", bucket: "15m" };
+                return nodes.clusterSamples;
             case "load_app_settings":
                 return { refreshInterval: 60_000 };
             case "controller_health":

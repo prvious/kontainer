@@ -6,8 +6,8 @@ import { authenticatedInvoke, type ReportCustodyError as Report } from "@/hooks/
 import type { ClusterSummary, ControllerSettings, ControllerStatusView, NodeList, SampleSeries, SampleWindow } from "@/types/nodes";
 import { DEFAULT_APP_SETTINGS } from "@/types/settings";
 
-/** `node` is a node id, or `"cluster"` for the cluster-wide series. */
-type SampleScope = string;
+/** The controller serves only the cluster-wide series (ADR 0039). */
+type SampleScope = "cluster";
 
 export const nodesQueries = {
     all: (profileId: string) => ["nodes", profileId] as const,
@@ -24,10 +24,7 @@ export const nodesQueries = {
     samples: (profileId: string, scope: SampleScope, window: SampleWindow, bucket: string, report: Report) =>
         queryOptions({
             queryKey: [...nodesQueries.all(profileId), "samples", scope, window, bucket] as const,
-            queryFn: () =>
-                scope === "cluster"
-                    ? authenticatedInvoke<SampleSeries>("get_cluster_samples", profileId, { window, bucket }, report)
-                    : authenticatedInvoke<SampleSeries>("get_node_samples", profileId, { nodeId: scope, window, bucket }, report),
+            queryFn: () => authenticatedInvoke<SampleSeries>("get_cluster_samples", profileId, { window, bucket }, report),
         }),
 };
 

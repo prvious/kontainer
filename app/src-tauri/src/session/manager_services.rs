@@ -1,12 +1,11 @@
-//! Swarm services, one service's tasks, and scale / restart / rollback, as credential-free IPC
-//! views.
+//! Swarm services, one service's newest task error, and scale / restart / rollback, as
+//! credential-free IPC views.
 //!
 //! Mirrors `app/src/types/services.ts`; the shared fixture `app/tests/fixtures/services-ipc.json`
 //! keeps both sides in sync.
 
 use kontainer_native_client::{
     IdempotencyKey, ServiceAction, ServiceDetail, ServiceId, ServiceItem, ServiceList, ServiceMode,
-    TaskItem,
 };
 use serde::Serialize;
 use uuid::Uuid;
@@ -43,28 +42,12 @@ struct ServiceView {
     version: u64,
     stack: Option<String>,
     update_state: Option<String>,
-    update_message: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct TaskView {
-    id: String,
-    slot: Option<u64>,
-    swarm_node_id: Option<String>,
-    state: String,
-    desired_state: String,
-    error: Option<String>,
-    message: Option<String>,
-    updated_at: Option<String>,
-    container_id: Option<String>,
-}
-
+/// What the replica tooltip reads.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ServiceDetailView {
-    service: ServiceView,
-    tasks: Vec<TaskView>,
     latest_error: Option<String>,
 }
 
@@ -84,23 +67,6 @@ impl From<ServiceItem> for ServiceView {
             version: item.version,
             stack: item.stack,
             update_state: item.update_state,
-            update_message: item.update_message,
-        }
-    }
-}
-
-impl From<TaskItem> for TaskView {
-    fn from(task: TaskItem) -> Self {
-        Self {
-            id: task.id,
-            slot: task.slot,
-            swarm_node_id: task.swarm_node_id,
-            state: task.state,
-            desired_state: task.desired_state,
-            error: task.error,
-            message: task.message,
-            updated_at: task.updated_at.map(|at| timestamp!(at)),
-            container_id: task.container_id,
         }
     }
 }
@@ -117,8 +83,6 @@ impl From<ServiceList> for ServiceListView {
 impl From<ServiceDetail> for ServiceDetailView {
     fn from(detail: ServiceDetail) -> Self {
         Self {
-            service: detail.service.into(),
-            tasks: detail.tasks.into_iter().map(TaskView::from).collect(),
             latest_error: detail.latest_error,
         }
     }

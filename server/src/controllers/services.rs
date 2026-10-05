@@ -1,8 +1,8 @@
 #![forbid(unsafe_code)]
 
-//! Swarm services from the manager: the list with running counts, one service with its tasks,
-//! and scale / restart / rollback as durable operations. When the manager can't answer, reads
-//! and writes are 503 `quorum_unavailable` and no operation is admitted.
+//! Swarm services from the manager: the list with running counts, one service's newest task
+//! error, and scale / restart / rollback as durable operations. When the manager can't answer,
+//! reads and writes are 503 `quorum_unavailable` and no operation is admitted.
 
 use axum::{
     Json,
@@ -11,7 +11,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use chrono::{DateTime, SecondsFormat, Utc};
-use kontainer_engine::{ServiceMode, TaskSummary, image_without_digest, is_valid_swarm_id};
+use kontainer_engine::{ServiceMode, image_without_digest, is_valid_swarm_id};
 use loco_rs::{app::AppContext, controller::Routes, prelude::post};
 use serde::{Deserialize, Serialize};
 use tokio_util::sync::CancellationToken;
@@ -37,8 +37,6 @@ use crate::{
 /// Seconds the desktop waits before asking again when the swarm has no quorum.
 const QUORUM_RETRY_SECONDS: u32 = 10;
 const MAX_REPLICAS: u64 = 1_000;
-/// Tasks returned with one service, newest first.
-const MAX_TASKS: usize = 50;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -63,7 +61,6 @@ pub struct ServiceResponse {
     pub stack: Option<String>,
     /// Swarm's update status, e.g. `updating`, `completed`, `rollback_completed`.
     pub update_state: Option<String>,
-    pub update_message: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
@@ -73,28 +70,11 @@ pub struct ServiceListResponse {
     pub snapshot_at: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct TaskResponse {
-    pub id: String,
-    pub slot: Option<u64>,
-    /// Swarm node id (not the Kontainer node id).
-    pub swarm_node_id: Option<String>,
-    pub state: String,
-    pub desired_state: String,
-    pub error: Option<String>,
-    pub message: Option<String>,
-    pub updated_at: Option<String>,
-    pub container_id: Option<String>,
-}
-
+/// What the replica tooltip asks of one service.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ServiceDetailResponse {
-    pub service: ServiceResponse,
-    /// Newest first, at most 50.
-    pub tasks: Vec<TaskResponse>,
-    /// The newest task error, for the replica tooltip and the scaling status line.
+    /// The newest task error, e.g. "no suitable node (insufficient memory on 3 nodes)".
     pub latest_error: Option<String>,
 }
 
@@ -132,21 +112,6 @@ fn service_response(row: ServiceRow) -> ServiceResponse {
         version: service.version,
         stack: service.stack,
         update_state: service.update_state,
-        update_message: service.update_message,
-    }
-}
-
-fn task_response(task: TaskSummary) -> TaskResponse {
-    TaskResponse {
-        updated_at: timestamp(task.updated_at_seconds),
-        id: task.id,
-        slot: task.slot,
-        swarm_node_id: task.node_id,
-        state: task.state,
-        desired_state: task.desired_state,
-        error: task.error,
-        message: task.message,
-        container_id: task.container_id,
     }
 }
 
@@ -252,7 +217,7 @@ pub(crate) async fn index(
     operation_id = "get_service",
     params(("serviceId" = String, Path, description = "Swarm service id")),
     responses(
-        (status = 200, description = "The service, its newest tasks, and the newest task error", body = ServiceDetailResponse),
+        (status = 200, description = "The service's newest task error", body = ServiceDetailResponse),
         (status = 400, description = "`invalid_request`", body = super::admission::FieldErrorResponse),
         (status = 401, description = "Missing, malformed, expired, or revoked access credential"),
         (status = 404, description = "No such service", body = super::admission::AdmissionErrorResponse),
@@ -275,13 +240,6 @@ pub(crate) async fn show(
         Ok(Some(detail)) => json_no_store(
             StatusCode::OK,
             ServiceDetailResponse {
-                service: service_response(detail.row),
-                tasks: detail
-                    .tasks
-                    .into_iter()
-                    .take(MAX_TASKS)
-                    .map(task_response)
-                    .collect(),
                 latest_error: detail.latest_error,
             },
         ),

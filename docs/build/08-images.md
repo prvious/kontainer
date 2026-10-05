@@ -24,6 +24,7 @@ Design: Images `OJDW6` (light `y36cL7`); states `iuoVz` (03.S7 delete confirmati
 
 - `GET /api/v1/images` → fan-out; images with the same id on several nodes merge into one row
   with `nodeIds`, `usedBy` summed, size once. `nodes` outcomes and `snapshotAt` as in spec 05.
+  Rows carry no `dangling` flag: an image with no tags is dangling (ADR 0040).
 - `DELETE /api/v1/images/{id}` body `{ nodeIds: [...] | "all", force }` → 202 `image.remove`;
   the executor removes on each listed node with concurrency 4 and reports per-node results.
 - `POST /api/v1/images/pulls` `{ reference, nodeIds }` → 202 `image.pull`; the executor runs

@@ -76,3 +76,7 @@ What becomes easier, what becomes harder, what must be revisited and when.
 | [0036](./0036-typed-confirmation-when-data-can-be-lost.md) | Typed confirmation when data can be lost | accepted |
 | [0037](./0037-node-status-fresh-samples-and-departed-nodes.md) | Node status from fresh samples, departed nodes, and unknown manager counts | accepted |
 | [0038](./0038-remove-the-desktop-operation-events-chain.md) | Remove the desktop operation-events chain until a screen shows operation history | accepted |
+| [0039](./0039-drop-unread-node-and-metrics-data.md) | Drop node and metrics data that no screen reads | accepted |
+| [0040](./0040-trim-the-service-detail-and-unread-fields.md) | Trim the service detail, unread fields, and the unsent log close | accepted |
+| [0041](./0041-corrections-to-adrs-0015-0024-and-0028.md) | Correct factual errors in ADRs 0015, 0024 and 0028 | accepted |
+| [0042](./0042-the-controller-runs-on-a-swarm-manager.md) | Run the controller on a Swarm manager with its Docker socket | accepted |

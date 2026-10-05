@@ -4,21 +4,24 @@ package kontainer.stream.v1;
 
 // StreamEnvelope is the shared public framing boundary. Each product frame
 // kind carries exactly one payload message below; kinds and messages are
-// only ever added.
+// added, and a retired one's number and name stay reserved.
 message StreamEnvelope {
   uint32 protocol_version = 1;
+  // No product frame numbers its envelopes; log and exec frames send 0.
   uint64 sequence = 2;
   FrameKind kind = 3;
   bytes payload = 4;
 }
 
 enum FrameKind {
+  // LogsClose was never sent; a client ends a log stream by closing the socket (ADR 0040).
+  reserved 4;
+  reserved "FRAME_KIND_LOGS_CLOSE";
   FRAME_KIND_UNSPECIFIED = 0;
   FRAME_KIND_DATA = 1;
   FRAME_KIND_ACKNOWLEDGEMENT = 2;
-  // Client to server: LogsOpen, then optionally LogsClose.
+  // Client to server: LogsOpen only; closing the socket ends the stream.
   FRAME_KIND_LOGS_OPEN = 3;
-  FRAME_KIND_LOGS_CLOSE = 4;
   // Server to client.
   FRAME_KIND_LOG_LINE = 5;
   FRAME_KIND_LOG_GAP = 6;
@@ -42,8 +45,6 @@ message LogsOpen {
   optional uint32 tail = 3;
 }
 
-message LogsClose {}
-
 enum LogStreamKind {
   LOG_STREAM_KIND_UNSPECIFIED = 0;
   LOG_STREAM_KIND_STDOUT = 1;
@@ -51,7 +52,9 @@ enum LogStreamKind {
 }
 
 message LogLine {
-  uint64 seq = 1;
+  // The server's line counter; the client counts the lines it delivers itself (ADR 0040).
+  reserved 1;
+  reserved "seq";
   int64 ts_unix_ms = 2;
   LogStreamKind stream = 3;
   string task_id = 4;

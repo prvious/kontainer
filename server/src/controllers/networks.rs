@@ -59,7 +59,6 @@ pub struct NetworkResponse {
     pub containers: u32,
     pub created_at: Option<String>,
     pub attachable: bool,
-    pub internal: bool,
     /// Docker's own networks (`host`, `bridge`, `none`, `docker_gwbridge`, `ingress`).
     pub builtin: bool,
     /// Local: its node. Swarm: the nodes with endpoints on it.
@@ -103,7 +102,6 @@ fn network_response(row: NetworkRow) -> NetworkResponse {
         subnets: row.subnets,
         containers: row.containers,
         attachable: row.attachable,
-        internal: row.internal,
         builtin: row.builtin,
         node_ids: row.node_ids,
     }

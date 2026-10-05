@@ -50,7 +50,6 @@ pub struct CheckIn {
     pub os: String,
     pub cpu_cores: u32,
     pub memory_total_bytes: u64,
-    pub agent_started_at: DateTime<Utc>,
     pub sample: Option<SampleReading>,
 }
 
@@ -59,7 +58,6 @@ pub struct SampleReading {
     pub sampled_at: DateTime<Utc>,
     pub cpu_percent: f32,
     pub memory_used_bytes: u64,
-    pub disk_used_bytes: Option<u64>,
     pub containers_running: u32,
     pub containers_paused: u32,
     pub containers_exited: u32,
@@ -106,9 +104,6 @@ pub fn validate(check_in: &CheckIn) -> Result<(), CheckInRejection> {
             || !rate_ok(sample.net_rx_bytes_per_sec)
             || !rate_ok(sample.net_tx_bytes_per_sec)
             || i64::try_from(sample.memory_used_bytes).is_err()
-            || sample
-                .disk_used_bytes
-                .is_some_and(|disk| i64::try_from(disk).is_err())
         {
             return Err(CheckInRejection::Sample);
         }
@@ -142,10 +137,8 @@ pub fn valid_host_port(value: &str) -> bool {
 /// Latest sample as the node list shows it.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LatestSample {
-    pub sampled_at: DateTime<Utc>,
     pub cpu_percent: f32,
     pub memory_used_bytes: i64,
-    pub disk_used_bytes: Option<i64>,
     pub containers_running: i32,
     pub containers_paused: i32,
     pub containers_exited: i32,
@@ -167,8 +160,6 @@ pub struct NodeView {
     pub arch: String,
     pub cpu_cores: i32,
     pub memory_total_bytes: i64,
-    pub agent_started_at: DateTime<Utc>,
-    pub first_seen_at: DateTime<Utc>,
     pub last_check_in_at: DateTime<Utc>,
     pub latest_sample: Option<LatestSample>,
 }
@@ -513,12 +504,10 @@ mod tests {
             os: "Alpine Linux".to_owned(),
             cpu_cores: 4,
             memory_total_bytes: 8 << 30,
-            agent_started_at: Utc::now(),
             sample: Some(SampleReading {
                 sampled_at: Utc::now(),
                 cpu_percent: 12.5,
                 memory_used_bytes: 1 << 30,
-                disk_used_bytes: None,
                 containers_running: 3,
                 containers_paused: 0,
                 containers_exited: 1,
@@ -589,14 +578,10 @@ mod tests {
             arch: "aarch64".to_owned(),
             cpu_cores: 4,
             memory_total_bytes: 8 << 30,
-            agent_started_at: at,
-            first_seen_at: at,
             last_check_in_at: at,
             latest_sample: Some(super::LatestSample {
-                sampled_at: at,
                 cpu_percent: cpu,
                 memory_used_bytes: memory,
-                disk_used_bytes: None,
                 containers_running: 3,
                 containers_paused: 0,
                 containers_exited: 0,

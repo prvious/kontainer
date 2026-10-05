@@ -11,13 +11,14 @@ use crate::{
 
 pub struct ServiceDetail {
     pub row: ServiceRow,
-    /// Every task, newest first.
+    /// Every task, in the manager's order; scaling convergence reads them.
     pub tasks: Vec<TaskSummary>,
     pub latest_error: Option<String>,
 }
 
 /// One service with its tasks (every state) and the newest task error. `Ok(None)` when the
-/// manager has no such service. Convergence polls through this, so it keeps every task.
+/// manager has no such service. Convergence polls through this; the HTTP route returns only the
+/// error.
 pub async fn execute(
     manager: &dyn ManagerEngine,
     service_id: &str,
@@ -31,10 +32,9 @@ pub async fn execute(
         else {
             return Ok(None);
         };
-        let mut tasks = manager
+        let tasks = manager
             .list_tasks(&[service_id.to_owned()], false, cancellation)
             .await?;
-        tasks.sort_by_key(|task| std::cmp::Reverse(task.updated_at_seconds.unwrap_or(0)));
         let latest_error = latest_task_error(&tasks);
         let row = service_rows(vec![service], &tasks)
             .pop()

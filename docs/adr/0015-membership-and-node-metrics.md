@@ -1,6 +1,6 @@
 # 0015. Membership, node samples, and fan-out
 
-- Status: accepted (amended by 0037)
+- Status: accepted (amended by 0037, 0039, 0041)
 - Date: 2026-09-28
 - Spec: docs/build/05-membership-and-node-metrics.md
 

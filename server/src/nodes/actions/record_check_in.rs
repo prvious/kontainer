@@ -1,7 +1,7 @@
 use chrono::Duration;
 use sea_orm::{
-    ActiveValue::Set, ColumnTrait, DatabaseConnection, DbErr, EntityTrait, QueryFilter, QueryOrder,
-    QuerySelect, TransactionError, TransactionTrait, sea_query::OnConflict,
+    ActiveValue::Set, DatabaseConnection, DbErr, EntityTrait, TransactionError, TransactionTrait,
+    sea_query::OnConflict,
 };
 
 use super::database_now;
@@ -21,8 +21,7 @@ pub enum RecordCheckInError {
     Persistence(#[source] DbErr),
 }
 
-/// Upsert the node and insert its sample in one transaction. A sample without disk usage carries
-/// the node's last known value forward (the agent reads disk every twelfth sample).
+/// Upsert the node and insert its sample in one transaction.
 pub async fn execute(
     database: &DatabaseConnection,
     cluster_id: &str,
@@ -48,11 +47,7 @@ pub async fn execute(
                     memory_total_bytes: Set(
                         i64::try_from(check_in.memory_total_bytes).unwrap_or(i64::MAX)
                     ),
-                    agent_started_at: Set(check_in.agent_started_at),
-                    first_seen_at: Set(now),
                     last_check_in_at: Set(now),
-                    created_at: Set(now),
-                    updated_at: Set(now),
                 };
                 node::Entity::insert(row)
                     .on_conflict(
@@ -68,9 +63,7 @@ pub async fn execute(
                                 node::Column::Arch,
                                 node::Column::CpuCores,
                                 node::Column::MemoryTotalBytes,
-                                node::Column::AgentStartedAt,
                                 node::Column::LastCheckInAt,
-                                node::Column::UpdatedAt,
                             ])
                             .to_owned(),
                     )
@@ -79,19 +72,6 @@ pub async fn execute(
 
                 let Some(sample) = check_in.sample else {
                     return Ok(());
-                };
-                let disk_used_bytes = match sample.disk_used_bytes {
-                    Some(disk) => Some(i64::try_from(disk).unwrap_or(i64::MAX)),
-                    None => node_sample::Entity::find()
-                        .select_only()
-                        .column(node_sample::Column::DiskUsedBytes)
-                        .filter(node_sample::Column::NodeId.eq(&check_in.node_id))
-                        .filter(node_sample::Column::DiskUsedBytes.is_not_null())
-                        .order_by_desc(node_sample::Column::SampledAt)
-                        .into_tuple::<Option<i64>>()
-                        .one(transaction)
-                        .await?
-                        .flatten(),
                 };
                 let sampled_at = if (sample.sampled_at - now).abs() > MAX_CLOCK_SKEW {
                     now
@@ -106,7 +86,6 @@ pub async fn execute(
                     memory_used_bytes: Set(
                         i64::try_from(sample.memory_used_bytes).unwrap_or(i64::MAX)
                     ),
-                    disk_used_bytes: Set(disk_used_bytes),
                     containers_running: Set(count(sample.containers_running)),
                     containers_paused: Set(count(sample.containers_paused)),
                     containers_exited: Set(count(sample.containers_exited)),

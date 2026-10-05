@@ -33,9 +33,6 @@ const auth = {
 
 /** The last hour of cluster CPU with a 62 % peak and one empty bucket. */
 const hour = {
-    ...nodes.clusterSamples,
-    window: "1h",
-    bucket: "60s",
     points: [
         { ...nodes.clusterSamples.points[0], at: "2026-09-28T11:58:00.000Z" },
         { ...nodes.clusterSamples.points[1], at: "2026-09-28T11:59:00.000Z", cpuPercent: 62 },

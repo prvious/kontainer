@@ -16,7 +16,7 @@ use tokio_util::sync::CancellationToken;
 
 /// Stats reads in flight at once.
 const STATS_CONCURRENCY: usize = 8;
-/// `docker system df` runs on every twelfth sample; the controller carries the value forward.
+/// `docker system df` runs on every twelfth sample, only to refresh [`VolumeSizeCache`].
 pub const DISK_SAMPLE_EVERY: u64 = 12;
 
 /// The last tick's per-container stats. `ListContainers` reads it so the list carries CPU and
@@ -75,7 +75,6 @@ pub struct NodeReading {
     /// 0–100 of the whole node.
     pub cpu_percent: f64,
     pub memory_used_bytes: u64,
-    pub disk_used_bytes: Option<u64>,
     pub net_rx_bytes_per_sec: Option<f64>,
     pub net_tx_bytes_per_sec: Option<f64>,
 }
@@ -132,17 +131,11 @@ impl NodeSampler {
             .values()
             .filter_map(|stats| stats.memory_used_bytes)
             .fold(0_u64, u64::saturating_add);
-        let disk_used_bytes = if tick.is_multiple_of(DISK_SAMPLE_EVERY) {
-            match self.engine.disk_usage(cancellation).await {
-                Ok(usage) => {
-                    self.volume_sizes.replace(usage.volume_sizes);
-                    usage.total_bytes
-                }
-                Err(_) => None,
-            }
-        } else {
-            None
-        };
+        if tick.is_multiple_of(DISK_SAMPLE_EVERY)
+            && let Ok(usage) = self.engine.disk_usage(cancellation).await
+        {
+            self.volume_sizes.replace(usage.volume_sizes);
+        }
         self.cache.replace(current);
 
         Ok(NodeReading {
@@ -150,7 +143,6 @@ impl NodeSampler {
             sampled_at_unix_ms: unix_ms(SystemTime::now()),
             cpu_percent,
             memory_used_bytes,
-            disk_used_bytes,
             net_rx_bytes_per_sec: rx_rate,
             net_tx_bytes_per_sec: tx_rate,
         })
@@ -458,24 +450,24 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn disk_usage_is_read_on_every_twelfth_sample_only() {
+    async fn volume_sizes_refresh_on_every_twelfth_sample_only() {
         let engine = Arc::new(FakeNodeEngine::two_containers());
         let sizes = VolumeSizeCache::default();
         let mut sampler = NodeSampler::new(engine.clone(), ContainerStatsCache::default())
             .with_volume_sizes(sizes.clone());
         assert_eq!(sizes.get("pg-data"), None, "unknown before the first df");
-        let mut with_disk = Vec::new();
+        let mut with_df = Vec::new();
         for tick in 0..25 {
-            let reading = sampler
+            let before = engine.disk_reads.load(Ordering::SeqCst);
+            sampler
                 .sample(Duration::from_secs(1), &CancellationToken::new())
                 .await
                 .unwrap();
-            if reading.disk_used_bytes.is_some() {
-                with_disk.push(tick);
+            if engine.disk_reads.load(Ordering::SeqCst) > before {
+                with_df.push(tick);
             }
         }
-        assert_eq!(with_disk, vec![0, 12, 24]);
-        assert_eq!(engine.disk_reads.load(Ordering::SeqCst), 3);
+        assert_eq!(with_df, vec![0, 12, 24]);
         assert_eq!(sizes.get("pg-data"), Some(4096));
         assert_eq!(sizes.get("other"), None);
     }

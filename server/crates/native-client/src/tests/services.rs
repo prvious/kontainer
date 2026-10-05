@@ -10,7 +10,7 @@ use super::support::{
 use crate::credentials::AccessCredential;
 use crate::error::NativeClientError;
 use crate::operations::IdempotencyKey;
-use crate::services::{ServiceAction, ServiceId, ServiceListBody, ServiceMode};
+use crate::services::{ServiceAction, ServiceDetailBody, ServiceId, ServiceListBody, ServiceMode};
 
 const SERVICE_LIST: &str = include_str!("fixtures/services/service-list.json");
 const ACCESS: &str = "kta_11111111111111111111111111111111.2222222222222222222222222222222222222222222222222222222222222222";
@@ -27,21 +27,8 @@ fn key() -> IdempotencyKey {
 }
 
 #[tokio::test]
-async fn services_list_and_detail_parse_counts_and_tasks() {
-    let list: serde_json::Value = serde_json::from_str(SERVICE_LIST).unwrap();
+async fn services_list_and_detail_parse_counts_and_the_latest_error() {
     let detail = json!({
-        "service": list["items"][0],
-        "tasks": [{
-            "id": "task00000000000000000000a",
-            "slot": 3,
-            "swarmNodeId": "swarmnode",
-            "state": "pending",
-            "desiredState": "running",
-            "error": "no suitable node (insufficient memory on 3 nodes)",
-            "message": "pending task scheduling",
-            "updatedAt": "2026-09-28T09:00:00.000Z",
-            "containerId": null
-        }],
         "latestError": "no suitable node (insufficient memory on 3 nodes)"
     })
     .to_string();
@@ -84,7 +71,6 @@ async fn services_list_and_detail_parse_counts_and_tasks() {
         detail.latest_error.as_deref(),
         Some("no suitable node (insufficient memory on 3 nodes)")
     );
-    assert_eq!(detail.tasks[0].slot, Some(3));
     let targets: Vec<_> = server
         .requests()
         .into_iter()
@@ -216,11 +202,10 @@ const SERVICE_OPENAPI_PATHS: [(&str, &str); 3] = [
     ("/api/v1/services/{serviceId}", "get"),
     ("/api/v1/services/{serviceId}/actions/{action}", "post"),
 ];
-const SERVICE_OPENAPI_SCHEMAS: [&str; 6] = [
+const SERVICE_OPENAPI_SCHEMAS: [&str; 5] = [
     "ServiceListResponse",
     "ServiceResponse",
     "ServiceDetailResponse",
-    "TaskResponse",
     "QuorumUnavailableResponse",
     "ServiceActionRequest",
 ];
@@ -242,6 +227,11 @@ fn openapi_services_contract_matches_the_checked_artifact() {
         &document,
         "ServiceListResponse",
         round_trip_keys::<ServiceListBody>(SERVICE_LIST),
+    );
+    assert_schema_fields(
+        &document,
+        "ServiceDetailResponse",
+        round_trip_keys::<ServiceDetailBody>(r#"{"latestError":null}"#),
     );
     let list: serde_json::Value = serde_json::from_str(SERVICE_LIST).unwrap();
     assert_schema_fields(

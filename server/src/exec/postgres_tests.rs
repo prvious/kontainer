@@ -206,7 +206,7 @@ impl Fixture {
             rows: 40,
         });
         client
-            .send_frame(&open.into_frame(1), &CancellationToken::new())
+            .send_frame(&open.into_frame(), &CancellationToken::new())
             .await
             .unwrap();
         client
@@ -334,14 +334,14 @@ async fn postgres_exec_relays_a_shell_both_ways_and_reports_its_exit() -> Result
         let cancellation = CancellationToken::new();
         client
             .send_frame(
-                &ExecMessage::Input(b"echo ok\r".to_vec()).into_frame(2),
+                &ExecMessage::Input(b"echo ok\r".to_vec()).into_frame(),
                 &cancellation,
             )
             .await
             .unwrap();
         client
             .send_frame(
-                &ExecMessage::Resize(ExecResize { cols: 90, rows: 20 }).into_frame(3),
+                &ExecMessage::Resize(ExecResize { cols: 90, rows: 20 }).into_frame(),
                 &cancellation,
             )
             .await
@@ -371,7 +371,7 @@ async fn postgres_exec_relays_a_shell_both_ways_and_reports_its_exit() -> Result
         assert_eq!((received == big, frames), (true, 3));
 
         client
-            .send_frame(&ExecMessage::Close.into_frame(4), &cancellation)
+            .send_frame(&ExecMessage::Close.into_frame(), &cancellation)
             .await
             .unwrap();
         wait_for(&fixture.agent, 3).await;

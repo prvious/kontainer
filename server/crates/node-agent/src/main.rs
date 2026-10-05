@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use std::{env, error::Error, ffi::OsString, sync::Arc, time::SystemTime};
+use std::{env, error::Error, ffi::OsString, sync::Arc};
 
 use kontainer_engine::{ContainerEngine, LocalDockerEngine, LocalEngineOptions};
 use kontainer_node_agent::{
@@ -31,7 +31,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .json()
         .init();
 
-    let started_at = SystemTime::now();
     let config = AgentConfig::from_environment()?;
     let controller = Arc::new(MtlsControllerLink::new(
         &config.controller_rpc_endpoint,
@@ -61,10 +60,6 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let facts = AgentFacts {
         node_id: config.node_id.clone(),
         advertise_address: config.advertise_address.clone(),
-        agent_started_at_unix_ms: started_at
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|elapsed| i64::try_from(elapsed.as_millis()).unwrap_or(i64::MAX))
-            .unwrap_or(0),
     };
     // Tracked with in-flight requests: draining cancels the loop and the grace deadline joins it.
     requests.spawn(run_check_in(

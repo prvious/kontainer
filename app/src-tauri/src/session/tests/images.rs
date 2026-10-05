@@ -38,7 +38,6 @@ fn image_list() -> ImageList {
                 size_bytes: 192_000_000,
                 created_at: "2026-09-01T10:00:00.000Z".parse().unwrap(),
                 used_by: 3,
-                dangling: false,
                 node_ids: nodes(&["manager", "worker-1"]),
             },
             ImageItem {
@@ -48,7 +47,6 @@ fn image_list() -> ImageList {
                 size_bytes: 7_800_000,
                 created_at: "2026-08-20T08:30:00.000Z".parse().unwrap(),
                 used_by: 0,
-                dangling: true,
                 node_ids: nodes(&["manager"]),
             },
         ],

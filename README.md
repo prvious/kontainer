@@ -33,6 +33,13 @@ The server workspace ships two processes:
 - `kontainer-controller` - owns `/api/v1`, PostgreSQL, auth, operations, and cluster coordination.
 - `kontainer-node-agent` - runs on each Swarm node, owns local Docker access, and never connects to PostgreSQL.
 
+The controller must run on a Swarm manager with that manager's Docker socket mounted
+(`KONTAINER_DOCKER_HOST`, default `unix:///var/run/docker.sock`; TCP only on loopback). On a
+worker, services, stacks, overlay networks and service logs answer `not_a_manager`. The socket is
+root-equivalent access to the host, so run the controller only on a trusted manager. If that
+manager goes down, those Swarm features are unavailable until the controller runs on another
+manager; node-local features keep working through the agents. See ADR 0042.
+
 Frontend requests flow through the desktop boundary like this:
 
 `React -> Tauri invoke -> Rust client -> controller -> node agent -> local Docker Engine`
@@ -52,10 +59,7 @@ Frontend requests flow through the desktop boundary like this:
 
 ## Build Plan
 
-- `docs/build/00-goal.md` - standing instructions for the implementing agent and the `/goal` condition
-- `docs/build/NN-*.md` - one spec per feature, in build order
-- `docs/build/PROGRESS.md` - the ledger; `docs/build/design-gaps.md` - screens the design does not draw yet
-- `docs/design.pen` - the product design; read it through the Pencil MCP
+See [`docs/build/README.md`](docs/build/README.md) for the specs, the ledger, and the design source.
 
 ## Local Development
 

@@ -16,7 +16,6 @@
                 "containers": 0,
                 "createdAt": "2026-09-20T10:00:00.000Z",
                 "attachable": false,
-                "internal": false,
                 "builtin": true,
                 "nodeIds": ["manager"]
             },
@@ -29,7 +28,6 @@
                 "containers": 6,
                 "createdAt": "2026-09-21T09:00:00.000Z",
                 "attachable": true,
-                "internal": false,
                 "builtin": false,
                 "nodeIds": ["manager", "worker-1"]
             },
@@ -42,7 +40,6 @@
                 "containers": 0,
                 "createdAt": null,
                 "attachable": false,
-                "internal": false,
                 "builtin": false,
                 "nodeIds": []
             }

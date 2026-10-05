@@ -58,15 +58,12 @@ describe("node membership queries", () => {
         expect(queryClient.getQueryData([...nodesQueries.all(profileId), "summary"])).toEqual(fixture.clusterSummary);
     });
 
-    it("reads cluster and node series under the samples keys", async () => {
-        mockCommands({ get_cluster_samples: () => fixture.clusterSamples, get_node_samples: () => fixture.clusterSamples });
+    it("reads the cluster series under the samples key", async () => {
+        mockCommands({ get_cluster_samples: () => fixture.clusterSamples });
         const { queryClient, wrapper } = createWrapper();
         const cluster = renderHook(() => useSamples("cluster", "5m", "60s"), { wrapper });
-        const node = renderHook(() => useSamples("manager", "5m", "60s"), { wrapper });
         await waitFor(() => expect(cluster.result.current.data).toBeDefined());
-        await waitFor(() => expect(node.result.current.data).toBeDefined());
         expect(invoke).toHaveBeenCalledWith("get_cluster_samples", { profileId, window: "5m", bucket: "60s" });
-        expect(invoke).toHaveBeenCalledWith("get_node_samples", { profileId, nodeId: "manager", window: "5m", bucket: "60s" });
         expect(queryClient.getQueryData(["nodes", profileId, "samples", "cluster", "5m", "60s"])).toEqual(fixture.clusterSamples);
     });
 

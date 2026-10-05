@@ -169,11 +169,11 @@ pub struct DurableOperation {
     pub kind: String,
     pub state: OperationState,
     pub claimed_by: Option<String>,
+    /// When a worker claimed it, which is when it started.
     pub claimed_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
     pub payload: serde_json::Value,
-    pub started_at: Option<DateTime<Utc>>,
     pub finished_at: Option<DateTime<Utc>>,
     pub request_id: Option<String>,
 }
@@ -191,7 +191,6 @@ impl TryFrom<operation::Model> for DurableOperation {
             created_at: model.created_at,
             updated_at: model.updated_at,
             payload: model.payload,
-            started_at: model.started_at,
             finished_at: model.finished_at,
             request_id: model.request_id,
         })

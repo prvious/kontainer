@@ -24,7 +24,6 @@ pub enum LogStreamKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LogLine {
-    pub seq: u64,
     pub ts_unix_ms: i64,
     pub stream: LogStreamKind,
     pub task_id: String,
@@ -55,7 +54,6 @@ pub struct LogEnd {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LogMessage {
     Open(LogsOpen),
-    Close,
     Line(LogLine),
     Gap(LogGap),
     End(LogEnd),
@@ -71,8 +69,9 @@ pub enum LogPayloadError {
 }
 
 impl LogMessage {
+    /// The envelope's `sequence` is 0: nothing reads it.
     #[must_use]
-    pub fn into_frame(self, sequence: u64) -> StreamFrame {
+    pub fn into_frame(self) -> StreamFrame {
         let (kind, payload) = match self {
             Self::Open(open) => (
                 StreamFrameKind::LogsOpen,
@@ -83,14 +82,9 @@ impl LogMessage {
                 }
                 .encode_to_vec(),
             ),
-            Self::Close => (
-                StreamFrameKind::LogsClose,
-                wire::LogsClose {}.encode_to_vec(),
-            ),
             Self::Line(line) => (
                 StreamFrameKind::LogLine,
                 wire::LogLine {
-                    seq: line.seq,
                     ts_unix_ms: line.ts_unix_ms,
                     stream: match line.stream {
                         LogStreamKind::Stdout => wire::LogStreamKind::Stdout,
@@ -126,7 +120,7 @@ impl LogMessage {
             ),
         };
         StreamFrame {
-            sequence,
+            sequence: 0,
             kind,
             payload,
         }
@@ -144,10 +138,6 @@ impl LogMessage {
                     tail: open.tail,
                 })
             }
-            StreamFrameKind::LogsClose => {
-                wire::LogsClose::decode(bytes).map_err(malformed)?;
-                Self::Close
-            }
             StreamFrameKind::LogLine => {
                 let line = wire::LogLine::decode(bytes).map_err(malformed)?;
                 let stream = match wire::LogStreamKind::try_from(line.stream) {
@@ -156,7 +146,6 @@ impl LogMessage {
                     _ => return Err(LogPayloadError::UnknownValue),
                 };
                 Self::Line(LogLine {
-                    seq: line.seq,
                     ts_unix_ms: line.ts_unix_ms,
                     stream,
                     task_id: line.task_id,
@@ -209,9 +198,7 @@ mod tests {
                 since_unix_ms: None,
                 tail: None,
             }),
-            LogMessage::Close,
             LogMessage::Line(LogLine {
-                seq: 7,
                 ts_unix_ms: 1_790_000_000_123,
                 stream: LogStreamKind::Stderr,
                 task_id: "x0xza695s4xgf5rqmbvkpsizf".to_owned(),
@@ -226,10 +213,9 @@ mod tests {
                 message: "The service was removed.".to_owned(),
             }),
         ];
-        for (sequence, message) in messages.into_iter().enumerate() {
-            let frame = message.clone().into_frame(sequence as u64);
-            let decoded = StreamFrame::decode(&frame.encode()).unwrap();
-            assert_eq!(decoded.sequence, sequence as u64);
+        for message in messages {
+            let decoded = StreamFrame::decode(&message.clone().into_frame().encode()).unwrap();
+            assert_eq!(decoded.sequence, 0);
             assert_eq!(LogMessage::from_frame(&decoded).unwrap(), message);
         }
     }

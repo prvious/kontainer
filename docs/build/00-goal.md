@@ -42,14 +42,16 @@ settings, all from the desktop app.
    the rest.
 8. **Checks.** Run the smallest relevant set after each change and the full set before marking a spec
    done. A spec is not done while any check fails.
-   - Frontend: `pnpm --filter app test`, `pnpm types`, `pnpm lint`, `pnpm fmt`
+   - Frontend: `pnpm --filter app test`, `pnpm types`, `pnpm lint`,
+     `pnpm --filter app fmt:check` (`pnpm fmt` is the fixer; it rewrites files and can't fail)
    - Server: `cargo fmt --manifest-path server/Cargo.toml --all -- --check`,
      `cargo check --manifest-path server/Cargo.toml --workspace --all-targets`,
      `cargo clippy --manifest-path server/Cargo.toml --workspace --all-targets -- -D warnings`,
      `cargo test --manifest-path server/Cargo.toml --workspace` with PostgreSQL running from
      `server/compose.postgres.yaml` and `KONTAINER_REQUIRE_POSTGRES_TESTS=1` plus
      `KONTAINER_TEST_DATABASE_URL` set as `README.md` documents
-   - Tauri: `cargo fmt` and `cargo test` in `app/src-tauri`
+   - Tauri: `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, and `cargo test` in
+     `app/src-tauri`
 9. **Tests.** Every change ships with tests or updated tests. Frontend tests mock Tauri IPC the way
    `app/tests/setup.ts` already does (load the `vitest-tauri-testing` skill). Server tests follow
    `server/src/test_support.rs` for PostgreSQL. Real Docker tests use the development cluster from
@@ -96,5 +98,5 @@ and 06 are shared infrastructure that specs 07 to 16 depend on, so their tests m
 Paste this as one line after `/goal` (it is under the 4,000 character limit):
 
 ```
-Read docs/build/00-goal.md and implement docs/build/01-cleanup.md through docs/build/18-integrations.md in order, following every rule in 00-goal.md. The goal is met when: docs/build/PROGRESS.md marks every spec done (or blocked with a written reason after one retry); the transcript shows `pnpm --filter app test`, `pnpm types`, `pnpm lint`, `pnpm fmt`, `cargo fmt --manifest-path server/Cargo.toml --all -- --check`, `cargo clippy --manifest-path server/Cargo.toml --workspace --all-targets -- -D warnings`, `cargo test --manifest-path server/Cargo.toml --workspace` (with KONTAINER_REQUIRE_POSTGRES_TESTS=1), and `cargo test` in app/src-tauri all exiting 0 in the final turn; every commit is on branch build/desktop-v1; and `git status` is clean. Report progress against the spec list every turn.
+Read docs/build/00-goal.md and implement docs/build/01-cleanup.md through docs/build/18-integrations.md in order, following every rule in 00-goal.md. The goal is met when: docs/build/PROGRESS.md marks every spec done (or blocked with a written reason after one retry); the transcript shows `pnpm --filter app test`, `pnpm types`, `pnpm lint`, `pnpm --filter app fmt:check`, `cargo fmt --manifest-path server/Cargo.toml --all -- --check`, `cargo clippy --manifest-path server/Cargo.toml --workspace --all-targets -- -D warnings`, `cargo test --manifest-path server/Cargo.toml --workspace` (with KONTAINER_REQUIRE_POSTGRES_TESTS=1), and `cargo fmt --check` and `cargo test` in app/src-tauri all exiting 0 in the final turn; every commit is on branch build/desktop-v1; and `git status` is clean. Report progress against the spec list every turn.
 ```

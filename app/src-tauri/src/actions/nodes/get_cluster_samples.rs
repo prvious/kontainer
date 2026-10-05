@@ -11,5 +11,5 @@ pub async fn get_cluster_samples(
     window: String,
     bucket: String,
 ) -> Result<SampleSeriesView, InventoryError> {
-    state.samples(profile_id, None, &window, &bucket).await
+    state.cluster_samples(profile_id, &window, &bucket).await
 }

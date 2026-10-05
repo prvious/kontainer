@@ -214,11 +214,9 @@ async fn postgres_deep_status_enforces_session_and_drain_before_diagnostics()
                 os: "linux".to_owned(),
                 cpu_cores: 4,
                 memory_total_bytes: 8 << 30,
-                agent_started_at: chrono::Utc::now(),
                 sample: Some(crate::nodes::postgres_tests::reading(
                     chrono::Utc::now(),
                     5.0,
-                    None,
                 )),
             },
         )
@@ -230,12 +228,8 @@ async fn postgres_deep_status_enforces_session_and_drain_before_diagnostics()
         assert_eq!(body["items"][0]["id"], "manager");
         assert_eq!(body["items"][0]["agentStatus"], "online");
         assert_eq!(
-            (
-                &body["items"][0]["role"],
-                &body["items"][0]["swarmStatus"],
-                &body["items"][0]["health"],
-            ),
-            (&"unknown".into(), &"unknown".into(), &"degraded".into()),
+            (&body["items"][0]["role"], &body["items"][0]["health"]),
+            (&"unknown".into(), &"degraded".into()),
             "without a manager Swarm state is unknown, so the node is degraded"
         );
         assert!(body["items"][0]["latestSample"].is_object());
@@ -1247,8 +1241,7 @@ async fn postgres_session_openapi_registers_auth_routes_without_secrets()
                             || (path == "/api/v1/volumes" && ["node", "name"].contains(&name))
                             || (path == "/api/v1/networks/{networkId}" && name == "node")
                             || (path == "/api/v1/services" && name == "stack")
-                            || (["/api/v1/nodes/{nodeId}/samples", "/api/v1/cluster/samples"]
-                                .contains(&path.as_str())
+                            || (path == "/api/v1/cluster/samples"
                                 && ["window", "bucket"].contains(&name))
                             || (path == "/api/v1/operations/{operation_id}/events"
                                 && ["after", "limit"].contains(&name));

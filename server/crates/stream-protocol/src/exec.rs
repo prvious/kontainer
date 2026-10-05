@@ -62,8 +62,9 @@ pub enum ExecPayloadError {
 }
 
 impl ExecMessage {
+    /// The envelope's `sequence` is 0: nothing reads it.
     #[must_use]
-    pub fn into_frame(self, sequence: u64) -> StreamFrame {
+    pub fn into_frame(self) -> StreamFrame {
         let (kind, payload) = match self {
             Self::Open(open) => (
                 StreamFrameKind::ExecOpen,
@@ -122,7 +123,7 @@ impl ExecMessage {
             ),
         };
         StreamFrame {
-            sequence,
+            sequence: 0,
             kind,
             payload,
         }
@@ -190,7 +191,7 @@ mod tests {
     use super::{
         ExecError, ExecExit, ExecMessage, ExecOpen, ExecPayloadError, ExecResize, ExecStarted,
     };
-    use crate::{LogMessage, StreamFrame, StreamFrameKind};
+    use crate::{LogGap, LogMessage, StreamFrame, StreamFrameKind};
 
     #[test]
     fn every_exec_message_round_trips_through_an_envelope() {
@@ -233,19 +234,19 @@ mod tests {
                 message: "No shell at /bin/zsh.".to_owned(),
             }),
         ];
-        for (sequence, message) in messages.into_iter().enumerate() {
-            let frame = message.clone().into_frame(sequence as u64);
-            let decoded = StreamFrame::decode(&frame.encode()).unwrap();
+        for message in messages {
+            let decoded = StreamFrame::decode(&message.clone().into_frame().encode()).unwrap();
             assert_eq!(ExecMessage::from_frame(&decoded).unwrap(), message);
         }
     }
 
     #[test]
     fn exec_and_log_payloads_refuse_each_others_frames() {
-        let output = ExecMessage::Output(b"x".to_vec()).into_frame(1);
+        let output = ExecMessage::Output(b"x".to_vec()).into_frame();
         assert!(LogMessage::from_frame(&output).is_err());
+        let gap = LogMessage::Gap(LogGap { dropped: 1 }).into_frame();
         assert_eq!(
-            ExecMessage::from_frame(&LogMessage::Close.into_frame(1)),
+            ExecMessage::from_frame(&gap),
             Err(ExecPayloadError::NotAnExecFrame)
         );
         let garbage = StreamFrame {

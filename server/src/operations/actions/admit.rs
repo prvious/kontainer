@@ -167,7 +167,6 @@ where
         created_at: Set(now),
         updated_at: Set(now),
         payload: Set(material.payload.clone()),
-        started_at: Set(None),
         finished_at: Set(None),
         request_id: Set(material.request_id.clone()),
     }

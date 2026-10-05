@@ -47,25 +47,6 @@ impl LogsSession {
             _slot: slot,
         }
     }
-
-    /// Stop following, once, and record it without content.
-    fn stop(&self) {
-        let stopped = self
-            .follow
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .take();
-        if let Some((service_id, cancellation)) = stopped {
-            cancellation.cancel();
-            tracing::info!(
-                target: crate::AUDIT_TARGET,
-                event = "logs.close",
-                principal = %self.session.principal_id,
-                session = %self.session.family_id,
-                service = %service_id,
-            );
-        }
-    }
 }
 
 #[async_trait]
@@ -107,11 +88,6 @@ impl StreamApplication for LogsSession {
                 tokio::spawn(stream.run(open));
                 Ok(())
             }
-            Ok(LogMessage::Close) => {
-                self.stop();
-                outbound.close(StreamClose::NORMAL);
-                Ok(())
-            }
             _ => {
                 outbound.close(UNEXPECTED_FRAME);
                 Ok(())
@@ -120,8 +96,24 @@ impl StreamApplication for LogsSession {
     }
 }
 
+/// The client closed the socket, or the transport ended the session: stop following, and record
+/// it without content.
 impl Drop for LogsSession {
     fn drop(&mut self) {
-        self.stop();
+        let stopped = self
+            .follow
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        if let Some((service_id, cancellation)) = stopped {
+            cancellation.cancel();
+            tracing::info!(
+                target: crate::AUDIT_TARGET,
+                event = "logs.close",
+                principal = %self.session.principal_id,
+                session = %self.session.family_id,
+                service = %service_id,
+            );
+        }
     }
 }

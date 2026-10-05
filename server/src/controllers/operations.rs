@@ -40,6 +40,7 @@ pub struct OperationResponse {
     pub progress: Option<serde_json::Value>,
     pub created_at: String,
     pub updated_at: String,
+    /// When a worker claimed it.
     pub started_at: Option<String>,
     pub finished_at: Option<String>,
     /// The admitting request's id, shown next to failures.
@@ -85,7 +86,7 @@ impl From<OperationSnapshot> for OperationResponse {
             progress: snapshot.progress,
             created_at: timestamp(operation.created_at),
             updated_at: timestamp(operation.updated_at),
-            started_at: operation.started_at.map(timestamp),
+            started_at: operation.claimed_at.map(timestamp),
             finished_at: operation.finished_at.map(timestamp),
             request_id: operation.request_id,
         }
@@ -370,7 +371,6 @@ mod tests {
                 created_at: timestamp,
                 updated_at: timestamp,
                 payload: serde_json::json!({"secret": "payload-canary"}),
-                started_at: Some(timestamp),
                 finished_at: None,
                 request_id: Some("01J9ZM2R".to_owned()),
             },

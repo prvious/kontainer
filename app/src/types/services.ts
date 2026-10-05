@@ -26,7 +26,6 @@ export interface ServiceView {
     version: number;
     stack: string | null;
     updateState: string | null;
-    updateMessage: string | null;
 }
 
 export interface ServiceListView {
@@ -34,21 +33,8 @@ export interface ServiceListView {
     snapshotAt: string;
 }
 
-export interface TaskView {
-    id: string;
-    slot: number | null;
-    swarmNodeId: string | null;
-    state: string;
-    desiredState: string;
-    error: string | null;
-    message: string | null;
-    updatedAt: string | null;
-    containerId: string | null;
-}
-
+/** What the replica tooltip reads of one service. */
 export interface ServiceDetailView {
-    service: ServiceView;
-    tasks: TaskView[];
     latestError: string | null;
 }
 

@@ -43,7 +43,6 @@ struct NetworkView {
     containers: u32,
     created_at: Option<String>,
     attachable: bool,
-    internal: bool,
     builtin: bool,
     node_ids: Vec<String>,
 }
@@ -67,7 +66,6 @@ impl From<NetworkItem> for NetworkView {
             containers: item.containers,
             created_at: item.created_at.map(|at| timestamp!(at)),
             attachable: item.attachable,
-            internal: item.internal,
             builtin: item.builtin,
             node_ids: item.node_ids.iter().map(ToString::to_string).collect(),
         }

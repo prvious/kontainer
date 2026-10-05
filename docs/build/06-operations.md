@@ -50,8 +50,8 @@ at the HTTP edge before admission.
 
 ### Routes (protected)
 
-- `GET /api/v1/operations/{id}` adds `progress` (latest detail), `errorMessage`, `startedAt`,
-  `finishedAt`, `requestId`.
+- `GET /api/v1/operations/{id}` adds `progress` (latest detail), `errorMessage`, `startedAt` (the
+  claim time, `claimed_at`; there is no `started_at` column, ADR 0040), `finishedAt`, `requestId`.
 - `GET /api/v1/operations/{id}/events?after=0&limit=100` → ordered events.
 - `POST /api/v1/operations/{id}/cancel` → 202 when `recoverable`, 409 `not_cancellable` otherwise.
 - Hourly maintenance in the same supervised task: delete terminal operations older than 7 days and

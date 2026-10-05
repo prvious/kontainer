@@ -83,13 +83,12 @@ pub use networks::{
 pub use nodes::{
     AgentStatus, ClusterSummary, MAX_SAMPLE_POINTS, NodeAvailability, NodeHealth, NodeList,
     NodeRole, NodeSample, NodeSummary, QuorumState, SAMPLE_WINDOWS, SamplePoint, SampleSeries,
-    SwarmNodeStatus,
 };
 pub use operations::{AdmittedOperation, IdempotencyKey, OperationSnapshot, OperationState};
 pub use probe::ProbeFailure;
 pub use services::{
     MAX_REPLICAS, MAX_SERVICES, ServiceAction, ServiceDetail, ServiceId, ServiceItem, ServiceList,
-    ServiceMode, TaskItem,
+    ServiceMode,
 };
 pub use settings::{ControllerSettings, RETENTION_DAYS};
 pub use stacks::{StackItem, StackList, StackName, StackRemovalPlan, StackStatus};

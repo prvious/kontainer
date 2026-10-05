@@ -81,7 +81,6 @@ mod tests {
 
     fn line(seq: u64) -> LogLine {
         LogLine {
-            seq,
             ts_unix_ms: 1_790_000_000_000 + i64::try_from(seq).unwrap(),
             stream: LogStreamKind::Stdout,
             task_id: String::new(),

@@ -22,7 +22,6 @@ export interface StackView {
 
 export interface StackListView {
     items: StackView[];
-    snapshotAt: string;
 }
 
 export interface StackPlanView {

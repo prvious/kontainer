@@ -26,7 +26,8 @@ built-in tooltip), caption `qynvY`. Create dialog is gap G1 (interim, modelled o
 
 - `ListNetworks`: id, name, driver, scope, subnets from IPAM, `containers` (endpoint count),
   created, labels, flags `attachable`, `ingress`, `internal`, `builtin` (name in `host`, `bridge`,
-  `none`, `docker_gwbridge`, `ingress`).
+  `none`, `docker_gwbridge`, `ingress`). The public rows carry `attachable` and `builtin` only
+  (ADR 0040).
 - `InspectNetwork(id)` → attached container names; `RemoveNetwork(id)` for local networks.
 - Containers (spec 07 DTO) gain `networks: [names]` so the Containers page can filter by network.
   Add the `network` filter there as part of this spec.

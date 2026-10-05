@@ -47,7 +47,7 @@ async fn list_images_parses_merged_rows_and_node_outcomes() {
     assert_eq!(nginx.repo_tags, vec!["nginx:1.27", "nginx:latest"]);
     assert_eq!(nginx.used_by, 3);
     assert_eq!(nginx.node_ids, nodes(&["node-1", "worker-1"]));
-    assert!(list.items[1].dangling && list.items[1].repo_tags.is_empty());
+    assert!(list.items[1].repo_tags.is_empty(), "dangling");
     assert_eq!(list.nodes[2].status, NodeOutcomeStatus::Unavailable);
     let request = &server.requests()[0];
     assert_eq!(request.target, "/api/v1/images");

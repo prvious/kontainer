@@ -24,11 +24,7 @@ impl MigrationTrait for Migration {
                     .col(text(Node::Arch))
                     .col(integer(Node::CpuCores))
                     .col(big_integer(Node::MemoryTotalBytes))
-                    .col(timestamp_with_time_zone(Node::AgentStartedAt))
-                    .col(timestamp_with_time_zone(Node::FirstSeenAt))
                     .col(timestamp_with_time_zone(Node::LastCheckInAt))
-                    .col(timestamp_with_time_zone_default_now(Node::CreatedAt))
-                    .col(timestamp_with_time_zone_default_now(Node::UpdatedAt))
                     .to_owned(),
             )
             .await?;
@@ -42,7 +38,6 @@ impl MigrationTrait for Migration {
                     .col(timestamp_with_time_zone(NodeSample::SampledAt))
                     .col(float(NodeSample::CpuPercent))
                     .col(big_integer(NodeSample::MemoryUsedBytes))
-                    .col(big_integer_null(NodeSample::DiskUsedBytes))
                     .col(integer(NodeSample::ContainersRunning))
                     .col(integer(NodeSample::ContainersPaused))
                     .col(integer(NodeSample::ContainersExited))
@@ -129,11 +124,7 @@ enum Node {
     Arch,
     CpuCores,
     MemoryTotalBytes,
-    AgentStartedAt,
-    FirstSeenAt,
     LastCheckInAt,
-    CreatedAt,
-    UpdatedAt,
 }
 
 #[derive(DeriveIden)]
@@ -144,7 +135,6 @@ enum NodeSample {
     SampledAt,
     CpuPercent,
     MemoryUsedBytes,
-    DiskUsedBytes,
     ContainersRunning,
     ContainersPaused,
     ContainersExited,

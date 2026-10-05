@@ -2,7 +2,6 @@
 
 use kontainer_native_client::{
     AdmittedOperation, NativeClientError, ServiceDetail, ServiceItem, ServiceList, ServiceMode,
-    TaskItem,
 };
 
 use crate::session::manager::{InventoryError, ServiceDetailView, ServiceListView};
@@ -37,7 +36,6 @@ fn web() -> ServiceItem {
         version: 7,
         stack: Some("webapp".to_owned()),
         update_state: None,
-        update_message: None,
     }
 }
 
@@ -58,7 +56,6 @@ fn service_list() -> ServiceList {
                 version: 3,
                 stack: Some("monitoring".to_owned()),
                 update_state: None,
-                update_message: None,
             },
             web(),
             ServiceItem {
@@ -75,7 +72,6 @@ fn service_list() -> ServiceList {
                 version: 12,
                 stack: Some("toolbox".to_owned()),
                 update_state: Some("updating".to_owned()),
-                update_message: Some("update in progress".to_owned()),
             },
         ],
         snapshot_at: "2026-09-28T12:05:00.000Z".parse().unwrap(),
@@ -84,18 +80,6 @@ fn service_list() -> ServiceList {
 
 fn service_detail() -> ServiceDetail {
     ServiceDetail {
-        service: web(),
-        tasks: vec![TaskItem {
-            id: "task00000000000000000000a".to_owned(),
-            slot: Some(3),
-            swarm_node_id: Some("swarmnode".to_owned()),
-            state: "pending".to_owned(),
-            desired_state: "running".to_owned(),
-            error: Some("no suitable node (insufficient memory on 3 nodes)".to_owned()),
-            message: Some("pending task scheduling".to_owned()),
-            updated_at: at("2026-09-28T12:04:00.000Z"),
-            container_id: None,
-        }],
         latest_error: Some("no suitable node (insufficient memory on 3 nodes)".to_owned()),
     }
 }

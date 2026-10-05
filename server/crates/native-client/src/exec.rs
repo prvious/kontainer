@@ -148,7 +148,6 @@ pub struct ExecConnection {
 
 struct WebSocketExecInput {
     sender: NativeStreamSender,
-    sequence: u64,
 }
 
 impl ExecInputSink for WebSocketExecInput {
@@ -170,9 +169,8 @@ impl ExecInputSink for WebSocketExecInput {
                 ExecInputFrame::Close => vec![ExecMessage::Close],
             };
             for message in messages {
-                self.sequence += 1;
                 self.sender
-                    .send_frame(&message.into_frame(self.sequence), cancellation)
+                    .send_frame(&message.into_frame(), cancellation)
                     .await
                     .map_err(|error| match error {
                         StreamClientError::Cancelled => NativeClientError::Cancelled,
@@ -256,17 +254,14 @@ impl NativeClient {
             .open_stream(
                 "/api/v1/ws/exec",
                 access,
-                &open.into_frame(1),
+                &open.into_frame(),
                 StreamLimits::default().handshake_deadline(),
                 cancellation,
             )
             .await?;
         let (sender, receiver) = client.split();
         Ok(ExecConnection {
-            input: Box::new(WebSocketExecInput {
-                sender,
-                sequence: 1,
-            }),
+            input: Box::new(WebSocketExecInput { sender }),
             events: Box::new(WebSocketExecEvents {
                 receiver,
                 done: false,

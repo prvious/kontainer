@@ -15,7 +15,8 @@ confirmation); captions `zh11l`, `n3HebB`. Gaps G3 (deploy), G9 (stack detail �
   `running / desired` (sum of task counts), CPU percent and memory summed from container stats
   whose stack label matches, `lastDeployed` = max service `updated`, status `running` (every
   service converged), `partial`, `stopped` (no running task).
-- `GET /api/v1/stacks` → the list. `GET /api/v1/stacks/{name}/plan` → removal preview:
+- `GET /api/v1/stacks` → the list, `{ items }` with no `snapshotAt` (ADR 0040).
+  `GET /api/v1/stacks/{name}/plan` → removal preview:
   `services: [names]`, `networks: [names with the stack label]`, `volumesRetained: [named volumes
   referenced by service mounts]`.
 - `DELETE /api/v1/stacks/{name}` → 202 `stack.remove`. Executor: remove every service, wait until

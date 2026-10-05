@@ -118,7 +118,6 @@ impl ControllerLink for MtlsControllerLink {
 pub struct AgentFacts {
     pub node_id: String,
     pub advertise_address: String,
-    pub agent_started_at_unix_ms: i64,
 }
 
 /// Timing knobs; production uses [`CheckInTiming::default`], tests shrink them.
@@ -214,12 +213,10 @@ fn check_in_request(
         os: info.os,
         cpu_cores: info.cpu_cores,
         memory_total_bytes: info.memory_total_bytes,
-        agent_started_at_unix_ms: facts.agent_started_at_unix_ms,
         sample: reading.map(|reading| NodeSample {
             sampled_at_unix_ms: reading.sampled_at_unix_ms,
             cpu_percent: reading.cpu_percent,
             memory_used_bytes: reading.memory_used_bytes,
-            disk_used_bytes: reading.disk_used_bytes,
             containers_running: reading.info.containers_running,
             containers_paused: reading.info.containers_paused,
             containers_exited: reading.info.containers_stopped,
@@ -278,7 +275,6 @@ mod tests {
         AgentFacts {
             node_id: "manager".to_owned(),
             advertise_address: "127.0.0.1:50052".to_owned(),
-            agent_started_at_unix_ms: 1_760_000_000_000,
         }
     }
 
@@ -346,11 +342,6 @@ mod tests {
         );
         assert_eq!(sample.containers_running, 2);
         assert_eq!(sample.containers_exited, 1);
-        assert!(
-            sample.disk_used_bytes.is_some(),
-            "the first tick reads disk"
-        );
-        assert!(seen[1].sample.as_ref().unwrap().disk_used_bytes.is_none());
     }
 
     #[tokio::test]

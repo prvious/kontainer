@@ -114,7 +114,6 @@ tokio-rustls = { version = "0.26.5", default-features = false, features = ["ring
 tokio-stream.workspace = true
 tokio-util.workspace = true
 tonic.workspace = true
-tonic-prost.workspace = true
 tower.workspace = true
 tracing.workspace = true
 url.workspace = true
@@ -125,9 +124,6 @@ uuid.workspace = true
 kontainer-node-agent = { path = "crates/node-agent" }
 rcgen = "0.14.9"
 tempfile = "3.27.0"
-tokio-rustls = { version = "0.26.5", default-features = false, features = ["ring", "tls12"] }
-tower.workspace = true
-url.workspace = true
 
 [[bin]]
 name = "kontainer-controller"

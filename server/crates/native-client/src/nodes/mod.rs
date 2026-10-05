@@ -57,15 +57,6 @@ pub enum NodeAvailability {
     Drain,
 }
 
-/// What the manager last heard from the node.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum SwarmNodeStatus {
-    Ready,
-    Down,
-    Unknown,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum QuorumState {
@@ -76,10 +67,8 @@ pub enum QuorumState {
 /// The newest sample a node reported.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct NodeSample {
-    pub sampled_at: DateTime<Utc>,
     pub cpu_percent: f64,
     pub memory_used_bytes: u64,
-    pub disk_used_bytes: Option<u64>,
     pub containers_running: u32,
     pub containers_paused: u32,
     pub containers_exited: u32,
@@ -98,8 +87,6 @@ pub struct NodeSummary {
     pub role: NodeRole,
     pub is_leader: bool,
     pub availability: Option<NodeAvailability>,
-    pub swarm_status: SwarmNodeStatus,
-    pub swarm_node_id: Option<String>,
     pub address: Option<String>,
     pub agent_version: Option<String>,
     pub docker_version: String,
@@ -107,8 +94,6 @@ pub struct NodeSummary {
     pub arch: String,
     pub cpu_cores: u32,
     pub memory_total_bytes: u64,
-    pub agent_started_at: Option<DateTime<Utc>>,
-    pub first_seen_at: Option<DateTime<Utc>>,
     pub last_check_in_at: Option<DateTime<Utc>>,
     pub latest_sample: Option<NodeSample>,
 }
@@ -128,7 +113,6 @@ pub struct ClusterSummary {
     pub memory_used_bytes: u64,
     pub memory_total_bytes: u64,
     pub containers_running: u64,
-    pub snapshot_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -143,7 +127,6 @@ pub struct SamplePoint {
     pub at: DateTime<Utc>,
     pub cpu_percent: Option<f64>,
     pub memory_used_bytes: Option<f64>,
-    pub disk_used_bytes: Option<f64>,
     pub containers_running: Option<f64>,
     pub net_rx_bytes_per_sec: Option<f64>,
     pub net_tx_bytes_per_sec: Option<f64>,
@@ -152,10 +135,7 @@ pub struct SamplePoint {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SampleSeries {
-    pub window: String,
-    pub bucket: String,
     pub points: Vec<SamplePoint>,
-    pub snapshot_at: DateTime<Utc>,
 }
 
 /// Windows the controller accepts.
@@ -193,8 +173,6 @@ pub(crate) struct NodeBody {
     role: NodeRole,
     is_leader: bool,
     availability: Option<NodeAvailability>,
-    swarm_status: SwarmNodeStatus,
-    swarm_node_id: Option<String>,
     address: Option<String>,
     agent_version: Option<String>,
     docker_version: String,
@@ -202,8 +180,6 @@ pub(crate) struct NodeBody {
     arch: String,
     cpu_cores: u32,
     memory_total_bytes: u64,
-    agent_started_at: Option<String>,
-    first_seen_at: Option<String>,
     last_check_in_at: Option<String>,
     latest_sample: Option<NodeSampleBody>,
 }
@@ -222,16 +198,13 @@ pub(crate) struct ClusterSummaryBody {
     memory_used_bytes: u64,
     memory_total_bytes: u64,
     containers_running: u64,
-    snapshot_at: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct NodeSampleBody {
-    sampled_at: String,
     cpu_percent: f64,
     memory_used_bytes: u64,
-    disk_used_bytes: Option<u64>,
     containers_running: u32,
     containers_paused: u32,
     containers_exited: u32,
@@ -242,10 +215,7 @@ pub(crate) struct NodeSampleBody {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct SampleSeriesBody {
-    window: String,
-    bucket: String,
     points: Vec<SamplePointBody>,
-    snapshot_at: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -254,7 +224,6 @@ pub(crate) struct SamplePointBody {
     at: String,
     cpu_percent: Option<f64>,
     memory_used_bytes: Option<f64>,
-    disk_used_bytes: Option<f64>,
     containers_running: Option<f64>,
     net_rx_bytes_per_sec: Option<f64>,
     net_tx_bytes_per_sec: Option<f64>,
@@ -281,10 +250,8 @@ impl NodeListBody {
                 .latest_sample
                 .map(|sample| {
                     Ok::<_, NativeClientError>(NodeSample {
-                        sampled_at: parse_timestamp(&sample.sampled_at)?,
                         cpu_percent: finite(sample.cpu_percent)?,
                         memory_used_bytes: sample.memory_used_bytes,
-                        disk_used_bytes: sample.disk_used_bytes,
                         containers_running: sample.containers_running,
                         containers_paused: sample.containers_paused,
                         containers_exited: sample.containers_exited,
@@ -298,8 +265,6 @@ impl NodeListBody {
             let has_agent = node.agent_status != AgentStatus::NoAgent;
             let agent_fields = [
                 node.agent_version.is_some(),
-                node.agent_started_at.is_some(),
-                node.first_seen_at.is_some(),
                 node.last_check_in_at.is_some(),
             ];
             if agent_fields.iter().any(|present| *present != has_agent)
@@ -315,8 +280,6 @@ impl NodeListBody {
                 role: node.role,
                 is_leader: node.is_leader,
                 availability: node.availability,
-                swarm_status: node.swarm_status,
-                swarm_node_id: node.swarm_node_id,
                 address: node.address,
                 agent_version: node.agent_version,
                 docker_version: node.docker_version,
@@ -324,8 +287,6 @@ impl NodeListBody {
                 arch: node.arch,
                 cpu_cores: node.cpu_cores,
                 memory_total_bytes: node.memory_total_bytes,
-                agent_started_at: time(node.agent_started_at)?,
-                first_seen_at: time(node.first_seen_at)?,
                 last_check_in_at: time(node.last_check_in_at)?,
                 latest_sample,
             });
@@ -361,18 +322,13 @@ impl ClusterSummaryBody {
             memory_used_bytes: self.memory_used_bytes,
             memory_total_bytes: self.memory_total_bytes,
             containers_running: self.containers_running,
-            snapshot_at: parse_timestamp(&self.snapshot_at)?,
         })
     }
 }
 
 impl SampleSeriesBody {
-    pub(crate) fn into_series(
-        self,
-        window: &str,
-        bucket: &str,
-    ) -> Result<SampleSeries, NativeClientError> {
-        if self.window != window || self.bucket != bucket || self.points.len() > MAX_SAMPLE_POINTS {
+    pub(crate) fn into_series(self) -> Result<SampleSeries, NativeClientError> {
+        if self.points.len() > MAX_SAMPLE_POINTS {
             return Err(NativeClientError::InvalidResponse);
         }
         let mut points = Vec::with_capacity(self.points.len());
@@ -381,7 +337,6 @@ impl SampleSeriesBody {
                 at: parse_timestamp(&point.at)?,
                 cpu_percent: optional_finite(point.cpu_percent)?,
                 memory_used_bytes: optional_finite(point.memory_used_bytes)?,
-                disk_used_bytes: optional_finite(point.disk_used_bytes)?,
                 containers_running: optional_finite(point.containers_running)?,
                 net_rx_bytes_per_sec: optional_finite(point.net_rx_bytes_per_sec)?,
                 net_tx_bytes_per_sec: optional_finite(point.net_tx_bytes_per_sec)?,
@@ -391,11 +346,6 @@ impl SampleSeriesBody {
         if points.windows(2).any(|pair| pair[0].at >= pair[1].at) {
             return Err(NativeClientError::InvalidResponse);
         }
-        Ok(SampleSeries {
-            window: self.window,
-            bucket: self.bucket,
-            points,
-            snapshot_at: parse_timestamp(&self.snapshot_at)?,
-        })
+        Ok(SampleSeries { points })
     }
 }

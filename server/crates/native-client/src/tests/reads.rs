@@ -20,7 +20,7 @@ use crate::credentials::AccessCredential;
 use crate::error::NativeClientError;
 use crate::nodes::{
     AgentStatus, ClusterSummaryBody, NodeAvailability, NodeHealth, NodeListBody, NodeRole,
-    QuorumState, SampleSeriesBody, SwarmNodeStatus,
+    QuorumState, SampleSeriesBody,
 };
 use crate::operations::IdempotencyKey;
 use crate::operations::{OperationBody, OperationState};
@@ -66,12 +66,11 @@ async fn node_membership_is_strict_and_authenticated() {
         (manager.health, manager.role, manager.is_leader),
         (NodeHealth::Active, NodeRole::Manager, true)
     );
-    assert_eq!(manager.swarm_status, SwarmNodeStatus::Ready);
     assert_eq!(manager.address.as_deref(), Some("10.0.1.10"));
     assert_eq!(manager.cpu_cores, 4);
     let sample = manager.latest_sample.unwrap();
     assert_eq!(sample.cpu_percent, 12.5);
-    assert_eq!(sample.disk_used_bytes, Some(5 << 30));
+    assert_eq!(sample.containers_running, 5);
     assert_eq!(sample.net_tx_bytes_per_sec, None);
     assert_eq!(list.items[1].agent_status, AgentStatus::Offline);
     assert_eq!(list.items[1].health, NodeHealth::Down);
@@ -214,13 +213,11 @@ async fn cluster_summary_is_strict_and_consistent() {
 
 #[tokio::test]
 async fn sample_series_keep_null_buckets_and_validate_ranges_locally() {
+    let mut echoed: serde_json::Value = serde_json::from_str(CLUSTER_SAMPLES).unwrap();
+    echoed["window"] = json!("5m");
     let server = TestServer::plain(vec![
         respond(200, CLUSTER_SAMPLES),
-        respond(
-            200,
-            &CLUSTER_SAMPLES.replace(r#""window": "5m""#, r#""window": "1h""#),
-        ),
-        respond(404, r#"{"error":"not_found"}"#),
+        respond(200, &echoed.to_string()),
     ])
     .await;
     let client = plain_client(&server);
@@ -235,26 +232,18 @@ async fn sample_series_keep_null_buckets_and_validate_ranges_locally() {
     assert_eq!(series.points[1].nodes, 2);
     assert_eq!(
         client
-            .node_samples(&access(), &node(), "5m", "60s", &CancellationToken::new())
+            .cluster_samples(&access(), "1h", "60s", &CancellationToken::new())
             .await
             .err(),
         Some(NativeClientError::InvalidResponse),
-        "a series for another window is rejected"
-    );
-    assert_eq!(
-        client
-            .node_samples(&access(), &node(), "1h", "60s", &CancellationToken::new())
-            .await
-            .err(),
-        Some(NativeClientError::NotFound)
+        "an unknown field is rejected"
     );
     let targets: Vec<_> = server.requests().into_iter().map(|r| r.target).collect();
     assert_eq!(
         targets,
         vec![
             "/api/v1/cluster/samples?window=5m&bucket=60s",
-            "/api/v1/nodes/node-1/samples?window=5m&bucket=60s",
-            "/api/v1/nodes/node-1/samples?window=1h&bucket=60s",
+            "/api/v1/cluster/samples?window=1h&bucket=60s",
         ]
     );
 
@@ -278,7 +267,7 @@ async fn sample_series_keep_null_buckets_and_validate_ranges_locally() {
             "{window}/{bucket}"
         );
     }
-    assert_eq!(server.request_count(), 3, "local validation sends nothing");
+    assert_eq!(server.request_count(), 2, "local validation sends nothing");
 
     let mut unordered: serde_json::Value = serde_json::from_str(CLUSTER_SAMPLES).unwrap();
     unordered["points"].as_array_mut().unwrap().swap(0, 1);
@@ -879,9 +868,8 @@ fn default_limits_are_the_documented_bounds() {
 }
 
 /// Paths covered by the client's read surface, with their documented method.
-const READ_OPENAPI_PATHS: [(&str, &str); 12] = [
+const READ_OPENAPI_PATHS: [(&str, &str); 11] = [
     ("/api/v1/nodes", "get"),
-    ("/api/v1/nodes/{nodeId}/samples", "get"),
     ("/api/v1/cluster/samples", "get"),
     ("/api/v1/cluster/summary", "get"),
     ("/api/v1/settings", "get"),
@@ -896,14 +884,13 @@ const READ_OPENAPI_PATHS: [(&str, &str); 12] = [
     ("/api/v1/operations/{operation_id}/cancel", "post"),
     ("/api/v1/operations/noop", "post"),
 ];
-const READ_OPENAPI_SCHEMAS: [&str; 27] = [
+const READ_OPENAPI_SCHEMAS: [&str; 26] = [
     "NodeListResponse",
     "NodeResponse",
     "AgentStatusResponse",
     "NodeHealthResponse",
     "NodeRoleResponse",
     "NodeAvailabilityResponse",
-    "SwarmNodeStatusResponse",
     "ClusterSummaryResponse",
     "QuorumStateResponse",
     "NodeSampleResponse",
@@ -1063,10 +1050,6 @@ fn openapi_reads_contract_matches_the_checked_artifact() {
             "NodeAvailabilityResponse",
             json!(["active", "pause", "drain"]),
         ),
-        (
-            "SwarmNodeStatusResponse",
-            json!(["ready", "down", "unknown"]),
-        ),
         ("QuorumStateResponse", json!(["healthy", "degraded"])),
     ] {
         assert_eq!(schemas[schema]["enum"], names, "{schema}");
@@ -1080,9 +1063,10 @@ fn openapi_reads_contract_matches_the_checked_artifact() {
     for name in ["active", "pause", "drain"] {
         assert!(serde_json::from_value::<NodeAvailability>(json!(name)).is_ok());
     }
-    for name in ["ready", "down", "unknown"] {
-        assert!(serde_json::from_value::<SwarmNodeStatus>(json!(name)).is_ok());
-    }
+    assert!(
+        schemas["SwarmNodeStatusResponse"].is_null(),
+        "unread, dropped (ADR 0039)"
+    );
     for name in ["healthy", "degraded"] {
         assert!(serde_json::from_value::<QuorumState>(json!(name)).is_ok());
     }

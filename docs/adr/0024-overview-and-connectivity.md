@@ -1,6 +1,6 @@
 # 0024. The Overview, controller reachability, and paused changes
 
-- Status: accepted
+- Status: accepted (amended by 0041)
 - Date: 2026-09-28
 - Spec: docs/build/14-overview.md
 

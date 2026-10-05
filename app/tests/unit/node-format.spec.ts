@@ -6,10 +6,8 @@ const now = Date.parse("2026-10-04T12:00:00.000Z");
 const secondsAgo = (seconds: number) => new Date(now - seconds * 1000).toISOString();
 
 const sample: NodeSample = {
-    sampledAt: secondsAgo(2),
     cpuPercent: 12,
     memoryUsedBytes: 1_000_000_000,
-    diskUsedBytes: null,
     containersRunning: 5,
     containersPaused: 0,
     containersExited: 0,
@@ -25,8 +23,6 @@ const degraded: NodeSummary = {
     role: "worker",
     isLeader: false,
     availability: "active",
-    swarmStatus: "ready",
-    swarmNodeId: "swarm-worker-1",
     address: "10.0.1.11",
     agentVersion: "0.1.0",
     dockerVersion: "28.5.1",
@@ -34,8 +30,6 @@ const degraded: NodeSummary = {
     arch: "aarch64",
     cpuCores: 4,
     memoryTotalBytes: 8_000_000_000,
-    agentStartedAt: secondsAgo(3600),
-    firstSeenAt: secondsAgo(3600),
     lastCheckInAt: secondsAgo(3),
     latestSample: null,
 };

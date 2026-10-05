@@ -30,8 +30,8 @@ Design: Services `LMjiS` (light `q5rBtQ`); states `Y3UuOQ` (04.S3 scaling runnin
 - `GET /api/v1/services?stack=` → list with `runningReplicas` computed from tasks in one pass
   (one `tasks` call filtered by service ids, not one per service). 503 `quorum_unavailable` with
   `retryAfterSeconds: 10` when the manager cannot answer.
-- `GET /api/v1/services/{id}` → the service plus its tasks and the most recent task error, for
-  the replica tooltip and the scaling status line.
+- `GET /api/v1/services/{id}` → `{ latestError }`, the most recent task error, for the replica
+  tooltip (ADR 0040). Service rows carry `updateState` but not the update message.
 - `POST /api/v1/services/{id}/actions/scale` `{ replicas, version }` → 202 `service.scale`.
   Executor: apply, then poll tasks every 2 s until `running == desired` (or, when scaling down,
   until no task above the new count remains); progress detail

@@ -51,7 +51,6 @@ pub struct StackResponse {
 #[serde(rename_all = "camelCase")]
 pub struct StackListResponse {
     pub items: Vec<StackResponse>,
-    pub snapshot_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
@@ -118,7 +117,6 @@ pub(crate) async fn index(
             StatusCode::OK,
             StackListResponse {
                 items: rows.into_iter().map(stack_response).collect(),
-                snapshot_at: Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
             },
         ),
         Err(error) => manager_read_error(error),

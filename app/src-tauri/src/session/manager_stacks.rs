@@ -22,7 +22,6 @@ macro_rules! timestamp {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct StackListView {
     items: Vec<StackView>,
-    snapshot_at: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -65,7 +64,6 @@ impl From<StackList> for StackListView {
     fn from(list: StackList) -> Self {
         Self {
             items: list.items.into_iter().map(StackView::from).collect(),
-            snapshot_at: timestamp!(list.snapshot_at),
         }
     }
 }

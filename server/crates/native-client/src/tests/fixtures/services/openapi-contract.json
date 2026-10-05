@@ -77,7 +77,7 @@
                 }
               }
             },
-            "description": "The service, its newest tasks, and the newest task error"
+            "description": "The service's newest task error"
           },
           "400": {
             "content": {
@@ -265,29 +265,16 @@
       "type": "object"
     },
     "ServiceDetailResponse": {
+      "description": "What the replica tooltip asks of one service.",
       "properties": {
         "latestError": {
-          "description": "The newest task error, for the replica tooltip and the scaling status line.",
+          "description": "The newest task error, e.g. \"no suitable node (insufficient memory on 3 nodes)\".",
           "type": [
             "string",
             "null"
           ]
-        },
-        "service": {
-          "$ref": "#/components/schemas/ServiceResponse"
-        },
-        "tasks": {
-          "description": "Newest first, at most 50.",
-          "items": {
-            "$ref": "#/components/schemas/TaskResponse"
-          },
-          "type": "array"
         }
       },
-      "required": [
-        "service",
-        "tasks"
-      ],
       "type": "object"
     },
     "ServiceListResponse": {
@@ -358,12 +345,6 @@
             "null"
           ]
         },
-        "updateMessage": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "updateState": {
           "description": "Swarm's update status, e.g. `updating`, `completed`, `rollback_completed`.",
           "type": [
@@ -394,64 +375,6 @@
         "runningReplicas",
         "ports",
         "version"
-      ],
-      "type": "object"
-    },
-    "TaskResponse": {
-      "properties": {
-        "containerId": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "desiredState": {
-          "type": "string"
-        },
-        "error": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "id": {
-          "type": "string"
-        },
-        "message": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "slot": {
-          "format": "int64",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "state": {
-          "type": "string"
-        },
-        "swarmNodeId": {
-          "description": "Swarm node id (not the Kontainer node id).",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "updatedAt": {
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "id",
-        "state",
-        "desiredState"
       ],
       "type": "object"
     }

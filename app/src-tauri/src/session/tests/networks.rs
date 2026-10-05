@@ -38,7 +38,6 @@ fn network_list() -> NetworkList {
             containers,
             created_at: created.map(|at| at.parse().unwrap()),
             attachable: name == "toolbox_kontainer",
-            internal: false,
             builtin: name == "bridge",
             node_ids: nodes.iter().map(|id| node(id)).collect(),
         }

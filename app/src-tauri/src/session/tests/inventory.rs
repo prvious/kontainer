@@ -9,7 +9,7 @@ use kontainer_native_client::{
     AdmittedOperation, AgentStatus, ClusterSummary, ContainerItem, ContainerList, ContainerState,
     ControllerSettings, ControllerStatus, NativeClientError, NodeAvailability, NodeHealth, NodeId,
     NodeList, NodeOutcome, NodeOutcomeStatus, NodeRole, NodeSample, NodeSummary, QuorumState,
-    SamplePoint, SampleSeries, SwarmNodeStatus,
+    SamplePoint, SampleSeries,
 };
 use tokio::sync::Notify;
 
@@ -100,18 +100,10 @@ fn container_list() -> ContainerList {
 }
 
 fn node(id: &str, agent_status: AgentStatus, cores: u32, memory: u64) -> NodeSummary {
-    let (started, first, last) = if id == "manager" {
-        (
-            "2026-09-28T11:58:00.000Z",
-            "2026-09-28T11:58:01.000Z",
-            "2026-09-28T12:00:00.000Z",
-        )
+    let last = if id == "manager" {
+        "2026-09-28T12:00:00.000Z"
     } else {
-        (
-            "2026-09-28T11:00:00.000Z",
-            "2026-09-28T11:00:01.000Z",
-            "2026-09-28T11:30:00.000Z",
-        )
+        "2026-09-28T11:30:00.000Z"
     };
     NodeSummary {
         id: NodeId::parse(id).unwrap(),
@@ -121,8 +113,6 @@ fn node(id: &str, agent_status: AgentStatus, cores: u32, memory: u64) -> NodeSum
         role: NodeRole::Unknown,
         is_leader: false,
         availability: None,
-        swarm_status: SwarmNodeStatus::Unknown,
-        swarm_node_id: None,
         address: None,
         agent_version: Some("0.1.0".to_owned()),
         docker_version: "29.8.0".to_owned(),
@@ -130,8 +120,6 @@ fn node(id: &str, agent_status: AgentStatus, cores: u32, memory: u64) -> NodeSum
         arch: "aarch64".to_owned(),
         cpu_cores: cores,
         memory_total_bytes: memory,
-        agent_started_at: Some(started.parse().unwrap()),
-        first_seen_at: Some(first.parse().unwrap()),
         last_check_in_at: Some(last.parse().unwrap()),
         latest_sample: None,
     }
@@ -145,14 +133,10 @@ fn node_list() -> NodeList {
     manager.role = NodeRole::Manager;
     manager.is_leader = true;
     manager.availability = Some(NodeAvailability::Active);
-    manager.swarm_status = SwarmNodeStatus::Ready;
-    manager.swarm_node_id = Some("tj42rq5nzwf8jx0a2b4c6d8e1".to_owned());
     manager.address = Some("10.0.1.10".to_owned());
     manager.latest_sample = Some(NodeSample {
-        sampled_at: "2026-09-28T12:00:00.000Z".parse().unwrap(),
         cpu_percent: 12.5,
         memory_used_bytes: 1 << 30,
-        disk_used_bytes: Some(5 << 30),
         containers_running: 5,
         containers_paused: 0,
         containers_exited: 1,
@@ -165,13 +149,9 @@ fn node_list() -> NodeList {
     worker_3.health = NodeHealth::Degraded;
     worker_3.role = NodeRole::Worker;
     worker_3.availability = Some(NodeAvailability::Drain);
-    worker_3.swarm_status = SwarmNodeStatus::Ready;
-    worker_3.swarm_node_id = Some(swarm_id.to_owned());
     worker_3.address = Some("10.0.1.13".to_owned());
     worker_3.os = "linux".to_owned();
     worker_3.agent_version = None;
-    worker_3.agent_started_at = None;
-    worker_3.first_seen_at = None;
     worker_3.last_check_in_at = None;
     NodeList {
         items: vec![
@@ -196,7 +176,6 @@ fn cluster_summary() -> ClusterSummary {
         memory_used_bytes: 1 << 30,
         memory_total_bytes: 8 << 30,
         containers_running: 5,
-        snapshot_at: "2026-09-28T12:00:02.000Z".parse().unwrap(),
     }
 }
 
@@ -209,14 +188,11 @@ fn empty_nodes() -> NodeList {
 
 fn series() -> SampleSeries {
     SampleSeries {
-        window: "5m".to_owned(),
-        bucket: "60s".to_owned(),
         points: vec![
             SamplePoint {
                 at: "2026-09-28T11:59:00.000Z".parse().unwrap(),
                 cpu_percent: None,
                 memory_used_bytes: None,
-                disk_used_bytes: None,
                 containers_running: None,
                 net_rx_bytes_per_sec: None,
                 net_tx_bytes_per_sec: None,
@@ -226,14 +202,12 @@ fn series() -> SampleSeries {
                 at: "2026-09-28T12:00:00.000Z".parse().unwrap(),
                 cpu_percent: Some(30.0),
                 memory_used_bytes: Some(1200.0),
-                disk_used_bytes: Some(2000.0),
                 containers_running: Some(4.0),
                 net_rx_bytes_per_sec: Some(20.0),
                 net_tx_bytes_per_sec: None,
                 nodes: 2,
             },
         ],
-        snapshot_at: "2026-09-28T12:00:30.000Z".parse().unwrap(),
     }
 }
 
@@ -255,6 +229,7 @@ fn error_codes_and_container_views_match_the_shared_fixtures() {
         .collect();
     assert_eq!(serde_json::to_value(codes).unwrap(), fixture["errorCodes"]);
     assert!(!LIB_SOURCE.contains("get_configured_node"));
+    assert!(!LIB_SOURCE.contains("get_node_samples"));
     assert!(!LIB_SOURCE.contains("list_container_inventory"));
 
     let containers: serde_json::Value = serde_json::from_str(CONTAINERS_FIXTURE).unwrap();
@@ -431,12 +406,12 @@ async fn reads_use_only_the_active_profile_and_serialize_their_views() {
     );
     harness
         .manager
-        .samples(view.profile_id, None, "5m", "60s")
+        .cluster_samples(view.profile_id, "5m", "60s")
         .await
         .unwrap();
     harness
         .manager
-        .samples(view.profile_id, Some("manager"), "1h", "60s")
+        .cluster_samples(view.profile_id, "1h", "60s")
         .await
         .unwrap();
     let settings = harness
@@ -478,8 +453,8 @@ async fn reads_use_only_the_active_profile_and_serialize_their_views() {
         .filter(|entry| entry.starts_with("samples:"))
         .collect();
     assert_eq!(samples.len(), 2);
-    assert!(samples[0].ends_with(":cluster:5m:60s"));
-    assert!(samples[1].ends_with(":manager:1h:60s"));
+    assert!(samples[0].ends_with(":5m:60s"));
+    assert!(samples[1].ends_with(":1h:60s"));
     assert_eq!(harness.count("update_settings:"), 1);
     assert!(harness
         .entries()
@@ -495,14 +470,6 @@ async fn reads_use_only_the_active_profile_and_serialize_their_views() {
         harness
             .manager
             .containers(view.profile_id, Some("bad/node"))
-            .await
-            .err(),
-        Some(InventoryError::InvalidNodeId)
-    );
-    assert_eq!(
-        harness
-            .manager
-            .samples(view.profile_id, Some("../bad"), "5m", "60s")
             .await
             .err(),
         Some(InventoryError::InvalidNodeId)

@@ -82,7 +82,6 @@ pub fn run() {
             actions::exec::exec_close::exec_close,
             actions::nodes::get_cluster_summary::get_cluster_summary,
             actions::nodes::get_cluster_samples::get_cluster_samples,
-            actions::nodes::get_node_samples::get_node_samples,
             actions::settings::get_settings::get_settings,
             actions::settings::get_status::get_status,
             actions::settings::update_settings::update_settings,

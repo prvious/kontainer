@@ -48,7 +48,6 @@ async fn converge(
         created_at: now,
         updated_at: now,
         payload: serde_json::to_value(payload)?,
-        started_at: Some(now),
         finished_at: None,
         request_id: None,
     };

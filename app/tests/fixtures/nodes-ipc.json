@@ -3,7 +3,6 @@
         ["nodes", "list_nodes"],
         ["nodes", "get_cluster_summary"],
         ["nodes", "get_cluster_samples"],
-        ["nodes", "get_node_samples"],
         ["settings", "get_settings"],
         ["settings", "get_status"],
         ["settings", "update_settings"]
@@ -18,8 +17,6 @@
                 "role": "manager",
                 "isLeader": true,
                 "availability": "active",
-                "swarmStatus": "ready",
-                "swarmNodeId": "tj42rq5nzwf8jx0a2b4c6d8e1",
                 "address": "10.0.1.10",
                 "agentVersion": "0.1.0",
                 "dockerVersion": "29.8.0",
@@ -27,14 +24,10 @@
                 "arch": "aarch64",
                 "cpuCores": 4,
                 "memoryTotalBytes": 8589934592,
-                "agentStartedAt": "2026-09-28T11:58:00.000Z",
-                "firstSeenAt": "2026-09-28T11:58:01.000Z",
                 "lastCheckInAt": "2026-09-28T12:00:00.000Z",
                 "latestSample": {
-                    "sampledAt": "2026-09-28T12:00:00.000Z",
                     "cpuPercent": 12.5,
                     "memoryUsedBytes": 1073741824,
-                    "diskUsedBytes": 5368709120,
                     "containersRunning": 5,
                     "containersPaused": 0,
                     "containersExited": 1,
@@ -50,8 +43,6 @@
                 "role": "unknown",
                 "isLeader": false,
                 "availability": null,
-                "swarmStatus": "unknown",
-                "swarmNodeId": null,
                 "address": null,
                 "agentVersion": "0.1.0",
                 "dockerVersion": "29.8.0",
@@ -59,8 +50,6 @@
                 "arch": "aarch64",
                 "cpuCores": 2,
                 "memoryTotalBytes": 4294967296,
-                "agentStartedAt": "2026-09-28T11:00:00.000Z",
-                "firstSeenAt": "2026-09-28T11:00:01.000Z",
                 "lastCheckInAt": "2026-09-28T11:30:00.000Z",
                 "latestSample": null
             },
@@ -72,8 +61,6 @@
                 "role": "worker",
                 "isLeader": false,
                 "availability": "drain",
-                "swarmStatus": "ready",
-                "swarmNodeId": "w3kq2m9p0r1s3t5u7w9y0z2b4",
                 "address": "10.0.1.13",
                 "agentVersion": null,
                 "dockerVersion": "29.8.0",
@@ -81,8 +68,6 @@
                 "arch": "aarch64",
                 "cpuCores": 2,
                 "memoryTotalBytes": 4294967296,
-                "agentStartedAt": null,
-                "firstSeenAt": null,
                 "lastCheckInAt": null,
                 "latestSample": null
             }
@@ -100,18 +85,14 @@
         "cpuPercent": 12.5,
         "memoryUsedBytes": 1073741824,
         "memoryTotalBytes": 8589934592,
-        "containersRunning": 5,
-        "snapshotAt": "2026-09-28T12:00:02.000Z"
+        "containersRunning": 5
     },
     "clusterSamples": {
-        "window": "5m",
-        "bucket": "60s",
         "points": [
             {
                 "at": "2026-09-28T11:59:00.000Z",
                 "cpuPercent": null,
                 "memoryUsedBytes": null,
-                "diskUsedBytes": null,
                 "containersRunning": null,
                 "netRxBytesPerSec": null,
                 "netTxBytesPerSec": null,
@@ -121,14 +102,12 @@
                 "at": "2026-09-28T12:00:00.000Z",
                 "cpuPercent": 30.0,
                 "memoryUsedBytes": 1200.0,
-                "diskUsedBytes": 2000.0,
                 "containersRunning": 4.0,
                 "netRxBytesPerSec": 20.0,
                 "netTxBytesPerSec": null,
                 "nodes": 2
             }
-        ],
-        "snapshotAt": "2026-09-28T12:00:30.000Z"
+        ]
     },
     "settings": {
         "metricsRetentionDays": 7

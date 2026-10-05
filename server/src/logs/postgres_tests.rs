@@ -240,7 +240,7 @@ impl Fixture {
             tail,
         });
         client
-            .send_frame(&open.into_frame(1), &CancellationToken::new())
+            .send_frame(&open.into_frame(), &CancellationToken::new())
             .await
             .unwrap();
         client
@@ -308,13 +308,19 @@ async fn postgres_log_streams_authenticate_follow_truncate_and_end() -> Result<(
         };
         assert_eq!(
             (
-                first.seq,
+                first.ts_unix_ms,
                 first.line.as_str(),
                 first.stream,
                 first.task_id.as_str(),
                 first.node_id.as_str()
             ),
-            (1, "GET / 200", LogStreamKind::Stderr, TASK, NODE)
+            (
+                1_790_000_000_001,
+                "GET / 200",
+                LogStreamKind::Stderr,
+                TASK,
+                NODE
+            )
         );
         assert!(!first.truncated);
         let LogMessage::Line(long) = next(&mut client).await.unwrap() else {
@@ -347,7 +353,7 @@ async fn postgres_log_streams_authenticate_follow_truncate_and_end() -> Result<(
             tail: None,
         });
         unknown
-            .send_frame(&open.into_frame(1), &CancellationToken::new())
+            .send_frame(&open.into_frame(), &CancellationToken::new())
             .await
             .unwrap();
         // Docker's 404 arrives as a stream item, and the service isn't listed: a terminal end,
@@ -359,6 +365,21 @@ async fn postgres_log_streams_authenticate_follow_truncate_and_end() -> Result<(
             (end.reason, end.code.as_str()),
             (LogEndReason::ServiceRemoved, "service_removed")
         );
+
+        // There is no close frame: closing the socket drops the session, which stops the follow.
+        fixture.manager.removed.store(false, Ordering::SeqCst);
+        *fixture.manager.writer.lock().unwrap() = None;
+        let mut closing = fixture.open(None).await;
+        opened(&fixture).await;
+        let writer = fixture.manager.writer();
+        closing.close().await;
+        for _ in 0..200 {
+            if writer.is_closed() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(writer.is_closed(), "the follow stopped with the socket");
 
         fixture.finish().await;
         Ok::<_, Box<dyn Error>>(())
@@ -431,7 +452,7 @@ async fn postgres_log_streams_limit_sessions_close_on_expiry_and_notice_a_silent
             tail: None,
         });
         client
-            .send_frame(&open.into_frame(1), &CancellationToken::new())
+            .send_frame(&open.into_frame(), &CancellationToken::new())
             .await
             .unwrap();
         assert_eq!(

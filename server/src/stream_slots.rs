@@ -43,6 +43,8 @@ impl SessionSlots {
         })
     }
 
+    /// Streams `family` holds now; tests check that dropped slots are released.
+    #[cfg(test)]
     #[must_use]
     pub fn open(&self, family: Uuid) -> usize {
         self.counts().get(&family).copied().unwrap_or(0)

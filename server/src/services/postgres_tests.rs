@@ -519,17 +519,10 @@ async fn postgres_services_list_counts_detail_and_quorum() -> Result<(), Box<dyn
         .await?;
         assert_eq!(status, StatusCode::OK);
         assert_eq!(
-            detail["latestError"],
-            "no suitable node (insufficient memory on 3 nodes)"
+            detail,
+            serde_json::json!({"latestError": "no suitable node (insufficient memory on 3 nodes)"}),
+            "only what the replica tooltip reads"
         );
-        assert_eq!(
-            (
-                detail["service"]["runningReplicas"].as_u64(),
-                detail["service"]["desiredReplicas"].as_u64()
-            ),
-            (Some(1), Some(2))
-        );
-        assert!(!detail["tasks"].as_array().unwrap().is_empty());
         let (status, _, _) = send(&fixture, "GET", "/api/v1/services/nope", None, "").await?;
         assert_eq!(status, StatusCode::BAD_REQUEST);
 

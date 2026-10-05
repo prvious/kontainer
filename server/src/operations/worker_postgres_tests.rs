@@ -135,8 +135,8 @@ async fn postgres_noop_runs_end_to_end_with_progress_and_one_terminal_event()
             snapshot.progress,
             Some(serde_json::json!({"total": 3, "done": 3}))
         );
-        assert!(snapshot.operation.started_at.is_some());
-        assert!(snapshot.operation.finished_at >= snapshot.operation.started_at);
+        assert!(snapshot.operation.claimed_at.is_some());
+        assert!(snapshot.operation.finished_at >= snapshot.operation.claimed_at);
         assert_eq!(
             snapshot.operation.request_id.as_deref(),
             Some("req-test-01")
@@ -206,7 +206,7 @@ async fn postgres_a_failed_finalize_is_retried_until_the_outcome_lands()
         worker.await?;
 
         assert_eq!(snapshot.operation.state, OperationState::Succeeded);
-        let took = snapshot.operation.finished_at.unwrap() - snapshot.operation.started_at.unwrap();
+        let took = snapshot.operation.finished_at.unwrap() - snapshot.operation.claimed_at.unwrap();
         assert!(
             took >= Duration::milliseconds(250),
             "recorded on the retry after the first backoff, took {took}"

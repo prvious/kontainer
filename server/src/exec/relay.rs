@@ -77,7 +77,6 @@ enum Stop {
 
 struct Frames {
     outbound: OutboundSender,
-    sequence: u64,
     stall: Duration,
 }
 
@@ -85,14 +84,11 @@ impl Frames {
     /// Send, waiting up to the stall limit for room; a client that doesn't make room in time is
     /// dropped.
     async fn send(&mut self, message: ExecMessage) -> Result<(), Stop> {
-        let frame = message.into_frame(self.sequence + 1);
+        let frame = message.into_frame();
         let deadline = time::Instant::now() + self.stall;
         loop {
             match self.outbound.try_send(frame.clone()) {
-                Ok(()) => {
-                    self.sequence += 1;
-                    return Ok(());
-                }
+                Ok(()) => return Ok(()),
                 Err(OutboundFrameError::QueueOverloaded) if time::Instant::now() < deadline => {
                     time::sleep(RETRY_EVERY).await;
                 }
@@ -149,7 +145,6 @@ impl ExecRelay {
     pub async fn run(self) {
         let mut frames = Frames {
             outbound: self.outbound.clone(),
-            sequence: 0,
             stall: self.timing.stall,
         };
         let client = match self.client().await {

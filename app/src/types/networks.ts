@@ -23,7 +23,6 @@ export interface NetworkView {
     containers: number;
     createdAt: string | null;
     attachable: boolean;
-    internal: boolean;
     /** Docker's own networks, which can never be removed. */
     builtin: boolean;
     /** Local: its node. Swarm: the nodes with endpoints on it. */

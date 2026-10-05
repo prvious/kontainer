@@ -10,8 +10,6 @@
         "dev:smoke": "./dev/smoke.sh",
         "dev:cluster": "./dev/setup.sh",
         "reset": "./dev/teardown.sh",
-        "down": "./dev/teardown.sh",
-        "dev:cluster:rm": "./dev/teardown.sh",
         "dev:cluster:seed": "./dev/seed-services.sh",
         "build": "pnpm run build:app && pnpm run build:server",
         "build:app": "pnpm --filter app build",

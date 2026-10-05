@@ -37,7 +37,6 @@ pub struct ImageItem {
     pub created_at: DateTime<Utc>,
     /// Containers using it, summed across nodes.
     pub used_by: u32,
-    pub dangling: bool,
     pub node_ids: Vec<NodeId>,
 }
 
@@ -88,7 +87,6 @@ pub(crate) struct ImageItemBody {
     size_bytes: u64,
     created_at: String,
     used_by: u32,
-    dangling: bool,
     node_ids: Vec<String>,
 }
 
@@ -128,7 +126,6 @@ impl ImageListBody {
                     size_bytes: item.size_bytes,
                     created_at: parse_timestamp(&item.created_at)?,
                     used_by: item.used_by,
-                    dangling: item.dangling,
                     node_ids: item
                         .node_ids
                         .iter()

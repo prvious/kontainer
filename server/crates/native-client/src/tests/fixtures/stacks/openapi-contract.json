@@ -189,14 +189,10 @@
             "$ref": "#/components/schemas/StackResponse"
           },
           "type": "array"
-        },
-        "snapshotAt": {
-          "type": "string"
         }
       },
       "required": [
-        "items",
-        "snapshotAt"
+        "items"
       ],
       "type": "object"
     },

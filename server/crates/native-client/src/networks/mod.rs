@@ -65,7 +65,6 @@ pub struct NetworkItem {
     pub containers: u32,
     pub created_at: Option<DateTime<Utc>>,
     pub attachable: bool,
-    pub internal: bool,
     pub builtin: bool,
     /// Local: its node. Swarm: the nodes with endpoints on it.
     pub node_ids: Vec<NodeId>,
@@ -132,7 +131,6 @@ pub(crate) struct NetworkItemBody {
     containers: u32,
     created_at: Option<String>,
     attachable: bool,
-    internal: bool,
     builtin: bool,
     node_ids: Vec<String>,
 }
@@ -198,7 +196,6 @@ impl NetworkListBody {
                         .map(parse_timestamp)
                         .transpose()?,
                     attachable: item.attachable,
-                    internal: item.internal,
                     builtin: item.builtin,
                     node_ids: item
                         .node_ids

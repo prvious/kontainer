@@ -32,7 +32,7 @@ export function useServices() {
     });
 }
 
-/** One service with its tasks, fetched only while `serviceId` is set (a hovered replica count). */
+/** One service's newest task error, fetched only while `serviceId` is set (a hovered replica count). */
 export function useService(serviceId: string | null) {
     const { session, reportInventoryCustodyError } = useAuth();
     const profileId = session?.profileId ?? "";

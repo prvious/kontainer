@@ -14,7 +14,6 @@ pub struct Model {
     /// The admitted, validated request the executor reads.
     #[sea_orm(column_type = "JsonBinary")]
     pub payload: Json,
-    pub started_at: Option<DateTimeUtc>,
     pub finished_at: Option<DateTimeUtc>,
     /// The admitting HTTP request's id, shown next to failures.
     pub request_id: Option<String>,

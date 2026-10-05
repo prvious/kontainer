@@ -16,7 +16,6 @@ export interface ImageView {
     createdAt: string;
     /** Containers using it, summed across nodes. */
     usedBy: number;
-    dangling: boolean;
     nodeIds: string[];
 }
 

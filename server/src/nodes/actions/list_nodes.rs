@@ -85,10 +85,8 @@ pub async fn execute(
                 .get(&row.id)
                 .filter(|sample| is_fresh(sample.sampled_at, now))
                 .map(|sample| LatestSample {
-                    sampled_at: sample.sampled_at,
                     cpu_percent: sample.cpu_percent,
                     memory_used_bytes: sample.memory_used_bytes,
-                    disk_used_bytes: sample.disk_used_bytes,
                     containers_running: sample.containers_running,
                     containers_paused: sample.containers_paused,
                     containers_exited: sample.containers_exited,
@@ -107,8 +105,6 @@ pub async fn execute(
                 arch: row.arch,
                 cpu_cores: row.cpu_cores,
                 memory_total_bytes: row.memory_total_bytes,
-                agent_started_at: row.agent_started_at,
-                first_seen_at: row.first_seen_at,
                 last_check_in_at: row.last_check_in_at,
                 latest_sample,
             }

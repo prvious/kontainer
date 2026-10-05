@@ -1211,88 +1211,6 @@
         }
       }
     },
-    "/api/v1/nodes/{nodeId}/samples": {
-      "get": {
-        "tags": [
-          "super::nodes"
-        ],
-        "operationId": "node_samples",
-        "parameters": [
-          {
-            "name": "nodeId",
-            "in": "path",
-            "description": "Node id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "window",
-            "in": "query",
-            "description": "One of 5m, 15m, 1h, 24h, 7d",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "bucket",
-            "in": "query",
-            "description": "Bucket width such as 5s, 60s, 15m; at most 200 points",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Averages per bucket; buckets without samples are null",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SampleSeriesResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Invalid window or bucket",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NodeErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing, malformed, expired, or revoked access credential"
-          },
-          "404": {
-            "description": "Unknown node",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NodeErrorResponse"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "Persistence unavailable or controller draining",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NodeErrorResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/operations/noop": {
       "post": {
         "tags": [
@@ -1614,7 +1532,7 @@
         ],
         "responses": {
           "200": {
-            "description": "The service, its newest tasks, and the newest task error",
+            "description": "The service's newest task error",
             "content": {
               "application/json": {
                 "schema": {
@@ -2617,8 +2535,7 @@
           "cpuPercent",
           "memoryUsedBytes",
           "memoryTotalBytes",
-          "containersRunning",
-          "snapshotAt"
+          "containersRunning"
         ],
         "properties": {
           "containersRunning": {
@@ -2686,9 +2603,6 @@
           "quorum": {
             "$ref": "#/components/schemas/QuorumStateResponse",
             "description": "`healthy` when the manager answers and every manager is ready and reachable."
-          },
-          "snapshotAt": {
-            "type": "string"
           }
         }
       },
@@ -3084,15 +2998,11 @@
           "sizeBytes",
           "createdAt",
           "usedBy",
-          "dangling",
           "nodeIds"
         ],
         "properties": {
           "createdAt": {
             "type": "string"
-          },
-          "dangling": {
-            "type": "boolean"
           },
           "imageId": {
             "type": "string",
@@ -3227,7 +3137,6 @@
           "subnets",
           "containers",
           "attachable",
-          "internal",
           "builtin",
           "nodeIds"
         ],
@@ -3256,9 +3165,6 @@
           },
           "id": {
             "type": "string"
-          },
-          "internal": {
-            "type": "boolean"
           },
           "name": {
             "type": "string"
@@ -3370,8 +3276,6 @@
           "role",
           "isLeader",
           "availability",
-          "swarmStatus",
-          "swarmNodeId",
           "address",
           "agentVersion",
           "dockerVersion",
@@ -3379,8 +3283,6 @@
           "arch",
           "cpuCores",
           "memoryTotalBytes",
-          "agentStartedAt",
-          "firstSeenAt",
           "lastCheckInAt",
           "latestSample"
         ],
@@ -3391,12 +3293,6 @@
               "null"
             ],
             "description": "The address the manager sees the node at."
-          },
-          "agentStartedAt": {
-            "type": [
-              "string",
-              "null"
-            ]
           },
           "agentStatus": {
             "$ref": "#/components/schemas/AgentStatusResponse"
@@ -3428,12 +3324,6 @@
           },
           "dockerVersion": {
             "type": "string"
-          },
-          "firstSeenAt": {
-            "type": [
-              "string",
-              "null"
-            ]
           },
           "health": {
             "$ref": "#/components/schemas/NodeHealthResponse"
@@ -3474,15 +3364,6 @@
           },
           "role": {
             "$ref": "#/components/schemas/NodeRoleResponse"
-          },
-          "swarmNodeId": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "swarmStatus": {
-            "$ref": "#/components/schemas/SwarmNodeStatusResponse"
           }
         }
       },
@@ -3497,10 +3378,8 @@
       "NodeSampleResponse": {
         "type": "object",
         "required": [
-          "sampledAt",
           "cpuPercent",
           "memoryUsedBytes",
-          "diskUsedBytes",
           "containersRunning",
           "containersPaused",
           "containersExited",
@@ -3525,13 +3404,6 @@
             "format": "float",
             "description": "0–100 of the node."
           },
-          "diskUsedBytes": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64"
-          },
           "memoryUsedBytes": {
             "type": "integer",
             "format": "int64"
@@ -3549,9 +3421,6 @@
               "null"
             ],
             "format": "double"
-          },
-          "sampledAt": {
-            "type": "string"
           }
         }
       },
@@ -3674,7 +3543,8 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "When a worker claimed it."
           },
           "state": {
             "$ref": "#/components/schemas/OperationStateResponse"
@@ -3875,7 +3745,6 @@
           "at",
           "cpuPercent",
           "memoryUsedBytes",
-          "diskUsedBytes",
           "containersRunning",
           "netRxBytesPerSec",
           "netTxBytesPerSec",
@@ -3900,13 +3769,6 @@
             ],
             "format": "double",
             "description": "Null when no sample landed in the bucket, never 0."
-          },
-          "diskUsedBytes": {
-            "type": [
-              "number",
-              "null"
-            ],
-            "format": "double"
           },
           "memoryUsedBytes": {
             "type": [
@@ -3940,26 +3802,14 @@
       "SampleSeriesResponse": {
         "type": "object",
         "required": [
-          "window",
-          "bucket",
-          "points",
-          "snapshotAt"
+          "points"
         ],
         "properties": {
-          "bucket": {
-            "type": "string"
-          },
           "points": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/SamplePointResponse"
             }
-          },
-          "snapshotAt": {
-            "type": "string"
-          },
-          "window": {
-            "type": "string"
           }
         }
       },
@@ -3989,27 +3839,14 @@
       },
       "ServiceDetailResponse": {
         "type": "object",
-        "required": [
-          "service",
-          "tasks"
-        ],
+        "description": "What the replica tooltip asks of one service.",
         "properties": {
           "latestError": {
             "type": [
               "string",
               "null"
             ],
-            "description": "The newest task error, for the replica tooltip and the scaling status line."
-          },
-          "service": {
-            "$ref": "#/components/schemas/ServiceResponse"
-          },
-          "tasks": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/TaskResponse"
-            },
-            "description": "Newest first, at most 50."
+            "description": "The newest task error, e.g. \"no suitable node (insufficient memory on 3 nodes)\"."
           }
         }
       },
@@ -4093,12 +3930,6 @@
               "null"
             ]
           },
-          "updateMessage": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "updateState": {
             "type": [
               "string",
@@ -4172,8 +4003,7 @@
       "StackListResponse": {
         "type": "object",
         "required": [
-          "items",
-          "snapshotAt"
+          "items"
         ],
         "properties": {
           "items": {
@@ -4181,9 +4011,6 @@
             "items": {
               "$ref": "#/components/schemas/StackResponse"
             }
-          },
-          "snapshotAt": {
-            "type": "string"
           }
         }
       },
@@ -4332,73 +4159,6 @@
           },
           "version": {
             "type": "string"
-          }
-        }
-      },
-      "SwarmNodeStatusResponse": {
-        "type": "string",
-        "description": "What the manager last heard from the node; `unknown` when it did not answer or does not\nknow the node.",
-        "enum": [
-          "ready",
-          "down",
-          "unknown"
-        ]
-      },
-      "TaskResponse": {
-        "type": "object",
-        "required": [
-          "id",
-          "state",
-          "desiredState"
-        ],
-        "properties": {
-          "containerId": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "desiredState": {
-            "type": "string"
-          },
-          "error": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "id": {
-            "type": "string"
-          },
-          "message": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "slot": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64",
-            "minimum": 0
-          },
-          "state": {
-            "type": "string"
-          },
-          "swarmNodeId": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Swarm node id (not the Kontainer node id)."
-          },
-          "updatedAt": {
-            "type": [
-              "string",
-              "null"
-            ]
           }
         }
       },

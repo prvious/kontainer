@@ -359,7 +359,8 @@ impl LogReceiver for WebSocketLogReceiver {
             };
             match LogMessage::from_frame(&frame) {
                 Ok(LogMessage::Line(line)) => Ok(LogFrame::Line(LogLineItem {
-                    seq: line.seq,
+                    // The follower numbers the lines it delivers.
+                    seq: 0,
                     ts_unix_ms: line.ts_unix_ms,
                     stream: match line.stream {
                         LogStreamKind::Stdout => LogStream::Stdout,
@@ -406,7 +407,7 @@ impl NativeClient {
             .open_stream(
                 "/api/v1/ws/logs",
                 access,
-                &open.into_frame(1),
+                &open.into_frame(),
                 StreamLimits::default().handshake_deadline(),
                 cancellation,
             )

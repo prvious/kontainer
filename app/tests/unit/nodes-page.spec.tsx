@@ -59,13 +59,12 @@ function series() {
         at: new Date(end - (12 - index) * 10_000).toISOString(),
         cpuPercent: index === 12 ? 99 : 20 + index,
         memoryUsedBytes: 2 * 1024 ** 3,
-        diskUsedBytes: null,
         containersRunning: 5,
         netRxBytesPerSec: null,
         netTxBytesPerSec: null,
         nodes: index === 12 ? 1 : index === 11 ? 2 : 4,
     }));
-    return { window: "5m", bucket: "10s", points, snapshotAt: new Date(end).toISOString() };
+    return { points };
 }
 
 function mockCommands(overrides: Record<string, (args: Record<string, unknown>) => unknown> = {}) {

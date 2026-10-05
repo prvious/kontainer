@@ -120,11 +120,9 @@ pub(crate) trait Controller: Send + Sync + 'static {
         cancellation: &'a CancellationToken,
     ) -> ControllerFuture<'a, Result<ExecConnection, NativeClientError>>;
 
-    /// `node_id` `None` reads the cluster series.
-    fn samples<'a>(
+    fn cluster_samples<'a>(
         &'a self,
         access: &'a AccessCredential,
-        node_id: Option<&'a NodeId>,
         window: &'a str,
         bucket: &'a str,
         cancellation: &'a CancellationToken,
@@ -492,28 +490,17 @@ impl Controller for NativeController {
         Box::pin(self.client.connect_exec(access, request, cancellation))
     }
 
-    fn samples<'a>(
+    fn cluster_samples<'a>(
         &'a self,
         access: &'a AccessCredential,
-        node_id: Option<&'a NodeId>,
         window: &'a str,
         bucket: &'a str,
         cancellation: &'a CancellationToken,
     ) -> ControllerFuture<'a, Result<SampleSeries, NativeClientError>> {
-        Box::pin(async move {
-            match node_id {
-                Some(node_id) => {
-                    self.client
-                        .node_samples(access, node_id, window, bucket, cancellation)
-                        .await
-                }
-                None => {
-                    self.client
-                        .cluster_samples(access, window, bucket, cancellation)
-                        .await
-                }
-            }
-        })
+        Box::pin(
+            self.client
+                .cluster_samples(access, window, bucket, cancellation),
+        )
     }
 
     fn get_status<'a>(

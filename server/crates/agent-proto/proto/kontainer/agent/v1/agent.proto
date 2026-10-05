@@ -60,7 +60,9 @@ message CheckInRequest {
   string os = 8;
   uint32 cpu_cores = 9;
   uint64 memory_total_bytes = 10;
-  int64 agent_started_at_unix_ms = 11;
+  // Dropped unread (ADR 0039).
+  reserved 11;
+  reserved "agent_started_at_unix_ms";
   // Absent from agents that predate sampling; the check-in still counts.
   NodeSample sample = 12;
 }
@@ -72,8 +74,9 @@ message NodeSample {
   // 0-100 of the whole node.
   double cpu_percent = 2;
   uint64 memory_used_bytes = 3;
-  // Present on every twelfth sample only; the controller carries it forward.
-  optional uint64 disk_used_bytes = 4;
+  // Dropped unread (ADR 0039).
+  reserved 4;
+  reserved "disk_used_bytes";
   uint32 containers_running = 5;
   uint32 containers_paused = 6;
   uint32 containers_exited = 7;

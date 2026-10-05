@@ -1,6 +1,6 @@
 # 0003. Node metrics are check-in samples in PostgreSQL, no spool or rollups
 
-- Status: accepted
+- Status: accepted (amended by 0039)
 - Date: 2026-09-28
 - Spec: docs/build/05-membership-and-node-metrics.md
 

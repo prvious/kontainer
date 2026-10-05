@@ -7,7 +7,7 @@ use sea_orm::{ActiveValue::Set, EntityTrait, PaginatorTrait};
 
 use super::{
     actions::{node_samples, prune_samples},
-    domain::{SampleRange, SampleScope},
+    domain::SampleRange,
 };
 use crate::{
     nodes::{
@@ -34,7 +34,6 @@ async fn insert_sample(
         sampled_at: Set(at),
         cpu_percent: Set(cpu),
         memory_used_bytes: Set(memory),
-        disk_used_bytes: Set(Some(1000)),
         containers_running: Set(2),
         containers_paused: Set(0),
         containers_exited: Set(0),
@@ -71,32 +70,28 @@ async fn postgres_buckets_average_per_node_and_leave_gaps_null() -> Result<(), B
         .await?;
         insert_sample(db, "manager", starts[2] + Duration::seconds(1), 50.0, 500).await?;
 
-        let (node, _) =
-            node_samples::execute(db, &SampleScope::Node("manager".to_owned()), range).await?;
-        assert_eq!(node.len(), 5);
-        assert_eq!(node[0].at, starts[0]);
-        assert_eq!(node[0].cpu_percent, Some(20.0));
-        assert_eq!(node[0].memory_used_bytes, Some(200.0));
-        assert_eq!(node[0].nodes, 1);
-        assert_eq!(node[1].cpu_percent, None, "a gap is null, never 0");
-        assert_eq!(node[1].memory_used_bytes, None);
-        assert_eq!(node[1].nodes, 0);
-        assert_eq!(node[2].cpu_percent, Some(50.0));
-
-        let (cluster, _) = node_samples::execute(db, &SampleScope::Cluster, range).await?;
+        let cluster = node_samples::execute(db, range).await?;
         assert_eq!(cluster.len(), 5);
+        assert_eq!(cluster[0].at, starts[0]);
         assert_eq!(cluster[0].nodes, 2, "contributors counted per bucket");
-        assert_eq!(cluster[0].cpu_percent, Some(30.0), "mean of 20 and 40");
+        assert_eq!(
+            cluster[0].cpu_percent,
+            Some(30.0),
+            "mean of manager's own mean (20) and 40"
+        );
         assert_eq!(cluster[0].memory_used_bytes, Some(1200.0), "200 + 1000");
-        assert_eq!(cluster[0].disk_used_bytes, Some(2000.0));
         assert_eq!(cluster[0].net_rx_bytes_per_sec, Some(20.0));
         assert_eq!(cluster[0].net_tx_bytes_per_sec, None);
+        assert_eq!(cluster[1].cpu_percent, None, "a gap is null, never 0");
+        assert_eq!(cluster[1].memory_used_bytes, None);
+        assert_eq!(cluster[1].nodes, 0);
         assert_eq!(cluster[2].nodes, 1);
+        assert_eq!(cluster[2].cpu_percent, Some(50.0));
         assert_eq!(cluster[3].cpu_percent, None);
 
         // 24h at 15m is 96 buckets; before the agents started, all null.
         let day = SampleRange::parse("24h", "15m")?;
-        let (series, _) = node_samples::execute(db, &SampleScope::Cluster, day).await?;
+        let series = node_samples::execute(db, day).await?;
         assert_eq!(series.len(), 96);
         assert!(series[..90].iter().all(|point| point.cpu_percent.is_none()));
         assert!(series.iter().any(|point| point.cpu_percent.is_some()));
@@ -193,12 +188,11 @@ async fn postgres_samples_record_through_check_in() -> Result<(), Box<dyn Error>
         record_check_in::execute(
             db,
             "development",
-            check_in("manager", Some(reading(now, 12.0, Some(4096)))),
+            check_in("manager", Some(reading(now, 12.0))),
         )
         .await?;
         let range = SampleRange::parse("5m", "5s")?;
-        let (points, _) =
-            node_samples::execute(db, &SampleScope::Node("manager".to_owned()), range).await?;
+        let points = node_samples::execute(db, range).await?;
         assert_eq!(points.len(), 60);
         let filled: Vec<_> = points
             .iter()
@@ -206,7 +200,7 @@ async fn postgres_samples_record_through_check_in() -> Result<(), Box<dyn Error>
             .collect();
         assert_eq!(filled.len(), 1);
         assert_eq!(filled[0].cpu_percent, Some(12.0));
-        assert_eq!(filled[0].disk_used_bytes, Some(4096.0));
+        assert_eq!(filled[0].containers_running, Some(3.0));
         Ok::<_, Box<dyn Error>>(())
     }
     .await;

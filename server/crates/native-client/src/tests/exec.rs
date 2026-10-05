@@ -51,14 +51,14 @@ impl StreamApplication for EchoShell {
                     exec_id: "e".repeat(64),
                     shell: open.shell.unwrap_or_else(|| "/bin/sh".to_owned()),
                 })
-                .into_frame(1),
+                .into_frame(),
             ),
             Ok(ExecMessage::Input(bytes)) if bytes == b"expire" => {
                 outbound.close(StreamClose::new(4401, "access expired"));
                 Ok(())
             }
             Ok(ExecMessage::Input(bytes)) => {
-                outbound.try_send(ExecMessage::Output(bytes).into_frame(2))
+                outbound.try_send(ExecMessage::Output(bytes).into_frame())
             }
             Ok(ExecMessage::Resize(resize)) => {
                 self.resizes
@@ -73,7 +73,7 @@ impl StreamApplication for EchoShell {
                         code: Some(0),
                         reason: "exited".to_owned(),
                     })
-                    .into_frame(3),
+                    .into_frame(),
                 )?;
                 outbound.close(StreamClose::NORMAL);
                 Ok(())

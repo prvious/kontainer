@@ -5,8 +5,8 @@
 
 use kontainer_native_client::{
     AgentStatus, ClusterSummary, ControllerSettings, ControllerStatus, NodeAvailability,
-    NodeHealth, NodeId, NodeList, NodeRole, NodeSample, NodeSummary, QuorumState, SamplePoint,
-    SampleSeries, SwarmNodeStatus,
+    NodeHealth, NodeList, NodeRole, NodeSample, NodeSummary, QuorumState, SamplePoint,
+    SampleSeries,
 };
 use serde::Serialize;
 use uuid::Uuid;
@@ -37,8 +37,6 @@ struct NodeView {
     role: NodeRole,
     is_leader: bool,
     availability: Option<NodeAvailability>,
-    swarm_status: SwarmNodeStatus,
-    swarm_node_id: Option<String>,
     address: Option<String>,
     agent_version: Option<String>,
     docker_version: String,
@@ -46,8 +44,6 @@ struct NodeView {
     arch: String,
     cpu_cores: u32,
     memory_total_bytes: u64,
-    agent_started_at: Option<String>,
-    first_seen_at: Option<String>,
     last_check_in_at: Option<String>,
     latest_sample: Option<NodeSampleView>,
 }
@@ -67,16 +63,13 @@ pub(crate) struct ClusterSummaryView {
     memory_used_bytes: u64,
     memory_total_bytes: u64,
     containers_running: u64,
-    snapshot_at: String,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct NodeSampleView {
-    sampled_at: String,
     cpu_percent: f64,
     memory_used_bytes: u64,
-    disk_used_bytes: Option<u64>,
     containers_running: u32,
     containers_paused: u32,
     containers_exited: u32,
@@ -87,10 +80,7 @@ struct NodeSampleView {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SampleSeriesView {
-    window: String,
-    bucket: String,
     points: Vec<SamplePointView>,
-    snapshot_at: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -99,7 +89,6 @@ struct SamplePointView {
     at: String,
     cpu_percent: Option<f64>,
     memory_used_bytes: Option<f64>,
-    disk_used_bytes: Option<f64>,
     containers_running: Option<f64>,
     net_rx_bytes_per_sec: Option<f64>,
     net_tx_bytes_per_sec: Option<f64>,
@@ -134,10 +123,8 @@ impl From<ControllerStatus> for ControllerStatusView {
 impl From<NodeSample> for NodeSampleView {
     fn from(sample: NodeSample) -> Self {
         Self {
-            sampled_at: timestamp!(sample.sampled_at),
             cpu_percent: sample.cpu_percent,
             memory_used_bytes: sample.memory_used_bytes,
-            disk_used_bytes: sample.disk_used_bytes,
             containers_running: sample.containers_running,
             containers_paused: sample.containers_paused,
             containers_exited: sample.containers_exited,
@@ -157,8 +144,6 @@ impl From<NodeSummary> for NodeView {
             role: node.role,
             is_leader: node.is_leader,
             availability: node.availability,
-            swarm_status: node.swarm_status,
-            swarm_node_id: node.swarm_node_id,
             address: node.address,
             agent_version: node.agent_version,
             docker_version: node.docker_version,
@@ -166,8 +151,6 @@ impl From<NodeSummary> for NodeView {
             arch: node.arch,
             cpu_cores: node.cpu_cores,
             memory_total_bytes: node.memory_total_bytes,
-            agent_started_at: node.agent_started_at.map(|at| timestamp!(at)),
-            first_seen_at: node.first_seen_at.map(|at| timestamp!(at)),
             last_check_in_at: node.last_check_in_at.map(|at| timestamp!(at)),
             latest_sample: node.latest_sample.map(NodeSampleView::from),
         }
@@ -197,7 +180,6 @@ impl From<ClusterSummary> for ClusterSummaryView {
             memory_used_bytes: summary.memory_used_bytes,
             memory_total_bytes: summary.memory_total_bytes,
             containers_running: summary.containers_running,
-            snapshot_at: timestamp!(summary.snapshot_at),
         }
     }
 }
@@ -208,7 +190,6 @@ impl From<SamplePoint> for SamplePointView {
             at: timestamp!(point.at),
             cpu_percent: point.cpu_percent,
             memory_used_bytes: point.memory_used_bytes,
-            disk_used_bytes: point.disk_used_bytes,
             containers_running: point.containers_running,
             net_rx_bytes_per_sec: point.net_rx_bytes_per_sec,
             net_tx_bytes_per_sec: point.net_tx_bytes_per_sec,
@@ -220,14 +201,11 @@ impl From<SamplePoint> for SamplePointView {
 impl From<SampleSeries> for SampleSeriesView {
     fn from(series: SampleSeries) -> Self {
         Self {
-            window: series.window,
-            bucket: series.bucket,
             points: series
                 .points
                 .into_iter()
                 .map(SamplePointView::from)
                 .collect(),
-            snapshot_at: timestamp!(series.snapshot_at),
         }
     }
 }
@@ -262,21 +240,18 @@ impl SessionManager {
         Ok(summary.into())
     }
 
-    /// `node_id` `None` reads the cluster series.
-    pub(crate) async fn samples(
+    pub(crate) async fn cluster_samples(
         &self,
         profile_id: Uuid,
-        node_id: Option<&str>,
         window: &str,
         bucket: &str,
     ) -> Result<SampleSeriesView, InventoryError> {
-        let node = node_id.map(NodeId::parse).transpose()?;
         let series = self
             .authenticated(
                 profile_id,
-                &(node, window, bucket),
-                |controller, access, cancellation, (node, window, bucket)| {
-                    controller.samples(access, node.as_ref(), window, bucket, cancellation)
+                &(window, bucket),
+                |controller, access, cancellation, (window, bucket)| {
+                    controller.cluster_samples(access, window, bucket, cancellation)
                 },
             )
             .await?;

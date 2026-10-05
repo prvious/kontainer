@@ -76,19 +76,15 @@ impl ControllerIntakeService {
 
 /// Map the wire message onto the domain check-in; the node id is the certificate's.
 fn domain_check_in(node_id: String, check_in: CheckInRequest) -> Result<CheckIn, Status> {
-    let timestamp = |unix_ms: i64| {
-        chrono::DateTime::from_timestamp_millis(unix_ms)
-            .ok_or_else(|| Status::invalid_argument("a timestamp is out of range"))
-    };
     let sample = check_in
         .sample
         .map(|sample| {
             Ok::<_, Status>(SampleReading {
-                sampled_at: timestamp(sample.sampled_at_unix_ms)?,
+                sampled_at: chrono::DateTime::from_timestamp_millis(sample.sampled_at_unix_ms)
+                    .ok_or_else(|| Status::invalid_argument("a timestamp is out of range"))?,
                 #[allow(clippy::cast_possible_truncation)]
                 cpu_percent: sample.cpu_percent as f32,
                 memory_used_bytes: sample.memory_used_bytes,
-                disk_used_bytes: sample.disk_used_bytes,
                 containers_running: sample.containers_running,
                 containers_paused: sample.containers_paused,
                 containers_exited: sample.containers_exited,
@@ -108,7 +104,6 @@ fn domain_check_in(node_id: String, check_in: CheckInRequest) -> Result<CheckIn,
         os: check_in.os,
         cpu_cores: check_in.cpu_cores,
         memory_total_bytes: check_in.memory_total_bytes,
-        agent_started_at: timestamp(check_in.agent_started_at_unix_ms)?,
         sample,
     })
 }
@@ -235,12 +230,10 @@ mod tests {
             os: "Alpine Linux".to_owned(),
             cpu_cores: 4,
             memory_total_bytes: 8 << 30,
-            agent_started_at_unix_ms: 1_760_000_000_000,
             sample: Some(NodeSample {
                 sampled_at_unix_ms: 1_760_000_005_000,
                 cpu_percent: 12.5,
                 memory_used_bytes: 1 << 30,
-                disk_used_bytes: None,
                 containers_running: 3,
                 containers_paused: 0,
                 containers_exited: 1,

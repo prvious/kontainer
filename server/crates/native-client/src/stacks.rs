@@ -64,7 +64,6 @@ pub struct StackItem {
 #[derive(Debug, Clone, PartialEq)]
 pub struct StackList {
     pub items: Vec<StackItem>,
-    pub snapshot_at: DateTime<Utc>,
 }
 
 /// What removing a stack takes away, and the volumes it leaves.
@@ -79,7 +78,6 @@ pub struct StackRemovalPlan {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct StackListBody {
     items: Vec<StackItemBody>,
-    snapshot_at: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -134,10 +132,7 @@ impl StackListBody {
                 })
             })
             .collect::<Result<_, NativeClientError>>()?;
-        Ok(StackList {
-            items,
-            snapshot_at: parse_timestamp(&self.snapshot_at)?,
-        })
+        Ok(StackList { items })
     }
 }
 

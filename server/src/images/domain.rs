@@ -162,7 +162,6 @@ pub struct ImageRow {
     pub size_bytes: u64,
     pub created_at_seconds: i64,
     pub used_by: u32,
-    pub dangling: bool,
     pub node_ids: Vec<String>,
 }
 
@@ -182,7 +181,6 @@ pub fn merge_images(per_node: Vec<(String, Vec<AgentImage>)>) -> Vec<ImageRow> {
                         size_bytes: image.size_bytes,
                         created_at_seconds: image.created_at_seconds,
                         used_by: 0,
-                        dangling: true,
                         node_ids: Vec::new(),
                     },
                     BTreeSet::new(),
@@ -190,7 +188,6 @@ pub fn merge_images(per_node: Vec<(String, Vec<AgentImage>)>) -> Vec<ImageRow> {
                 )
             });
             entry.0.used_by = entry.0.used_by.saturating_add(image.used_by);
-            entry.0.dangling &= image.dangling;
             entry.0.node_ids.push(node_id.clone());
             entry.1.extend(image.repo_tags);
             entry.2.extend(image.repo_digests);
@@ -430,8 +427,10 @@ mod tests {
         assert_eq!(nginx.used_by, 3, "summed");
         assert_eq!(nginx.size_bytes, 1000, "counted once");
         assert_eq!(nginx.repo_tags, vec!["nginx:1.27", "nginx:latest"]);
-        assert!(!nginx.dangling);
-        assert!(merged[1].dangling);
+        assert!(
+            merged[1].repo_tags.is_empty(),
+            "dangling: no tag on any node"
+        );
     }
 
     #[test]

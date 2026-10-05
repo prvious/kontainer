@@ -1,6 +1,6 @@
 # 0025. Service log streams: protocol, transport, reconnects, and the viewer
 
-- Status: accepted
+- Status: accepted (amended by 0040)
 - Date: 2026-09-28
 - Spec: docs/build/15-logs.md
 

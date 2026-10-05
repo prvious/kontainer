@@ -36,7 +36,6 @@ struct ImageView {
     size_bytes: u64,
     created_at: String,
     used_by: u32,
-    dangling: bool,
     node_ids: Vec<String>,
 }
 
@@ -49,7 +48,6 @@ impl From<ImageItem> for ImageView {
             size_bytes: item.size_bytes,
             created_at: timestamp!(item.created_at),
             used_by: item.used_by,
-            dangling: item.dangling,
             node_ids: item.node_ids.iter().map(ToString::to_string).collect(),
         }
     }

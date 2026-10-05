@@ -21,8 +21,7 @@
                 "updatedAt": "2026-09-27T10:00:00.000Z",
                 "version": 3,
                 "stack": "monitoring",
-                "updateState": null,
-                "updateMessage": null
+                "updateState": null
             },
             {
                 "id": "webappweb0000000000000000",
@@ -37,8 +36,7 @@
                 "updatedAt": "2026-09-28T11:00:00.000Z",
                 "version": 7,
                 "stack": "webapp",
-                "updateState": null,
-                "updateMessage": null
+                "updateState": null
             },
             {
                 "id": "toolboxalpine000000000000",
@@ -53,42 +51,12 @@
                 "updatedAt": null,
                 "version": 12,
                 "stack": "toolbox",
-                "updateState": "updating",
-                "updateMessage": "update in progress"
+                "updateState": "updating"
             }
         ],
         "snapshotAt": "2026-09-28T12:05:00.000Z"
     },
     "serviceDetail": {
-        "service": {
-            "id": "webappweb0000000000000000",
-            "name": "webapp_web",
-            "image": "nginx:alpine",
-            "imageReference": "nginx:alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "mode": "replicated",
-            "desiredReplicas": 3,
-            "runningReplicas": 2,
-            "ports": ["8080:80/tcp"],
-            "createdAt": "2026-09-20T10:00:00.000Z",
-            "updatedAt": "2026-09-28T11:00:00.000Z",
-            "version": 7,
-            "stack": "webapp",
-            "updateState": null,
-            "updateMessage": null
-        },
-        "tasks": [
-            {
-                "id": "task00000000000000000000a",
-                "slot": 3,
-                "swarmNodeId": "swarmnode",
-                "state": "pending",
-                "desiredState": "running",
-                "error": "no suitable node (insufficient memory on 3 nodes)",
-                "message": "pending task scheduling",
-                "updatedAt": "2026-09-28T12:04:00.000Z",
-                "containerId": null
-            }
-        ],
         "latestError": "no suitable node (insufficient memory on 3 nodes)"
     }
 }

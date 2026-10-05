@@ -396,9 +396,6 @@
         "id": {
           "type": "string"
         },
-        "internal": {
-          "type": "boolean"
-        },
         "name": {
           "type": "string"
         },
@@ -428,7 +425,6 @@
         "subnets",
         "containers",
         "attachable",
-        "internal",
         "builtin",
         "nodeIds"
       ],

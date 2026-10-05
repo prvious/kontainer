@@ -1,6 +1,6 @@
 # 0028. Integrations hub and GitHub page as placeholders, and a kit breadcrumb
 
-- Status: accepted
+- Status: accepted (amended by 0041)
 - Date: 2026-09-28
 - Spec: docs/build/18-integrations.md
 

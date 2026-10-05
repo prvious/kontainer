@@ -381,88 +381,6 @@
         ]
       }
     },
-    "/api/v1/nodes/{nodeId}/samples": {
-      "get": {
-        "operationId": "node_samples",
-        "parameters": [
-          {
-            "description": "Node id",
-            "in": "path",
-            "name": "nodeId",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "One of 5m, 15m, 1h, 24h, 7d",
-            "in": "query",
-            "name": "window",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "description": "Bucket width such as 5s, 60s, 15m; at most 200 points",
-            "in": "query",
-            "name": "bucket",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SampleSeriesResponse"
-                }
-              }
-            },
-            "description": "Averages per bucket; buckets without samples are null"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NodeErrorResponse"
-                }
-              }
-            },
-            "description": "Invalid window or bucket"
-          },
-          "401": {
-            "description": "Missing, malformed, expired, or revoked access credential"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NodeErrorResponse"
-                }
-              }
-            },
-            "description": "Unknown node"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NodeErrorResponse"
-                }
-              }
-            },
-            "description": "Persistence unavailable or controller draining"
-          }
-        },
-        "tags": [
-          "super::nodes"
-        ]
-      }
-    },
     "/api/v1/operations/noop": {
       "post": {
         "operationId": "admit_noop",
@@ -866,9 +784,6 @@
         "quorum": {
           "$ref": "#/components/schemas/QuorumStateResponse",
           "description": "`healthy` when the manager answers and every manager is ready and reachable."
-        },
-        "snapshotAt": {
-          "type": "string"
         }
       },
       "required": [
@@ -882,8 +797,7 @@
         "cpuPercent",
         "memoryUsedBytes",
         "memoryTotalBytes",
-        "containersRunning",
-        "snapshotAt"
+        "containersRunning"
       ],
       "type": "object"
     },
@@ -1154,12 +1068,6 @@
             "null"
           ]
         },
-        "agentStartedAt": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "agentStatus": {
           "$ref": "#/components/schemas/AgentStatusResponse"
         },
@@ -1190,12 +1098,6 @@
         },
         "dockerVersion": {
           "type": "string"
-        },
-        "firstSeenAt": {
-          "type": [
-            "string",
-            "null"
-          ]
         },
         "health": {
           "$ref": "#/components/schemas/NodeHealthResponse"
@@ -1236,15 +1138,6 @@
         },
         "role": {
           "$ref": "#/components/schemas/NodeRoleResponse"
-        },
-        "swarmNodeId": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "swarmStatus": {
-          "$ref": "#/components/schemas/SwarmNodeStatusResponse"
         }
       },
       "required": [
@@ -1255,8 +1148,6 @@
         "role",
         "isLeader",
         "availability",
-        "swarmStatus",
-        "swarmNodeId",
         "address",
         "agentVersion",
         "dockerVersion",
@@ -1264,8 +1155,6 @@
         "arch",
         "cpuCores",
         "memoryTotalBytes",
-        "agentStartedAt",
-        "firstSeenAt",
         "lastCheckInAt",
         "latestSample"
       ],
@@ -1298,13 +1187,6 @@
           "format": "float",
           "type": "number"
         },
-        "diskUsedBytes": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
         "memoryUsedBytes": {
           "format": "int64",
           "type": "integer"
@@ -1322,16 +1204,11 @@
             "number",
             "null"
           ]
-        },
-        "sampledAt": {
-          "type": "string"
         }
       },
       "required": [
-        "sampledAt",
         "cpuPercent",
         "memoryUsedBytes",
-        "diskUsedBytes",
         "containersRunning",
         "containersPaused",
         "containersExited",
@@ -1392,6 +1269,7 @@
           ]
         },
         "startedAt": {
+          "description": "When a worker claimed it.",
           "type": [
             "string",
             "null"
@@ -1458,13 +1336,6 @@
             "null"
           ]
         },
-        "diskUsedBytes": {
-          "format": "double",
-          "type": [
-            "number",
-            "null"
-          ]
-        },
         "memoryUsedBytes": {
           "format": "double",
           "type": [
@@ -1497,7 +1368,6 @@
         "at",
         "cpuPercent",
         "memoryUsedBytes",
-        "diskUsedBytes",
         "containersRunning",
         "netRxBytesPerSec",
         "netTxBytesPerSec",
@@ -1507,27 +1377,15 @@
     },
     "SampleSeriesResponse": {
       "properties": {
-        "bucket": {
-          "type": "string"
-        },
         "points": {
           "items": {
             "$ref": "#/components/schemas/SamplePointResponse"
           },
           "type": "array"
-        },
-        "snapshotAt": {
-          "type": "string"
-        },
-        "window": {
-          "type": "string"
         }
       },
       "required": [
-        "window",
-        "bucket",
-        "points",
-        "snapshotAt"
+        "points"
       ],
       "type": "object"
     },
@@ -1556,15 +1414,6 @@
         "metricsRetentionDays"
       ],
       "type": "object"
-    },
-    "SwarmNodeStatusResponse": {
-      "description": "What the manager last heard from the node; `unknown` when it did not answer or does not\nknow the node.",
-      "enum": [
-        "ready",
-        "down",
-        "unknown"
-      ],
-      "type": "string"
     },
     "TooManyContainersResponse": {
       "properties": {
