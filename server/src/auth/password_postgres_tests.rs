@@ -1,6 +1,10 @@
 //! Email/password registration and sign-in against real PostgreSQL.
 
-use std::{error::Error, path::Path, time::Instant};
+use std::{
+    error::Error,
+    path::Path,
+    time::{Duration, Instant},
+};
 
 use axum::{
     Router,
@@ -450,6 +454,29 @@ async fn a_non_ascii_owner_email_signs_in_in_any_case() -> Result<(), Box<dyn Er
     .await
 }
 
+/// The fastest of three logins answered 401. Concurrent tests share the process-wide Argon2
+/// permits, so waiting for one (or a 429 `busy` after 2 s) only ever adds time; the minimum is the
+/// request's own hashing work.
+async fn fastest_rejection(app: &Router, email: &str, password: &str) -> Duration {
+    let mut fastest: Option<Duration> = None;
+    for _ in 0..3 {
+        let started = Instant::now();
+        let (status, _, _) = call(
+            app,
+            "POST",
+            "/api/v1/auth/password/login",
+            Some(login(email, password)),
+            None,
+        )
+        .await;
+        if status == StatusCode::UNAUTHORIZED {
+            let elapsed = started.elapsed();
+            fastest = Some(fastest.map_or(elapsed, |shortest| shortest.min(elapsed)));
+        }
+    }
+    fastest.expect("at least one login was rejected with 401, not refused as busy")
+}
+
 #[tokio::test]
 async fn an_unknown_email_costs_the_same_hashing_work_as_a_wrong_password()
 -> Result<(), Box<dyn Error>> {
@@ -472,26 +499,8 @@ async fn an_unknown_email_costs_the_same_hashing_work_as_a_wrong_password()
         )
         .await;
 
-        let started = Instant::now();
-        call(
-            &app,
-            "POST",
-            "/api/v1/auth/password/login",
-            Some(login(EMAIL, "wrong horse battery staple")),
-            None,
-        )
-        .await;
-        let wrong_password = started.elapsed();
-        let started = Instant::now();
-        call(
-            &app,
-            "POST",
-            "/api/v1/auth/password/login",
-            Some(login("stranger@example.com", PASSWORD)),
-            None,
-        )
-        .await;
-        let unknown_email = started.elapsed();
+        let wrong_password = fastest_rejection(&app, EMAIL, "wrong horse battery staple").await;
+        let unknown_email = fastest_rejection(&app, "stranger@example.com", PASSWORD).await;
 
         // Same timing class: both pay one Argon2id verification. The bound is
         // loose so scheduler noise cannot flake it, but a skipped hash (≈1 ms
