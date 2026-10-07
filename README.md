@@ -235,6 +235,15 @@ pnpm lint:server
 cargo test --manifest-path app/src-tauri/Cargo.toml
 ```
 
+End-to-end tests drive the built desktop app with WebdriverIO's embedded WebDriver. This works on
+macOS, Windows and Linux and needs no external driver. The `e2e` build has its own identifier and
+keychain service, so it never touches your real saved connections (ADR 0044):
+
+```bash
+pnpm --filter app e2e:build
+pnpm --filter app e2e
+```
+
 ## Notes
 
 - The desktop app talks to the controller API; neither public APIs nor protobuf messages proxy the Docker socket.

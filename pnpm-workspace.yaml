@@ -1,2 +1,7 @@
 packages:
   - "app"
+allowBuilds:
+  edgedriver: false
+  esbuild: false
+  geckodriver: false
+  msw: false

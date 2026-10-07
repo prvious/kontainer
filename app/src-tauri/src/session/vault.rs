@@ -18,8 +18,12 @@ use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 use zeroize::{Zeroize, Zeroizing};
 
-/// Service name every desktop credential is filed under.
+/// Service name every desktop credential is filed under. The e2e build files under its own name,
+/// so a test run never reads or replaces the real credentials (ADR 0044).
+#[cfg(not(feature = "e2e"))]
 pub(crate) const VAULT_SERVICE: &str = "dev.kontainer.app";
+#[cfg(feature = "e2e")]
+pub(crate) const VAULT_SERVICE: &str = "dev.kontainer.e2e";
 /// Fixed user name of the trusted anchor entry.
 pub(crate) const ANCHOR_USER: &str = "active-profile-anchor";
 
