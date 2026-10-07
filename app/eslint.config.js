@@ -6,7 +6,7 @@ import tseslint from "typescript-eslint";
 import { defineConfig, globalIgnores } from "eslint/config";
 
 export default defineConfig([
-    globalIgnores(["dist", "node_modules", "src/components/ui", "src/routeTree.gen.ts"]),
+    globalIgnores(["dist", "node_modules", "src-tauri/target", "src/components/ui", "src/routeTree.gen.ts"]),
     {
         files: ["**/*.{ts,tsx}"],
         extends: [js.configs.recommended, tseslint.configs.recommended, reactHooks.configs.flat.recommended, reactRefresh.configs.vite],

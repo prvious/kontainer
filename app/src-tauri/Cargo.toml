@@ -15,6 +15,11 @@ rust-version = "1.98"
 name = "kontainer_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+# Embeds a WebDriver server for the e2e suite and gives the build its own identity (ADR 0044).
+# Shipped builds never enable it.
+e2e = ["dep:tauri-plugin-wdio-webdriver"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -26,6 +31,7 @@ tauri-plugin-store = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri-plugin-window-state = "2.4.1"
+tauri-plugin-wdio-webdriver = { version = "1.4.0", optional = true }
 # Desktop session custody: the UI-neutral controller client, the OS credential
 # vault, and the async/concurrency primitives the custody layer needs.
 kontainer-native-client = { path = "../../server/crates/native-client" }

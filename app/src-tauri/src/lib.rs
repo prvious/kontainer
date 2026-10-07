@@ -16,10 +16,14 @@ fn end_page_streams<R: Runtime>(app: &impl Manager<R>) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build())
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(tauri_plugin_window_state::Builder::default().build());
+    // Only the e2e build embeds the WebDriver server; shipped builds never have it (ADR 0044).
+    #[cfg(feature = "e2e")]
+    let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
+    builder
         .setup(|app| {
             // Session custody must be initialized before any IPC command can
             // reach it: legacy plaintext is invalidated here, and a failure

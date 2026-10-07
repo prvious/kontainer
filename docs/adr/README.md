@@ -81,3 +81,4 @@ What becomes easier, what becomes harder, what must be revisited and when.
 | [0041](./0041-corrections-to-adrs-0015-0024-and-0028.md) | Correct factual errors in ADRs 0015, 0024 and 0028 | accepted |
 | [0042](./0042-the-controller-runs-on-a-swarm-manager.md) | Run the controller on a Swarm manager with its Docker socket | accepted |
 | [0043](./0043-idempotent-container-actions-and-chrono-times.md) | Idempotent start and stop, Docker times through chrono, and the agent RPC's last unread fields | accepted |
+| [0044](./0044-desktop-e2e-with-webdriverio-embedded.md) | Drive the desktop app end to end with WebdriverIO's embedded WebDriver | accepted |
