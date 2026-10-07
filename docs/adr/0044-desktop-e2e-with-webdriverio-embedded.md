@@ -41,8 +41,10 @@ external driver.
 
 ## Consequences
 
-- macOS, Windows and Linux use the same suite and provider. The suite is not in CI yet. Adding it
-  means a job that builds the e2e binary and runs it, under `xvfb` on Linux.
+- macOS, Windows and Linux use the same suite and provider.
+- CI runs the suite on macOS only, in `.github/workflows/desktop-e2e.yml`. That job builds the e2e
+  binary, unlocks the login keychain and runs the specs, on any change under `app/`, the native
+  client or the pnpm files. Windows can be added as is; Linux also needs `xvfb`.
 - The `e2e` feature must stay out of release tooling. A release built with it would ship a WebDriver
   server.
 - WebdriverIO v10 exists, but `@wdio/tauri-service` 1.4 targets v9. Upgrade them together.
