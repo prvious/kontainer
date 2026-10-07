@@ -60,6 +60,7 @@ impl TryFrom<&str> for PrincipalStatus {
 pub enum RevocationReason {
     Logout,
     RefreshReuse,
+    PasswordReset,
 }
 
 impl RevocationReason {
@@ -68,6 +69,7 @@ impl RevocationReason {
         match self {
             Self::Logout => "logout",
             Self::RefreshReuse => "refresh_reuse",
+            Self::PasswordReset => "password_reset",
         }
     }
 }
@@ -81,6 +83,8 @@ pub struct CorruptSessionState(String);
 pub struct ValidatedSession {
     pub principal_id: Uuid,
     pub family_id: Uuid,
+    /// When the presented access credential stops being valid; long-lived streams close then.
+    pub access_expires_at: DateTime<Utc>,
 }
 
 /// Authenticated principal derived from live persisted session state.
@@ -170,6 +174,7 @@ mod tests {
     fn revocation_reasons_are_stable() {
         assert_eq!(RevocationReason::Logout.as_str(), "logout");
         assert_eq!(RevocationReason::RefreshReuse.as_str(), "refresh_reuse");
+        assert_eq!(RevocationReason::PasswordReset.as_str(), "password_reset");
     }
 
     #[test]

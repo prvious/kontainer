@@ -6,25 +6,37 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use kontainer_native_client::{
-    AccessCredential, ContainerPage, ContainerPageRequest, LoginVerifier, NativeClientError,
-    NodeId, RefreshCredential,
+    AccessCredential, AdmittedOperation, ContainerAction, ContainerActionOptions, ContainerList,
+    ContainerTarget, ControllerSettings, ControllerStatus, IdempotencyKey, ImageList, ImageNodes,
+    NativeClientError, NodeId, NodeList, OperationSnapshot, ProbeFailure, RefreshCredential,
+    SampleSeries, VolumeList, VolumeName, VolumeQuery, VolumeSpec,
 };
+use kontainer_native_client::{
+    AttachedContainer, NetworkId, NetworkList, NetworkPlacement, NetworkSpec,
+};
+use kontainer_native_client::{ClusterSummary, StackList, StackName, StackRemovalPlan};
+use kontainer_native_client::{
+    ExecConnection, ExecEvent, ExecEventFuture, ExecEventSource, ExecInputFrame, ExecInputSink,
+    ExecOpenRequest, ExecSendFuture,
+};
+use kontainer_native_client::{
+    LogDisconnect, LogFrame, LogFrameFuture, LogOpenRequest, LogReceiver,
+};
+use kontainer_native_client::{ServiceAction, ServiceDetail, ServiceId, ServiceList};
 use tokio::sync::Notify;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
-use crate::session::browser::BrowserOpener;
 use crate::session::controller::{
-    Controller, ControllerFactory, ControllerFuture, IssuedCredentials, LoginStart,
-    RedeemedSession, Redemption,
+    Controller, ControllerFactory, ControllerFuture, IssuedCredentials, RedeemedSession,
 };
-use crate::session::errors::SessionError;
+use crate::session::errors::{LoginFailure, SessionError};
 use crate::session::manager::SessionManager;
 use crate::session::metadata::{MetadataError, SessionMetadataStore};
 use crate::session::models::{
     decode_anchor, decode_profile, encode_anchor, encode_profile, AnchorRecord, AnchorState,
-    LoginHint, MetadataSession, ProfileRecord, SessionDocument, SessionLoginInput, SessionView,
+    MetadataSession, PasswordLoginInput, ProfileRecord, SessionDocument, SessionView,
     ANCHOR_VERSION,
 };
 use crate::session::vault::{CredentialVault, VaultError, VaultFuture};
@@ -37,6 +49,10 @@ pub(crate) const CLUSTER: &str = "test";
 pub(crate) const PRINCIPAL_ID: Uuid = Uuid::from_u128(0xaa);
 pub(crate) const OTHER_PRINCIPAL_ID: Uuid = Uuid::from_u128(0xab);
 pub(crate) const PROFILE_ID: Uuid = Uuid::from_u128(0xbb);
+pub(crate) const EMAIL: &str = "owner@example.com";
+pub(crate) const DISPLAY_NAME: &str = "Ada Owner";
+pub(crate) const PASSWORD: &str = "correct horse battery staple";
+pub(crate) const SETUP_CODE: &str = "setup-code-canary";
 
 pub(crate) fn new_log() -> OpLog {
     Arc::new(Mutex::new(Vec::new()))
@@ -106,14 +122,17 @@ pub(crate) fn redeemed_for(seed: u8, principal_id: Uuid) -> RedeemedSession {
     RedeemedSession {
         cluster_id: CLUSTER.to_owned(),
         principal_id,
-        github_login: "owner".to_owned(),
+        email: EMAIL.to_owned(),
+        display_name: DISPLAY_NAME.to_owned(),
         issued: issued(seed, future_ms(), future_ms()),
     }
 }
 
-pub(crate) fn login_input(origin: &str) -> SessionLoginInput {
-    SessionLoginInput {
+pub(crate) fn login_input(origin: &str) -> PasswordLoginInput {
+    PasswordLoginInput {
         origin: origin.to_owned(),
+        email: EMAIL.to_owned(),
+        password: Zeroizing::new(PASSWORD.to_owned()),
         label: Some("Default".to_owned()),
     }
 }
@@ -355,46 +374,88 @@ impl SessionMetadataStore for FakeMetadata {
     }
 }
 
-pub(crate) struct FakeBrowser {
-    log: OpLog,
-    opened: Mutex<Vec<String>>,
-    pub(crate) fail: AtomicBool,
-}
-
-impl FakeBrowser {
-    fn new(log: OpLog) -> Self {
-        Self {
-            log,
-            opened: Mutex::new(Vec::new()),
-            fail: AtomicBool::new(false),
-        }
-    }
-
-    pub(crate) fn opened(&self) -> Vec<String> {
-        self.opened.lock().unwrap().clone()
-    }
-}
-
-impl BrowserOpener for FakeBrowser {
-    fn open(&self, url: &str) -> Result<(), SessionError> {
-        record(&self.log, "open_browser");
-        if self.fail.load(Ordering::SeqCst) {
-            return Err(SessionError::BrowserOpenFailed);
-        }
-        self.opened.lock().unwrap().push(url.to_owned());
-        Ok(())
-    }
-}
-
 #[derive(Default)]
 pub(crate) struct Script {
-    pub(crate) start: VecDeque<Result<LoginStart, SessionError>>,
-    pub(crate) redeem: VecDeque<Result<Redemption, SessionError>>,
+    pub(crate) login: VecDeque<Result<RedeemedSession, LoginFailure>>,
+    pub(crate) register: VecDeque<Result<RedeemedSession, LoginFailure>>,
+    pub(crate) bootstrap: VecDeque<Result<bool, LoginFailure>>,
+    pub(crate) probe: VecDeque<Result<(), ProbeFailure>>,
     pub(crate) refresh: VecDeque<Result<IssuedCredentials, SessionError>>,
     pub(crate) logout: VecDeque<Result<(), SessionError>>,
-    pub(crate) discover: VecDeque<Result<Option<NodeId>, NativeClientError>>,
-    pub(crate) discover_gate: Option<Arc<Notify>>,
-    pub(crate) containers: VecDeque<Result<ContainerPage, NativeClientError>>,
+    pub(crate) nodes: VecDeque<Result<NodeList, NativeClientError>>,
+    pub(crate) nodes_gate: Option<Arc<Notify>>,
+    pub(crate) samples: VecDeque<Result<SampleSeries, NativeClientError>>,
+    pub(crate) settings: VecDeque<Result<ControllerSettings, NativeClientError>>,
+    pub(crate) statuses: VecDeque<Result<ControllerStatus, NativeClientError>>,
+    pub(crate) operations: VecDeque<Result<OperationSnapshot, NativeClientError>>,
+    pub(crate) admissions: VecDeque<Result<AdmittedOperation, NativeClientError>>,
+    pub(crate) containers: VecDeque<Result<ContainerList, NativeClientError>>,
+    pub(crate) images: VecDeque<Result<ImageList, NativeClientError>>,
+    pub(crate) volumes: VecDeque<Result<VolumeList, NativeClientError>>,
+    pub(crate) networks: VecDeque<Result<NetworkList, NativeClientError>>,
+    pub(crate) attached: VecDeque<Result<Vec<AttachedContainer>, NativeClientError>>,
+    pub(crate) services: VecDeque<Result<ServiceList, NativeClientError>>,
+    pub(crate) service_details: VecDeque<Result<ServiceDetail, NativeClientError>>,
+    pub(crate) stacks: VecDeque<Result<StackList, NativeClientError>>,
+    pub(crate) plans: VecDeque<Result<StackRemovalPlan, NativeClientError>>,
+    pub(crate) summaries: VecDeque<Result<ClusterSummary, NativeClientError>>,
+    /// Each log connect takes the next entry: the frames that connection yields, or a refusal.
+    pub(crate) log_connections:
+        VecDeque<Result<Vec<Result<LogFrame, LogDisconnect>>, NativeClientError>>,
+    /// Each exec connect takes the next entry: the events that session yields, or a refusal.
+    pub(crate) exec_connections: VecDeque<Result<Vec<ExecEvent>, NativeClientError>>,
+    /// What every exec session was sent, in order.
+    pub(crate) exec_inputs: Arc<Mutex<Vec<ExecInputFrame>>>,
+}
+
+/// Records what a session was sent.
+pub(crate) struct RecordedExecInput(pub(crate) Arc<Mutex<Vec<ExecInputFrame>>>);
+
+impl ExecInputSink for RecordedExecInput {
+    fn send<'a>(
+        &'a mut self,
+        frame: ExecInputFrame,
+        _: &'a CancellationToken,
+    ) -> ExecSendFuture<'a> {
+        self.0.lock().unwrap().push(frame);
+        Box::pin(async { Ok(()) })
+    }
+}
+
+/// Yields scripted events, then waits for cancellation.
+pub(crate) struct ScriptedExecEvents(pub(crate) VecDeque<ExecEvent>);
+
+impl ExecEventSource for ScriptedExecEvents {
+    fn next_event<'a>(&'a mut self, cancellation: &'a CancellationToken) -> ExecEventFuture<'a> {
+        let next = self.0.pop_front();
+        Box::pin(async move {
+            match next {
+                Some(event) => Some(event),
+                None => {
+                    cancellation.cancelled().await;
+                    None
+                }
+            }
+        })
+    }
+}
+
+/// Yields scripted frames, then reports the connection dropped.
+pub(crate) struct ScriptedLogReceiver(pub(crate) VecDeque<Result<LogFrame, LogDisconnect>>);
+
+impl LogReceiver for ScriptedLogReceiver {
+    fn next_frame<'a>(&'a mut self, cancellation: &'a CancellationToken) -> LogFrameFuture<'a> {
+        let next = self.0.pop_front();
+        Box::pin(async move {
+            match next {
+                Some(frame) => frame,
+                None => {
+                    cancellation.cancelled().await;
+                    Err(LogDisconnect::Cancelled)
+                }
+            }
+        })
+    }
 }
 
 pub(crate) struct FakeControllerFactory {
@@ -445,23 +506,20 @@ impl Controller for FakeController {
         &self.origin
     }
 
-    fn discover_node<'a>(
+    fn list_nodes<'a>(
         &'a self,
         access: &'a AccessCredential,
         _cancellation: &'a CancellationToken,
-    ) -> ControllerFuture<'a, Result<Option<NodeId>, NativeClientError>> {
-        record(
-            &self.log,
-            format!("discover:{}", public_tag(access.expose())),
-        );
+    ) -> ControllerFuture<'a, Result<NodeList, NativeClientError>> {
+        record(&self.log, format!("nodes:{}", public_tag(access.expose())));
         let (outcome, gate) = {
             let mut script = self.script.lock().unwrap();
             (
                 script
-                    .discover
+                    .nodes
                     .pop_front()
                     .unwrap_or(Err(NativeClientError::InvalidResponse)),
-                script.discover_gate.clone(),
+                script.nodes_gate.clone(),
             )
         };
         let log = self.log.clone();
@@ -469,26 +527,186 @@ impl Controller for FakeController {
             if let Some(gate) = gate {
                 gate.notified().await;
             }
-            record(&log, "discover_done");
+            record(&log, "nodes_done");
             outcome
         })
+    }
+
+    fn cluster_summary<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ClusterSummary, NativeClientError>> {
+        record(
+            &self.log,
+            format!("summary:{}", public_tag(access.expose())),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .summaries
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn connect_logs<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        request: &'a LogOpenRequest,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<Box<dyn LogReceiver>, NativeClientError>> {
+        record(
+            &self.log,
+            format!(
+                "logs:{}:{}:{:?}:{}",
+                public_tag(access.expose()),
+                request.service_id.as_str(),
+                request.since_unix_ms,
+                request.tail
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .log_connections
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::Unavailable))
+            .map(|frames| Box::new(ScriptedLogReceiver(frames.into())) as Box<dyn LogReceiver>);
+        Box::pin(async move { outcome })
+    }
+
+    fn connect_exec<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        request: &'a ExecOpenRequest,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ExecConnection, NativeClientError>> {
+        record(
+            &self.log,
+            format!(
+                "exec:{}:{}:{}:{:?}:{}x{}",
+                public_tag(access.expose()),
+                request.node_id,
+                &request.container_id[..8],
+                request.shell,
+                request.cols,
+                request.rows
+            ),
+        );
+        let (outcome, inputs) = {
+            let mut script = self.script.lock().unwrap();
+            (
+                script
+                    .exec_connections
+                    .pop_front()
+                    .unwrap_or(Err(NativeClientError::Unavailable)),
+                script.exec_inputs.clone(),
+            )
+        };
+        let outcome = outcome.map(|events| ExecConnection {
+            input: Box::new(RecordedExecInput(inputs)),
+            events: Box::new(ScriptedExecEvents(events.into())),
+        });
+        Box::pin(async move { outcome })
+    }
+
+    fn cluster_samples<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        window: &'a str,
+        bucket: &'a str,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<SampleSeries, NativeClientError>> {
+        record(
+            &self.log,
+            format!("samples:{}:{window}:{bucket}", public_tag(access.expose())),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .samples
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn get_status<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ControllerStatus, NativeClientError>> {
+        record(
+            &self.log,
+            format!("get_status:{}", public_tag(access.expose())),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .statuses
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn get_settings<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ControllerSettings, NativeClientError>> {
+        record(
+            &self.log,
+            format!("get_settings:{}", public_tag(access.expose())),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .settings
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn update_settings<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        metrics_retention_days: u32,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ControllerSettings, NativeClientError>> {
+        record(
+            &self.log,
+            format!(
+                "update_settings:{}:{metrics_retention_days}",
+                public_tag(access.expose())
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .settings
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
     }
 
     fn list_containers<'a>(
         &'a self,
         access: &'a AccessCredential,
-        node_id: &'a NodeId,
-        page: &'a ContainerPageRequest,
+        node: Option<&'a NodeId>,
         _cancellation: &'a CancellationToken,
-    ) -> ControllerFuture<'a, Result<ContainerPage, NativeClientError>> {
+    ) -> ControllerFuture<'a, Result<ContainerList, NativeClientError>> {
         record(
             &self.log,
             format!(
-                "containers:{}:{}:{}:{}",
+                "containers:{}:{}",
                 public_tag(access.expose()),
-                node_id,
-                page.limit,
-                page.cursor.as_deref().unwrap_or("")
+                node.map_or_else(|| "all".to_owned(), ToString::to_string)
             ),
         );
         let outcome = self
@@ -501,47 +719,606 @@ impl Controller for FakeController {
         Box::pin(async move { outcome })
     }
 
-    fn start_login<'a>(
+    fn container_action<'a>(
         &'a self,
-        _verifier: &'a LoginVerifier,
+        access: &'a AccessCredential,
+        target: &'a ContainerTarget,
+        action: ContainerAction,
+        options: ContainerActionOptions,
+        key: &'a IdempotencyKey,
         _cancellation: &'a CancellationToken,
-    ) -> ControllerFuture<'a, Result<LoginStart, SessionError>> {
-        record(&self.log, "start_login");
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
+        record(
+            &self.log,
+            format!(
+                "container_action:{}:{}:{}:{}:{}:{:?}:{}",
+                public_tag(access.expose()),
+                target.node_id,
+                target.container_id,
+                action.as_str(),
+                options.force,
+                options.timeout_seconds,
+                key.as_str()
+            ),
+        );
         let outcome = self
             .script
             .lock()
             .unwrap()
-            .start
+            .admissions
             .pop_front()
-            .unwrap_or_else(|| {
-                Ok(LoginStart {
-                    attempt_id: Uuid::from_u128(0x11),
-                    authorize_url: "https://github.com/login/oauth/authorize".to_owned(),
-                    expires_at_unix_ms: future_ms() + 10 * 60 * 1000,
-                })
-            });
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
         Box::pin(async move { outcome })
     }
 
-    fn redeem_login<'a>(
+    fn containers_bulk_action<'a>(
         &'a self,
-        _attempt_id: Uuid,
-        _verifier: &'a LoginVerifier,
+        access: &'a AccessCredential,
+        action: ContainerAction,
+        targets: &'a [ContainerTarget],
+        force: bool,
+        key: &'a IdempotencyKey,
         _cancellation: &'a CancellationToken,
-    ) -> ControllerFuture<'a, Result<Redemption, SessionError>> {
-        record(&self.log, "redeem_begin");
-        let log = self.log.clone();
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
+        record(
+            &self.log,
+            format!(
+                "containers_bulk:{}:{}:{}:{force}:{}",
+                public_tag(access.expose()),
+                action.as_str(),
+                targets.len(),
+                key.as_str()
+            ),
+        );
         let outcome = self
             .script
             .lock()
             .unwrap()
-            .redeem
+            .admissions
             .pop_front()
-            .unwrap_or(Err(SessionError::InvalidResponse));
-        Box::pin(async move {
-            record(&log, "redeem_end");
-            outcome
-        })
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn list_images<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ImageList, NativeClientError>> {
+        record(&self.log, format!("images:{}", public_tag(access.expose())));
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .images
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn remove_image<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        image_id: &'a str,
+        nodes: &'a ImageNodes,
+        force: bool,
+        key: &'a IdempotencyKey,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
+        let nodes = match nodes {
+            ImageNodes::All => "all".to_owned(),
+            ImageNodes::Only(nodes) => nodes
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(","),
+        };
+        record(
+            &self.log,
+            format!(
+                "remove_image:{}:{image_id}:{nodes}:{force}:{}",
+                public_tag(access.expose()),
+                key.as_str()
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .admissions
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn pull_image<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        reference: &'a str,
+        nodes: &'a [NodeId],
+        key: &'a IdempotencyKey,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
+        record(
+            &self.log,
+            format!(
+                "pull_image:{}:{reference}:{}:{}",
+                public_tag(access.expose()),
+                nodes
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(","),
+                key.as_str()
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .admissions
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn list_volumes<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        query: &'a VolumeQuery,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<VolumeList, NativeClientError>> {
+        record(
+            &self.log,
+            format!(
+                "volumes:{}:{}:{}",
+                public_tag(access.expose()),
+                query.node.as_ref().map_or("all", NodeId::as_str),
+                query.name.as_ref().map_or("any", VolumeName::as_str),
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .volumes
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn create_volume<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        spec: &'a VolumeSpec,
+        key: &'a IdempotencyKey,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
+        let labels: Vec<_> = spec
+            .labels
+            .iter()
+            .map(|(label, value)| format!("{label}={value}"))
+            .collect();
+        record(
+            &self.log,
+            format!(
+                "create_volume:{}:{}:{}:{}:{}",
+                public_tag(access.expose()),
+                spec.node_id,
+                spec.name.as_str(),
+                labels.join(","),
+                key.as_str()
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .admissions
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn remove_volume<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        node_id: &'a NodeId,
+        name: &'a VolumeName,
+        key: &'a IdempotencyKey,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
+        record(
+            &self.log,
+            format!(
+                "remove_volume:{}:{node_id}:{}:{}",
+                public_tag(access.expose()),
+                name.as_str(),
+                key.as_str()
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .admissions
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn list_networks<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<NetworkList, NativeClientError>> {
+        record(
+            &self.log,
+            format!("networks:{}", public_tag(access.expose())),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .networks
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn inspect_network<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        network_id: &'a NetworkId,
+        node: Option<&'a NodeId>,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<Vec<AttachedContainer>, NativeClientError>> {
+        record(
+            &self.log,
+            format!(
+                "inspect_network:{}:{}:{}",
+                public_tag(access.expose()),
+                network_id.as_str(),
+                node.map_or("swarm", NodeId::as_str)
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .attached
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn create_network<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        spec: &'a NetworkSpec,
+        key: &'a IdempotencyKey,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
+        let placement = match &spec.placement {
+            NetworkPlacement::Overlay { attachable } => format!("overlay:{attachable}"),
+            NetworkPlacement::Bridge { node_id } => format!("bridge:{node_id}"),
+        };
+        record(
+            &self.log,
+            format!(
+                "create_network:{}:{}:{placement}:{}:{}",
+                public_tag(access.expose()),
+                spec.name,
+                spec.subnet.as_deref().unwrap_or("none"),
+                key.as_str()
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .admissions
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn remove_network<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        network_id: &'a NetworkId,
+        node: Option<&'a NodeId>,
+        key: &'a IdempotencyKey,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
+        record(
+            &self.log,
+            format!(
+                "remove_network:{}:{}:{}:{}",
+                public_tag(access.expose()),
+                network_id.as_str(),
+                node.map_or("swarm", NodeId::as_str),
+                key.as_str()
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .admissions
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn list_services<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        stack: Option<&'a str>,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ServiceList, NativeClientError>> {
+        record(
+            &self.log,
+            format!(
+                "services:{}:{}",
+                public_tag(access.expose()),
+                stack.unwrap_or("all")
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .services
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn get_service<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        service_id: &'a ServiceId,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ServiceDetail, NativeClientError>> {
+        record(
+            &self.log,
+            format!(
+                "service:{}:{}",
+                public_tag(access.expose()),
+                service_id.as_str()
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .service_details
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn service_action<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        service_id: &'a ServiceId,
+        action: ServiceAction,
+        version: u64,
+        key: &'a IdempotencyKey,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
+        let action = match action {
+            ServiceAction::Scale { replicas } => format!("scale={replicas}"),
+            ServiceAction::Restart => "restart".to_owned(),
+            ServiceAction::Rollback => "rollback".to_owned(),
+        };
+        record(
+            &self.log,
+            format!(
+                "service_action:{}:{}:{action}:{version}:{}",
+                public_tag(access.expose()),
+                service_id.as_str(),
+                key.as_str()
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .admissions
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn list_stacks<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<StackList, NativeClientError>> {
+        record(&self.log, format!("stacks:{}", public_tag(access.expose())));
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .stacks
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn stack_removal_plan<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        name: &'a StackName,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<StackRemovalPlan, NativeClientError>> {
+        record(
+            &self.log,
+            format!(
+                "stack_plan:{}:{}",
+                public_tag(access.expose()),
+                name.as_str()
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .plans
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn remove_stack<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        name: &'a StackName,
+        key: &'a IdempotencyKey,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
+        record(
+            &self.log,
+            format!(
+                "remove_stack:{}:{}:{}",
+                public_tag(access.expose()),
+                name.as_str(),
+                key.as_str()
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .admissions
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn get_operation<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        operation_id: Uuid,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<OperationSnapshot, NativeClientError>> {
+        record(
+            &self.log,
+            format!(
+                "get_operation:{}:{operation_id}",
+                public_tag(access.expose())
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .operations
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn cancel_operation<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        operation_id: Uuid,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<OperationSnapshot, NativeClientError>> {
+        record(
+            &self.log,
+            format!(
+                "cancel_operation:{}:{operation_id}",
+                public_tag(access.expose())
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .operations
+            .pop_front()
+            .unwrap_or(Err(NativeClientError::InvalidResponse));
+        Box::pin(async move { outcome })
+    }
+
+    fn bootstrap_status<'a>(
+        &'a self,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<bool, LoginFailure>> {
+        record(&self.log, "bootstrap");
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .bootstrap
+            .pop_front()
+            .unwrap_or(Ok(true));
+        Box::pin(async move { outcome })
+    }
+
+    fn password_login<'a>(
+        &'a self,
+        email: &'a str,
+        password: &'a str,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<RedeemedSession, LoginFailure>> {
+        // The password never reaches the log; only its presence is recorded.
+        record(
+            &self.log,
+            format!("password_login:{email}:{}", !password.is_empty()),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .login
+            .pop_front()
+            .unwrap_or(Err(LoginFailure::from(SessionError::InvalidResponse)));
+        Box::pin(async move { outcome })
+    }
+
+    fn register_owner<'a>(
+        &'a self,
+        display_name: &'a str,
+        email: &'a str,
+        _password: &'a str,
+        setup_code: &'a str,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<RedeemedSession, LoginFailure>> {
+        // Records only whether the code reached the controller, never its value.
+        record(
+            &self.log,
+            format!(
+                "register_owner:{display_name}:{email}:{}",
+                setup_code == SETUP_CODE
+            ),
+        );
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .register
+            .pop_front()
+            .unwrap_or(Err(LoginFailure::from(SessionError::InvalidResponse)));
+        Box::pin(async move { outcome })
+    }
+
+    fn probe<'a>(
+        &'a self,
+        _cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<(), ProbeFailure>> {
+        record(&self.log, format!("probe:{}", origin_label(&self.origin)));
+        let outcome = self
+            .script
+            .lock()
+            .unwrap()
+            .probe
+            .pop_front()
+            .unwrap_or(Ok(()));
+        Box::pin(async move { outcome })
     }
 
     fn refresh_session<'a>(
@@ -619,7 +1396,6 @@ pub(crate) struct Harness {
     pub(crate) vault: Arc<FakeVault>,
     pub(crate) metadata: Arc<FakeMetadata>,
     pub(crate) controllers: Arc<FakeControllerFactory>,
-    pub(crate) browser: Arc<FakeBrowser>,
     pub(crate) log: OpLog,
 }
 
@@ -629,19 +1405,12 @@ impl Harness {
         let vault = Arc::new(FakeVault::new(log.clone()));
         let metadata = Arc::new(FakeMetadata::new(log.clone()));
         let controllers = Arc::new(FakeControllerFactory::new(log.clone()));
-        let browser = Arc::new(FakeBrowser::new(log.clone()));
-        let manager = SessionManager::new(
-            vault.clone(),
-            metadata.clone(),
-            controllers.clone(),
-            browser.clone(),
-        );
+        let manager = SessionManager::new(vault.clone(), metadata.clone(), controllers.clone());
         Self {
             manager,
             vault,
             metadata,
             controllers,
-            browser,
             log,
         }
     }
@@ -662,16 +1431,12 @@ impl Harness {
             self.vault.clone(),
             self.metadata.clone(),
             self.controllers.clone(),
-            self.browser.clone(),
         )
     }
 
     /// Complete one login against the default origin and pair.
     pub(crate) async fn login_ok(&self) -> SessionView {
-        self.controllers
-            .script()
-            .redeem
-            .push_back(Ok(Redemption::Ready(redeemed(1))));
+        self.controllers.script().login.push_back(Ok(redeemed(1)));
         self.manager
             .login(login_input(ORIGIN))
             .await
@@ -701,23 +1466,17 @@ impl Harness {
         };
         self.vault.seed_anchor(&anchor);
         self.vault.seed_profile(&record);
-        self.metadata.set_document(SessionDocument::new(
-            None,
-            Some(MetadataSession {
+        self.metadata
+            .set_document(SessionDocument::new(Some(MetadataSession {
                 profile_id: anchor.profile_id,
                 origin: anchor.origin.clone(),
                 cluster_id: anchor.cluster_id.clone(),
                 principal_id: anchor.principal_id,
-                github_login: "owner".to_owned(),
+                email: EMAIL.to_owned(),
+                display_name: DISPLAY_NAME.to_owned(),
                 label: Some("Default".to_owned()),
-            }),
-        ));
+            })));
         anchor
-    }
-
-    /// The login hint currently stored for the login screen.
-    pub(crate) fn hint(&self) -> Option<LoginHint> {
-        self.metadata.document().and_then(|document| document.hint)
     }
 
     /// The trusted profile UUID currently held by the vault anchor.

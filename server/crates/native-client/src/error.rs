@@ -8,6 +8,66 @@
 use std::io::ErrorKind;
 
 use reqwest::StatusCode;
+use serde::{Deserialize, Serialize};
+
+/// Why the controller rejected one submitted account field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FieldProblem {
+    /// The value has the wrong shape (for example an email without a domain).
+    Invalid,
+    /// The value is blank.
+    Empty,
+    /// The value is shorter than the documented minimum.
+    TooShort,
+    /// The value is longer than the documented maximum.
+    TooLong,
+}
+
+/// Field-level rejections from `validation_failed`; `None` means the field passed.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AccountFieldErrors {
+    /// Problem with the email.
+    #[serde(default)]
+    pub email: Option<FieldProblem>,
+    /// Problem with the password.
+    #[serde(default)]
+    pub password: Option<FieldProblem>,
+    /// Problem with the display name.
+    #[serde(default)]
+    pub display_name: Option<FieldProblem>,
+    /// Problem with the first-run setup code: `empty` or `invalid`.
+    #[serde(default)]
+    pub setup_code: Option<FieldProblem>,
+}
+
+/// An error plus the controller's `x-request-id` for the failed exchange,
+/// when the controller answered at all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Traced<E> {
+    /// The closed error code.
+    pub error: E,
+    /// Sanitized request identifier the controller logged for this exchange.
+    pub request_id: Option<String>,
+}
+
+impl<E> Traced<E> {
+    pub(crate) fn untraced(error: E) -> Self {
+        Self {
+            error,
+            request_id: None,
+        }
+    }
+}
+
+impl<E: std::fmt::Display> std::fmt::Display for Traced<E> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.error.fmt(formatter)
+    }
+}
+
+impl<E: std::error::Error> std::error::Error for Traced<E> {}
 
 /// Every failure a native client call can report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -22,9 +82,6 @@ pub enum NativeClientError {
     /// The node ID is not a canonical controller node identifier.
     #[error("node ID is not valid")]
     InvalidNodeId,
-    /// The page size or cursor is outside the documented bounds.
-    #[error("pagination is not valid")]
-    InvalidPagination,
     /// The caller's cancellation token fired before the call completed.
     #[error("request was cancelled")]
     Cancelled,
@@ -67,6 +124,47 @@ pub enum NativeClientError {
     /// A controller dependency exceeded its deadline (`504`).
     #[error("controller dependency timed out")]
     GatewayTimeout,
+    /// The cluster list is over its cap (`413 too_many_containers`); list one node instead.
+    #[error("too many containers to list at once")]
+    TooManyContainers,
+    /// The Swarm manager can't answer (`503 quorum_unavailable`); workloads keep running.
+    #[error("the swarm has no quorum")]
+    QuorumUnavailable {
+        /// Seconds until asking again makes sense.
+        retry_after_seconds: u32,
+    },
+    /// The controller's Docker host is not a Swarm manager (`503 not_a_manager`).
+    #[error("the controller is not connected to a swarm manager")]
+    NotAManager,
+    /// The object changed since the version the request was based on (`409 version_conflict`).
+    #[error("the object changed since it was read")]
+    VersionConflict,
+
+    /// This session already holds as many streams as the controller allows.
+    #[error("too many streams are open for this session")]
+    LimitReached,
+    /// Email or password is incorrect (`401 invalid_credentials`); unknown
+    /// emails and wrong passwords are indistinguishable.
+    #[error("email or password is incorrect")]
+    InvalidCredentials {
+        /// Failures left before the email locks for fifteen minutes.
+        attempts_remaining: u32,
+    },
+    /// Too many failures locked sign-in for this email (`429 locked`).
+    #[error("sign-in is locked for this email")]
+    LoginLocked {
+        /// Seconds until the lock expires.
+        retry_after_seconds: u32,
+    },
+    /// Registration is closed because the owner exists (`409 owner_exists`).
+    #[error("an owner already exists")]
+    OwnerExists,
+    /// The controller rejected submitted account fields (`400 validation_failed`).
+    #[error("submitted fields are not valid")]
+    ValidationFailed {
+        /// Which fields were rejected and why.
+        fields: AccountFieldErrors,
+    },
     /// Any other non-success status, with no body attached.
     #[error("controller returned status {status}")]
     UnexpectedStatus {

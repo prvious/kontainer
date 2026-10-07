@@ -5,6 +5,18 @@ use prost::Message;
 pub const PROTOCOL_VERSION: u32 = 1;
 pub const WEBSOCKET_SUBPROTOCOL: &str = "kontainer.stream.v1";
 
+mod exec;
+mod logs;
+
+pub use exec::{
+    ExecError, ExecExit, ExecMessage, ExecOpen, ExecPayloadError, ExecResize, ExecStarted,
+    MAX_EXEC_DIMENSION,
+};
+pub use logs::{
+    DEFAULT_LOG_TAIL, LogEnd, LogEndReason, LogGap, LogLine, LogMessage, LogPayloadError,
+    LogStreamKind, LogsOpen, MAX_LOG_TAIL,
+};
+
 mod wire {
     include!(concat!(env!("OUT_DIR"), "/kontainer.stream.v1.rs"));
 }
@@ -13,6 +25,59 @@ mod wire {
 pub enum StreamFrameKind {
     Data,
     Acknowledgement,
+    LogsOpen,
+    LogLine,
+    LogGap,
+    LogEnd,
+    ExecOpen,
+    ExecInput,
+    ExecResize,
+    ExecClose,
+    ExecStarted,
+    ExecOutput,
+    ExecExit,
+    ExecError,
+}
+
+impl StreamFrameKind {
+    fn to_wire(self) -> wire::FrameKind {
+        match self {
+            Self::Data => wire::FrameKind::Data,
+            Self::Acknowledgement => wire::FrameKind::Acknowledgement,
+            Self::LogsOpen => wire::FrameKind::LogsOpen,
+            Self::LogLine => wire::FrameKind::LogLine,
+            Self::LogGap => wire::FrameKind::LogGap,
+            Self::LogEnd => wire::FrameKind::LogEnd,
+            Self::ExecOpen => wire::FrameKind::ExecOpen,
+            Self::ExecInput => wire::FrameKind::ExecInput,
+            Self::ExecResize => wire::FrameKind::ExecResize,
+            Self::ExecClose => wire::FrameKind::ExecClose,
+            Self::ExecStarted => wire::FrameKind::ExecStarted,
+            Self::ExecOutput => wire::FrameKind::ExecOutput,
+            Self::ExecExit => wire::FrameKind::ExecExit,
+            Self::ExecError => wire::FrameKind::ExecError,
+        }
+    }
+
+    fn from_wire(kind: wire::FrameKind) -> Option<Self> {
+        Some(match kind {
+            wire::FrameKind::Unspecified => return None,
+            wire::FrameKind::Data => Self::Data,
+            wire::FrameKind::Acknowledgement => Self::Acknowledgement,
+            wire::FrameKind::LogsOpen => Self::LogsOpen,
+            wire::FrameKind::LogLine => Self::LogLine,
+            wire::FrameKind::LogGap => Self::LogGap,
+            wire::FrameKind::LogEnd => Self::LogEnd,
+            wire::FrameKind::ExecOpen => Self::ExecOpen,
+            wire::FrameKind::ExecInput => Self::ExecInput,
+            wire::FrameKind::ExecResize => Self::ExecResize,
+            wire::FrameKind::ExecClose => Self::ExecClose,
+            wire::FrameKind::ExecStarted => Self::ExecStarted,
+            wire::FrameKind::ExecOutput => Self::ExecOutput,
+            wire::FrameKind::ExecExit => Self::ExecExit,
+            wire::FrameKind::ExecError => Self::ExecError,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -46,10 +111,7 @@ impl StreamFrame {
         wire::StreamEnvelope {
             protocol_version: PROTOCOL_VERSION,
             sequence: self.sequence,
-            kind: match self.kind {
-                StreamFrameKind::Data => wire::FrameKind::Data.into(),
-                StreamFrameKind::Acknowledgement => wire::FrameKind::Acknowledgement.into(),
-            },
+            kind: self.kind.to_wire().into(),
             payload: self.payload.clone(),
         }
         .encode_to_vec()
@@ -65,13 +127,10 @@ impl StreamFrame {
             ));
         }
 
-        let kind = match wire::FrameKind::try_from(envelope.kind) {
-            Ok(wire::FrameKind::Data) => StreamFrameKind::Data,
-            Ok(wire::FrameKind::Acknowledgement) => StreamFrameKind::Acknowledgement,
-            Ok(wire::FrameKind::Unspecified) | Err(_) => {
-                return Err(StreamProtocolError::UnknownFrameKind(envelope.kind));
-            }
-        };
+        let kind = wire::FrameKind::try_from(envelope.kind)
+            .ok()
+            .and_then(StreamFrameKind::from_wire)
+            .ok_or(StreamProtocolError::UnknownFrameKind(envelope.kind))?;
 
         Ok(Self {
             sequence: envelope.sequence,
@@ -141,6 +200,19 @@ mod tests {
         assert_eq!(
             StreamFrame::decode(&unknown_kind),
             Err(StreamProtocolError::UnknownFrameKind(99))
+        );
+
+        // The retired LogsClose kind stays reserved.
+        let logs_close = wire::StreamEnvelope {
+            protocol_version: PROTOCOL_VERSION,
+            sequence: 0,
+            kind: 4,
+            payload: Vec::new(),
+        }
+        .encode_to_vec();
+        assert_eq!(
+            StreamFrame::decode(&logs_close),
+            Err(StreamProtocolError::UnknownFrameKind(4))
         );
     }
 }

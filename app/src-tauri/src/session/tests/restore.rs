@@ -4,7 +4,7 @@
 use std::sync::atomic::Ordering;
 
 use crate::session::errors::SessionError;
-use crate::session::models::{AnchorState, SessionDocument, SessionLoginInput};
+use crate::session::models::{AnchorState, ConnectionSummary};
 
 use super::fakes::{
     future_ms, issued, past_ms, Harness, CLUSTER, OTHER_ORIGIN, OTHER_PRINCIPAL_ID,
@@ -32,7 +32,8 @@ async fn restore_rotates_once_in_order_and_commits_the_successor() {
     assert_eq!(view.origin, anchor.origin);
     assert_eq!(view.cluster_id, anchor.cluster_id);
     assert_eq!(view.principal_id, anchor.principal_id);
-    assert_eq!(view.github_login, "owner");
+    assert_eq!(view.email, super::fakes::EMAIL);
+    assert_eq!(view.display_name, super::fakes::DISPLAY_NAME);
     assert_eq!(view.access_expires_at_unix_ms, access_expires_at_unix_ms);
 
     // Metadata is checked before the keyed credential is read; the anchor is
@@ -46,6 +47,7 @@ async fn restore_rotates_once_in_order_and_commits_the_successor() {
             "write_anchor:commit_pending",
             "refresh:controller.example:01010101",
             "write_profile:2",
+            "read_document",
             "write_document",
             "write_anchor:ready",
         ]
@@ -196,8 +198,8 @@ async fn restore_refresh_rejection_cleans_up_and_requires_relogin() {
     assert_eq!(harness.count("refresh"), 1);
     assert!(!harness.vault.has_profile(anchor.profile_id));
     assert_eq!(harness.vault.anchor_state(), Some(AnchorState::LoggedOut));
-    let hint = harness.hint().expect("hint survives");
-    assert_eq!(hint.origin, anchor.origin);
+    let document = harness.metadata.document().expect("document");
+    assert!(document.session.is_none());
 }
 
 #[tokio::test]
@@ -399,9 +401,6 @@ async fn restore_logged_out_anchor_returns_none_and_clears_stale_metadata() {
     assert_eq!(harness.manager.restore().await.expect("restore"), None);
     let document = harness.metadata.document().expect("document");
     assert!(document.session.is_none());
-    let hint = document.hint.expect("hint");
-    assert_eq!(hint.origin, anchor.origin);
-    assert_eq!(hint.label.as_deref(), Some("Default"));
 }
 
 #[tokio::test]
@@ -439,12 +438,12 @@ async fn restore_skips_the_vault_when_a_session_is_already_published() {
 }
 
 #[tokio::test]
-async fn restore_rejects_login_inputs_with_identity_fields() {
-    // Identity can only come from the controller response: the login input is
-    // strictly origin plus label.
-    let parsed: Result<SessionLoginInput, _> = serde_json::from_value(serde_json::json!({
-        "origin": "https://controller.example/",
-        "label": null,
+async fn ipc_inputs_reject_identity_fields() {
+    // Identity can only come from the controller response: the one structured
+    // IPC input (the sign-out summary) is strictly two counts.
+    let parsed: Result<ConnectionSummary, _> = serde_json::from_value(serde_json::json!({
+        "nodes": 3,
+        "services": 12,
         "principalId": "018f2e34-0000-7000-8000-0000000000aa",
     }));
     assert!(parsed.is_err());
@@ -491,24 +490,7 @@ async fn session_document_keeps_the_same_shape_after_a_failed_restore() {
     let _ = harness.manager.restore().await;
     let document = harness.metadata.document().expect("document");
     assert_eq!(document.version, crate::session::models::METADATA_VERSION);
-    assert!(document.hint.is_some());
     assert!(document.session.is_none());
-}
-
-#[tokio::test]
-async fn restore_without_an_anchor_keeps_the_login_hint() {
-    let harness = Harness::new();
-    let hint_origin = OTHER_ORIGIN.to_owned();
-    harness.metadata.set_document(SessionDocument::new(
-        Some(crate::session::models::LoginHint {
-            origin: hint_origin.clone(),
-            label: Some("Hinted".to_owned()),
-        }),
-        None,
-    ));
-    assert_eq!(harness.manager.restore().await.expect("restore"), None);
-    let document = harness.metadata.document().expect("document");
-    assert_eq!(document.hint.expect("hint").origin, hint_origin);
 }
 
 #[tokio::test]

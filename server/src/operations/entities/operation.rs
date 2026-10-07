@@ -11,6 +11,12 @@ pub struct Model {
     pub claimed_at: Option<DateTimeUtc>,
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
+    /// The admitted, validated request the executor reads.
+    #[sea_orm(column_type = "JsonBinary")]
+    pub payload: Json,
+    pub finished_at: Option<DateTimeUtc>,
+    /// The admitting HTTP request's id, shown next to failures.
+    pub request_id: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

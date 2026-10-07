@@ -103,13 +103,27 @@ impl AuthenticatedPeerIdentity {
 
     /// Test-only controller identity. Production identities come only from
     /// `PeerIdentityInterceptor`; this helper exists so unit tests can
-    /// exercise authenticated handlers without mTLS fixtures.
+    /// exercise authenticated handlers without mTLS fixtures. Production
+    /// builds don't have it: the `test-util` feature is enabled only from
+    /// dev-dependencies.
+    #[cfg(any(test, feature = "test-util"))]
     #[doc(hidden)]
     #[must_use]
     pub fn new_for_tests() -> Self {
         Self(WorkloadIdentity::Controller {
             cluster_id: "test-cluster".to_owned(),
             instance_id: "test-controller".to_owned(),
+        })
+    }
+
+    /// Test-only node agent identity, for the same reason as `new_for_tests`.
+    #[cfg(any(test, feature = "test-util"))]
+    #[doc(hidden)]
+    #[must_use]
+    pub fn agent_for_tests(node_id: &str) -> Self {
+        Self(WorkloadIdentity::NodeAgent {
+            cluster_id: "test-cluster".to_owned(),
+            node_id: node_id.to_owned(),
         })
     }
 

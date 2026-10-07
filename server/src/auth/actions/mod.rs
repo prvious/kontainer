@@ -1,7 +1,14 @@
 pub mod accept_github_callback;
+pub mod bootstrap_status;
+pub(crate) mod claim_bootstrap_owner;
 pub mod create_session;
+pub mod current_account;
+pub mod password_login;
 pub mod redeem_github_login;
+pub mod register_owner;
+pub mod reset_password;
 pub mod revoke_session_family;
 pub mod rotate_refresh;
+pub mod session_family_active;
 pub mod start_github_login;
 pub mod validate_access;

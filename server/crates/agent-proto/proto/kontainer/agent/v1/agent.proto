@@ -13,17 +13,84 @@ service ControllerIntake {
 service NodeAgent {
   rpc Describe(DescribeRequest) returns (DescribeResponse);
   rpc ListContainers(ListContainersRequest) returns (ListContainersResponse);
+  // Lifecycle action on one local container. Starting a running container or
+  // stopping a stopped one succeeds (Docker's 304 is not an error). Failures
+  // are statuses whose message is a stable code: NOT_FOUND `not_found`,
+  // FAILED_PRECONDITION `container_running`, UNAVAILABLE `engine_error`.
+  rpc ContainerAction(ContainerActionRequest) returns (ContainerActionResponse);
+  rpc ListImages(ListImagesRequest) returns (ListImagesResponse);
+  // Failure codes as for ContainerAction; an in-use image is FAILED_PRECONDITION `image_in_use`.
+  rpc RemoveImage(RemoveImageRequest) returns (RemoveImageResponse);
+  // Anonymous pull. Progress events until the pull ends; a failed pull ends with one event whose
+  // `error` is the registry's or daemon's own message.
+  rpc PullImage(PullImageRequest) returns (stream PullImageEvent);
+  rpc ListVolumes(ListVolumesRequest) returns (ListVolumesResponse);
+  // An existing name is ALREADY_EXISTS `volume_exists`; Docker itself would hand the existing
+  // volume back.
+  rpc CreateVolume(CreateVolumeRequest) returns (CreateVolumeResponse);
+  // A volume that containers mount is refused by Docker with or without force. That refusal is a
+  // result, not an error: `in_use_by` names the containers and nothing is removed.
+  rpc RemoveVolume(RemoveVolumeRequest) returns (RemoveVolumeResponse);
+  // Every network on the node (local and the swarm-scope ones present here) with its running
+  // endpoints on this node.
+  rpc ListNetworks(ListNetworksRequest) returns (ListNetworksResponse);
+  // One network's endpoints on this node. NOT_FOUND `not_found` when the node doesn't have it.
+  rpc InspectNetwork(InspectNetworkRequest) returns (InspectNetworkResponse);
+  // A local `bridge` network on this node.
+  rpc CreateNetwork(CreateNetworkRequest) returns (CreateNetworkResponse);
+  // A local network with endpoints is refused as a result: `in_use_by` names the containers.
+  // Built-ins are INVALID_ARGUMENT `builtin_network`.
+  rpc RemoveNetwork(RemoveNetworkRequest) returns (RemoveNetworkResponse);
+  // An interactive TTY shell in one local container. The first client frame is `open`; then
+  // input, resizes, and a close. The agent answers `started` (or one `error`), output, and one
+  // `exit` whose code is absent when unknown. Error codes: `target_not_running`,
+  // `shell_not_found`, `invalid_request`, `engine_error`.
+  rpc Exec(stream ExecClientFrame) returns (stream ExecServerFrame);
 }
 
 message CheckInRequest {
   string agent_id = 1;
   string agent_version = 2;
   string architecture = 3;
+  // host:port the controller dials for NodeAgent calls.
+  string advertise_address = 4;
+  string hostname = 5;
+  // From `docker info` Swarm.NodeID; empty when the node is not in a Swarm.
+  string swarm_node_id = 6;
+  string docker_version = 7;
+  string os = 8;
+  uint32 cpu_cores = 9;
+  uint64 memory_total_bytes = 10;
+  // Dropped unread (ADR 0039).
+  reserved 11;
+  reserved "agent_started_at_unix_ms";
+  // Absent from agents that predate sampling; the check-in still counts.
+  NodeSample sample = 12;
+}
+
+// One resource sample for the node, taken just before the check-in. CPU and
+// memory are container-scoped sums (ADR 0003).
+message NodeSample {
+  int64 sampled_at_unix_ms = 1;
+  // 0-100 of the whole node.
+  double cpu_percent = 2;
+  uint64 memory_used_bytes = 3;
+  // Dropped unread (ADR 0039).
+  reserved 4;
+  reserved "disk_used_bytes";
+  uint32 containers_running = 5;
+  uint32 containers_paused = 6;
+  uint32 containers_exited = 7;
+  // Absent on the first sample after start (no previous counters).
+  optional double net_rx_bytes_per_sec = 8;
+  optional double net_tx_bytes_per_sec = 9;
 }
 
 message CheckInResponse {
   string controller_version = 1;
   string protocol_package = 2;
+  // Seconds until the next check-in; zero means keep the current cadence.
+  uint32 check_in_interval_seconds = 3;
 }
 
 message DescribeRequest {}
@@ -68,7 +135,43 @@ message ContainerSummary {
   int64 created_at_unix_seconds = 6;
   // Provenance is always the serving agent's configured node ID.
   string node_id = 7;
+  // From the agent's last sample; absent for containers that are not running.
+  optional double cpu_percent = 8;
+  optional uint64 memory_used_bytes = 9;
+  optional uint64 memory_limit_bytes = 10;
+  // From inspect; absent when the container never started or stopped.
+  optional int64 started_at_unix_seconds = 11;
+  optional int64 finished_at_unix_seconds = 12;
+  // Published ports only, `host:container/proto`.
+  repeated string published_ports = 13;
+  // The allowlisted Swarm labels; every other label stays on the node.
+  optional string service_name = 14;
+  optional string stack_namespace = 15;
+  optional string task_id = 16;
+  // Names of the networks it has endpoints on, at most 16.
+  repeated string networks = 17;
 }
+
+enum ContainerAction {
+  CONTAINER_ACTION_UNSPECIFIED = 0;
+  CONTAINER_ACTION_START = 1;
+  CONTAINER_ACTION_STOP = 2;
+  CONTAINER_ACTION_RESTART = 3;
+  CONTAINER_ACTION_PAUSE = 4;
+  CONTAINER_ACTION_UNPAUSE = 5;
+  CONTAINER_ACTION_REMOVE = 6;
+}
+
+message ContainerActionRequest {
+  string container_id = 1;
+  ContainerAction action = 2;
+  // Remove only: kill a running container first.
+  bool force = 3;
+  // Stop and restart only: grace before kill; absent means 10.
+  optional uint32 timeout_seconds = 4;
+}
+
+message ContainerActionResponse {}
 
 message ListContainersResponse {
   repeated ContainerSummary containers = 1;
@@ -77,3 +180,189 @@ message ListContainersResponse {
   string next_page_token = 2;
 }
 
+message ListImagesRequest {}
+
+message ImageSummary {
+  // `sha256:<64 hex>`.
+  string image_id = 1;
+  repeated string repo_tags = 2;
+  repeated string repo_digests = 3;
+  uint64 size_bytes = 4;
+  int64 created_at_unix_seconds = 5;
+  // Containers on this node (any state) created from this image.
+  uint32 used_by = 6;
+  // Dropped unread: an untagged image has no `repo_tags`.
+  reserved 7;
+  reserved "dangling";
+}
+
+message ListImagesResponse {
+  repeated ImageSummary images = 1;
+}
+
+message RemoveImageRequest {
+  string image_id = 1;
+  bool force = 2;
+}
+
+message RemoveImageResponse {}
+
+message PullImageRequest {
+  // A normalized reference with a tag or digest.
+  string reference = 1;
+}
+
+message PullImageEvent {
+  optional string layer_id = 1;
+  string status = 2;
+  optional uint64 current = 3;
+  optional uint64 total = 4;
+  optional string error = 5;
+}
+
+message ListVolumesRequest {}
+
+message VolumeSummary {
+  string name = 1;
+  string driver = 2;
+  string mountpoint = 3;
+  optional int64 created_at_unix_seconds = 4;
+  map<string, string> labels = 5;
+  // Containers on this node (any state) that mount it, and up to 16 of their names.
+  uint32 used_by = 6;
+  repeated string users = 7;
+  // From the agent's last `docker system df`; absent until it ran or when the driver can't say.
+  optional uint64 size_bytes = 8;
+}
+
+message ListVolumesResponse {
+  repeated VolumeSummary volumes = 1;
+}
+
+message CreateVolumeRequest {
+  string name = 1;
+  string driver = 2;
+  map<string, string> labels = 3;
+  map<string, string> driver_opts = 4;
+}
+
+message CreateVolumeResponse {
+  VolumeSummary volume = 1;
+}
+
+message RemoveVolumeRequest {
+  string name = 1;
+}
+
+message RemoveVolumeResponse {
+  // Non-empty when Docker refused because these containers mount the volume.
+  repeated string in_use_by = 1;
+}
+
+message ListNetworksRequest {}
+
+message NetworkSummary {
+  string id = 1;
+  string name = 2;
+  string driver = 3;
+  // `local`, `swarm`, or `global`.
+  string scope = 4;
+  repeated string subnets = 5;
+  // Running containers on this node with an endpoint on it.
+  uint32 containers = 6;
+  optional int64 created_at_unix_seconds = 7;
+  map<string, string> labels = 8;
+  bool attachable = 9;
+  // Dropped unread: built-in networks are matched by name (`builtin`).
+  reserved 10, 11;
+  reserved "ingress", "internal";
+  bool builtin = 12;
+}
+
+message ListNetworksResponse {
+  repeated NetworkSummary networks = 1;
+}
+
+message InspectNetworkRequest {
+  string id = 1;
+}
+
+message NetworkEndpoint {
+  string container_id = 1;
+  string name = 2;
+}
+
+message InspectNetworkResponse {
+  // Dropped unread: the controller asks only for the endpoints.
+  reserved 1;
+  reserved "network";
+  repeated NetworkEndpoint endpoints = 2;
+}
+
+message CreateNetworkRequest {
+  string name = 1;
+  optional string subnet = 2;
+  map<string, string> labels = 3;
+}
+
+message CreateNetworkResponse {
+  string id = 1;
+}
+
+message RemoveNetworkRequest {
+  string id = 1;
+}
+
+message RemoveNetworkResponse {
+  repeated string in_use_by = 1;
+}
+
+message ExecClientFrame {
+  oneof frame {
+    ExecOpenRequest open = 1;
+    bytes input = 2;
+    ExecResizeRequest resize = 3;
+    ExecCloseRequest close = 4;
+  }
+}
+
+// Without `shell` the agent tries `/bin/bash -l`, then `/bin/sh`; a given shell is used as is.
+message ExecOpenRequest {
+  string container_id = 1;
+  optional string shell = 2;
+  uint32 cols = 3;
+  uint32 rows = 4;
+}
+
+message ExecResizeRequest {
+  uint32 cols = 1;
+  uint32 rows = 2;
+}
+
+message ExecCloseRequest {}
+
+message ExecServerFrame {
+  oneof frame {
+    ExecStartedEvent started = 1;
+    bytes output = 2;
+    ExecExitEvent exit = 3;
+    ExecErrorEvent error = 4;
+  }
+}
+
+message ExecStartedEvent {
+  string exec_id = 1;
+  string shell = 2;
+}
+
+message ExecExitEvent {
+  optional int64 code = 1;
+  // The process was still running when the session ended: closing a TTY's input doesn't end
+  // it, and the agent leaves it running. `code` is then absent.
+  bool still_running = 2;
+}
+
+message ExecErrorEvent {
+  string code = 1;
+  string message = 2;
+}

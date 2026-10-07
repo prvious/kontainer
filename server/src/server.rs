@@ -14,6 +14,7 @@ use axum::{
 };
 use hyper::server::conn::http1;
 use hyper_util::{rt::TokioIo, server::conn::auto, service::TowerToHyperService};
+use kontainer_engine::DockerHost;
 use kontainer_lifecycle::{DrainClock, ShutdownGrace};
 use kontainer_rpc_auth::{MutualTlsIdentityFiles, spawn_tracked, valid_identity_segment};
 use loco_rs::{
@@ -39,10 +40,55 @@ use crate::{
 pub(crate) struct ControllerSettings {
     agent_rpc: AgentRpcSettings,
     public_http: PublicHttpSettings,
+    #[serde(default)]
+    docker: DockerSettings,
     #[serde(default, deserialize_with = "deserialize_shutdown_grace")]
     shutdown_grace: ShutdownGrace,
     #[serde(default)]
     github_auth: GitHubAuthSettings,
+}
+
+/// The Docker Engine the controller's manager-scoped engine talks to
+/// (spec 10). `tcp://` is the dev-cluster override from ADR 0004 and is
+/// refused outside development and test by [`validate_docker_host`].
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct DockerSettings {
+    #[serde(deserialize_with = "deserialize_docker_host")]
+    pub(crate) host: DockerHost,
+}
+
+fn deserialize_docker_host<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<DockerHost, D::Error> {
+    String::deserialize(deserializer)?
+        .parse()
+        .map_err(serde::de::Error::custom)
+}
+
+fn validate_docker_host(docker: &DockerSettings, environment: &Environment) -> Result<()> {
+    // Loco defaults to `development` when LOCO_ENV is unset, so the environment check alone
+    // fails open; plain-TCP Docker is unauthenticated, so never allow it off this machine.
+    if docker.host.is_remote_tcp() {
+        return Err(Error::Message(
+            "settings.docker.host may use tcp:// only for a loopback host (localhost, 127.0.0.0/8, ::1)"
+                .to_owned(),
+        ));
+    }
+    if docker.host.is_tcp() && !matches!(environment, Environment::Development | Environment::Test)
+    {
+        return Err(Error::Message(format!(
+            "settings.docker.host may use tcp:// only in development or test, not {environment:?}"
+        )));
+    }
+    Ok(())
+}
+
+/// Refuse a Docker host the running environment doesn't allow, before anything serves. `serve`
+/// builds the manager engine from the same settings.
+pub fn init_docker_state(ctx: &AppContext) -> Result<()> {
+    let settings = controller_settings(ctx)?;
+    validate_docker_host(&settings.docker, &ctx.environment)
 }
 
 fn deserialize_shutdown_grace<'de, D: serde::Deserializer<'de>>(
@@ -106,6 +152,43 @@ pub fn init_shutdown_state(ctx: &AppContext) -> Result<()> {
 #[derive(Clone)]
 pub struct ForceCancellation(pub CancellationToken);
 
+/// When this controller started and the tracing filter it logs with, fixed at boot for
+/// `/api/v1/status`.
+#[derive(Clone, Debug)]
+pub struct ControllerRuntime {
+    pub started_at: chrono::DateTime<chrono::Utc>,
+    pub log_level: String,
+}
+
+pub fn init_runtime_state(ctx: &AppContext) -> Result<()> {
+    let logger = &ctx.config.logger;
+    ctx.shared_store.insert(ControllerRuntime {
+        started_at: chrono::Utc::now(),
+        log_level: effective_log_level(
+            std::env::var("RUST_LOG").ok().as_deref(),
+            logger.override_filter.as_deref(),
+            &logger.level.to_string(),
+        ),
+    });
+    Ok(())
+}
+
+/// The filter Loco applies, in its order: `RUST_LOG`, then the configured `override_filter`,
+/// then the configured level. Blank values don't count.
+pub fn effective_log_level(
+    rust_log: Option<&str>,
+    override_filter: Option<&str>,
+    level: &str,
+) -> String {
+    [rust_log, override_filter]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .find(|filter| !filter.is_empty())
+        .unwrap_or(level)
+        .to_owned()
+}
+
 /// Struct shape (not a tagged enum): serde's `deny_unknown_fields` is not
 /// honored for internally tagged enums, so the mode/bundle consistency is
 /// enforced by [`PublicHttpSettings::validate`] instead.
@@ -154,8 +237,16 @@ struct AgentRpcSettings {
     #[serde(deserialize_with = "deserialize_cluster_id")]
     cluster_id: String,
     tls: AgentRpcTlsSettings,
-    #[serde(default)]
-    client: Option<AgentRpcClientSettings>,
+    /// Agent certificates carry `{node_id}.{suffix}` as their DNS name.
+    #[serde(
+        default = "default_agent_server_name_suffix",
+        deserialize_with = "deserialize_dns_suffix"
+    )]
+    agent_server_name_suffix: String,
+}
+
+fn default_agent_server_name_suffix() -> String {
+    crate::nodes::agents::DEFAULT_AGENT_SERVER_NAME_SUFFIX.to_owned()
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -164,15 +255,6 @@ struct AgentRpcTlsSettings {
     certificate_path: PathBuf,
     private_key_path: PathBuf,
     client_ca_path: PathBuf,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct AgentRpcClientSettings {
-    endpoint: String,
-    server_name: String,
-    #[serde(deserialize_with = "deserialize_node_id")]
-    node_id: String,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -192,6 +274,27 @@ impl std::fmt::Display for ServerKind {
     }
 }
 
+/// Print the first-run setup code to stdout (not the log) while no owner exists. If ownership
+/// can't be read, print it anyway: registration still refuses a second owner.
+async fn announce_setup_code(ctx: &AppContext) {
+    let Some(code) = ctx
+        .shared_store
+        .get::<crate::auth::credentials::SetupCode>()
+    else {
+        return;
+    };
+    if matches!(
+        crate::auth::actions::bootstrap_status::execute(&ctx.db).await,
+        Ok(true)
+    ) {
+        return;
+    }
+    println!(
+        "Kontainer setup code: {} — enter it on the Create owner screen. A new code is printed on each restart until the owner exists.",
+        code.as_str()
+    );
+}
+
 pub async fn serve(router: Router, ctx: &AppContext, params: &ServeParams) -> Result<()> {
     let settings = controller_settings(ctx)?;
     let http_listener = TcpListener::bind(format!("{}:{}", params.binding, params.port)).await?;
@@ -204,11 +307,19 @@ pub async fn serve(router: Router, ctx: &AppContext, params: &ServeParams) -> Re
         &ctx.config.server.host,
     )
     .await?;
+    // Only once startup can no longer fail on configuration, so the code isn't printed for a
+    // controller that never serves.
+    announce_setup_code(ctx).await;
     let agent_rpc = if settings.agent_rpc.enabled {
+        let recorder = crate::rpc::PostgresCheckInRecorder::new(
+            ctx.db.clone(),
+            settings.agent_rpc.cluster_id.clone(),
+        );
         Some(BoundAgentRpcServer {
             listener: TcpListener::bind(settings.agent_rpc.binding).await?,
             cluster_id: settings.agent_rpc.cluster_id,
             tls_files: settings.agent_rpc.tls.into(),
+            intake: crate::rpc::ControllerIntakeService::recording(Arc::new(recorder)),
         })
     } else {
         None
@@ -226,21 +337,115 @@ pub async fn serve(router: Router, ctx: &AppContext, params: &ServeParams) -> Re
         agent_rpc,
         shutdown.clone(),
     );
-    tokio::pin!(servers);
+    // Swarm-wide objects go through the configured host. Whether it is a manager is checked per
+    // call (ADR 0031), so a daemon that starts late or is promoted later works without a restart;
+    // until then manager-scoped routes answer 503 `not_a_manager` and the rest keeps working.
+    let manager = crate::swarm::engine::connect_manager(&settings.docker.host);
+    if let Some(manager) = &manager {
+        ctx.shared_store
+            .insert(crate::swarm::engine::SharedManagerEngine(manager.clone()));
+    }
+    // Hourly sample pruning stops with the drain and is joined before serve returns.
+    let pruner = tokio::spawn(crate::tasks::prune_samples::run_hourly(
+        ctx.db.clone(),
+        shutdown.draining(),
+    ));
+    // The operation worker recovers interrupted operations first, then claims until the drain,
+    // and gets the shutdown grace to finish in-flight executions (ADR 0009).
+    let worker = tokio::spawn(
+        crate::operations::worker::Worker {
+            database: ctx.db.clone(),
+            registry: Arc::new(crate::operations::executor::production_registry()),
+            agents: ctx
+                .shared_store
+                .get::<crate::nodes::agents::SharedAgentDirectory>()
+                .map(|directory| directory.0),
+            manager,
+            settings: crate::operations::worker::WorkerSettings::new(
+                settings.shutdown_grace.duration(),
+            ),
+        }
+        .run(shutdown.draining()),
+    );
 
-    tokio::select! {
+    // Log and exec streams close with 1001 when the drain starts; upgraded connections are not HTTP
+    // requests the servers track.
+    let log_streams = ctx.shared_store.get::<crate::logs::LogStreams>();
+    let exec_streams = ctx.shared_store.get::<crate::exec::ExecStreams>();
+    let draining = shutdown.draining();
+    let streams = tokio::spawn(async move {
+        draining.cancelled().await;
+        if let Some(streams) = log_streams
+            && let Err(error) = streams.server.shutdown().await
+        {
+            tracing::warn!(?error, "log streams did not close within the grace");
+        }
+        if let Some(streams) = exec_streams
+            && let Err(error) = streams.server.shutdown().await
+        {
+            tracing::warn!(?error, "exec sessions did not close within the grace");
+        }
+    });
+
+    let result = run_until_stopped(servers, shutdown_signal(), worker, &shutdown).await;
+    if let Err(error) = streams.await {
+        tracing::error!(%error, "log stream shutdown task failed");
+    }
+    if let Err(error) = pruner.await {
+        tracing::error!(%error, "sample pruning task failed");
+    }
+    result
+}
+
+/// Wait for the servers to stop, then join the operation worker. A shutdown signal starts the
+/// drain first, and so does the worker stopping on its own: before the drain it only stops on a
+/// bug, and admission would keep answering 202 for operations nothing runs. That exit fails the
+/// controller, like a server's, rather than restarting the worker and hiding the cause.
+async fn run_until_stopped(
+    servers: impl Future<Output = Result<()>>,
+    signal: impl Future<Output = ()>,
+    mut worker: tokio::task::JoinHandle<()>,
+    shutdown: &ControllerShutdown,
+) -> Result<()> {
+    tokio::pin!(servers);
+    let mut worker_exit = None;
+    let result = tokio::select! {
         result = &mut servers => result,
-        _ = shutdown_signal() => {
+        () = signal => {
             shutdown.begin_drain();
             servers.await
         }
+        exit = &mut worker => {
+            let unexpected = !shutdown.draining().is_cancelled();
+            worker_exit = Some(exit);
+            if unexpected {
+                tracing::error!("the operation worker stopped before the drain; shutting down");
+                shutdown.begin_drain();
+            }
+            let result = servers.await;
+            if unexpected {
+                result.and(Err(Error::string("the operation worker stopped")))
+            } else {
+                result
+            }
+        }
+    };
+    shutdown.begin_drain();
+    let exit = match worker_exit {
+        Some(exit) => exit,
+        None => worker.await,
+    };
+    if let Err(error) = exit {
+        tracing::error!(%error, "operation worker task failed");
     }
+    result
 }
 
 pub struct BoundAgentRpcServer {
     pub listener: TcpListener,
     pub cluster_id: String,
     pub tls_files: MutualTlsIdentityFiles,
+    pub intake: crate::rpc::ControllerIntakeService,
 }
 
 pub struct BoundHttpServer {
@@ -454,6 +659,7 @@ pub async fn supervise_controller_servers(
                 agent_rpc.listener,
                 agent_rpc.cluster_id,
                 agent_rpc.tls_files,
+                agent_rpc.intake,
                 cancellation.clone(),
                 force.clone(),
                 rpc_connections.clone(),
@@ -598,7 +804,7 @@ fn parse_controller_settings(settings: serde_json::Value) -> Result<ControllerSe
     serde_json::from_value(settings)
         .map_err(|_| {
             Error::string(
-                "invalid controller settings: check agent_rpc, public_http, github_auth, shutdown_grace, and cluster_id keys and types",
+                "invalid controller settings: check agent_rpc, public_http, docker, github_auth, shutdown_grace, and cluster_id keys and types",
             )
         })
         .and_then(|settings: ControllerSettings| {
@@ -635,20 +841,30 @@ pub struct ControllerClusterId(pub String);
 /// settings. A missing secret file or invalid origin fails startup when
 /// login is enabled; a disabled service fails login requests closed.
 ///
-/// When `agent_rpc.client` is configured, the static controller-to-agent
-/// client is also validated here. Missing, malformed, or mismatched TLS
-/// files fail startup; an unreachable agent does not, and surfaces only as
-/// a typed call failure.
+/// With agent RPC enabled, the per-node agent directory is inserted too: it
+/// dials each node at its advertised address with the controller identity.
 pub fn init_shared_auth_state(ctx: &AppContext) -> Result<()> {
     use std::sync::Arc;
 
     let settings = controller_settings(ctx)?;
     ctx.shared_store
         .insert(ControllerClusterId(settings.agent_rpc.cluster_id.clone()));
+    ctx.shared_store
+        .insert(crate::auth::throttle::LoginThrottle::default());
+    // A fresh code per process; `serve` prints it while no owner exists (ADR 0029).
+    ctx.shared_store
+        .insert(crate::auth::credentials::SetupCode::generate());
 
-    if let Some(client) = build_agent_client(&settings)? {
+    if settings.agent_rpc.enabled {
+        let directory = crate::nodes::agents::MtlsAgentDirectory::new(
+            settings.agent_rpc.cluster_id.clone(),
+            settings.agent_rpc.tls.clone().into(),
+            settings.agent_rpc.agent_server_name_suffix.clone(),
+        );
         ctx.shared_store
-            .insert(crate::rpc::SharedAgentClient(Arc::new(client)));
+            .insert(crate::nodes::agents::SharedAgentDirectory(Arc::new(
+                directory,
+            )));
     }
 
     let service = if settings.github_auth.enabled {
@@ -704,47 +920,27 @@ fn deserialize_cluster_id<'de, D: serde::Deserializer<'de>>(
     Ok(value)
 }
 
-fn deserialize_node_id<'de, D: serde::Deserializer<'de>>(
+fn deserialize_dns_suffix<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> std::result::Result<String, D::Error> {
     let value = String::deserialize(deserializer)?;
-    if !valid_identity_segment(&value) {
+    let valid = !value.is_empty()
+        && value.len() <= 200
+        && value.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label
+                    .chars()
+                    .all(|character| character.is_ascii_alphanumeric() || character == '-')
+        });
+    if !valid {
         return Err(serde::de::Error::custom(
-            "node_id must be a canonical workload identity segment",
+            "agent_server_name_suffix must be a DNS name",
         ));
     }
     Ok(value)
-}
-
-/// Validate the static outbound agent settings without connecting.
-///
-/// Returns `None` when no outbound client is configured. A configured
-/// endpoint, DNS name, node ID, and TLS bundle are parsed here so invalid
-/// settings and bad TLS files fail startup before HTTP admission.
-fn build_agent_client(
-    settings: &ControllerSettings,
-) -> Result<Option<crate::rpc::NodeAgentClientConfig>, Error> {
-    let Some(client) = &settings.agent_rpc.client else {
-        return Ok(None);
-    };
-    let tls_files: MutualTlsIdentityFiles = settings.agent_rpc.tls.clone().into();
-    crate::rpc::NodeAgentClientConfig::new(
-        client.endpoint.clone(),
-        client.server_name.clone(),
-        settings.agent_rpc.cluster_id.clone(),
-        client.node_id.clone(),
-        tls_files,
-    )
-    .map(Some)
-    .map_err(|error| {
-        let tls = &settings.agent_rpc.tls;
-        Error::Message(format!(
-            "invalid agent client configuration ({} / {} / {}): {error}",
-            tls.certificate_path.display(),
-            tls.private_key_path.display(),
-            tls.client_ca_path.display()
-        ))
-    })
 }
 
 /// Load and validate the public TLS identity before any listener admits
@@ -894,7 +1090,7 @@ mod tests {
             binding,
             cluster_id,
             tls,
-            client: _,
+            agent_server_name_suffix: _,
         } = settings.agent_rpc;
         assert!(enabled);
         assert_eq!(binding.to_string(), "127.0.0.1:50051");
@@ -915,6 +1111,7 @@ mod tests {
                 }
             },
             "public_http": { "mode": "plaintext" },
+            "docker": { "host": "unix:///var/run/docker.sock" },
             "github_auth": { "enabled": false }
         })
     }
@@ -993,6 +1190,7 @@ mod tests {
             "/agent_rpc",
             "/agent_rpc/tls",
             "/public_http",
+            "/docker",
             "/github_auth",
         ] {
             let mut settings = valid_settings();
@@ -1038,80 +1236,43 @@ mod tests {
     }
 
     #[test]
-    fn agent_client_settings_use_the_certificate_identity_rules() {
-        for invalid in ["", ".", "..", "node/other", " secret-value "] {
-            let mut settings = valid_settings();
-            settings["agent_rpc"]["client"] = serde_json::json!({
-                "endpoint": "https://127.0.0.1:50052",
-                "server_name": "node-1.agent.kontainer.test",
-                "node_id": invalid,
-            });
-            let error = serde_json::from_value::<ControllerSettings>(settings).unwrap_err();
-            assert!(
-                error
-                    .to_string()
-                    .contains("node_id must be a canonical workload identity segment"),
-                "{invalid} must be rejected"
-            );
-            assert!(!error.to_string().contains("secret-value"));
-        }
-    }
-
-    #[test]
-    fn unknown_agent_client_settings_are_rejected() {
+    fn the_static_agent_client_setting_is_gone_and_the_suffix_is_validated() {
         let mut settings = valid_settings();
         settings["agent_rpc"]["client"] = serde_json::json!({
             "endpoint": "https://127.0.0.1:50052",
             "server_name": "node-1.agent.kontainer.test",
             "node_id": "node-1",
-            "unexpected_setting": "secret-value",
         });
-        let error = parse_controller_settings(settings).unwrap_err();
-        assert!(!error.to_string().contains("secret-value"));
-    }
-
-    #[test]
-    fn agent_client_is_optional_but_validates_tls_at_startup() {
-        // No client configured: no outbound client, startup still succeeds.
-        let settings: ControllerSettings = serde_json::from_value(valid_settings()).unwrap();
-        assert!(settings.agent_rpc.client.is_none());
-        assert!(super::build_agent_client(&settings).unwrap().is_none());
-
-        // Client configured with missing TLS files: startup fails closed
-        // without leaking file contents.
-        let mut with_client = valid_settings();
-        with_client["agent_rpc"]["client"] = serde_json::json!({
-            "endpoint": "https://127.0.0.1:50052",
-            "server_name": "node-1.agent.kontainer.test",
-            "node_id": "node-1",
-        });
-        let settings: ControllerSettings = serde_json::from_value(with_client).unwrap();
-        let error = super::build_agent_client(&settings).unwrap_err();
         assert!(
-            error
-                .to_string()
-                .contains("invalid agent client configuration")
+            parse_controller_settings(settings).is_err(),
+            "membership replaced the one configured agent"
         );
-        assert!(!error.to_string().contains("secret-value"));
 
-        // Invalid endpoints fail before any TLS work.
-        for endpoint in [
-            "http://127.0.0.1:50052",
-            "https://127.0.0.1:50052/containers",
-            "not-a-url",
+        let parsed = parse_controller_settings(valid_settings()).unwrap();
+        assert_eq!(
+            parsed.agent_rpc.agent_server_name_suffix,
+            "agent.kontainer.internal"
+        );
+        let mut custom = valid_settings();
+        custom["agent_rpc"]["agent_server_name_suffix"] = serde_json::json!("agents.example");
+        assert_eq!(
+            parse_controller_settings(custom)
+                .unwrap()
+                .agent_rpc
+                .agent_server_name_suffix,
+            "agents.example"
+        );
+        for invalid in [
+            "",
+            "under_score.example",
+            "-bad.example",
+            "a..b",
+            "secret value",
         ] {
-            let mut bad_endpoint = valid_settings();
-            bad_endpoint["agent_rpc"]["client"] = serde_json::json!({
-                "endpoint": endpoint,
-                "server_name": "node-1.agent.kontainer.test",
-                "node_id": "node-1",
-            });
-            let settings: ControllerSettings = serde_json::from_value(bad_endpoint).unwrap();
-            let error = super::build_agent_client(&settings).unwrap_err();
-            assert!(
-                error.to_string().contains("agent endpoint is invalid"),
-                "{endpoint} must be rejected"
-            );
+            let mut bad = valid_settings();
+            bad["agent_rpc"]["agent_server_name_suffix"] = serde_json::json!(invalid);
+            let error = parse_controller_settings(bad).unwrap_err();
+            assert!(!error.to_string().contains("secret value"), "{invalid}");
         }
     }
 
@@ -1122,9 +1283,57 @@ mod tests {
             let settings: ControllerSettings =
                 serde_json::from_value(config.settings.unwrap()).unwrap();
 
-            assert!(!settings.agent_rpc.enabled);
+            // Development runs the agent RPC against dev/pki by default.
+            assert_eq!(
+                settings.agent_rpc.enabled,
+                environment == Environment::Development
+            );
             assert_eq!(settings.public_http.mode, PublicHttpMode::Plaintext);
             assert!(!settings.github_auth.enabled);
+        }
+    }
+
+    #[test]
+    fn docker_host_defaults_to_the_socket_and_tcp_is_development_only() {
+        let settings = parse_controller_settings(valid_settings()).unwrap();
+        assert_eq!(
+            settings.docker.host,
+            kontainer_engine::DockerHost::default()
+        );
+
+        let mut tcp = valid_settings();
+        tcp["docker"] = serde_json::json!({ "host": "tcp://localhost:2375" });
+        let settings = parse_controller_settings(tcp).unwrap();
+        for environment in [Environment::Development, Environment::Test] {
+            assert!(super::validate_docker_host(&settings.docker, &environment).is_ok());
+        }
+        let error =
+            super::validate_docker_host(&settings.docker, &Environment::Production).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("tcp:// only in development or test")
+        );
+
+        let mut remote = valid_settings();
+        remote["docker"] = serde_json::json!({ "host": "tcp://10.0.0.5:2375" });
+        let settings = parse_controller_settings(remote).unwrap();
+        for environment in [
+            Environment::Development,
+            Environment::Test,
+            Environment::Production,
+        ] {
+            let error = super::validate_docker_host(&settings.docker, &environment).unwrap_err();
+            assert!(
+                error.to_string().contains("only for a loopback host"),
+                "{environment:?}"
+            );
+        }
+
+        for invalid in ["http://localhost:2375", "localhost:2375", ""] {
+            let mut settings = valid_settings();
+            settings["docker"] = serde_json::json!({ "host": invalid });
+            assert!(parse_controller_settings(settings).is_err(), "{invalid}");
         }
     }
 
@@ -1371,5 +1580,80 @@ mod tests {
 
     fn loopback() -> SocketAddr {
         SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 5150)
+    }
+
+    mod worker_supervision {
+        use std::{future::pending, time::Duration};
+
+        use loco_rs::Error;
+        use tokio_util::sync::CancellationToken;
+
+        use super::super::{ControllerShutdown, run_until_stopped};
+
+        /// Servers that stop once the drain starts, as the real ones do.
+        fn servers(shutdown: &ControllerShutdown) -> impl Future<Output = loco_rs::Result<()>> {
+            let draining = shutdown.draining();
+            async move {
+                draining.cancelled().await;
+                Ok(())
+            }
+        }
+
+        #[tokio::test]
+        async fn a_worker_that_stops_on_its_own_drains_and_fails_the_controller() {
+            let shutdown = ControllerShutdown::from(CancellationToken::new());
+            let worker = tokio::spawn(async {});
+            let result = tokio::time::timeout(
+                Duration::from_secs(5),
+                run_until_stopped(servers(&shutdown), pending(), worker, &shutdown),
+            )
+            .await
+            .expect("the worker's exit starts the drain");
+            assert!(shutdown.draining().is_cancelled());
+            assert!(
+                result
+                    .unwrap_err()
+                    .to_string()
+                    .contains("operation worker stopped")
+            );
+        }
+
+        #[tokio::test]
+        async fn a_panicking_worker_fails_the_controller_too() {
+            let shutdown = ControllerShutdown::from(CancellationToken::new());
+            let worker = tokio::spawn(async { panic!("worker bug") });
+            let result = run_until_stopped(servers(&shutdown), pending(), worker, &shutdown).await;
+            assert!(result.is_err());
+        }
+
+        #[tokio::test]
+        async fn a_shutdown_signal_drains_then_joins_the_worker() {
+            let shutdown = ControllerShutdown::from(CancellationToken::new());
+            let draining = shutdown.draining();
+            let worker = tokio::spawn(async move { draining.cancelled().await });
+            let result = run_until_stopped(servers(&shutdown), async {}, worker, &shutdown).await;
+            assert!(result.is_ok());
+            assert!(shutdown.draining().is_cancelled());
+        }
+
+        #[tokio::test]
+        async fn a_worker_finishing_its_drain_first_keeps_the_server_error() {
+            let shutdown = ControllerShutdown::from(CancellationToken::new());
+            let draining = shutdown.draining();
+            let worker = tokio::spawn(async move { draining.cancelled().await });
+            let failing = {
+                let shutdown = shutdown.clone();
+                async move {
+                    shutdown.begin_drain();
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                    Err(Error::string("public HTTP server failed"))
+                }
+            };
+            let result = run_until_stopped(failing, pending(), worker, &shutdown).await;
+            assert_eq!(
+                result.unwrap_err().to_string(),
+                Error::string("public HTTP server failed").to_string()
+            );
+        }
     }
 }

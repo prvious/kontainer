@@ -50,5 +50,6 @@ pub async fn execute(
     Ok(ValidatedSession {
         principal_id: family.principal_id,
         family_id: family.id,
+        access_expires_at: family.access_expires_at,
     })
 }

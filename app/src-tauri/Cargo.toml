@@ -1,8 +1,8 @@
 [package]
-name = "tauri-app"
+name = "kontainer-desktop"
 version = "0.1.0"
-description = "A Tauri App"
-authors = ["you"]
+description = "Kontainer desktop"
+authors = ["Clovis Muneza"]
 edition = "2021"
 rust-version = "1.98"
 
@@ -12,23 +12,20 @@ rust-version = "1.98"
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
-name = "tauri_app_lib"
+name = "kontainer_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+base64 = "0.22.1"
 tauri = { version = "2", features = ["macos-private-api"] }
 tauri-plugin-opener = "2"
 tauri-plugin-store = "2"
-base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-reqwest = { version = "0.12", features = ["json"] }
 tauri-plugin-window-state = "2.4.1"
-tokio-tungstenite = { version = "0.28.0", features = ["connect"] }
-futures-util = "0.3.31"
 # Desktop session custody: the UI-neutral controller client, the OS credential
 # vault, and the async/concurrency primitives the custody layer needs.
 kontainer-native-client = { path = "../../server/crates/native-client" }

@@ -61,7 +61,11 @@ impl Hooks for App {
 
     async fn after_context(ctx: AppContext) -> Result<AppContext> {
         crate::server::init_shutdown_state(&ctx)?;
+        crate::server::init_runtime_state(&ctx)?;
         crate::server::init_shared_auth_state(&ctx)?;
+        crate::server::init_docker_state(&ctx)?;
+        crate::logs::init_log_streams(&ctx)?;
+        crate::exec::init_exec_streams(&ctx)?;
         Ok(ctx)
     }
 
@@ -79,7 +83,10 @@ impl Hooks for App {
         Ok(())
     }
 
-    fn register_tasks(_tasks: &mut Tasks) {}
+    fn register_tasks(tasks: &mut Tasks) {
+        tasks.register(crate::tasks::reset_password::ResetPassword);
+        tasks.register(crate::tasks::prune_samples::PruneSamples);
+    }
 
     async fn truncate(_ctx: &AppContext) -> Result<()> {
         Ok(())

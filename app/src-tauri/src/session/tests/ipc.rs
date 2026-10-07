@@ -3,8 +3,10 @@
 
 use uuid::Uuid;
 
-use crate::session::errors::SessionError;
-use crate::session::models::{LoginHint, SessionDocument, SessionView};
+use crate::session::errors::{FieldErrorsView, FieldProblem, LoginFailure, SessionError};
+use crate::session::models::{
+    ConnectionSummary, ProbeDiagnostic, ProbeStatus, ProbeView, SavedConnection, SessionView,
+};
 
 use super::fakes::Harness;
 
@@ -25,7 +27,8 @@ fn session_view_matches_the_shared_fixture() {
         origin: "https://controller.example/".to_owned(),
         cluster_id: "test".to_owned(),
         principal_id: Uuid::parse_str("018f2e34-0000-7000-8000-0000000000aa").expect("uuid"),
-        github_login: "owner".to_owned(),
+        email: "owner@example.com".to_owned(),
+        display_name: "Ada Owner".to_owned(),
         label: Some("Default".to_owned()),
         access_expires_at_unix_ms: 1_760_000_000_000,
     };
@@ -42,14 +45,53 @@ fn session_view_matches_the_shared_fixture() {
 }
 
 #[test]
-fn login_hint_matches_the_shared_fixture() {
-    let hint = LoginHint {
+fn connection_probe_and_failure_shapes_match_the_shared_fixture() {
+    let connection = SavedConnection {
+        id: Uuid::parse_str("018f2e34-0000-7000-8000-0000000000cc").expect("uuid"),
         origin: "https://controller.example/".to_owned(),
         label: Some("Default".to_owned()),
+        last_used_at_unix_ms: 1_760_000_000_000,
+        last_summary: Some(ConnectionSummary {
+            nodes: 3,
+            services: 12,
+        }),
     };
     assert_eq!(
-        serde_json::to_value(&hint).expect("serializes"),
-        fixture()["loginHint"]
+        serde_json::to_value(&connection).expect("serializes"),
+        fixture()["savedConnection"]
+    );
+    let probe = ProbeView {
+        status: ProbeStatus::Unreachable,
+        diagnostic: Some(ProbeDiagnostic::Tcp),
+    };
+    assert_eq!(
+        serde_json::to_value(probe).expect("serializes"),
+        fixture()["probeView"]
+    );
+    let failure = LoginFailure {
+        attempts_remaining: Some(7),
+        retry_after_seconds: None,
+        fields: Some(FieldErrorsView {
+            password: Some(FieldProblem::TooShort),
+            ..FieldErrorsView::default()
+        }),
+        request_id: Some("01J9ZK4F3Q".to_owned()),
+        ..SessionError::InvalidCredentials.into()
+    };
+    assert_eq!(
+        serde_json::to_value(&failure).expect("serializes"),
+        fixture()["loginFailure"]
+    );
+    let setup_code_failure = LoginFailure {
+        fields: Some(FieldErrorsView {
+            setup_code: Some(FieldProblem::Invalid),
+            ..FieldErrorsView::default()
+        }),
+        ..SessionError::ValidationFailed.into()
+    };
+    assert_eq!(
+        serde_json::to_value(&setup_code_failure).expect("serializes"),
+        fixture()["setupCodeFailure"]
     );
 }
 
@@ -120,25 +162,4 @@ async fn custody_outputs_never_carry_credentials() {
     ] {
         assert!(!output.contains(canary), "{canary} leaked into IPC output");
     }
-}
-
-#[tokio::test]
-async fn login_hint_reports_only_stored_hints() {
-    use std::sync::atomic::Ordering;
-
-    let harness = Harness::new();
-    assert!(harness.manager.login_hint().is_none());
-
-    let hint = LoginHint {
-        origin: "https://controller.example/".to_owned(),
-        label: Some("Default".to_owned()),
-    };
-    harness
-        .metadata
-        .set_document(SessionDocument::new(Some(hint.clone()), None));
-    assert_eq!(harness.manager.login_hint(), Some(hint));
-
-    // A broken store yields no hint rather than an error or stale data.
-    harness.metadata.corrupt_reads.store(true, Ordering::SeqCst);
-    assert!(harness.manager.login_hint().is_none());
 }

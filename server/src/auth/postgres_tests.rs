@@ -57,6 +57,8 @@ async fn test_principal(
     let id = Uuid::now_v7();
     principal::ActiveModel {
         id: Set(id),
+        email: Set(None),
+        display_name: Set(None),
         kind: Set("human".to_owned()),
         status: Set(status.to_owned()),
         authorization_epoch: Set(0),
@@ -113,38 +115,48 @@ async fn test_context(database: sea_orm::DatabaseConnection) -> Result<AppContex
     Ok(App::after_context(context).await?)
 }
 
-#[derive(Debug)]
-struct DeepStatusFakeAgent {
-    calls: Arc<AtomicUsize>,
+async fn authorized_get(
+    router: &Router,
+    path: &str,
+    access: &str,
+) -> Result<(StatusCode, Option<String>, serde_json::Value), Box<dyn Error>> {
+    let response = router
+        .clone()
+        .oneshot(
+            Request::get(path)
+                .header(header::AUTHORIZATION, format!("Bearer {access}"))
+                .body(Body::empty())?,
+        )
+        .await?;
+    let status = response.status();
+    let cache = response
+        .headers()
+        .get(header::CACHE_CONTROL)
+        .map(|value| value.to_str().unwrap_or_default().to_owned());
+    let body = serde_json::from_slice(&to_bytes(response.into_body(), 64 * 1024).await?)?;
+    Ok((status, cache, body))
 }
 
-#[async_trait::async_trait]
-impl crate::rpc::AgentClient for DeepStatusFakeAgent {
-    async fn describe(
-        &self,
-        _cancellation: &tokio_util::sync::CancellationToken,
-    ) -> Result<crate::rpc::AgentDescription, crate::rpc::AgentClientError> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        Ok(crate::rpc::AgentDescription {
-            node_id: "secret-node-canary".to_owned(),
-            agent_version: "secret-agent-version-canary".to_owned(),
-            architecture: "secret-architecture-canary".to_owned(),
-            docker_connected: false,
-        })
+async fn assert_challenged(
+    router: &Router,
+    path: &str,
+    access: Option<&str>,
+) -> Result<(), Box<dyn Error>> {
+    let mut request = Request::get(path);
+    if let Some(access) = access {
+        request = request.header(header::AUTHORIZATION, format!("Bearer {access}"));
     }
-
-    async fn list_containers(
-        &self,
-        _page_size: u32,
-        _page_token: String,
-        _cancellation: &tokio_util::sync::CancellationToken,
-    ) -> Result<crate::rpc::AgentContainerPage, crate::rpc::AgentClientError> {
-        Err(crate::rpc::AgentClientError::Unavailable)
-    }
-
-    fn node_id(&self) -> &str {
-        "secret-node-canary"
-    }
+    let response = router.clone().oneshot(request.body(Body::empty())?).await?;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{path}");
+    assert_eq!(
+        response.headers().get(header::CACHE_CONTROL).unwrap(),
+        "no-store"
+    );
+    assert_eq!(
+        response.headers().get(header::WWW_AUTHENTICATE).unwrap(),
+        "Bearer error=\"invalid_token\""
+    );
+    Ok(())
 }
 
 #[tokio::test]
@@ -156,7 +168,6 @@ async fn postgres_deep_status_enforces_session_and_drain_before_diagnostics()
     let evidence = async {
         let session = issued(&test_database.connection).await?;
         let context = test_context(test_database.connection.clone()).await?;
-        let agent_calls = Arc::new(AtomicUsize::new(0));
         let drain = context
             .shared_store
             .get::<tokio_util::sync::CancellationToken>()
@@ -168,156 +179,63 @@ async fn postgres_deep_status_enforces_session_and_drain_before_diagnostics()
                 crate::controllers::health::admit_request,
             ));
         let path = "/api/v1/status/deep";
-        let valid = router
-            .clone()
-            .oneshot(
-                Request::get(path)
-                    .header(
-                        header::AUTHORIZATION,
-                        format!("Bearer {}", session.access_plaintext),
-                    )
-                    .body(Body::empty())?,
-            )
-            .await?;
-        assert_eq!(valid.status(), StatusCode::OK);
-        assert_eq!(
-            valid.headers().get(header::CACHE_CONTROL).unwrap(),
-            "no-store"
-        );
-        let body: serde_json::Value =
-            serde_json::from_slice(&to_bytes(valid.into_body(), 4096).await?)?;
+        let nodes_path = "/api/v1/nodes";
+        let access = session.access_plaintext.clone();
+
+        let (status, cache, body) = authorized_get(&router, path, &access).await?;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(cache.as_deref(), Some("no-store"));
         assert_eq!(
             body,
             serde_json::json!({
                 "build": {"version": env!("CARGO_PKG_VERSION")},
                 "migration": "current",
                 "database": "reachable",
-                "agentRpc": "down"
+                "nodesOnline": 0,
+                "nodesTotal": 0
             })
         );
+        let (status, cache, body) = authorized_get(&router, nodes_path, &access).await?;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(cache.as_deref(), Some("no-store"));
+        assert_eq!(body["items"], serde_json::json!([]));
 
-        let configured_path = "/api/v1/nodes/configured";
-        let no_node = router
-            .clone()
-            .oneshot(
-                Request::get(configured_path)
-                    .header(
-                        header::AUTHORIZATION,
-                        format!("Bearer {}", session.access_plaintext),
-                    )
-                    .body(Body::empty())?,
-            )
-            .await?;
-        assert_eq!(no_node.status(), StatusCode::OK);
+        crate::nodes::actions::record_check_in::execute(
+            &test_database.connection,
+            "test",
+            crate::nodes::domain::CheckIn {
+                node_id: "manager".to_owned(),
+                agent_version: "0.1.0".to_owned(),
+                architecture: "aarch64".to_owned(),
+                advertise_address: "127.0.0.1:50052".to_owned(),
+                hostname: "manager".to_owned(),
+                swarm_node_id: None,
+                docker_version: "29.8.0".to_owned(),
+                os: "linux".to_owned(),
+                cpu_cores: 4,
+                memory_total_bytes: 8 << 30,
+                sample: Some(crate::nodes::postgres_tests::reading(
+                    chrono::Utc::now(),
+                    5.0,
+                )),
+            },
+        )
+        .await?;
+        let (_, _, body) = authorized_get(&router, path, &access).await?;
+        assert_eq!(body["nodesOnline"], 1);
+        assert_eq!(body["nodesTotal"], 1);
+        let (_, _, body) = authorized_get(&router, nodes_path, &access).await?;
+        assert_eq!(body["items"][0]["id"], "manager");
+        assert_eq!(body["items"][0]["agentStatus"], "online");
         assert_eq!(
-            no_node.headers().get(header::CACHE_CONTROL).unwrap(),
-            "no-store"
+            (&body["items"][0]["role"], &body["items"][0]["health"]),
+            (&"unknown".into(), &"degraded".into()),
+            "without a manager Swarm state is unknown, so the node is degraded"
         );
-        assert_eq!(
-            serde_json::from_slice::<serde_json::Value>(
-                &to_bytes(no_node.into_body(), 4096).await?
-            )?,
-            serde_json::json!({"nodeId": null})
-        );
+        assert!(body["items"][0]["latestSample"].is_object());
 
-        context
-            .shared_store
-            .insert(crate::rpc::SharedAgentClient(Arc::new(
-                DeepStatusFakeAgent {
-                    calls: agent_calls.clone(),
-                },
-            )));
-        let with_agent = router
-            .clone()
-            .oneshot(
-                Request::get(path)
-                    .header(
-                        header::AUTHORIZATION,
-                        format!("Bearer {}", session.access_plaintext),
-                    )
-                    .body(Body::empty())?,
-            )
-            .await?;
-        assert_eq!(with_agent.status(), StatusCode::OK);
-        assert_eq!(
-            with_agent.headers().get(header::CACHE_CONTROL).unwrap(),
-            "no-store"
-        );
-        let with_agent_body = to_bytes(with_agent.into_body(), 4096).await?;
-        assert_eq!(
-            serde_json::from_slice::<serde_json::Value>(&with_agent_body)?,
-            serde_json::json!({
-                "build": {"version": env!("CARGO_PKG_VERSION")},
-                "migration": "current",
-                "database": "reachable",
-                "agentRpc": "up"
-            })
-        );
-        assert!(!String::from_utf8_lossy(&with_agent_body).contains("canary"));
-        assert_eq!(agent_calls.load(Ordering::SeqCst), 1);
-
-        let configured = router
-            .clone()
-            .oneshot(
-                Request::get(configured_path)
-                    .header(
-                        header::AUTHORIZATION,
-                        format!("Bearer {}", session.access_plaintext),
-                    )
-                    .body(Body::empty())?,
-            )
-            .await?;
-        assert_eq!(configured.status(), StatusCode::OK);
-        assert_eq!(
-            configured.headers().get(header::CACHE_CONTROL).unwrap(),
-            "no-store"
-        );
-        assert_eq!(
-            serde_json::from_slice::<serde_json::Value>(
-                &to_bytes(configured.into_body(), 4096).await?
-            )?,
-            serde_json::json!({"nodeId": "secret-node-canary"})
-        );
-        assert_eq!(
-            agent_calls.load(Ordering::SeqCst),
-            1,
-            "discovery makes no agent RPC"
-        );
-
-        let anonymous = router
-            .clone()
-            .oneshot(Request::get(path).body(Body::empty())?)
-            .await?;
-        assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
-        assert_eq!(
-            anonymous.headers().get(header::CACHE_CONTROL).unwrap(),
-            "no-store"
-        );
-        assert_eq!(
-            anonymous.headers().get(header::WWW_AUTHENTICATE).unwrap(),
-            "Bearer error=\"invalid_token\""
-        );
-        assert_eq!(agent_calls.load(Ordering::SeqCst), 1);
-
-        let anonymous_discovery = router
-            .clone()
-            .oneshot(Request::get(configured_path).body(Body::empty())?)
-            .await?;
-        assert_eq!(anonymous_discovery.status(), StatusCode::UNAUTHORIZED);
-        assert_eq!(
-            anonymous_discovery
-                .headers()
-                .get(header::CACHE_CONTROL)
-                .unwrap(),
-            "no-store"
-        );
-        assert_eq!(
-            anonymous_discovery
-                .headers()
-                .get(header::WWW_AUTHENTICATE)
-                .unwrap(),
-            "Bearer error=\"invalid_token\""
-        );
+        assert_challenged(&router, path, None).await?;
+        assert_challenged(&router, nodes_path, None).await?;
 
         revoke_session_family::execute(
             &test_database.connection,
@@ -325,86 +243,24 @@ async fn postgres_deep_status_enforces_session_and_drain_before_diagnostics()
             RevocationReason::Logout,
         )
         .await?;
-        let revoked = router
-            .clone()
-            .oneshot(
-                Request::get(path)
-                    .header(
-                        header::AUTHORIZATION,
-                        format!("Bearer {}", session.access_plaintext),
-                    )
-                    .body(Body::empty())?,
-            )
-            .await?;
-        assert_eq!(revoked.status(), StatusCode::UNAUTHORIZED);
-        assert_eq!(
-            revoked.headers().get(header::CACHE_CONTROL).unwrap(),
-            "no-store"
-        );
-        assert_eq!(
-            revoked.headers().get(header::WWW_AUTHENTICATE).unwrap(),
-            "Bearer error=\"invalid_token\""
-        );
-        assert_eq!(agent_calls.load(Ordering::SeqCst), 1);
-
-        let revoked_discovery = router
-            .clone()
-            .oneshot(
-                Request::get(configured_path)
-                    .header(
-                        header::AUTHORIZATION,
-                        format!("Bearer {}", session.access_plaintext),
-                    )
-                    .body(Body::empty())?,
-            )
-            .await?;
-        assert_eq!(revoked_discovery.status(), StatusCode::UNAUTHORIZED);
-        assert_eq!(
-            revoked_discovery
-                .headers()
-                .get(header::CACHE_CONTROL)
-                .unwrap(),
-            "no-store"
-        );
-        assert_eq!(
-            revoked_discovery
-                .headers()
-                .get(header::WWW_AUTHENTICATE)
-                .unwrap(),
-            "Bearer error=\"invalid_token\""
-        );
+        assert_challenged(&router, path, Some(&access)).await?;
+        assert_challenged(&router, nodes_path, Some(&access)).await?;
 
         drain.cancel();
-        let draining_discovery = router
-            .clone()
-            .oneshot(Request::get(configured_path).body(Body::empty())?)
-            .await?;
-        assert_eq!(draining_discovery.status(), StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(
-            draining_discovery
-                .headers()
-                .get(header::CACHE_CONTROL)
-                .unwrap(),
-            "no-store"
-        );
-        assert_eq!(
-            serde_json::from_slice::<serde_json::Value>(
-                &to_bytes(draining_discovery.into_body(), 4096).await?
-            )?,
-            serde_json::json!({"ok": false})
-        );
-        let draining = router
-            .oneshot(Request::get(path).body(Body::empty())?)
-            .await?;
-        assert_eq!(draining.status(), StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(
-            draining.headers().get(header::CACHE_CONTROL).unwrap(),
-            "no-store"
-        );
-        let draining_body: serde_json::Value =
-            serde_json::from_slice(&to_bytes(draining.into_body(), 4096).await?)?;
-        assert_eq!(draining_body, serde_json::json!({"ok": false}));
-        assert_eq!(agent_calls.load(Ordering::SeqCst), 1);
+        for draining_path in [path, nodes_path] {
+            let draining = router
+                .clone()
+                .oneshot(Request::get(draining_path).body(Body::empty())?)
+                .await?;
+            assert_eq!(draining.status(), StatusCode::SERVICE_UNAVAILABLE);
+            assert_eq!(
+                draining.headers().get(header::CACHE_CONTROL).unwrap(),
+                "no-store"
+            );
+            let draining_body: serde_json::Value =
+                serde_json::from_slice(&to_bytes(draining.into_body(), 4096).await?)?;
+            assert_eq!(draining_body, serde_json::json!({"ok": false}));
+        }
 
         let manager = SchemaManager::new(&test_database.connection);
         manager
@@ -416,59 +272,15 @@ async fn postgres_deep_status_enforces_session_and_drain_before_diagnostics()
             )
             .await?;
         let broken_context = test_context(test_database.connection.clone()).await?;
-        broken_context
-            .shared_store
-            .insert(crate::rpc::SharedAgentClient(Arc::new(
-                DeepStatusFakeAgent {
-                    calls: agent_calls.clone(),
-                },
-            )));
         let broken_router =
             App::routes(&broken_context).to_router::<App>(broken_context, Router::new())?;
-        let broken_discovery = broken_router
-            .clone()
-            .oneshot(
-                Request::get(configured_path)
-                    .header(
-                        header::AUTHORIZATION,
-                        format!("Bearer {}", session.access_plaintext),
-                    )
-                    .body(Body::empty())?,
-            )
-            .await?;
-        assert_eq!(broken_discovery.status(), StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(
-            broken_discovery
-                .headers()
-                .get(header::CACHE_CONTROL)
-                .unwrap(),
-            "no-store"
-        );
-        assert_eq!(
-            serde_json::from_slice::<serde_json::Value>(
-                &to_bytes(broken_discovery.into_body(), 4096).await?
-            )?,
-            serde_json::json!({"error": "unavailable"})
-        );
-        let broken = broken_router
-            .oneshot(
-                Request::get(path)
-                    .header(
-                        header::AUTHORIZATION,
-                        format!("Bearer {}", session.access_plaintext),
-                    )
-                    .body(Body::empty())?,
-            )
-            .await?;
-        assert_eq!(broken.status(), StatusCode::SERVICE_UNAVAILABLE);
-        assert_eq!(
-            broken.headers().get(header::CACHE_CONTROL).unwrap(),
-            "no-store"
-        );
-        let broken_body: serde_json::Value =
-            serde_json::from_slice(&to_bytes(broken.into_body(), 4096).await?)?;
-        assert_eq!(broken_body, serde_json::json!({"error": "unavailable"}));
-        assert_eq!(agent_calls.load(Ordering::SeqCst), 1);
+        for broken_path in [path, nodes_path] {
+            let (status, cache, body) =
+                authorized_get(&broken_router, broken_path, &access).await?;
+            assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+            assert_eq!(cache.as_deref(), Some("no-store"));
+            assert_eq!(body, serde_json::json!({"error": "unavailable"}));
+        }
         Ok::<_, Box<dyn Error>>(())
     }
     .await;
@@ -1425,8 +1237,14 @@ async fn postgres_session_openapi_registers_auth_routes_without_secrets()
                         let name = name.as_str().unwrap_or_default();
                         let allowed = (path == "/api/v1/auth/github/callback"
                             && ["code", "state", "error"].contains(&name))
-                            || (path == "/api/v1/nodes/{nodeId}/containers"
-                                && ["limit", "cursor"].contains(&name));
+                            || (path == "/api/v1/containers" && name == "node")
+                            || (path == "/api/v1/volumes" && ["node", "name"].contains(&name))
+                            || (path == "/api/v1/networks/{networkId}" && name == "node")
+                            || (path == "/api/v1/services" && name == "stack")
+                            || (path == "/api/v1/cluster/samples"
+                                && ["window", "bucket"].contains(&name))
+                            || (path == "/api/v1/operations/{operation_id}/events"
+                                && ["after", "limit"].contains(&name));
                         if !allowed {
                             violations.push(format!("{method} {path} query {name}"));
                         }

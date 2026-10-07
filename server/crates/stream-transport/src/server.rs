@@ -18,7 +18,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     OutboundFrameError, StreamApplication, StreamClose, StreamLimits,
-    application::{QueuedFrame, outbound_queue},
+    application::{QueuedFrame, SessionSignal, outbound_queue},
 };
 
 #[derive(Clone)]
@@ -154,6 +154,18 @@ pub struct StreamAdmission {
 impl StreamAdmission {
     #[must_use]
     pub fn upgrade(self, websocket: WebSocketUpgrade) -> Response {
+        let application = self.server.inner.application.clone();
+        self.upgrade_with(websocket, application)
+    }
+
+    /// Upgrade with an application for this connection only, e.g. one that carries the
+    /// authenticated session it serves. It is dropped when the connection ends.
+    #[must_use]
+    pub fn upgrade_with(
+        self,
+        websocket: WebSocketUpgrade,
+        application: Arc<dyn StreamApplication>,
+    ) -> Response {
         let limits = self.server.inner.limits;
         websocket
             .protocols([WEBSOCKET_SUBPROTOCOL])
@@ -165,6 +177,7 @@ impl StreamAdmission {
                 run_connection(
                     socket,
                     self.server,
+                    application,
                     self.session_permit,
                     self.session_registration,
                 )
@@ -186,22 +199,16 @@ pub enum StreamShutdownError {
     OwnedTaskDidNotJoin,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SessionSignal {
-    Running,
-    Close(StreamClose),
-    PeerClosed,
-}
-
 async fn run_connection(
     socket: WebSocket,
     server: StreamServer,
+    application: Arc<dyn StreamApplication>,
     _session_permit: OwnedSemaphorePermit,
     _session_registration: SessionRegistration,
 ) {
     let (sink, stream) = socket.split();
-    let (outbound, receiver) = outbound_queue(server.inner.limits);
     let (signal_sender, signal_receiver) = watch::channel(SessionSignal::Running);
+    let (outbound, receiver) = outbound_queue(server.inner.limits, signal_sender.clone());
     let stop_reader = CancellationToken::new();
 
     let reader_server = server.clone();
@@ -209,7 +216,15 @@ async fn run_connection(
     let reader_stop = stop_reader.clone();
     let reader_registration = server.inner.register_task();
     let mut reader = tokio::spawn(async move {
-        read_loop(stream, outbound, reader_server, reader_signal, reader_stop).await;
+        read_loop(
+            stream,
+            outbound,
+            application,
+            reader_server,
+            reader_signal,
+            reader_stop,
+        )
+        .await;
         reader_registration.complete();
     });
 
@@ -264,6 +279,7 @@ fn record_join_result(inner: &Arc<ServerInner>, result: Result<(), tokio::task::
 async fn read_loop(
     mut stream: futures_util::stream::SplitStream<WebSocket>,
     outbound: crate::OutboundSender,
+    application: Arc<dyn StreamApplication>,
     server: StreamServer,
     signal: watch::Sender<SessionSignal>,
     stop: CancellationToken,
@@ -293,7 +309,7 @@ async fn read_loop(
                     }
                 };
 
-                let application = server.inner.application.handle(frame, &outbound);
+                let application = application.handle(frame, &outbound);
                 let result = tokio::select! {
                     biased;
                     () = server.inner.shutdown.cancelled() => {
@@ -354,6 +370,9 @@ async fn write_loop(
     mut signal: watch::Receiver<SessionSignal>,
     server: StreamServer,
 ) {
+    // A quiet connection still carries a Ping, so the client can tell quiet from dead.
+    let every = server.inner.limits.ping_interval();
+    let mut ping = time::interval_at(time::Instant::now() + every, every);
     loop {
         tokio::select! {
             biased;
@@ -370,6 +389,19 @@ async fn write_loop(
                     SessionSignal::Running => {}
                     SessionSignal::Close(close) => {
                         send_close(&mut sink, close, server.inner.limits).await;
+                        return;
+                    }
+                    SessionSignal::Finish(close) => {
+                        let limits = server.inner.limits;
+                        let _ = time::timeout(limits.shutdown_grace(), async {
+                            while let Ok(queued) = receiver.try_recv() {
+                                if sink.send(Message::Binary(queued.encoded.into())).await.is_err() {
+                                    return;
+                                }
+                            }
+                        })
+                        .await;
+                        send_close(&mut sink, close, limits).await;
                         return;
                     }
                     SessionSignal::PeerClosed => {
@@ -390,6 +422,11 @@ async fn write_loop(
                 }
                 None => return,
             },
+            _ = ping.tick() => {
+                if sink.send(Message::Ping(axum::body::Bytes::new())).await.is_err() {
+                    return;
+                }
+            }
         }
     }
 }

@@ -4,6 +4,18 @@ import { vi } from "vitest";
 // Mock @tauri-apps/api/core
 vi.mock("@tauri-apps/api/core", () => ({
     invoke: vi.fn(),
+    // Tests take the channel from the invoke arguments and call `onmessage` to push events.
+    Channel: class {
+        onmessage: (message: unknown) => void = () => {};
+        constructor(onmessage?: (message: unknown) => void) {
+            if (onmessage) this.onmessage = onmessage;
+        }
+    },
+}));
+
+// Mock @tauri-apps/api/app
+vi.mock("@tauri-apps/api/app", () => ({
+    getVersion: vi.fn(() => Promise.resolve("0.1.0")),
 }));
 
 // Mock @tauri-apps/api/window
@@ -25,37 +37,44 @@ vi.mock("@tauri-apps/plugin-opener", () => ({
     openUrl: vi.fn(),
 }));
 
-// Mock useSettings so all hooks that depend on SettingsProvider work in tests
+// Mock useSettings so hooks that read terminal defaults work in tests
 vi.mock("@/hooks/use-settings", () => ({
-    useSettings: () => ({
-        refreshInterval: 5000,
-        setRefreshInterval: vi.fn(),
+    useSettings: vi.fn(() => ({
         terminalDefaults: {
             shell: "",
             fontSize: 13,
             fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, Monaco, 'Courier New', monospace",
             scrollback: 1000,
         },
-        setTerminalDefaults: vi.fn(),
-        isLoading: false,
-    }),
+    })),
 }));
 
-// Mock useAppearance so components using AppearanceProvider work in tests
+// Mock useAppearance so components outside AppearanceProvider work in tests
 vi.mock("@/hooks/use-appearance", () => ({
-    useAppearance: () => ({
+    useAppearance: vi.fn(() => ({
         scheme: "system",
-        setScheme: vi.fn(),
-        resolvedScheme: "light",
-        theme: "default",
-        setTheme: vi.fn(),
-        themes: [{ id: "default", label: "Default" }],
-        font: "figtree",
-        setFont: vi.fn(),
-        fonts: [
-            { id: "figtree", label: "Figtree", cssFamily: '"Figtree Variable", sans-serif', load: vi.fn() },
-            { id: "inter", label: "Inter", cssFamily: '"Inter Variable", sans-serif', load: vi.fn() },
-        ],
-        isFontLoading: false,
-    }),
+        resolvedScheme: "dark",
+    })),
 }));
+
+// jsdom has no matchMedia or ResizeObserver; the shadcn sidebar and Recharts read them.
+Object.defineProperty(window, "matchMedia", {
+    writable: true,
+    value: (query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+        addListener: () => {},
+        removeListener: () => {},
+        dispatchEvent: () => false,
+    }),
+});
+
+class ResizeObserverStub {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+}
+globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver;

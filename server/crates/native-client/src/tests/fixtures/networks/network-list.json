@@ -1,0 +1,34 @@
+{
+  "items": [
+    {
+      "id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "name": "bridge",
+      "driver": "bridge",
+      "scope": "local",
+      "subnets": ["172.17.0.0/16"],
+      "containers": 0,
+      "createdAt": "2026-09-20T10:00:00.000Z",
+      "attachable": false,
+      "builtin": true,
+      "nodeIds": ["node-1"]
+    },
+    {
+      "id": "x7kq2m9p0r1s3t5u7w9y0z2b4",
+      "name": "toolbox_kontainer",
+      "driver": "overlay",
+      "scope": "swarm",
+      "subnets": ["10.0.1.0/24"],
+      "containers": 5,
+      "createdAt": null,
+      "attachable": true,
+      "builtin": false,
+      "nodeIds": ["node-1", "worker-1"]
+    }
+  ],
+  "nodes": [
+    { "nodeId": "node-1", "status": "ok" },
+    { "nodeId": "worker-1", "status": "ok" }
+  ],
+  "manager": "ok",
+  "snapshotAt": "2026-09-28T09:00:00.000Z"
+}

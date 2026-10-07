@@ -543,9 +543,13 @@ pub(crate) fn covered_contract(
     for (path, method) in paths {
         let operation = document["paths"][path][method].clone();
         assert!(operation.is_object(), "{method} {path} must be documented");
-        let mut methods = serde_json::Map::new();
-        methods.insert((*method).to_owned(), operation);
-        covered_paths.insert((*path).to_owned(), serde_json::Value::Object(methods));
+        // Several methods on one path all stay; a fresh map per method kept only the last.
+        covered_paths
+            .entry((*path).to_owned())
+            .or_insert_with(|| serde_json::json!({}))
+            .as_object_mut()
+            .expect("a path holds an object of methods")
+            .insert((*method).to_owned(), operation);
     }
     let mut covered_schemas = serde_json::Map::new();
     for name in schemas {

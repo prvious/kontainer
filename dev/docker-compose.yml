@@ -8,9 +8,10 @@ services:
     environment:
       DOCKER_TLS_CERTDIR: ""
     ports:
-      - "2375:2375"
+      - "127.0.0.1:2375:2375"
     networks:
-      - dind
+      dind:
+        ipv4_address: 172.29.0.10
     volumes:
       - manager-data:/var/lib/docker
     deploy:
@@ -29,9 +30,10 @@ services:
     environment:
       DOCKER_TLS_CERTDIR: ""
     ports:
-      - "2376:2375"
+      - "127.0.0.1:2376:2375"
     networks:
-      - dind
+      dind:
+        ipv4_address: 172.29.0.11
     volumes:
       - worker1-data:/var/lib/docker
     deploy:
@@ -50,9 +52,10 @@ services:
     environment:
       DOCKER_TLS_CERTDIR: ""
     ports:
-      - "2378:2375"
+      - "127.0.0.1:2378:2375"
     networks:
-      - dind
+      dind:
+        ipv4_address: 172.29.0.12
     volumes:
       - worker2-data:/var/lib/docker
     deploy:
@@ -64,9 +67,14 @@ services:
           cpus: "0.5"
           memory: 512M
 
+# Fixed addresses: the Swarm stores the manager's advertise address, and a
+# restart that reshuffles bridge IPs would otherwise strand the workers.
 networks:
   dind:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.29.0.0/24
 
 volumes:
   manager-data:

@@ -1,11 +1,11 @@
 #![cfg(feature = "real-engine-tests")]
 #![forbid(unsafe_code)]
 
-use std::{env, path::PathBuf, time::Duration};
+use std::{env, time::Duration};
 
 use kontainer_engine::{
-    ContainerEngine, ContainerPageRequest, EngineAccessScope, EngineApiVersion, EngineErrorKind,
-    LocalDockerEngine, LocalEngineOptions,
+    ContainerEngine, ContainerPageRequest, DockerHost, EngineAccessScope, EngineApiVersion,
+    EngineErrorKind, LocalDockerEngine, LocalEngineOptions,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -16,14 +16,14 @@ const TEST_API_VERSION_ENV: &str = "KONTAINER_TEST_ENGINE_API_VERSION";
 
 #[tokio::test]
 async fn qualifies_configured_real_engine() {
-    let socket_path = required_environment_path(TEST_SOCKET_ENV);
+    let host = required_docker_host(TEST_SOCKET_ENV);
     let fixture_image = required_environment(TEST_ENGINE_ENV);
     let expected_version = required_environment(TEST_VERSION_ENV);
     let expected_api_version = required_environment(TEST_API_VERSION_ENV)
         .parse::<EngineApiVersion>()
         .expect("configured expected Engine API version must be valid");
     let options = LocalEngineOptions {
-        socket_path,
+        host,
         operation_timeout: Duration::from_secs(10),
     };
     let manager = LocalDockerEngine::connect_for_manager(options.clone()).unwrap();
@@ -73,10 +73,10 @@ async fn qualifies_paged_container_inventory() {
     const RUNNING_FIXTURE: &str = "kontainer-inventory-running";
     const EXITED_FIXTURE: &str = "kontainer-inventory-exited";
 
-    let socket_path = required_environment_path(TEST_SOCKET_ENV);
+    let host = required_docker_host(TEST_SOCKET_ENV);
     let fixture_image = required_environment(TEST_ENGINE_ENV);
     let engine = LocalDockerEngine::connect_for_node(LocalEngineOptions {
-        socket_path,
+        host,
         operation_timeout: Duration::from_secs(10),
     })
     .unwrap();
@@ -153,9 +153,9 @@ async fn qualifies_paged_container_inventory() {
 
 #[tokio::test]
 async fn stopped_real_engine_maps_to_connection_unavailable() {
-    let socket_path = required_environment_path(TEST_SOCKET_ENV);
+    let host = required_docker_host(TEST_SOCKET_ENV);
     let options = LocalEngineOptions {
-        socket_path,
+        host,
         operation_timeout: Duration::from_secs(2),
     };
 
@@ -173,6 +173,10 @@ fn required_environment(name: &str) -> String {
         .unwrap_or_else(|_| panic!("required test environment variable {name} is missing"))
 }
 
-fn required_environment_path(name: &str) -> PathBuf {
-    required_environment(name).into()
+/// The socket variable takes a socket path, `unix://` URL, or `tcp://host:port`
+/// so the same tests run against the docker-in-docker development cluster.
+fn required_docker_host(name: &str) -> DockerHost {
+    required_environment(name)
+        .parse()
+        .unwrap_or_else(|error| panic!("{name}: {error}"))
 }

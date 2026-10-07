@@ -18,8 +18,8 @@ use kontainer_agent_proto::{
         controller_intake_client::ControllerIntakeClient, node_agent_client::NodeAgentClient,
     },
 };
-use kontainer_controller::rpc::serve_controller_rpc;
 use kontainer_controller::rpc::{AgentClientError, NodeAgentClientConfig};
+use kontainer_controller::rpc::{ControllerIntakeService, serve_controller_rpc};
 use kontainer_controller::server::{
     BoundAgentRpcServer, BoundHttpServer, ControllerShutdown, HttpTransport,
     supervise_controller_servers,
@@ -99,6 +99,7 @@ fn inventory_summary(id: &str, name: &str) -> ContainerSummary {
         state: ContainerState::Running,
         status: "Up 3s".to_owned(),
         created_at_seconds: 1_700_000_000,
+        ..ContainerSummary::default()
     }
 }
 
@@ -191,6 +192,136 @@ async fn describe_reports_node_identity_and_engine_health() {
     assert!(response.docker_connected);
     assert!(!response.architecture.is_empty());
 
+    node_agent.stop().await;
+}
+
+/// The certificates `dev/pki.sh` writes must satisfy the same rpc-auth rules
+/// as the generated fixtures. Runs when `KONTAINER_TEST_DEV_PKI_DIR` points at
+/// that directory (for example `../dev/pki`).
+#[tokio::test]
+async fn dev_pki_files_complete_a_verified_describe() {
+    let Ok(directory) = std::env::var("KONTAINER_TEST_DEV_PKI_DIR") else {
+        return;
+    };
+    let directory = std::path::PathBuf::from(directory);
+    let files = |stem: &str| {
+        MutualTlsIdentityFiles::new(
+            directory.join(format!("{stem}.pem")),
+            directory.join(format!("{stem}-key.pem")),
+            directory.join("agent-ca.pem"),
+        )
+    };
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let cancellation = CancellationToken::new();
+    let service = NodeAgentService::new("manager", Arc::new(AvailableEngine), cancellation.clone());
+    let server = serve_node_agent_rpc(
+        listener,
+        "development".to_owned(),
+        files("node-manager"),
+        service,
+        cancellation.clone(),
+        cancellation.clone(),
+        TaskTracker::new(),
+        TaskTracker::new(),
+        unused_failure_sender(),
+    )
+    .unwrap();
+    let task = tokio::spawn(server);
+
+    let client = NodeAgentClientConfig::new(
+        format!("https://{address}"),
+        "manager.agent.kontainer.internal".to_owned(),
+        "development".to_owned(),
+        "manager".to_owned(),
+        files("controller"),
+    )
+    .unwrap();
+    let description = client.describe(&CancellationToken::new()).await.unwrap();
+    assert_eq!(description.node_id, "manager");
+
+    let wrong_node = NodeAgentClientConfig::new(
+        format!("https://{address}"),
+        "manager.agent.kontainer.internal".to_owned(),
+        "development".to_owned(),
+        "worker-1".to_owned(),
+        files("controller"),
+    )
+    .unwrap();
+    assert!(
+        wrong_node
+            .describe(&CancellationToken::new())
+            .await
+            .is_err()
+    );
+
+    cancellation.cancel();
+    let _ = timeout(Duration::from_secs(2), task).await;
+}
+
+/// Stops that wait out their grace take longer than a read's RPC timeout.
+struct SlowStopEngine;
+
+#[async_trait]
+impl ContainerEngine for SlowStopEngine {
+    async fn is_available(&self) -> Result<bool, EngineError> {
+        Ok(true)
+    }
+
+    async fn container_action(
+        &self,
+        container_id: &str,
+        _action: kontainer_engine::ContainerAction,
+        _options: kontainer_engine::ContainerActionOptions,
+        _cancellation: &CancellationToken,
+    ) -> Result<(), EngineError> {
+        if container_id.starts_with('b') {
+            return Err(EngineError::new(
+                EngineErrorKind::Conflict,
+                EngineOperation::ContainerAction,
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(2_500)).await;
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn production_client_actions_outlast_the_read_timeout_and_keep_their_codes() {
+    use kontainer_controller::rpc::AgentContainerAction;
+
+    let pki = TestPki::generate();
+    let node_agent = start_node_agent(&pki, Arc::new(SlowStopEngine)).await;
+    let client = production_client(
+        node_agent.address,
+        pki.trusted_files(&pki.controller),
+        NODE_AGENT_NAME,
+        CLUSTER_ID,
+        NODE_ID,
+    );
+    client
+        .container_action(
+            &"a".repeat(64),
+            AgentContainerAction::Stop,
+            false,
+            Some(1),
+            &CancellationToken::new(),
+        )
+        .await
+        .expect("a stop that takes longer than two seconds still succeeds");
+    assert_eq!(
+        client
+            .container_action(
+                &"b".repeat(64),
+                AgentContainerAction::Remove,
+                false,
+                None,
+                &CancellationToken::new()
+            )
+            .await
+            .unwrap_err(),
+        AgentClientError::ContainerRunning
+    );
     node_agent.stop().await;
 }
 
@@ -561,7 +692,7 @@ async fn production_client_maps_pagination_and_daemon_failures_without_internals
     // rejects them as invalid input, which the client preserves as a typed
     // pagination failure.
     for (size, token) in [
-        (101, String::new()),
+        (501, String::new()),
         (10, "not-a-cursor".to_owned()),
         (10, "v1:short".to_owned()),
     ] {
@@ -729,7 +860,7 @@ async fn list_containers_rejects_invalid_pagination_and_agent_identity() {
     }
     let oversized = agent
         .list_containers(ListContainersRequest {
-            page_size: 101,
+            page_size: 501,
             page_token: String::new(),
         })
         .await
@@ -796,6 +927,7 @@ async fn valid_controller_and_agent_complete_both_versioned_rpc_exchanges() {
             agent_id: NODE_ID.to_owned(),
             agent_version: "0.1.0-test".to_owned(),
             architecture: std::env::consts::ARCH.to_owned(),
+            ..CheckInRequest::default()
         })
         .await
         .unwrap()
@@ -1226,6 +1358,7 @@ async fn shared_shutdown_joins_controller_http_and_rpc_tasks() {
                 listener: rpc_listener,
                 cluster_id: CLUSTER_ID.to_owned(),
                 tls_files,
+                intake: ControllerIntakeService::default(),
             }),
             task_cancellation,
         )
@@ -1296,6 +1429,7 @@ async fn runtime_http_task_failure_drains_and_joins_the_rpc_sibling() {
                 listener: rpc_listener,
                 cluster_id: CLUSTER_ID.to_owned(),
                 tls_files,
+                intake: ControllerIntakeService::default(),
             }),
             task_shutdown,
         )
@@ -1372,6 +1506,7 @@ async fn rpc_startup_failure_cancels_and_joins_the_http_server() {
                 listener: rpc_listener,
                 cluster_id: CLUSTER_ID.to_owned(),
                 tls_files: MutualTlsIdentityFiles::new(&missing_file, &missing_file, &missing_file),
+                intake: ControllerIntakeService::default(),
             }),
             cancellation.clone(),
         ),
@@ -1414,6 +1549,7 @@ async fn invalid_tls_fails_before_rpc_polling_or_http_admission() {
             rpc_listener,
             CLUSTER_ID.to_owned(),
             files.clone(),
+            ControllerIntakeService::default(),
             CancellationToken::new(),
             CancellationToken::new(),
             TaskTracker::new(),
@@ -1479,6 +1615,7 @@ async fn invalid_tls_fails_before_rpc_polling_or_http_admission() {
                     listener: rpc_listener,
                     cluster_id: CLUSTER_ID.to_owned(),
                     tls_files: files,
+                    intake: ControllerIntakeService::default(),
                 }),
                 cancellation.clone(),
             ),
@@ -1505,6 +1642,7 @@ async fn start_controller(pki: &TestPki) -> RunningServer {
             listener,
             CLUSTER_ID.to_owned(),
             tls_files,
+            ControllerIntakeService::default(),
             task_cancellation.clone(),
             task_cancellation,
             TaskTracker::new(),
@@ -1646,5 +1784,6 @@ fn check_in_request(agent_id: &str) -> CheckInRequest {
         agent_id: agent_id.to_owned(),
         agent_version: "0.1.0-test".to_owned(),
         architecture: std::env::consts::ARCH.to_owned(),
+        ..CheckInRequest::default()
     }
 }

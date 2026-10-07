@@ -15,8 +15,7 @@ use utoipa::ToSchema;
 
 use crate::{
     auth::domain::PrincipalContext,
-    rpc::{AgentClientError, AgentDescription, SharedAgentClient},
-    server::ForceCancellation,
+    nodes::{actions::list_nodes, domain::NodeStatus},
 };
 
 const CHECK_DEADLINE: Duration = Duration::from_secs(4);
@@ -28,7 +27,12 @@ pub struct DeepStatusResponse {
     build: BuildResponse,
     migration: MigrationState,
     database: DatabaseState,
-    agent_rpc: AgentRpcState,
+    /// Members checking in within 15 s; null when membership could not be read.
+    #[schema(required = true)]
+    nodes_online: Option<u32>,
+    /// Every node that has ever checked in; null when membership could not be read.
+    #[schema(required = true)]
+    nodes_total: Option<u32>,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, ToSchema)]
@@ -52,14 +56,6 @@ pub enum DatabaseState {
     Timeout,
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum AgentRpcState {
-    Up,
-    Down,
-    Timeout,
-}
-
 #[utoipa::path(
     get,
     path = "/api/v1/status/deep",
@@ -68,8 +64,7 @@ pub enum AgentRpcState {
         (status = 200, description = "Authenticated dependency diagnostic; component failures are states, not HTTP errors", body = DeepStatusResponse),
         (status = 401, description = "Missing, malformed, expired, or revoked access credential"),
         (status = 503, description = "Controller draining new work or session persistence unavailable; the body is either HealthResponse or a generic error")
-    ),
-    security(("access_session" = []))
+    )
 )]
 pub(super) async fn show(
     State(context): State<AppContext>,
@@ -77,8 +72,6 @@ pub(super) async fn show(
 ) -> Response {
     // The handler runs only after session validation; start one deadline here.
     let deadline = Instant::now() + CHECK_DEADLINE;
-    let client = context.shared_store.get::<SharedAgentClient>();
-    let cancellation = context.shared_store.get::<ForceCancellation>();
     let status = run_checks(
         context.db.ping(),
         async {
@@ -87,10 +80,15 @@ pub(super) async fn show(
                 .map(|pending| !pending.is_empty())
         },
         async {
-            match (client, cancellation) {
-                (Some(client), Some(cancellation)) => client.0.describe(&cancellation.0).await,
-                _ => Err(AgentClientError::Unavailable),
-            }
+            let (nodes, _) = list_nodes::execute(&context.db).await?;
+            let online = nodes
+                .iter()
+                .filter(|node| node.status == NodeStatus::Online)
+                .count();
+            Ok((
+                u32::try_from(online).unwrap_or(u32::MAX),
+                u32::try_from(nodes.len()).unwrap_or(u32::MAX),
+            ))
         },
         deadline,
     )
@@ -98,16 +96,16 @@ pub(super) async fn show(
     ([(header::CACHE_CONTROL, "no-store")], Json(status)).into_response()
 }
 
-async fn run_checks<D, M, A>(
+async fn run_checks<D, M, N>(
     database: D,
     migration: M,
-    agent: A,
+    nodes: N,
     deadline: Instant,
 ) -> DeepStatusResponse
 where
     D: Future<Output = Result<(), DbErr>>,
     M: Future<Output = Result<bool, DbErr>>,
-    A: Future<Output = Result<AgentDescription, AgentClientError>>,
+    N: Future<Output = Result<(u32, u32), DbErr>>,
 {
     let database = async {
         match timeout_at(deadline, timeout(DATABASE_DEADLINE, database)).await {
@@ -122,21 +120,21 @@ where
             _ => MigrationState::Unknown,
         }
     };
-    let agent = async {
-        match timeout_at(deadline, agent).await {
-            Ok(Ok(_)) => AgentRpcState::Up,
-            Ok(Err(AgentClientError::TimedOut)) | Err(_) => AgentRpcState::Timeout,
-            Ok(Err(_)) => AgentRpcState::Down,
+    let nodes = async {
+        match timeout_at(deadline, timeout(DATABASE_DEADLINE, nodes)).await {
+            Ok(Ok(Ok(counts))) => Some(counts),
+            _ => None,
         }
     };
-    let (database, migration, agent_rpc) = tokio::join!(database, migration, agent);
+    let (database, migration, nodes) = tokio::join!(database, migration, nodes);
     DeepStatusResponse {
         build: BuildResponse {
             version: env!("CARGO_PKG_VERSION"),
         },
         migration,
         database,
-        agent_rpc,
+        nodes_online: nodes.map(|(online, _)| online),
+        nodes_total: nodes.map(|(_, total)| total),
     }
 }
 
@@ -154,59 +152,51 @@ mod tests {
     use sea_orm::DbErr;
     use tokio::{sync::Barrier, time::Instant};
 
-    use super::{AgentClientError, AgentDescription, run_checks};
+    use super::run_checks;
 
-    fn description() -> AgentDescription {
-        AgentDescription {
-            node_id: "secret-node-canary".to_owned(),
-            agent_version: "secret-version-canary".to_owned(),
-            architecture: "secret-architecture-canary".to_owned(),
-            docker_connected: false,
-        }
+    fn counts() -> Result<(u32, u32), DbErr> {
+        Ok((3, 3))
     }
 
     #[tokio::test]
     async fn maps_every_state_and_serializes_only_redacted_fields() {
         let deadline = Instant::now() + Duration::from_millis(50);
-        let good = run_checks(
-            ready(Ok(())),
-            ready(Ok(false)),
-            ready(Ok(description())),
-            deadline,
-        )
-        .await;
+        let good = run_checks(ready(Ok(())), ready(Ok(false)), ready(counts()), deadline).await;
         assert_eq!(
             serde_json::to_value(&good).unwrap(),
             serde_json::json!({
                 "build": {"version": env!("CARGO_PKG_VERSION")},
                 "migration": "current",
                 "database": "reachable",
-                "agentRpc": "up"
+                "nodesOnline": 3,
+                "nodesTotal": 3
             })
         );
 
         let failed = run_checks(
             ready(Err(DbErr::Custom("secret-database-canary".into()))),
             ready(Err(DbErr::Custom("secret-migration-canary".into()))),
-            ready(Err(AgentClientError::IdentityMismatch)),
+            ready(Err(DbErr::Custom("secret-membership-canary".into()))),
             deadline,
         )
         .await;
         assert_eq!(failed.database, super::DatabaseState::Unreachable);
         assert_eq!(failed.migration, super::MigrationState::Unknown);
-        assert_eq!(failed.agent_rpc, super::AgentRpcState::Down);
+        assert_eq!(failed.nodes_online, None);
+        assert_eq!(failed.nodes_total, None);
         let serialized = serde_json::to_string(&failed).unwrap();
         assert!(!serialized.contains("canary"));
 
         let pending_migration = run_checks(
             ready(Ok(())),
             ready(Ok(true)),
-            ready(Err(AgentClientError::TimedOut)),
+            ready(Ok((1, 3))),
             Instant::now() + Duration::from_millis(50),
         )
         .await;
         assert_eq!(pending_migration.migration, super::MigrationState::Unknown);
-        assert_eq!(pending_migration.agent_rpc, super::AgentRpcState::Timeout);
+        assert_eq!(pending_migration.nodes_online, Some(1));
+        assert_eq!(pending_migration.nodes_total, Some(3));
 
         let timed_out = run_checks(
             pending(),
@@ -217,7 +207,7 @@ mod tests {
         .await;
         assert_eq!(timed_out.database, super::DatabaseState::Timeout);
         assert_eq!(timed_out.migration, super::MigrationState::Unknown);
-        assert_eq!(timed_out.agent_rpc, super::AgentRpcState::Timeout);
+        assert_eq!(timed_out.nodes_online, None);
     }
 
     #[tokio::test]
@@ -265,7 +255,7 @@ mod tests {
                 active.fetch_add(1, Ordering::SeqCst);
                 let _guard = Active(active);
                 started.wait().await;
-                pending::<Result<AgentDescription, AgentClientError>>().await
+                pending::<Result<(u32, u32), DbErr>>().await
             }
         };
         let deadline = Instant::now() + Duration::from_millis(50);
@@ -276,7 +266,7 @@ mod tests {
         .await
         .expect("all checks started before the shared deadline");
         assert_eq!(total.load(Ordering::SeqCst), 3);
-        assert_eq!(status.agent_rpc, super::AgentRpcState::Timeout);
+        assert_eq!(status.nodes_total, None);
         assert_eq!(active.load(Ordering::SeqCst), 0);
     }
 
@@ -288,7 +278,7 @@ mod tests {
             run_checks(
                 pending(),
                 pending(),
-                ready(Ok(description())),
+                ready(counts()),
                 started + Duration::from_secs(4),
             ),
         )
@@ -297,7 +287,7 @@ mod tests {
         assert!(started.elapsed() >= Duration::from_millis(900));
         assert_eq!(status.database, super::DatabaseState::Timeout);
         assert_eq!(status.migration, super::MigrationState::Unknown);
-        assert_eq!(status.agent_rpc, super::AgentRpcState::Up);
+        assert_eq!(status.nodes_online, Some(3));
     }
 
     #[tokio::test]
@@ -325,7 +315,7 @@ mod tests {
             },
             async {
                 wait(active.clone()).await;
-                Ok(description())
+                Ok((0, 0))
             },
             Instant::now() + Duration::from_secs(4),
         ));
@@ -361,7 +351,7 @@ mod tests {
                         .await
                         .map(|pending| !pending.is_empty())
                 },
-                ready(Err(AgentClientError::Unavailable)),
+                ready(Err(DbErr::Custom("no membership".into()))),
                 Instant::now() + Duration::from_secs(4),
             )
             .await;

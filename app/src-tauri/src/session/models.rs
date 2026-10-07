@@ -13,8 +13,12 @@ use zeroize::{Zeroize, Zeroizing};
 pub(crate) const ANCHOR_VERSION: u32 = 1;
 /// Schema version of the UUID-keyed profile credential record.
 pub(crate) const PROFILE_VERSION: u32 = 1;
-/// Schema version of the non-secret metadata document.
-pub(crate) const METADATA_VERSION: u32 = 1;
+/// Schema version of the non-secret metadata document. Version 2 replaced the
+/// GitHub login with email and display name and added saved connections; a
+/// version 1 document reads as corrupt and startup replaces it.
+pub(crate) const METADATA_VERSION: u32 = 2;
+/// Most saved connections the login screen keeps, most recent first.
+pub(crate) const MAX_CONNECTIONS: usize = 10;
 /// Hard ceiling for any encoded vault record; larger blobs are corrupt.
 pub(crate) const MAX_RECORD_BYTES: usize = 8 * 1024;
 /// Longest display label the desktop persists or reports.
@@ -145,33 +149,86 @@ pub(crate) fn decode_profile(bytes: &[u8]) -> Result<ProfileRecord, RecordDecode
 }
 
 /// Non-secret metadata persisted in `session.json`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct SessionDocument {
     pub version: u32,
-    /// Unauthenticated login hint (previously used origin and label).
-    pub hint: Option<LoginHint>,
     /// The session summary, valid only while it matches the vault anchor.
     pub session: Option<MetadataSession>,
+    /// Controllers signed in to before, most recent first (at most ten).
+    #[serde(default)]
+    pub connections: Vec<SavedConnection>,
+    /// Older documents carry a removed `hint`: accept and drop it so they don't read as corrupt.
+    #[serde(default, skip_serializing, rename = "hint")]
+    legacy_hint: Option<serde::de::IgnoredAny>,
 }
 
 impl SessionDocument {
     /// A document that always carries the current schema version.
-    pub(crate) fn new(hint: Option<LoginHint>, session: Option<MetadataSession>) -> Self {
+    pub(crate) fn new(session: Option<MetadataSession>) -> Self {
         Self {
             version: METADATA_VERSION,
-            hint,
             session,
+            connections: Vec::new(),
+            legacy_hint: None,
         }
+    }
+
+    /// The same document carrying `connections` forward.
+    pub(crate) fn with_connections(mut self, connections: Vec<SavedConnection>) -> Self {
+        self.connections = connections;
+        self
+    }
+
+    /// Move `origin` to the front (creating it when new), stamp it, and cap the list.
+    pub(crate) fn touch_connection(
+        &mut self,
+        origin: &str,
+        label: Option<String>,
+        used_at_unix_ms: i64,
+    ) {
+        let existing = self
+            .connections
+            .iter()
+            .position(|connection| connection.origin == origin);
+        let mut connection = match existing {
+            Some(index) => self.connections.remove(index),
+            None => SavedConnection {
+                id: Uuid::new_v4(),
+                origin: origin.to_owned(),
+                label: None,
+                last_used_at_unix_ms: used_at_unix_ms,
+                last_summary: None,
+            },
+        };
+        connection.last_used_at_unix_ms = used_at_unix_ms;
+        if label.is_some() {
+            connection.label = label;
+        }
+        self.connections.insert(0, connection);
+        self.connections.truncate(MAX_CONNECTIONS);
     }
 }
 
-/// A non-secret origin/label hint for the login screen.
+/// A controller the owner signed in to before. Non-secret: no credential,
+/// email, or password is ever stored here.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct LoginHint {
+pub(crate) struct SavedConnection {
+    pub id: Uuid,
     pub origin: String,
     pub label: Option<String>,
+    pub last_used_at_unix_ms: i64,
+    /// Cluster size seen at sign-out or switch, for the switcher subtitle.
+    #[serde(default)]
+    pub last_summary: Option<ConnectionSummary>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ConnectionSummary {
+    pub nodes: u32,
+    pub services: u32,
 }
 
 /// The non-secret session summary; never authority on its own.
@@ -182,7 +239,8 @@ pub(crate) struct MetadataSession {
     pub origin: String,
     pub cluster_id: String,
     pub principal_id: Uuid,
-    pub github_login: String,
+    pub email: String,
+    pub display_name: String,
     pub label: Option<String>,
 }
 
@@ -214,17 +272,65 @@ pub(crate) struct SessionView {
     pub origin: String,
     pub cluster_id: String,
     pub principal_id: Uuid,
-    pub github_login: String,
+    pub email: String,
+    pub display_name: String,
     pub label: Option<String>,
     pub access_expires_at_unix_ms: i64,
 }
 
-/// Input for starting a login attempt.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct SessionLoginInput {
+/// A password sign-in. The password lives only here, zeroed on drop; it is
+/// never stored, logged, or returned.
+pub(crate) struct PasswordLoginInput {
     pub origin: String,
+    pub email: String,
+    pub password: Zeroizing<String>,
     pub label: Option<String>,
+}
+
+/// First-run owner registration. The password and the controller's one-time
+/// setup code are handled as the password is in sign-in: zeroed on drop,
+/// never stored, logged, or returned.
+pub(crate) struct RegisterOwnerInput {
+    pub origin: String,
+    pub display_name: String,
+    pub email: String,
+    pub password: Zeroizing<String>,
+    pub setup_code: Zeroizing<String>,
+    pub label: Option<String>,
+}
+
+/// Whether the controller at an origin already has its owner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct BootstrapView {
+    pub owner_exists: bool,
+}
+
+/// A reachability probe outcome for the connect card and the titlebar dot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProbeView {
+    pub status: ProbeStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diagnostic: Option<ProbeDiagnostic>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ProbeStatus {
+    Ready,
+    Unreachable,
+}
+
+/// The connection step that failed: DNS → TCP → TLS → HTTP, or a timeout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ProbeDiagnostic {
+    Dns,
+    Tcp,
+    Tls,
+    Http,
+    Timeout,
 }
 
 /// Trim, bound, and drop empty display labels.

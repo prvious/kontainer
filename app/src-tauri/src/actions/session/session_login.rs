@@ -1,19 +1,29 @@
 use tauri::State;
+use zeroize::Zeroizing;
 
-use crate::session::errors::SessionError;
+use crate::session::errors::LoginFailure;
 use crate::session::manager::SessionManager;
-use crate::session::models::{SessionLoginInput, SessionView};
+use crate::session::models::{PasswordLoginInput, SessionView};
 
-/// Start a browser login against a validated controller origin.
+/// Sign in to a controller with email and password.
 ///
-/// An earlier attempt is cancelled and joined before this one generates its
-/// verifier. The authorization URL, OAuth state, verifier, and credentials
-/// never cross this boundary.
+/// The password exists only as this request argument: it is zeroed after the
+/// sign-in call and never stored, logged, or returned. Credentials stay in
+/// Rust custody; React receives only the credential-free [`SessionView`].
 #[tauri::command]
 pub async fn session_login(
     state: State<'_, SessionManager>,
     origin: String,
+    email: String,
+    password: String,
     label: Option<String>,
-) -> Result<SessionView, SessionError> {
-    state.login(SessionLoginInput { origin, label }).await
+) -> Result<SessionView, LoginFailure> {
+    state
+        .login(PasswordLoginInput {
+            origin,
+            email,
+            password: Zeroizing::new(password),
+            label,
+        })
+        .await
 }

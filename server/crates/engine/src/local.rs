@@ -1,34 +1,62 @@
-use std::{collections::HashMap, future::Future, path::PathBuf, time::Duration};
+use std::{collections::HashMap, future::Future, time::Duration};
 
 use async_trait::async_trait;
 use bollard::{
     API_DEFAULT_VERSION, Docker,
     errors::Error as BollardError,
-    models::{ContainerSummaryStateEnum, LocalNodeState, SwarmInfo},
+    models::{
+        ContainerCpuStats, ContainerStatsResponse, ContainerSummaryStateEnum, LocalNodeState,
+        SwarmInfo, SystemDataUsageResponse, SystemInfo,
+    },
 };
+use futures_util::StreamExt;
 use tokio::time;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    CapabilityStatus, ContainerEngine, ContainerPage, ContainerPageRequest, ContainerState,
-    ContainerSummary, EngineAccessScope, EngineApiVersion, EngineCapabilities, EngineDescription,
-    EngineError, EngineErrorKind, EngineOperation, UnsupportedCapabilityReason,
-    canonical_display_name, format_page_token, is_valid_container_id, truncate_status_text,
+    CapabilityStatus, ContainerAction, ContainerActionOptions, ContainerEngine, ContainerPage,
+    ContainerPageRequest, ContainerState, ContainerStats, ContainerSummary, ContainerTimes,
+    CpuCounters, DEFAULT_STOP_TIMEOUT_SECONDS, DiskUsage, DockerHost, EngineAccessScope,
+    EngineApiVersion, EngineCapabilities, EngineDescription, EngineError, EngineErrorKind,
+    EngineOperation, ImageSummary, NodeInfo, PullEvent, PullProgress, PullStream,
+    STACK_NAMESPACE_LABEL, UnsupportedCapabilityReason,
+    container::{
+        SERVICE_NAME_LABEL, TASK_ID_LABEL, bounded_label, canonical_display_name,
+        format_page_token, parse_docker_time, truncate_status_text,
+    },
+    image::bounded_message,
+    is_plausible_reference, is_valid_container_id, is_valid_image_id,
+    node::memory_used,
+};
+use crate::{ExecAttachment, ExecInput, ExecStatus};
+use crate::{LogSource, ServiceLogRequest, ServiceLogStream, service_log::parse_service_log_line};
+use crate::{
+    MAX_NETWORK_ENDPOINTS, MAX_VOLUME_USERS, NetworkCreate, NetworkDetail, NetworkEndpoint,
+    NetworkSummary, VolumeCreate, VolumeSummary, are_valid_volume_labels, is_builtin_network,
+    is_valid_cidr, is_valid_network_id, is_valid_network_name, is_valid_volume_name,
+    volume::bounded_labels,
+};
+use crate::{
+    ServiceMode, ServiceSummary, SwarmAvailability, SwarmNode, SwarmNodeState, SwarmRole,
+    TaskSummary, is_valid_swarm_id,
 };
 
-const DEFAULT_DOCKER_SOCKET: &str = "/var/run/docker.sock";
 const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(10);
+const MAX_CONTAINER_NETWORKS: usize = 16;
+/// Ports, tags, or digests kept per item. Readers reject more, so one container with a wide port
+/// range would otherwise fail its node's whole list.
+const MAX_ITEM_VALUES: usize = 64;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalEngineOptions {
-    pub socket_path: PathBuf,
+    pub host: DockerHost,
     pub operation_timeout: Duration,
 }
 
 impl Default for LocalEngineOptions {
     fn default() -> Self {
         Self {
-            socket_path: DEFAULT_DOCKER_SOCKET.into(),
+            host: DockerHost::default(),
             operation_timeout: DEFAULT_OPERATION_TIMEOUT,
         }
     }
@@ -61,21 +89,85 @@ impl LocalDockerEngine {
             ));
         }
 
-        let socket_path = options.socket_path.to_str().ok_or_else(|| {
-            EngineError::new(
-                EngineErrorKind::InvalidConfiguration,
-                EngineOperation::Connect,
-            )
-        })?;
         let bollard_timeout = options.operation_timeout.as_secs().max(1);
-        let client = Docker::connect_with_socket(socket_path, bollard_timeout, API_DEFAULT_VERSION)
-            .map_err(|error| EngineError::from_bollard(EngineOperation::Connect, &error))?;
+        let client = match &options.host {
+            DockerHost::UnixSocket(socket_path) => {
+                let socket_path = socket_path.to_str().ok_or_else(|| {
+                    EngineError::new(
+                        EngineErrorKind::InvalidConfiguration,
+                        EngineOperation::Connect,
+                    )
+                })?;
+                Docker::connect_with_socket(socket_path, bollard_timeout, API_DEFAULT_VERSION)
+            }
+            DockerHost::Tcp { .. } => Docker::connect_with_http(
+                &options.host.to_string(),
+                bollard_timeout,
+                API_DEFAULT_VERSION,
+            ),
+        }
+        .map_err(|error| EngineError::from_bollard(EngineOperation::Connect, &error))?;
 
         Ok(Self {
             access_scope,
             client,
             operation_timeout: options.operation_timeout,
         })
+    }
+
+    /// Read the service, refuse a stale `version`, apply `change`, and send the update based on
+    /// that same version. `change` may ask for Docker's rollback instead of a new spec.
+    async fn update_service_spec<F>(
+        &self,
+        service_id: &str,
+        version: u64,
+        cancellation: &CancellationToken,
+        change: F,
+    ) -> Result<(), EngineError>
+    where
+        F: FnOnce(&mut bollard::models::ServiceSpec) -> Result<Option<String>, EngineError> + Send,
+    {
+        use bollard::query_parameters::{InspectServiceOptions, UpdateServiceOptions};
+
+        let operation = EngineOperation::UpdateService;
+        if !is_valid_swarm_id(service_id) {
+            return Err(EngineError::new(EngineErrorKind::InvalidInput, operation));
+        }
+        let client = self.negotiate(cancellation).await?;
+        let service = self
+            .execute(
+                operation,
+                cancellation,
+                client.inspect_service(service_id, None::<InspectServiceOptions>),
+            )
+            .await?;
+        let current = service
+            .version
+            .and_then(|version| version.index)
+            .ok_or_else(|| EngineError::new(EngineErrorKind::InvalidResponse, operation))?;
+        if current != version {
+            return Err(EngineError::new(
+                EngineErrorKind::VersionConflict,
+                operation,
+            ));
+        }
+        let mut spec = service
+            .spec
+            .ok_or_else(|| EngineError::new(EngineErrorKind::InvalidResponse, operation))?;
+        let rollback = change(&mut spec)?;
+        let options = UpdateServiceOptions {
+            version: i32::try_from(version)
+                .map_err(|_| EngineError::new(EngineErrorKind::VersionConflict, operation))?,
+            rollback,
+            ..Default::default()
+        };
+        self.execute(
+            operation,
+            cancellation,
+            client.update_service(service_id, spec, options, None),
+        )
+        .await
+        .map(|_| ())
     }
 
     async fn negotiate(&self, cancellation: &CancellationToken) -> Result<Docker, EngineError> {
@@ -85,6 +177,30 @@ impl LocalDockerEngine {
             self.client.clone().negotiate_version(),
         )
         .await
+    }
+
+    /// [`Self::execute`] for calls that wait out a stop grace: the deadline extends by it.
+    async fn execute_with_grace<T, F>(
+        &self,
+        operation: EngineOperation,
+        cancellation: &CancellationToken,
+        grace_seconds: i32,
+        future: F,
+    ) -> Result<T, EngineError>
+    where
+        F: Future<Output = Result<T, BollardError>>,
+    {
+        let deadline =
+            self.operation_timeout + Duration::from_secs(u64::try_from(grace_seconds).unwrap_or(0));
+        tokio::select! {
+            biased;
+            () = cancellation.cancelled() => Err(EngineError::new(EngineErrorKind::Cancelled, operation)),
+            result = time::timeout(deadline, future) => match result {
+                Ok(Ok(value)) => Ok(value),
+                Ok(Err(error)) => Err(EngineError::from_bollard(operation, &error)),
+                Err(_) => Err(EngineError::new(EngineErrorKind::DeadlineExceeded, operation)),
+            },
+        }
     }
 
     async fn execute<T, F>(
@@ -252,6 +368,1331 @@ impl ContainerEngine for LocalDockerEngine {
             })
         }
     }
+
+    async fn node_info(&self, cancellation: &CancellationToken) -> Result<NodeInfo, EngineError> {
+        let client = self.negotiate(cancellation).await?;
+        let info = self
+            .execute(EngineOperation::ReadSystemInfo, cancellation, client.info())
+            .await?;
+        Ok(map_node_info(info))
+    }
+
+    async fn running_container_ids(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> Result<Vec<String>, EngineError> {
+        use bollard::query_parameters::ListContainersOptionsBuilder;
+
+        let client = self.negotiate(cancellation).await?;
+        let filters = HashMap::from([("status".to_owned(), vec!["running".to_owned()])]);
+        let options = ListContainersOptionsBuilder::new()
+            .all(false)
+            .size(false)
+            .filters(&filters)
+            .build();
+        let summaries = self
+            .execute(
+                EngineOperation::ListContainers,
+                cancellation,
+                client.list_containers(Some(options)),
+            )
+            .await?;
+        Ok(summaries
+            .into_iter()
+            .filter_map(|summary| summary.id.filter(|id| is_valid_container_id(id)))
+            .collect())
+    }
+
+    async fn container_stats(
+        &self,
+        container_id: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<ContainerStats, EngineError> {
+        use bollard::query_parameters::StatsOptionsBuilder;
+
+        if !is_valid_container_id(container_id) {
+            return Err(EngineError::new(
+                EngineErrorKind::InvalidInput,
+                EngineOperation::ReadContainerStats,
+            ));
+        }
+        let client = self.negotiate(cancellation).await?;
+        // One-shot: answers at once instead of waiting a second for `precpu_stats`, so a busy
+        // node's sampler reads every container inside its deadline. CPU percent comes from the
+        // caller's previous reading.
+        let options = StatsOptionsBuilder::default()
+            .stream(false)
+            .one_shot(true)
+            .build();
+        let mut stream = client.stats(container_id, Some(options));
+        let response = self
+            .execute(EngineOperation::ReadContainerStats, cancellation, async {
+                stream.next().await.transpose()
+            })
+            .await?
+            .ok_or_else(|| {
+                EngineError::new(
+                    EngineErrorKind::InvalidResponse,
+                    EngineOperation::ReadContainerStats,
+                )
+            })?;
+        Ok(map_container_stats(response))
+    }
+
+    async fn container_times(
+        &self,
+        container_id: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<ContainerTimes, EngineError> {
+        if !is_valid_container_id(container_id) {
+            return Err(EngineError::new(
+                EngineErrorKind::InvalidInput,
+                EngineOperation::InspectContainer,
+            ));
+        }
+        let client = self.negotiate(cancellation).await?;
+        let inspect = self
+            .execute(
+                EngineOperation::InspectContainer,
+                cancellation,
+                client.inspect_container(
+                    container_id,
+                    None::<bollard::query_parameters::InspectContainerOptions>,
+                ),
+            )
+            .await?;
+        let state = inspect.state.unwrap_or_default();
+        Ok(ContainerTimes {
+            started_at_seconds: state.started_at.as_deref().and_then(parse_docker_time),
+            finished_at_seconds: state.finished_at.as_deref().and_then(parse_docker_time),
+        })
+    }
+
+    async fn container_action(
+        &self,
+        container_id: &str,
+        action: ContainerAction,
+        options: ContainerActionOptions,
+        cancellation: &CancellationToken,
+    ) -> Result<(), EngineError> {
+        use bollard::query_parameters::{
+            RemoveContainerOptionsBuilder, RestartContainerOptionsBuilder,
+            StopContainerOptionsBuilder,
+        };
+
+        if !is_valid_container_id(container_id) {
+            return Err(EngineError::new(
+                EngineErrorKind::InvalidInput,
+                EngineOperation::ContainerAction,
+            ));
+        }
+        let client = self.negotiate(cancellation).await?;
+        let grace = i32::try_from(
+            options
+                .timeout_seconds
+                .unwrap_or(DEFAULT_STOP_TIMEOUT_SECONDS),
+        )
+        .unwrap_or(i32::MAX);
+        let operation = EngineOperation::ContainerAction;
+        match action {
+            ContainerAction::Start => {
+                self.execute(
+                    operation,
+                    cancellation,
+                    client.start_container(
+                        container_id,
+                        None::<bollard::query_parameters::StartContainerOptions>,
+                    ),
+                )
+                .await
+            }
+            ContainerAction::Stop => {
+                let options = StopContainerOptionsBuilder::default().t(grace).build();
+                self.execute_with_grace(
+                    operation,
+                    cancellation,
+                    grace,
+                    client.stop_container(container_id, Some(options)),
+                )
+                .await
+            }
+            ContainerAction::Restart => {
+                let options = RestartContainerOptionsBuilder::default().t(grace).build();
+                self.execute_with_grace(
+                    operation,
+                    cancellation,
+                    grace,
+                    client.restart_container(container_id, Some(options)),
+                )
+                .await
+            }
+            ContainerAction::Pause => {
+                self.execute(
+                    operation,
+                    cancellation,
+                    client.pause_container(container_id),
+                )
+                .await
+            }
+            ContainerAction::Unpause => {
+                self.execute(
+                    operation,
+                    cancellation,
+                    client.unpause_container(container_id),
+                )
+                .await
+            }
+            ContainerAction::Remove => {
+                let options = RemoveContainerOptionsBuilder::default()
+                    .force(options.force)
+                    .v(false)
+                    .build();
+                self.execute(
+                    operation,
+                    cancellation,
+                    client.remove_container(container_id, Some(options)),
+                )
+                .await
+            }
+        }
+    }
+
+    async fn list_images(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> Result<Vec<ImageSummary>, EngineError> {
+        use bollard::query_parameters::{ListContainersOptionsBuilder, ListImagesOptionsBuilder};
+
+        let client = self.negotiate(cancellation).await?;
+        let images = self
+            .execute(
+                EngineOperation::ListImages,
+                cancellation,
+                client.list_images(Some(ListImagesOptionsBuilder::default().all(false).build())),
+            )
+            .await?;
+        let containers = self
+            .execute(
+                EngineOperation::ListImages,
+                cancellation,
+                client.list_containers(Some(
+                    ListContainersOptionsBuilder::new()
+                        .all(true)
+                        .size(false)
+                        .build(),
+                )),
+            )
+            .await?;
+        let mut used: HashMap<String, u32> = HashMap::new();
+        for container in containers {
+            if let Some(image_id) = container.image_id {
+                *used.entry(image_id).or_default() += 1;
+            }
+        }
+        Ok(images
+            .into_iter()
+            .filter(|image| is_valid_image_id(&image.id))
+            .map(|image| map_image(image, &used))
+            .collect())
+    }
+
+    async fn remove_image(
+        &self,
+        image_id: &str,
+        force: bool,
+        cancellation: &CancellationToken,
+    ) -> Result<(), EngineError> {
+        use bollard::query_parameters::RemoveImageOptionsBuilder;
+
+        if !is_valid_image_id(image_id) {
+            return Err(EngineError::new(
+                EngineErrorKind::InvalidInput,
+                EngineOperation::RemoveImage,
+            ));
+        }
+        let client = self.negotiate(cancellation).await?;
+        let options = RemoveImageOptionsBuilder::default()
+            .force(force)
+            .noprune(false)
+            .build();
+        self.execute(
+            EngineOperation::RemoveImage,
+            cancellation,
+            client.remove_image(image_id, Some(options), None),
+        )
+        .await
+        .map(|_| ())
+    }
+
+    async fn pull_image(
+        &self,
+        reference: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<PullStream, EngineError> {
+        use bollard::query_parameters::CreateImageOptionsBuilder;
+        use futures_util::StreamExt as _;
+
+        if !is_plausible_reference(reference) {
+            return Err(EngineError::new(
+                EngineErrorKind::InvalidInput,
+                EngineOperation::PullImage,
+            ));
+        }
+        let client = self.negotiate(cancellation).await?;
+        let options = CreateImageOptionsBuilder::default()
+            .from_image(reference)
+            .build();
+        // The daemon stream owns its request, so the caller polls it directly: dropping the
+        // stream ends the pull's connection, as does cancellation. It ends after a failure.
+        let events = client
+            .create_image(Some(options), None, None)
+            .map(pull_event)
+            .scan(false, |failed, event| {
+                let next = (!*failed).then_some(event);
+                *failed = matches!(next, Some(PullEvent::Failed(_)));
+                std::future::ready(next)
+            })
+            .take_until(cancellation.clone().cancelled_owned());
+        Ok(Box::pin(events))
+    }
+
+    async fn disk_usage(&self, cancellation: &CancellationToken) -> Result<DiskUsage, EngineError> {
+        use bollard::query_parameters::DataUsageOptionsBuilder;
+
+        let client = self.negotiate(cancellation).await?;
+        // Verbose adds each volume's size.
+        let usage = self
+            .execute(
+                EngineOperation::ReadDiskUsage,
+                cancellation,
+                client.df(Some(DataUsageOptionsBuilder::new().verbose(true).build())),
+            )
+            .await?;
+        Ok(DiskUsage {
+            volume_sizes: volume_sizes(&usage),
+        })
+    }
+
+    async fn list_services(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> Result<Vec<ServiceSummary>, EngineError> {
+        use bollard::query_parameters::ListServicesOptions;
+
+        let client = self.negotiate(cancellation).await?;
+        let services = self
+            .execute(
+                EngineOperation::ListServices,
+                cancellation,
+                client.list_services(None::<ListServicesOptions>),
+            )
+            .await?;
+        Ok(services.into_iter().filter_map(map_service).collect())
+    }
+
+    async fn list_tasks(
+        &self,
+        service_ids: &[String],
+        current_only: bool,
+        cancellation: &CancellationToken,
+    ) -> Result<Vec<TaskSummary>, EngineError> {
+        use bollard::query_parameters::ListTasksOptions;
+
+        if service_ids.iter().any(|id| !is_valid_swarm_id(id)) {
+            return Err(EngineError::new(
+                EngineErrorKind::InvalidInput,
+                EngineOperation::ListTasks,
+            ));
+        }
+        let mut filters = HashMap::new();
+        if !service_ids.is_empty() {
+            filters.insert("service".to_owned(), service_ids.to_vec());
+        }
+        if current_only {
+            filters.insert("desired-state".to_owned(), vec!["running".to_owned()]);
+        }
+        let client = self.negotiate(cancellation).await?;
+        let tasks = self
+            .execute(
+                EngineOperation::ListTasks,
+                cancellation,
+                client.list_tasks(Some(ListTasksOptions {
+                    filters: Some(filters),
+                })),
+            )
+            .await?;
+        Ok(tasks.into_iter().filter_map(map_task).collect())
+    }
+
+    async fn scale_service(
+        &self,
+        service_id: &str,
+        replicas: u64,
+        version: u64,
+        cancellation: &CancellationToken,
+    ) -> Result<(), EngineError> {
+        self.update_service_spec(service_id, version, cancellation, |spec| {
+            let replicated = spec
+                .mode
+                .as_mut()
+                .and_then(|mode| mode.replicated.as_mut())
+                .ok_or_else(|| {
+                    EngineError::new(
+                        EngineErrorKind::InvalidInput,
+                        EngineOperation::UpdateService,
+                    )
+                })?;
+            replicated.replicas = Some(i64::try_from(replicas).map_err(|_| {
+                EngineError::new(
+                    EngineErrorKind::InvalidInput,
+                    EngineOperation::UpdateService,
+                )
+            })?);
+            Ok(None)
+        })
+        .await
+    }
+
+    async fn force_update_service(
+        &self,
+        service_id: &str,
+        version: u64,
+        cancellation: &CancellationToken,
+    ) -> Result<(), EngineError> {
+        self.update_service_spec(service_id, version, cancellation, |spec| {
+            let template = spec.task_template.get_or_insert_with(Default::default);
+            template.force_update = Some(template.force_update.unwrap_or(0).wrapping_add(1));
+            Ok(None)
+        })
+        .await
+    }
+
+    async fn rollback_service(
+        &self,
+        service_id: &str,
+        version: u64,
+        cancellation: &CancellationToken,
+    ) -> Result<(), EngineError> {
+        self.update_service_spec(service_id, version, cancellation, |_| {
+            Ok(Some("previous".to_owned()))
+        })
+        .await
+    }
+
+    async fn remove_service(
+        &self,
+        service_id: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<(), EngineError> {
+        if !is_valid_swarm_id(service_id) {
+            return Err(EngineError::new(
+                EngineErrorKind::InvalidInput,
+                EngineOperation::UpdateService,
+            ));
+        }
+        let client = self.negotiate(cancellation).await?;
+        self.execute(
+            EngineOperation::UpdateService,
+            cancellation,
+            client.delete_service(service_id),
+        )
+        .await
+    }
+
+    async fn swarm_status(&self, cancellation: &CancellationToken) -> Result<(), EngineError> {
+        let client = self.negotiate(cancellation).await?;
+        self.execute(EngineOperation::ReadSwarm, cancellation, client.info())
+            .await?;
+        Ok(())
+    }
+
+    async fn exec_create(
+        &self,
+        container_id: &str,
+        command: &[String],
+        env: &[String],
+        cancellation: &CancellationToken,
+    ) -> Result<String, EngineError> {
+        use bollard::exec::CreateExecOptions;
+
+        if !is_valid_container_id(container_id) || command.is_empty() {
+            return Err(EngineError::new(
+                EngineErrorKind::InvalidInput,
+                EngineOperation::Exec,
+            ));
+        }
+        let client = self.negotiate(cancellation).await?;
+        let created = self
+            .execute(
+                EngineOperation::Exec,
+                cancellation,
+                client.create_exec(
+                    container_id,
+                    CreateExecOptions {
+                        attach_stdin: Some(true),
+                        attach_stdout: Some(true),
+                        attach_stderr: Some(true),
+                        tty: Some(true),
+                        env: Some(env.to_vec()),
+                        cmd: Some(command.to_vec()),
+                        ..CreateExecOptions::default()
+                    },
+                ),
+            )
+            .await?;
+        Ok(created.id)
+    }
+
+    async fn exec_start(
+        &self,
+        exec_id: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<ExecAttachment, EngineError> {
+        use bollard::exec::{StartExecOptions, StartExecResults};
+        use futures_util::StreamExt as _;
+
+        if !is_valid_container_id(exec_id) {
+            return Err(EngineError::new(
+                EngineErrorKind::InvalidInput,
+                EngineOperation::Exec,
+            ));
+        }
+        let client = self.negotiate(cancellation).await?;
+        let started = self
+            .execute(
+                EngineOperation::Exec,
+                cancellation,
+                client.start_exec(
+                    exec_id,
+                    Some(StartExecOptions {
+                        detach: false,
+                        tty: true,
+                        output_capacity: Some(64 * 1024),
+                    }),
+                ),
+            )
+            .await?;
+        let StartExecResults::Attached { output, input } = started else {
+            return Err(EngineError::new(
+                EngineErrorKind::DaemonRejected,
+                EngineOperation::Exec,
+            ));
+        };
+        // With a TTY the daemon sends raw bytes; whichever variant carries them, pass them on.
+        let output = output.map(|item| match item {
+            Ok(
+                bollard::container::LogOutput::StdOut { message }
+                | bollard::container::LogOutput::StdErr { message }
+                | bollard::container::LogOutput::Console { message }
+                | bollard::container::LogOutput::StdIn { message },
+            ) => Ok(message.to_vec()),
+            Err(error) => Err(EngineError::from_bollard(EngineOperation::Exec, &error)),
+        });
+        Ok(ExecAttachment {
+            output: Box::pin(output),
+            input: ExecInput::new(input),
+        })
+    }
+
+    async fn exec_resize(
+        &self,
+        exec_id: &str,
+        cols: u16,
+        rows: u16,
+        cancellation: &CancellationToken,
+    ) -> Result<(), EngineError> {
+        use bollard::exec::ResizeExecOptions;
+
+        if !is_valid_container_id(exec_id) || cols == 0 || rows == 0 {
+            return Err(EngineError::new(
+                EngineErrorKind::InvalidInput,
+                EngineOperation::Exec,
+            ));
+        }
+        let client = self.negotiate(cancellation).await?;
+        self.execute(
+            EngineOperation::Exec,
+            cancellation,
+            client.resize_exec(
+                exec_id,
+                ResizeExecOptions {
+                    height: rows,
+                    width: cols,
+                },
+            ),
+        )
+        .await
+    }
+
+    async fn exec_inspect(
+        &self,
+        exec_id: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<ExecStatus, EngineError> {
+        if !is_valid_container_id(exec_id) {
+            return Err(EngineError::new(
+                EngineErrorKind::InvalidInput,
+                EngineOperation::Exec,
+            ));
+        }
+        let client = self.negotiate(cancellation).await?;
+        let inspected = self
+            .execute(
+                EngineOperation::Exec,
+                cancellation,
+                client.inspect_exec(exec_id),
+            )
+            .await?;
+        let running = inspected.running.unwrap_or(false);
+        Ok(ExecStatus {
+            running,
+            exit_code: if running { None } else { inspected.exit_code },
+        })
+    }
+
+    async fn service_logs(
+        &self,
+        service_id: &str,
+        request: ServiceLogRequest,
+        cancellation: &CancellationToken,
+    ) -> Result<ServiceLogStream, EngineError> {
+        use bollard::{container::LogOutput, query_parameters::LogsOptionsBuilder};
+        use futures_util::StreamExt as _;
+
+        const OPERATION: EngineOperation = EngineOperation::ReadServiceLogs;
+        if !is_valid_swarm_id(service_id) {
+            return Err(EngineError::new(EngineErrorKind::InvalidInput, OPERATION));
+        }
+        // Bollard's options have no `details`, and Swarm puts each line's task and node there.
+        let client = self
+            .negotiate(cancellation)
+            .await?
+            .with_request_modifier(with_log_details);
+        let since = request.since_unix_ms.map_or(0, |ms| {
+            i32::try_from(ms.div_euclid(1000)).unwrap_or(i32::MAX)
+        });
+        let options = LogsOptionsBuilder::default()
+            .follow(request.follow)
+            .stdout(true)
+            .stderr(true)
+            .timestamps(true)
+            .since(since)
+            .tail(&request.tail.to_string())
+            .build();
+        // The daemon stream owns its request, so the caller polls it directly: dropping the
+        // stream ends the follow, as does cancellation. Docker's 404 for an unknown service is
+        // its first item; the stream ends after any error.
+        let lines = client
+            .service_logs(service_id, Some(options))
+            .filter_map(|item| {
+                std::future::ready(match item {
+                    Ok(LogOutput::StdOut { message } | LogOutput::Console { message }) => {
+                        parse_service_log_line(LogSource::Stdout, &message).map(Ok)
+                    }
+                    Ok(LogOutput::StdErr { message }) => {
+                        parse_service_log_line(LogSource::Stderr, &message).map(Ok)
+                    }
+                    Ok(LogOutput::StdIn { .. }) => None,
+                    Err(error) => Some(Err(EngineError::from_bollard(OPERATION, &error))),
+                })
+            })
+            .scan(false, |failed, line: Result<_, EngineError>| {
+                let next = (!*failed).then_some(line);
+                *failed = matches!(next, Some(Err(_)));
+                std::future::ready(next)
+            })
+            .take_until(cancellation.clone().cancelled_owned());
+        Ok(Box::pin(lines))
+    }
+
+    async fn list_swarm_nodes(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> Result<Vec<SwarmNode>, EngineError> {
+        use bollard::query_parameters::ListNodesOptions;
+
+        let client = self.negotiate(cancellation).await?;
+        let nodes = self
+            .execute(
+                EngineOperation::ReadSwarm,
+                cancellation,
+                client.list_nodes(None::<ListNodesOptions>),
+            )
+            .await?;
+        Ok(nodes.into_iter().filter_map(map_swarm_node).collect())
+    }
+
+    async fn list_networks(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> Result<Vec<NetworkSummary>, EngineError> {
+        use bollard::query_parameters::{ListContainersOptionsBuilder, ListNetworksOptions};
+
+        let client = self.negotiate(cancellation).await?;
+        let networks = self
+            .execute(
+                EngineOperation::ListNetworks,
+                cancellation,
+                client.list_networks(None::<ListNetworksOptions>),
+            )
+            .await?;
+        // Running containers only: a stopped container keeps no endpoint.
+        let containers = self
+            .execute(
+                EngineOperation::ListNetworks,
+                cancellation,
+                client
+                    .list_containers(Some(ListContainersOptionsBuilder::new().all(false).build())),
+            )
+            .await?;
+        let mut endpoints: HashMap<String, u32> = HashMap::new();
+        for container in containers {
+            let networks = container
+                .network_settings
+                .and_then(|settings| settings.networks)
+                .unwrap_or_default();
+            for settings in networks.into_values() {
+                if let Some(id) = settings.network_id {
+                    *endpoints.entry(id).or_default() += 1;
+                }
+            }
+        }
+        Ok(networks
+            .into_iter()
+            .filter_map(|network| {
+                let id = network.id.clone().filter(|id| is_valid_network_id(id))?;
+                let containers = endpoints.get(&id).copied().unwrap_or(0);
+                Some(map_network(
+                    id,
+                    network.name,
+                    network.driver,
+                    network.scope,
+                    network.ipam,
+                    network.created,
+                    network.labels,
+                    network.attachable,
+                    containers,
+                ))
+            })
+            .collect())
+    }
+
+    async fn inspect_network(
+        &self,
+        id: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<NetworkDetail, EngineError> {
+        if !is_valid_network_id(id) {
+            return Err(EngineError::new(
+                EngineErrorKind::InvalidInput,
+                EngineOperation::InspectNetwork,
+            ));
+        }
+        let client = self.negotiate(cancellation).await?;
+        let network = self
+            .execute(
+                EngineOperation::InspectNetwork,
+                cancellation,
+                client.inspect_network(id, None),
+            )
+            .await?;
+        let mut endpoints: Vec<NetworkEndpoint> = network
+            .containers
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|(container_id, _)| is_valid_container_id(container_id))
+            .map(|(container_id, endpoint)| NetworkEndpoint {
+                name: endpoint
+                    .name
+                    .map(|name| bounded_message(&name))
+                    .unwrap_or_else(|| container_id.chars().take(12).collect()),
+                container_id,
+            })
+            .collect();
+        endpoints.sort_by(|left, right| left.name.cmp(&right.name));
+        endpoints.truncate(MAX_NETWORK_ENDPOINTS);
+        let count = u32::try_from(endpoints.len()).unwrap_or(u32::MAX);
+        let summary = map_network(
+            network.id.unwrap_or_else(|| id.to_owned()),
+            network.name,
+            network.driver,
+            network.scope,
+            network.ipam,
+            network.created,
+            network.labels,
+            network.attachable,
+            count,
+        );
+        Ok(NetworkDetail {
+            network: summary,
+            endpoints,
+        })
+    }
+
+    async fn create_network(
+        &self,
+        network: &NetworkCreate,
+        cancellation: &CancellationToken,
+    ) -> Result<String, EngineError> {
+        use bollard::models::{Ipam, IpamConfig, NetworkCreateRequest};
+
+        let driver_ok = matches!(network.driver.as_str(), "overlay" | "bridge");
+        if !is_valid_network_name(&network.name)
+            || is_builtin_network(&network.name)
+            || !driver_ok
+            || network
+                .subnet
+                .as_deref()
+                .is_some_and(|subnet| !is_valid_cidr(subnet))
+            || !are_valid_volume_labels(&network.labels)
+        {
+            return Err(EngineError::new(
+                EngineErrorKind::InvalidInput,
+                EngineOperation::CreateNetwork,
+            ));
+        }
+        let client = self.negotiate(cancellation).await?;
+        let request = NetworkCreateRequest {
+            name: network.name.clone(),
+            driver: Some(network.driver.clone()),
+            attachable: Some(network.attachable),
+            // Docker allows duplicate names; the controller checks the list first.
+            ipam: network.subnet.clone().map(|subnet| Ipam {
+                config: Some(vec![IpamConfig {
+                    subnet: Some(subnet),
+                    ..Default::default()
+                }]),
+                ..Default::default()
+            }),
+            labels: Some(network.labels.clone().into_iter().collect()),
+            ..Default::default()
+        };
+        let created = self
+            .execute(
+                EngineOperation::CreateNetwork,
+                cancellation,
+                client.create_network(request),
+            )
+            .await?;
+        if is_valid_network_id(&created.id) {
+            Ok(created.id)
+        } else {
+            Err(EngineError::new(
+                EngineErrorKind::InvalidResponse,
+                EngineOperation::CreateNetwork,
+            ))
+        }
+    }
+
+    async fn remove_network(
+        &self,
+        id: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<(), EngineError> {
+        if !is_valid_network_id(id) {
+            return Err(EngineError::new(
+                EngineErrorKind::InvalidInput,
+                EngineOperation::RemoveNetwork,
+            ));
+        }
+        let detail = self.inspect_network(id, cancellation).await?;
+        if detail.network.builtin() {
+            return Err(EngineError::new(
+                EngineErrorKind::InvalidInput,
+                EngineOperation::RemoveNetwork,
+            ));
+        }
+        let client = self.negotiate(cancellation).await?;
+        self.execute(
+            EngineOperation::RemoveNetwork,
+            cancellation,
+            client.remove_network(id),
+        )
+        .await
+    }
+
+    async fn list_volumes(
+        &self,
+        cancellation: &CancellationToken,
+    ) -> Result<Vec<VolumeSummary>, EngineError> {
+        use bollard::query_parameters::{ListContainersOptionsBuilder, ListVolumesOptions};
+
+        let client = self.negotiate(cancellation).await?;
+        let volumes = self
+            .execute(
+                EngineOperation::ListVolumes,
+                cancellation,
+                client.list_volumes(None::<ListVolumesOptions>),
+            )
+            .await?;
+        let containers = self
+            .execute(
+                EngineOperation::ListVolumes,
+                cancellation,
+                client.list_containers(Some(
+                    ListContainersOptionsBuilder::new()
+                        .all(true)
+                        .size(false)
+                        .build(),
+                )),
+            )
+            .await?;
+        let mut users: HashMap<String, Vec<String>> = HashMap::new();
+        for container in containers {
+            let name = canonical_display_name(&container.names.unwrap_or_default())
+                .unwrap_or_else(|| container.id.unwrap_or_default().chars().take(12).collect());
+            for mount in container.mounts.unwrap_or_default() {
+                if let Some(volume) = mount.name {
+                    users
+                        .entry(volume)
+                        .or_default()
+                        .push(bounded_message(&name));
+                }
+            }
+        }
+        Ok(volumes
+            .volumes
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|volume| !volume.name.is_empty())
+            .map(|volume| {
+                let names = users.remove(&volume.name).unwrap_or_default();
+                map_volume(volume, &names)
+            })
+            .collect())
+    }
+
+    async fn create_volume(
+        &self,
+        volume: &VolumeCreate,
+        cancellation: &CancellationToken,
+    ) -> Result<VolumeSummary, EngineError> {
+        use bollard::models::VolumeCreateRequest;
+
+        if !is_valid_volume_name(&volume.name)
+            || volume.driver.is_empty()
+            || !are_valid_volume_labels(&volume.labels)
+            || !are_valid_volume_labels(&volume.driver_opts)
+        {
+            return Err(EngineError::new(
+                EngineErrorKind::InvalidInput,
+                EngineOperation::CreateVolume,
+            ));
+        }
+        let client = self.negotiate(cancellation).await?;
+        // Docker answers a create for an existing name with that volume; refuse instead.
+        match self
+            .execute(
+                EngineOperation::CreateVolume,
+                cancellation,
+                client.inspect_volume(&volume.name),
+            )
+            .await
+        {
+            Ok(_) => {
+                return Err(EngineError::new(
+                    EngineErrorKind::Conflict,
+                    EngineOperation::CreateVolume,
+                ));
+            }
+            Err(error) if error.kind() == EngineErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+        let request = VolumeCreateRequest {
+            name: Some(volume.name.clone()),
+            driver: Some(volume.driver.clone()),
+            driver_opts: Some(volume.driver_opts.clone().into_iter().collect()),
+            labels: Some(volume.labels.clone().into_iter().collect()),
+            cluster_volume_spec: None,
+        };
+        let created = self
+            .execute(
+                EngineOperation::CreateVolume,
+                cancellation,
+                client.create_volume(request),
+            )
+            .await?;
+        Ok(map_volume(created, &[]))
+    }
+
+    async fn remove_volume(
+        &self,
+        name: &str,
+        cancellation: &CancellationToken,
+    ) -> Result<(), EngineError> {
+        use bollard::query_parameters::RemoveVolumeOptions;
+
+        if !is_valid_volume_name(name) {
+            return Err(EngineError::new(
+                EngineErrorKind::InvalidInput,
+                EngineOperation::RemoveVolume,
+            ));
+        }
+        let client = self.negotiate(cancellation).await?;
+        self.execute(
+            EngineOperation::RemoveVolume,
+            cancellation,
+            client.remove_volume(name, None::<RemoveVolumeOptions>),
+        )
+        .await
+    }
+}
+
+fn map_image(image: bollard::models::ImageSummary, used: &HashMap<String, u32>) -> ImageSummary {
+    let repo_tags: Vec<String> = image
+        .repo_tags
+        .into_iter()
+        .filter(|tag| tag != "<none>:<none>")
+        .take(MAX_ITEM_VALUES)
+        .map(|tag| bounded_message(&tag))
+        .collect();
+    let repo_digests: Vec<String> = image
+        .repo_digests
+        .into_iter()
+        .filter(|digest| digest != "<none>@<none>")
+        .take(MAX_ITEM_VALUES)
+        .map(|digest| bounded_message(&digest))
+        .collect();
+    ImageSummary {
+        used_by: used.get(&image.id).copied().unwrap_or(0),
+        image_id: image.id,
+        repo_tags,
+        repo_digests,
+        size_bytes: u64::try_from(image.size).unwrap_or(0),
+        created_at_seconds: image.created.max(0),
+    }
+}
+
+/// One daemon pull message as a typed event; errors carry the daemon's (registry's) own words.
+fn pull_event(item: Result<bollard::models::CreateImageInfo, BollardError>) -> PullEvent {
+    match item {
+        Ok(info) => {
+            if let Some(message) = info.error_detail.and_then(|detail| detail.message) {
+                return PullEvent::Failed(bounded_message(&message));
+            }
+            let detail = info.progress_detail.unwrap_or_default();
+            PullEvent::Progress(PullProgress {
+                layer_id: info.id.map(|id| crate::image::bounded_status(&id)),
+                status: crate::image::bounded_status(info.status.as_deref().unwrap_or_default()),
+                current: detail.current.and_then(|value| u64::try_from(value).ok()),
+                total: detail.total.and_then(|value| u64::try_from(value).ok()),
+            })
+        }
+        Err(
+            BollardError::DockerStreamError { error }
+            | BollardError::DockerResponseServerError { message: error, .. },
+        ) => PullEvent::Failed(bounded_message(&error)),
+        Err(_) => {
+            PullEvent::Failed("the Docker Engine connection failed during the pull".to_owned())
+        }
+    }
+}
+
+fn map_node_info(info: SystemInfo) -> NodeInfo {
+    let count = |value: Option<i64>| {
+        value
+            .and_then(|value| u32::try_from(value).ok())
+            .unwrap_or(0)
+    };
+    NodeInfo {
+        hostname: info.name.unwrap_or_default(),
+        swarm_node_id: info
+            .swarm
+            .and_then(|swarm| swarm.node_id)
+            .filter(|id| !id.is_empty()),
+        docker_version: info.server_version.unwrap_or_default(),
+        os: info.operating_system.or(info.os_type).unwrap_or_default(),
+        architecture: info.architecture.unwrap_or_default(),
+        cpu_cores: count(info.ncpu),
+        memory_total_bytes: info
+            .mem_total
+            .and_then(|value| u64::try_from(value).ok())
+            .unwrap_or(0),
+        containers_running: count(info.containers_running),
+        containers_paused: count(info.containers_paused),
+        containers_stopped: count(info.containers_stopped),
+    }
+}
+
+fn cpu_counters(stats: Option<&ContainerCpuStats>) -> CpuCounters {
+    stats.map_or_else(CpuCounters::default, |stats| CpuCounters {
+        total_usage: stats
+            .cpu_usage
+            .as_ref()
+            .and_then(|usage| usage.total_usage)
+            .unwrap_or(0),
+        system_usage: stats.system_cpu_usage.unwrap_or(0),
+        online_cpus: stats.online_cpus.unwrap_or(0),
+    })
+}
+
+fn map_container_stats(response: ContainerStatsResponse) -> ContainerStats {
+    let memory = response.memory_stats.unwrap_or_default();
+    let (net_rx_bytes, net_tx_bytes) =
+        response
+            .networks
+            .unwrap_or_default()
+            .values()
+            .fold((0_u64, 0_u64), |(rx, tx), network| {
+                (
+                    rx.saturating_add(network.rx_bytes.unwrap_or(0)),
+                    tx.saturating_add(network.tx_bytes.unwrap_or(0)),
+                )
+            });
+    ContainerStats {
+        cpu_percent: None,
+        cpu: cpu_counters(response.cpu_stats.as_ref()),
+        memory_used_bytes: memory
+            .usage
+            .map(|usage| memory_used(usage, &memory.stats.clone().unwrap_or_default())),
+        memory_limit_bytes: memory.limit.filter(|limit| *limit > 0),
+        net_rx_bytes,
+        net_tx_bytes,
+    }
+}
+
+fn map_service(service: bollard::models::Service) -> Option<ServiceSummary> {
+    let id = service.id.filter(|id| is_valid_swarm_id(id))?;
+    let spec = service.spec.unwrap_or_default();
+    let mode = match spec.mode.as_ref() {
+        Some(mode) if mode.global.is_some() => ServiceMode::Global,
+        Some(mode) => ServiceMode::Replicated {
+            replicas: mode
+                .replicated
+                .as_ref()
+                .and_then(|replicated| replicated.replicas)
+                .and_then(|replicas| u64::try_from(replicas).ok())
+                .unwrap_or(0),
+        },
+        None => ServiceMode::Replicated { replicas: 1 },
+    };
+    let container = spec
+        .task_template
+        .as_ref()
+        .and_then(|template| template.container_spec.as_ref());
+    let image = container
+        .and_then(|container| container.image.clone())
+        .unwrap_or_default();
+    let mut volumes: Vec<String> = container
+        .and_then(|container| container.mounts.clone())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|mount| {
+            mount
+                .typ
+                .as_ref()
+                .is_some_and(|typ| typ.to_string() == "volume")
+        })
+        .filter_map(|mount| mount.source.filter(|source| is_valid_volume_name(source)))
+        .collect();
+    volumes.sort();
+    volumes.dedup();
+    let mut ports: Vec<String> = service
+        .endpoint
+        .and_then(|endpoint| endpoint.ports)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|port| {
+            let published = port.published_port?;
+            let target = port.target_port?;
+            let protocol = port
+                .protocol
+                .map_or_else(|| "tcp".to_owned(), |protocol| protocol.to_string());
+            Some(format!("{published}:{target}/{protocol}"))
+        })
+        .collect();
+    ports.sort();
+    ports.dedup();
+    ports.truncate(MAX_ITEM_VALUES);
+    let labels = spec.labels.unwrap_or_default();
+    let update = service.update_status.unwrap_or_default();
+    Some(ServiceSummary {
+        id,
+        name: bounded_message(&spec.name.unwrap_or_default()),
+        image: bounded_message(&image),
+        mode,
+        ports,
+        created_at_seconds: service.created_at.as_deref().and_then(parse_docker_time),
+        updated_at_seconds: service.updated_at.as_deref().and_then(parse_docker_time),
+        version: service
+            .version
+            .and_then(|version| version.index)
+            .unwrap_or(0),
+        stack: bounded_label(labels.get(STACK_NAMESPACE_LABEL)),
+        update_state: update
+            .state
+            .map(|state| state.to_string())
+            .filter(|state| !state.is_empty()),
+        update_message: update
+            .message
+            .map(|message| bounded_message(&message))
+            .filter(|message| !message.is_empty()),
+        volumes,
+    })
+}
+
+fn map_task(task: bollard::models::Task) -> Option<TaskSummary> {
+    let id = task.id.filter(|id| is_valid_swarm_id(id))?;
+    let status = task.status.unwrap_or_default();
+    let nonempty = |value: Option<String>| {
+        value
+            .map(|value| bounded_message(&value))
+            .filter(|value| !value.is_empty())
+    };
+    Some(TaskSummary {
+        id,
+        service_id: task.service_id.unwrap_or_default(),
+        slot: task.slot.and_then(|slot| u64::try_from(slot).ok()),
+        node_id: task.node_id.filter(|node| !node.is_empty()),
+        state: status
+            .state
+            .map(|state| state.to_string())
+            .unwrap_or_default(),
+        desired_state: task
+            .desired_state
+            .map(|state| state.to_string())
+            .unwrap_or_default(),
+        error: nonempty(status.err),
+        message: nonempty(status.message),
+        updated_at_seconds: task
+            .updated_at
+            .as_deref()
+            .or(status.timestamp.as_deref())
+            .and_then(parse_docker_time),
+        container_id: status
+            .container_status
+            .and_then(|container| container.container_id)
+            .filter(|id| is_valid_container_id(id)),
+    })
+}
+
+/// Ask a service-logs request for `details` as well, which Bollard's options can't express.
+fn with_log_details(mut request: bollard::BollardRequest) -> bollard::BollardRequest {
+    let uri = request.uri();
+    if uri.path().contains("/services/") && uri.path().ends_with("/logs") {
+        let with_details = match uri.query() {
+            Some(query) => format!("{}?{query}&details=1", uri.path()),
+            None => format!("{}?details=1", uri.path()),
+        };
+        let rebuilt = match (uri.scheme_str(), uri.authority()) {
+            (Some(scheme), Some(authority)) => format!("{scheme}://{authority}{with_details}"),
+            _ => with_details,
+        };
+        if let Ok(parsed) = rebuilt.parse() {
+            *request.uri_mut() = parsed;
+        }
+    }
+    request
+}
+
+fn map_swarm_node(node: bollard::models::Node) -> Option<SwarmNode> {
+    use bollard::models::{NodeSpecAvailabilityEnum, NodeSpecRoleEnum, NodeState, Reachability};
+
+    let id = node.id.filter(|id| is_valid_swarm_id(id))?;
+    let spec = node.spec.unwrap_or_default();
+    let description = node.description.unwrap_or_default();
+    let status = node.status.unwrap_or_default();
+    let platform = description.platform.unwrap_or_default();
+    let resources = description.resources.unwrap_or_default();
+    let text = |value: Option<String>| bounded_label(value.as_ref());
+    let manager = node.manager_status;
+    Some(SwarmNode {
+        id,
+        hostname: text(description.hostname).unwrap_or_default(),
+        role: match spec.role {
+            Some(NodeSpecRoleEnum::MANAGER) => SwarmRole::Manager,
+            _ => SwarmRole::Worker,
+        },
+        is_leader: manager
+            .as_ref()
+            .and_then(|manager| manager.leader)
+            .unwrap_or(false),
+        manager_reachable: manager
+            .as_ref()
+            .map(|manager| manager.reachability == Some(Reachability::REACHABLE)),
+        availability: match spec.availability {
+            Some(NodeSpecAvailabilityEnum::ACTIVE) => Some(SwarmAvailability::Active),
+            Some(NodeSpecAvailabilityEnum::PAUSE) => Some(SwarmAvailability::Pause),
+            Some(NodeSpecAvailabilityEnum::DRAIN) => Some(SwarmAvailability::Drain),
+            _ => None,
+        },
+        state: match status.state {
+            Some(NodeState::READY) => SwarmNodeState::Ready,
+            Some(NodeState::DOWN | NodeState::DISCONNECTED) => SwarmNodeState::Down,
+            _ => SwarmNodeState::Unknown,
+        },
+        address: text(status.addr),
+        docker_version: text(description.engine.and_then(|engine| engine.engine_version)),
+        os: text(platform.os),
+        architecture: text(platform.architecture),
+        cpu_cores: resources
+            .nano_cpus
+            .and_then(|nanos| u32::try_from(nanos / 1_000_000_000).ok()),
+        memory_total_bytes: resources
+            .memory_bytes
+            .and_then(|bytes| u64::try_from(bytes).ok()),
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn map_network(
+    id: String,
+    name: Option<String>,
+    driver: Option<String>,
+    scope: Option<String>,
+    ipam: Option<bollard::models::Ipam>,
+    created: Option<String>,
+    labels: Option<HashMap<String, String>>,
+    attachable: Option<bool>,
+    containers: u32,
+) -> NetworkSummary {
+    let subnets = ipam
+        .and_then(|ipam| ipam.config)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|config| config.subnet)
+        .filter(|subnet| subnet.len() <= 64)
+        .collect();
+    NetworkSummary {
+        id,
+        name: bounded_message(&name.unwrap_or_default()),
+        driver: bounded_message(&driver.unwrap_or_default()),
+        scope: bounded_message(&scope.unwrap_or_default()),
+        subnets,
+        containers,
+        created_at_seconds: created.as_deref().and_then(parse_docker_time),
+        labels: bounded_labels(labels.unwrap_or_default()),
+        attachable: attachable.unwrap_or(false),
+    }
+}
+
+fn map_volume(volume: bollard::models::Volume, users: &[String]) -> VolumeSummary {
+    VolumeSummary {
+        created_at_seconds: volume.created_at.as_deref().and_then(parse_docker_time),
+        labels: bounded_labels(volume.labels),
+        used_by: u32::try_from(users.len()).unwrap_or(u32::MAX),
+        users: users.iter().take(MAX_VOLUME_USERS).cloned().collect(),
+        driver: bounded_message(&volume.driver),
+        mountpoint: bounded_message(&volume.mountpoint),
+        name: volume.name,
+    }
+}
+
+/// Per-volume sizes from a verbose `df`; `-1` (the driver can't say) is left out.
+fn volume_sizes(usage: &SystemDataUsageResponse) -> std::collections::BTreeMap<String, u64> {
+    usage
+        .volume_usage
+        .as_ref()
+        .and_then(|usage| usage.items.as_ref())
+        .into_iter()
+        .flatten()
+        .filter_map(|item| {
+            let name = item.get("Name")?.as_str()?;
+            let size = item.get("UsageData")?.get("Size")?.as_i64()?;
+            Some((name.to_owned(), u64::try_from(size).ok()?))
+        })
+        .collect()
 }
 
 fn parse_required_api_version(
@@ -300,6 +1741,7 @@ fn map_container_summary(
         .filter(|created| *created >= 0)
         .ok_or_else(invalid_containers)?;
 
+    let labels = summary.labels.clone().unwrap_or_default();
     Ok(ContainerSummary {
         container_id,
         display_name,
@@ -307,7 +1749,52 @@ fn map_container_summary(
         state: map_container_state(summary.state),
         status: truncate_status_text(summary.status.as_deref().unwrap_or_default()),
         created_at_seconds,
+        published_ports: published_ports(summary.ports.as_deref().unwrap_or_default()),
+        service_name: bounded_label(labels.get(SERVICE_NAME_LABEL)),
+        stack_namespace: bounded_label(labels.get(STACK_NAMESPACE_LABEL)),
+        task_id: bounded_label(labels.get(TASK_ID_LABEL)),
+        networks: container_networks(summary),
     })
+}
+
+/// The networks a container has endpoints on, by name.
+fn container_networks(summary: &bollard::models::ContainerSummary) -> Vec<String> {
+    let mut names: Vec<String> = summary
+        .network_settings
+        .as_ref()
+        .and_then(|settings| settings.networks.as_ref())
+        .map(|networks| {
+            networks
+                .keys()
+                .filter(|name| is_valid_network_name(name))
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
+    names.sort();
+    names.truncate(MAX_CONTAINER_NETWORKS);
+    names
+}
+
+/// `host:container/proto` for each published port, once each (IPv4 and IPv6 bindings of one port
+/// collapse), sorted, and at most [`MAX_ITEM_VALUES`].
+fn published_ports(ports: &[bollard::models::PortSummary]) -> Vec<String> {
+    let mut published: Vec<String> = ports
+        .iter()
+        .filter_map(|port| {
+            let public = port.public_port?;
+            let protocol = port.typ.map_or("tcp", |typ| match typ {
+                bollard::models::PortSummaryTypeEnum::UDP => "udp",
+                bollard::models::PortSummaryTypeEnum::SCTP => "sctp",
+                _ => "tcp",
+            });
+            Some(format!("{public}:{}/{protocol}", port.private_port))
+        })
+        .collect();
+    published.sort();
+    published.dedup();
+    published.truncate(MAX_ITEM_VALUES);
+    published
 }
 
 fn map_container_state(state: Option<ContainerSummaryStateEnum>) -> ContainerState {
@@ -374,12 +1861,130 @@ mod tests {
 
     use super::{
         LocalDockerEngine, LocalEngineOptions, capabilities_from_swarm, map_container_state,
-        map_container_summary,
+        map_container_stats, map_container_summary, map_node_info, map_swarm_node, map_volume,
+        volume_sizes,
     };
     use crate::{
-        CapabilityStatus, ContainerEngine, ContainerPageRequest, ContainerState, EngineAccessScope,
-        EngineErrorKind, EngineOperation, UnsupportedCapabilityReason,
+        CapabilityStatus, ContainerEngine, ContainerPageRequest, ContainerState, CpuCounters,
+        EngineAccessScope, EngineErrorKind, EngineOperation, SwarmAvailability, SwarmNode,
+        SwarmNodeState, SwarmRole, UnsupportedCapabilityReason,
     };
+
+    #[test]
+    fn service_log_requests_ask_for_details_and_nothing_else_changes() {
+        let request = |uri: &str| {
+            let mut request = bollard::BollardRequest::new(bollard::body_full(Default::default()));
+            *request.uri_mut() = uri.parse().unwrap();
+            super::with_log_details(request).uri().to_string()
+        };
+        assert_eq!(
+            request("http://localhost:2375/v1.47/services/abc/logs?stdout=true&tail=500"),
+            "http://localhost:2375/v1.47/services/abc/logs?stdout=true&tail=500&details=1"
+        );
+        assert_eq!(
+            request("/services/abc/logs"),
+            "/services/abc/logs?details=1"
+        );
+        assert_eq!(
+            request("http://localhost:2375/v1.47/containers/abc/logs?stdout=true"),
+            "http://localhost:2375/v1.47/containers/abc/logs?stdout=true",
+            "container logs are left alone"
+        );
+    }
+
+    #[test]
+    fn swarm_nodes_map_role_leadership_state_and_resources() {
+        use bollard::models::{
+            EngineDescription, ManagerStatus, Node, NodeDescription, NodeSpec,
+            NodeSpecAvailabilityEnum, NodeSpecRoleEnum, NodeState, NodeStatus, Platform,
+            Reachability, ResourceObject,
+        };
+
+        let id = "x7kq2m9p0r1s3t5u7w9y0z2b4".to_owned();
+        let leader = Node {
+            id: Some(id.clone()),
+            spec: Some(NodeSpec {
+                role: Some(NodeSpecRoleEnum::MANAGER),
+                availability: Some(NodeSpecAvailabilityEnum::ACTIVE),
+                ..NodeSpec::default()
+            }),
+            description: Some(NodeDescription {
+                hostname: Some("manager".to_owned()),
+                platform: Some(Platform {
+                    architecture: Some("aarch64".to_owned()),
+                    os: Some("linux".to_owned()),
+                }),
+                resources: Some(ResourceObject {
+                    nano_cpus: Some(4_000_000_000),
+                    memory_bytes: Some(8 << 30),
+                    ..ResourceObject::default()
+                }),
+                engine: Some(EngineDescription {
+                    engine_version: Some("29.1.0".to_owned()),
+                    ..EngineDescription::default()
+                }),
+                ..NodeDescription::default()
+            }),
+            status: Some(NodeStatus {
+                state: Some(NodeState::READY),
+                addr: Some("172.20.0.2".to_owned()),
+                ..NodeStatus::default()
+            }),
+            manager_status: Some(ManagerStatus {
+                leader: Some(true),
+                reachability: Some(Reachability::REACHABLE),
+                addr: None,
+            }),
+            ..Node::default()
+        };
+        assert_eq!(
+            map_swarm_node(leader),
+            Some(SwarmNode {
+                id: id.clone(),
+                hostname: "manager".to_owned(),
+                role: SwarmRole::Manager,
+                is_leader: true,
+                manager_reachable: Some(true),
+                availability: Some(SwarmAvailability::Active),
+                state: SwarmNodeState::Ready,
+                address: Some("172.20.0.2".to_owned()),
+                docker_version: Some("29.1.0".to_owned()),
+                os: Some("linux".to_owned()),
+                architecture: Some("aarch64".to_owned()),
+                cpu_cores: Some(4),
+                memory_total_bytes: Some(8 << 30),
+            })
+        );
+
+        let drained = map_swarm_node(Node {
+            id: Some(id.clone()),
+            spec: Some(NodeSpec {
+                role: Some(NodeSpecRoleEnum::WORKER),
+                availability: Some(NodeSpecAvailabilityEnum::DRAIN),
+                ..NodeSpec::default()
+            }),
+            status: Some(NodeStatus {
+                state: Some(NodeState::DISCONNECTED),
+                ..NodeStatus::default()
+            }),
+            ..Node::default()
+        })
+        .unwrap();
+        assert_eq!(drained.role, SwarmRole::Worker);
+        assert_eq!(drained.availability, Some(SwarmAvailability::Drain));
+        assert_eq!(drained.state, SwarmNodeState::Down, "disconnected is down");
+        assert_eq!(
+            drained.manager_reachable, None,
+            "workers have no raft state"
+        );
+        assert_eq!(drained.cpu_cores, None);
+
+        assert_eq!(
+            map_swarm_node(Node::default()),
+            None,
+            "a node without a valid id is dropped"
+        );
+    }
 
     #[test]
     fn manager_and_node_constructors_preserve_their_authority() {
@@ -391,7 +1996,7 @@ mod tests {
                 as fn(LocalEngineOptions) -> Result<LocalDockerEngine, crate::EngineError>,
         ] {
             let error = connect(LocalEngineOptions {
-                socket_path: missing_socket.clone(),
+                host: crate::DockerHost::UnixSocket(missing_socket.clone()),
                 operation_timeout: Duration::from_secs(1),
             })
             .err()
@@ -403,10 +2008,25 @@ mod tests {
         assert_ne!(EngineAccessScope::Manager, EngineAccessScope::NodeLocal);
     }
 
+    #[tokio::test]
+    async fn tcp_hosts_connect_over_http_and_map_refusal_to_unavailable() {
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = closed.local_addr().unwrap().port();
+        drop(closed);
+        let engine = LocalDockerEngine::connect_for_node(LocalEngineOptions {
+            host: format!("tcp://127.0.0.1:{port}").parse().unwrap(),
+            operation_timeout: Duration::from_secs(1),
+        })
+        .unwrap();
+
+        let error = engine.is_available().await.unwrap_err();
+        assert_eq!(error.kind(), EngineErrorKind::ConnectionUnavailable);
+    }
+
     #[test]
     fn zero_timeout_is_rejected_before_adapter_construction() {
         let error = LocalDockerEngine::connect_for_node(LocalEngineOptions {
-            socket_path: "/var/run/docker.sock".into(),
+            host: crate::DockerHost::default(),
             operation_timeout: Duration::ZERO,
         })
         .err()
@@ -479,7 +2099,7 @@ mod tests {
         ));
         let listener = UnixListener::bind(&socket_path).unwrap();
         let engine = LocalDockerEngine::connect_for_node(LocalEngineOptions {
-            socket_path: socket_path.clone(),
+            host: crate::DockerHost::UnixSocket(socket_path.clone()),
             operation_timeout: Duration::from_secs(1),
         })
         .unwrap();
@@ -686,7 +2306,7 @@ mod tests {
         let _ = std::fs::remove_file(&socket_path);
         let listener = UnixListener::bind(&socket_path).unwrap();
         let engine = LocalDockerEngine::connect_for_node(LocalEngineOptions {
-            socket_path: socket_path.clone(),
+            host: crate::DockerHost::UnixSocket(socket_path.clone()),
             operation_timeout: Duration::from_secs(2),
         })
         .unwrap();
@@ -803,7 +2423,7 @@ mod tests {
         let _ = std::fs::remove_file(&socket_path);
         let listener = UnixListener::bind(&socket_path).unwrap();
         let engine = LocalDockerEngine::connect_for_node(LocalEngineOptions {
-            socket_path: socket_path.clone(),
+            host: crate::DockerHost::UnixSocket(socket_path.clone()),
             operation_timeout: Duration::from_secs(2),
         })
         .unwrap();
@@ -862,6 +2482,371 @@ mod tests {
             .unwrap()
             .unwrap();
         std::fs::remove_file(socket_path).unwrap();
+    }
+
+    #[test]
+    fn summaries_carry_published_ports_and_the_allowlisted_labels_only() {
+        use bollard::models::{PortSummary, PortSummaryTypeEnum};
+        let summary = bollard::models::ContainerSummary {
+            id: Some("a".repeat(64)),
+            names: Some(vec!["/web.1.abc".to_owned()]),
+            image: Some("nginx:latest".to_owned()),
+            created: Some(1_700_000_000),
+            state: Some(ContainerSummaryStateEnum::RUNNING),
+            status: Some("Up".to_owned()),
+            ports: Some(vec![
+                PortSummary {
+                    private_port: 80,
+                    public_port: Some(8080),
+                    typ: Some(PortSummaryTypeEnum::TCP),
+                    ip: Some("0.0.0.0".to_owned()),
+                },
+                PortSummary {
+                    private_port: 80,
+                    public_port: Some(8080),
+                    typ: Some(PortSummaryTypeEnum::TCP),
+                    ip: Some("::".to_owned()),
+                },
+                PortSummary {
+                    private_port: 53,
+                    public_port: Some(5353),
+                    typ: Some(PortSummaryTypeEnum::UDP),
+                    ip: None,
+                },
+                PortSummary {
+                    private_port: 9000,
+                    public_port: None,
+                    typ: Some(PortSummaryTypeEnum::TCP),
+                    ip: None,
+                },
+            ]),
+            labels: Some(
+                [
+                    ("com.docker.swarm.service.name", "shop_web"),
+                    ("com.docker.stack.namespace", "shop"),
+                    ("com.docker.swarm.task.id", "t1"),
+                    ("secret-canary-label", "value"),
+                ]
+                .into_iter()
+                .map(|(key, value)| (key.to_owned(), value.to_owned()))
+                .collect(),
+            ),
+            ..Default::default()
+        };
+        let mapped = map_container_summary(&summary).unwrap();
+        assert_eq!(mapped.published_ports, vec!["5353:53/udp", "8080:80/tcp"]);
+        assert_eq!(mapped.service_name.as_deref(), Some("shop_web"));
+        assert_eq!(mapped.stack_namespace.as_deref(), Some("shop"));
+        assert_eq!(mapped.task_id.as_deref(), Some("t1"));
+        assert!(!format!("{mapped:?}").contains("secret-canary"));
+    }
+
+    #[test]
+    fn daemon_statuses_map_to_lifecycle_kinds() {
+        use crate::EngineError;
+        let status = |status_code| bollard::errors::Error::DockerResponseServerError {
+            status_code,
+            message: "secret-canary".to_owned(),
+        };
+        for (code, kind) in [
+            (404, EngineErrorKind::NotFound),
+            (409, EngineErrorKind::Conflict),
+            (500, EngineErrorKind::DaemonRejected),
+        ] {
+            let error = EngineError::from_bollard(EngineOperation::ContainerAction, &status(code));
+            assert_eq!(error.kind(), kind, "{code}");
+            assert!(!error.to_string().contains("secret-canary"));
+        }
+        assert_eq!(
+            EngineError::from_bollard(EngineOperation::ListContainers, &status(404)).kind(),
+            EngineErrorKind::InvalidInput,
+            "a stale cursor stays invalid pagination"
+        );
+    }
+
+    #[test]
+    fn images_count_their_containers_and_drop_placeholder_tags() {
+        let id = format!("sha256:{}", "a".repeat(64));
+        let used = [(id.clone(), 2)].into_iter().collect();
+        let mapped = super::map_image(
+            bollard::models::ImageSummary {
+                id: id.clone(),
+                repo_tags: vec!["nginx:1.27".to_owned()],
+                repo_digests: vec!["nginx@sha256:abc".to_owned()],
+                size: 42_000_000,
+                created: 1_700_000_000,
+                ..Default::default()
+            },
+            &used,
+        );
+        assert_eq!(mapped.used_by, 2);
+        assert_eq!(mapped.size_bytes, 42_000_000);
+        let dangling = super::map_image(
+            bollard::models::ImageSummary {
+                id: format!("sha256:{}", "b".repeat(64)),
+                repo_tags: vec!["<none>:<none>".to_owned()],
+                size: -1,
+                ..Default::default()
+            },
+            &used,
+        );
+        assert!(dangling.repo_tags.is_empty());
+        assert_eq!((dangling.used_by, dangling.size_bytes), (0, 0));
+    }
+
+    #[test]
+    fn a_wide_port_range_or_tag_list_is_truncated_not_fatal() {
+        use bollard::models::{PortSummary, PortSummaryTypeEnum};
+
+        let wide = bollard::models::ContainerSummary {
+            id: Some("a".repeat(64)),
+            names: Some(vec!["/relay".to_owned()]),
+            image: Some("coturn:latest".to_owned()),
+            created: Some(1_700_000_000),
+            ports: Some(
+                (40_000..40_200)
+                    .map(|port| PortSummary {
+                        private_port: port,
+                        public_port: Some(port),
+                        typ: Some(PortSummaryTypeEnum::UDP),
+                        ip: None,
+                    })
+                    .collect(),
+            ),
+            ..Default::default()
+        };
+        let mapped = map_container_summary(&wide).unwrap();
+        assert_eq!(mapped.published_ports.len(), 64);
+        assert_eq!(mapped.published_ports[0], "40000:40000/udp");
+
+        let tagged = super::map_image(
+            bollard::models::ImageSummary {
+                id: format!("sha256:{}", "c".repeat(64)),
+                repo_tags: (0..100).map(|tag| format!("app:{tag}")).collect(),
+                repo_digests: (0..100)
+                    .map(|tag| format!("app@sha256:{tag:064}"))
+                    .collect(),
+                ..Default::default()
+            },
+            &std::collections::HashMap::new(),
+        );
+        assert_eq!(
+            (tagged.repo_tags.len(), tagged.repo_digests.len()),
+            (64, 64)
+        );
+
+        let service = super::map_service(bollard::models::Service {
+            id: Some("s".repeat(25)),
+            spec: Some(bollard::models::ServiceSpec {
+                name: Some("relay".to_owned()),
+                ..Default::default()
+            }),
+            endpoint: Some(bollard::models::ServiceEndpoint {
+                ports: Some(
+                    (40_000..40_200)
+                        .map(|port| bollard::models::EndpointPortConfig {
+                            published_port: Some(port),
+                            target_port: Some(port),
+                            ..Default::default()
+                        })
+                        .collect(),
+                ),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        assert_eq!(service.map(|service| service.ports.len()), Some(64));
+    }
+
+    #[test]
+    fn pull_messages_become_typed_events_with_registry_errors_verbatim() {
+        use crate::PullEvent;
+        use bollard::models::{CreateImageInfo, ErrorDetail, ProgressDetail};
+        let progress = super::pull_event(Ok(CreateImageInfo {
+            id: Some("a1b2c3".to_owned()),
+            status: Some("Downloading".to_owned()),
+            progress_detail: Some(ProgressDetail {
+                current: Some(1024),
+                total: Some(4096),
+            }),
+            ..Default::default()
+        }));
+        match progress {
+            PullEvent::Progress(progress) => {
+                assert_eq!(progress.layer_id.as_deref(), Some("a1b2c3"));
+                assert_eq!((progress.current, progress.total), (Some(1024), Some(4096)));
+            }
+            PullEvent::Failed(message) => panic!("unexpected failure {message}"),
+        }
+        let failed = super::pull_event(Ok(CreateImageInfo {
+            error_detail: Some(ErrorDetail {
+                code: None,
+                message: Some("manifest for alpine:nope not found: manifest unknown".to_owned()),
+            }),
+            ..Default::default()
+        }));
+        assert_eq!(
+            failed,
+            PullEvent::Failed("manifest for alpine:nope not found: manifest unknown".to_owned())
+        );
+        let denied = super::pull_event(Err(bollard::errors::Error::DockerResponseServerError {
+            status_code: 404,
+            message: "pull access denied for private/repo".to_owned(),
+        }));
+        assert_eq!(
+            denied,
+            PullEvent::Failed("pull access denied for private/repo".to_owned())
+        );
+    }
+
+    #[test]
+    fn stats_mapping_matches_docker_stats_math() {
+        use bollard::models::{
+            ContainerCpuStats, ContainerCpuUsage, ContainerMemoryStats, ContainerNetworkStats,
+            ContainerStatsResponse,
+        };
+
+        let cpu = |total_usage, system_cpu_usage| ContainerCpuStats {
+            cpu_usage: Some(ContainerCpuUsage {
+                total_usage: Some(total_usage),
+                ..Default::default()
+            }),
+            system_cpu_usage: Some(system_cpu_usage),
+            online_cpus: Some(2),
+            ..Default::default()
+        };
+        let network = |rx, tx| ContainerNetworkStats {
+            rx_bytes: Some(rx),
+            tx_bytes: Some(tx),
+            ..Default::default()
+        };
+        let response = ContainerStatsResponse {
+            cpu_stats: Some(cpu(3_000_000, 40_000_000)),
+            memory_stats: Some(ContainerMemoryStats {
+                usage: Some(5000),
+                limit: Some(100_000),
+                stats: Some([("inactive_file".to_owned(), 1000)].into_iter().collect()),
+                ..Default::default()
+            }),
+            networks: Some(
+                [
+                    ("eth0".to_owned(), network(100, 10)),
+                    ("eth1".to_owned(), network(50, 5)),
+                ]
+                .into_iter()
+                .collect(),
+            ),
+            ..Default::default()
+        };
+
+        let stats = map_container_stats(response);
+        assert_eq!(
+            stats.cpu,
+            CpuCounters {
+                total_usage: 3_000_000,
+                system_usage: 40_000_000,
+                online_cpus: 2,
+            },
+            "raw counters; the sampler derives percent from its previous reading"
+        );
+        assert_eq!(stats.cpu_percent, None, "a one-shot read has no delta");
+        assert_eq!(stats.memory_used_bytes, Some(4000));
+        assert_eq!(stats.memory_limit_bytes, Some(100_000));
+        assert_eq!((stats.net_rx_bytes, stats.net_tx_bytes), (150, 15));
+
+        let empty = map_container_stats(ContainerStatsResponse::default());
+        assert_eq!(empty.cpu_percent, None);
+        assert_eq!(empty.memory_used_bytes, None);
+        assert_eq!(empty.memory_limit_bytes, None);
+    }
+
+    /// A verbose `df` volume item, built through the JSON value type bollard exposes.
+    fn volume_item<V>(name: &str, size: Option<i64>) -> V
+    where
+        V: FromIterator<(String, V)> + From<String> + From<i64>,
+    {
+        let mut fields = vec![("Name".to_owned(), V::from(name.to_owned()))];
+        if let Some(size) = size {
+            let usage = [("Size".to_owned(), V::from(size))].into_iter().collect();
+            fields.push(("UsageData".to_owned(), usage));
+        }
+        fields.into_iter().collect()
+    }
+
+    #[test]
+    fn verbose_disk_usage_carries_each_volume_size_it_knows() {
+        use bollard::models::{SystemDataUsageResponse, VolumesDiskUsage};
+
+        let usage = SystemDataUsageResponse {
+            volume_usage: Some(VolumesDiskUsage {
+                items: Some(vec![
+                    volume_item("pg-data", Some(4096)),
+                    volume_item("nfs", Some(-1)),
+                    volume_item("no-usage", None),
+                ]),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let sizes = volume_sizes(&usage);
+        assert_eq!(
+            sizes.into_iter().collect::<Vec<_>>(),
+            vec![("pg-data".to_owned(), 4096)]
+        );
+    }
+
+    #[test]
+    fn volumes_map_with_bounded_labels_users_and_parsed_times() {
+        let volume = bollard::models::Volume {
+            name: "pg-data".to_owned(),
+            driver: "local".to_owned(),
+            mountpoint: "/var/lib/docker/volumes/pg-data/_data".to_owned(),
+            created_at: Some("2026-09-28T19:32:16Z".to_owned()),
+            labels: std::collections::HashMap::from([("app".to_owned(), "billing".to_owned())]),
+            ..Default::default()
+        };
+        let users: Vec<String> = (0..20).map(|index| format!("web.{index}")).collect();
+        let mapped = map_volume(volume, &users);
+        assert_eq!(mapped.used_by, 20);
+        assert_eq!(mapped.users.len(), crate::MAX_VOLUME_USERS);
+        assert_eq!(mapped.created_at_seconds, Some(1_790_623_936));
+        assert_eq!(
+            mapped.labels.get("app").map(String::as_str),
+            Some("billing")
+        );
+    }
+
+    #[test]
+    fn node_info_keeps_counts_and_drops_an_empty_swarm_id() {
+        let info = bollard::models::SystemInfo {
+            name: Some("manager".to_owned()),
+            ncpu: Some(4),
+            mem_total: Some(8 << 30),
+            operating_system: Some("Alpine Linux".to_owned()),
+            architecture: Some("aarch64".to_owned()),
+            server_version: Some("29.8.0".to_owned()),
+            containers_running: Some(5),
+            containers_paused: Some(1),
+            containers_stopped: Some(2),
+            swarm: Some(SwarmInfo {
+                node_id: Some(String::new()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let node = map_node_info(info);
+        assert_eq!(node.hostname, "manager");
+        assert_eq!(node.cpu_cores, 4);
+        assert_eq!(node.memory_total_bytes, 8 << 30);
+        assert_eq!(
+            (
+                node.containers_running,
+                node.containers_paused,
+                node.containers_stopped
+            ),
+            (5, 1, 2)
+        );
+        assert_eq!(node.swarm_node_id, None);
     }
 
     fn test_engine(operation_timeout: Duration) -> LocalDockerEngine {

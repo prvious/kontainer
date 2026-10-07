@@ -11,6 +11,8 @@
 
 use std::time::Duration;
 
+use kontainer_stream_protocol::StreamFrame;
+use kontainer_stream_transport::{NativeStreamClient, StreamClientError, StreamLimits};
 use reqwest::{Client, Method, Request, Response, header, redirect, retry};
 use serde::{Deserialize, de::DeserializeOwned};
 use tokio::time::{Instant, timeout_at};
@@ -19,7 +21,7 @@ use url::{Host, Url};
 use uuid::Uuid;
 
 use crate::credentials::AccessCredential;
-use crate::error::{NativeClientError, retryable_pre_response_failure};
+use crate::error::{AccountFieldErrors, NativeClientError, Traced, retryable_pre_response_failure};
 
 /// Default TCP/TLS connect bound for each connection attempt.
 pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -28,7 +30,7 @@ pub const DEFAULT_REQUEST_DEADLINE: Duration = Duration::from_secs(10);
 /// Default ceiling for auth/session and operation response bodies.
 pub const DEFAULT_JSON_BODY_LIMIT: usize = 64 * 1024;
 /// Default ceiling for a container page response body.
-pub const DEFAULT_COLLECTION_BODY_LIMIT: usize = 1024 * 1024;
+pub const DEFAULT_COLLECTION_BODY_LIMIT: usize = 4 * 1024 * 1024;
 
 /// Trust anchors used to validate the controller's TLS identity.
 #[derive(Debug, Clone, Default)]
@@ -94,6 +96,8 @@ pub struct NativeClient {
     pub(crate) origin: Url,
     pub(crate) http: Client,
     pub(crate) limits: Limits,
+    /// WebSockets verify with the public roots only, so a custom bundle refuses them.
+    pub(crate) custom_trust: bool,
 }
 
 /// Bounded-call policy copied out of the configuration.
@@ -111,13 +115,17 @@ pub(crate) enum RetryPolicy {
     Once,
 }
 
-/// Only inventory interprets its small, closed error envelope. Other calls
-/// continue to discard non-success bodies without reading them.
+/// Inventory and the account calls interpret their small, closed error
+/// envelopes. Other calls discard non-success bodies without reading them.
 #[derive(Clone, Copy)]
 pub(crate) enum ErrorBodyPolicy {
     Ignore,
     Inventory,
+    Account,
 }
+
+/// Longest `x-request-id` value carried into a [`Traced`] error.
+const MAX_REQUEST_ID_LEN: usize = 64;
 
 impl NativeClient {
     /// Validate configuration and build the client. No network traffic
@@ -143,6 +151,7 @@ impl NativeClient {
         Ok(Self {
             origin,
             http,
+            custom_trust: matches!(config.trust, TrustPolicy::PemBundle(_)),
             limits: Limits {
                 request_deadline: config.request_deadline,
                 json_body_limit: config.json_body_limit,
@@ -166,6 +175,70 @@ impl NativeClient {
         self.origin
             .join(path)
             .map_err(|_| NativeClientError::InvalidConfiguration)
+    }
+
+    /// Upgrade to the WebSocket stream at `path` with `access` and send its `open` frame, both
+    /// inside one `deadline`: a peer that completes the upgrade but never takes the open can't
+    /// hold the caller either. A 401 is `Unauthorized`, so the caller can refresh and try again;
+    /// a 429 is `LimitReached`.
+    pub(crate) async fn open_stream(
+        &self,
+        path: &str,
+        access: &AccessCredential,
+        open: &StreamFrame,
+        deadline: Duration,
+        cancellation: &CancellationToken,
+    ) -> Result<NativeStreamClient, NativeClientError> {
+        // WebSockets verify with the public roots only; a custom bundle is refused, not ignored.
+        if self.custom_trust {
+            return Err(NativeClientError::InvalidConfiguration);
+        }
+        let mut endpoint = self.endpoint(path)?;
+        let scheme = if endpoint.scheme() == "https" {
+            "wss"
+        } else {
+            "ws"
+        };
+        endpoint
+            .set_scheme(scheme)
+            .map_err(|()| NativeClientError::InvalidConfiguration)?;
+        let connect_and_open = async {
+            let mut client = NativeStreamClient::connect_with_bearer(
+                endpoint.as_str(),
+                Some(access.expose()),
+                StreamLimits::default(),
+                cancellation,
+            )
+            .await
+            .map_err(|error| match error {
+                StreamClientError::HandshakeRejected { status: 401 } => {
+                    NativeClientError::Unauthorized
+                }
+                StreamClientError::HandshakeRejected { status: 429 } => {
+                    NativeClientError::LimitReached
+                }
+                StreamClientError::HandshakeRejected { status: 400 } => {
+                    NativeClientError::InvalidRequest
+                }
+                StreamClientError::HandshakeRejected { status: 503 } => {
+                    NativeClientError::ServiceUnavailable
+                }
+                StreamClientError::Cancelled => NativeClientError::Cancelled,
+                StreamClientError::InvalidEndpoint => NativeClientError::InvalidConfiguration,
+                _ => NativeClientError::Unavailable,
+            })?;
+            client
+                .send_frame(open, cancellation)
+                .await
+                .map_err(|error| match error {
+                    StreamClientError::Cancelled => NativeClientError::Cancelled,
+                    _ => NativeClientError::Unavailable,
+                })?;
+            Ok(client)
+        };
+        tokio::time::timeout(deadline, connect_and_open)
+            .await
+            .unwrap_or(Err(NativeClientError::Unavailable))
     }
 
     /// Build a request that presents an access credential in exactly one
@@ -216,18 +289,33 @@ impl NativeClient {
         cancellation: &CancellationToken,
         error_policy: ErrorBodyPolicy,
     ) -> Result<Vec<u8>, NativeClientError> {
+        self.execute_traced(request, policy, body_limit, cancellation, error_policy)
+            .await
+            .map_err(|traced| traced.error)
+    }
+
+    /// [`Self::execute_with_error_policy`], keeping the controller's request
+    /// id on failures so callers can show it next to the error code.
+    pub(crate) async fn execute_traced(
+        &self,
+        request: Request,
+        policy: RetryPolicy,
+        body_limit: usize,
+        cancellation: &CancellationToken,
+        error_policy: ErrorBodyPolicy,
+    ) -> Result<Vec<u8>, Traced<NativeClientError>> {
         // Construction already rejected unrepresentable durations; this
         // `checked_add` keeps the invariant local and total.
         let deadline = Instant::now()
             .checked_add(self.limits.request_deadline)
-            .ok_or(NativeClientError::InvalidConfiguration)?;
+            .ok_or(Traced::untraced(NativeClientError::InvalidConfiguration))?;
         tokio::select! {
             biased;
-            () = cancellation.cancelled() => Err(NativeClientError::Cancelled),
+            () = cancellation.cancelled() => Err(Traced::untraced(NativeClientError::Cancelled)),
             result = timeout_at(deadline, self.exchange(request, policy, body_limit, error_policy)) => {
                 match result {
                     Ok(result) => result,
-                    Err(_) => Err(NativeClientError::DeadlineExceeded),
+                    Err(_) => Err(Traced::untraced(NativeClientError::DeadlineExceeded)),
                 }
             }
         }
@@ -239,13 +327,13 @@ impl NativeClient {
         policy: RetryPolicy,
         body_limit: usize,
         error_policy: ErrorBodyPolicy,
-    ) -> Result<Vec<u8>, NativeClientError> {
+    ) -> Result<Vec<u8>, Traced<NativeClientError>> {
         let retry_request = match policy {
             RetryPolicy::Never => None,
             RetryPolicy::Once => Some(
                 request
                     .try_clone()
-                    .ok_or(NativeClientError::InvalidConfiguration)?,
+                    .ok_or(Traced::untraced(NativeClientError::InvalidConfiguration))?,
             ),
         };
         let response = match self.http.execute(request).await {
@@ -258,8 +346,8 @@ impl NativeClient {
                         .http
                         .execute(retry_request)
                         .await
-                        .map_err(|error| map_transport_error(&error))?,
-                    None => return Err(map_transport_error(&error)),
+                        .map_err(|error| Traced::untraced(map_transport_error(&error)))?,
+                    None => return Err(Traced::untraced(map_transport_error(&error))),
                 }
             }
         };
@@ -340,27 +428,98 @@ async fn finish(
     response: Response,
     body_limit: usize,
     error_policy: ErrorBodyPolicy,
-) -> Result<Vec<u8>, NativeClientError> {
+) -> Result<Vec<u8>, Traced<NativeClientError>> {
     if !response.status().is_success() {
         let status = response.status();
-        if let ErrorBodyPolicy::Inventory = error_policy {
-            return Err(classify_inventory_error(response).await);
-        }
-        return Err(NativeClientError::from_status(status));
+        let request_id = request_id(&response);
+        let error = match error_policy {
+            ErrorBodyPolicy::Inventory => classify_inventory_error(response).await,
+            ErrorBodyPolicy::Account => classify_account_error(response).await,
+            ErrorBodyPolicy::Ignore => NativeClientError::from_status(status),
+        };
+        return Err(Traced { error, request_id });
     }
-    bounded_body(response, body_limit).await
+    bounded_body(response, body_limit)
+        .await
+        .map_err(Traced::untraced)
+}
+
+/// The controller's `x-request-id`, kept only when it is short and plain.
+fn request_id(response: &Response) -> Option<String> {
+    let value = response.headers().get("x-request-id")?.to_str().ok()?;
+    let plain = !value.is_empty()
+        && value.len() <= MAX_REQUEST_ID_LEN
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'));
+    plain.then(|| value.to_owned())
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AccountErrorBody {
+    error: String,
+    #[serde(default)]
+    attempts_remaining: Option<u32>,
+    #[serde(default)]
+    retry_after_seconds: Option<u32>,
+    #[serde(default)]
+    fields: Option<AccountFieldErrors>,
+}
+
+async fn classify_account_error(response: Response) -> NativeClientError {
+    let status = response.status();
+    let fallback = NativeClientError::from_status(status);
+    if !matches!(status.as_u16(), 400 | 401 | 409 | 429) {
+        return fallback;
+    }
+    let Ok(body) = bounded_body(response, 1024).await else {
+        return fallback;
+    };
+    let Ok(body) = serde_json::from_slice::<AccountErrorBody>(&body) else {
+        return fallback;
+    };
+    match (status.as_u16(), body.error.as_str()) {
+        (400, "validation_failed") => {
+            body.fields
+                .map_or(fallback, |fields| NativeClientError::ValidationFailed {
+                    fields,
+                })
+        }
+        (401, "invalid_credentials") => body
+            .attempts_remaining
+            .map_or(fallback, |attempts_remaining| {
+                NativeClientError::InvalidCredentials { attempts_remaining }
+            }),
+        (409, "owner_exists") => NativeClientError::OwnerExists,
+        (429, "locked") => body
+            .retry_after_seconds
+            .map_or(fallback, |retry_after_seconds| {
+                NativeClientError::LoginLocked {
+                    retry_after_seconds,
+                }
+            }),
+        // Too many password checks are running; nothing about this email.
+        (429, "busy") => NativeClientError::ServiceUnavailable,
+        _ => fallback,
+    }
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct InventoryErrorBody {
     error: String,
+    #[serde(default, rename = "retryAfterSeconds")]
+    retry_after_seconds: Option<u32>,
 }
 
 async fn classify_inventory_error(response: Response) -> NativeClientError {
     let status = response.status();
     let fallback = NativeClientError::from_status(status);
-    if !matches!(status.as_u16(), 400 | 503 | 504) {
+    if status.as_u16() == 413 {
+        return NativeClientError::TooManyContainers;
+    }
+    if !matches!(status.as_u16(), 400 | 409 | 503 | 504) {
         return fallback;
     }
     let Ok(body) = bounded_body(response, 128).await else {
@@ -370,8 +529,12 @@ async fn classify_inventory_error(response: Response) -> NativeClientError {
         return fallback;
     };
     match (status.as_u16(), body.error.as_str()) {
-        (400, "invalid_pagination") => NativeClientError::InvalidPagination,
         (503, "agent_unavailable") => NativeClientError::AgentUnavailable,
+        (503, "quorum_unavailable") => NativeClientError::QuorumUnavailable {
+            retry_after_seconds: body.retry_after_seconds.unwrap_or(10).clamp(1, 300),
+        },
+        (503, "not_a_manager") => NativeClientError::NotAManager,
+        (409, "version_conflict") => NativeClientError::VersionConflict,
         (504, "agent_timeout") => NativeClientError::AgentTimeout,
         _ => fallback,
     }
@@ -432,4 +595,11 @@ pub(crate) fn parse_timestamp(
         return Err(NativeClientError::InvalidResponse);
     }
     Ok(parsed)
+}
+
+/// A name a list shows: non-empty, at most 512 characters, no control characters. A list only
+/// displays what Docker holds, so one odd name must not blank the page; the strict rules apply
+/// where a name is created or acted on.
+pub(crate) fn valid_display_name(value: &str) -> bool {
+    !value.is_empty() && value.chars().count() <= 512 && !value.chars().any(char::is_control)
 }

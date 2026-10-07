@@ -1,0 +1,67 @@
+{
+  "items": [
+    {
+      "id": "manager",
+      "hostname": "manager",
+      "agentStatus": "online",
+      "health": "active",
+      "role": "manager",
+      "isLeader": true,
+      "availability": "active",
+      "address": "10.0.1.10",
+      "agentVersion": "0.1.0",
+      "dockerVersion": "29.8.0",
+      "os": "Alpine Linux v3.22",
+      "arch": "aarch64",
+      "cpuCores": 4,
+      "memoryTotalBytes": 8589934592,
+      "lastCheckInAt": "2026-09-28T12:00:00.000Z",
+      "latestSample": {
+        "cpuPercent": 12.5,
+        "memoryUsedBytes": 1073741824,
+        "containersRunning": 5,
+        "containersPaused": 0,
+        "containersExited": 1,
+        "netRxBytesPerSec": 2048.0,
+        "netTxBytesPerSec": null
+      }
+    },
+    {
+      "id": "worker-2",
+      "hostname": "worker-2",
+      "agentStatus": "offline",
+      "health": "down",
+      "role": "unknown",
+      "isLeader": false,
+      "availability": null,
+      "address": null,
+      "agentVersion": "0.1.0",
+      "dockerVersion": "29.8.0",
+      "os": "Alpine Linux v3.22",
+      "arch": "aarch64",
+      "cpuCores": 2,
+      "memoryTotalBytes": 4294967296,
+      "lastCheckInAt": "2026-09-28T11:30:00.000Z",
+      "latestSample": null
+    },
+    {
+      "id": "w3kq2m9p0r1s3t5u7w9y0z2b4",
+      "hostname": "worker-3",
+      "agentStatus": "no-agent",
+      "health": "degraded",
+      "role": "worker",
+      "isLeader": false,
+      "availability": "drain",
+      "address": "10.0.1.13",
+      "agentVersion": null,
+      "dockerVersion": "29.8.0",
+      "os": "linux",
+      "arch": "aarch64",
+      "cpuCores": 2,
+      "memoryTotalBytes": 4294967296,
+      "lastCheckInAt": null,
+      "latestSample": null
+    }
+  ],
+  "snapshotAt": "2026-09-28T12:00:02.000Z"
+}

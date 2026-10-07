@@ -11,5 +11,7 @@ real-engine-tests = []
 [dependencies]
 async-trait.workspace = true
 bollard.workspace = true
+chrono.workspace = true
+futures-util.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true

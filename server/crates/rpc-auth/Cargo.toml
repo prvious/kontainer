@@ -5,6 +5,10 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
+[features]
+# Test-only peer identities; enabled only from dependants' dev-dependencies.
+test-util = []
+
 [dependencies]
 hyper = { workspace = true, features = ["http2"] }
 hyper-util.workspace = true

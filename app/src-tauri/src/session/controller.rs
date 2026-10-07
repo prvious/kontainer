@@ -7,27 +7,31 @@
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 
 use kontainer_native_client::{
-    AccessCredential, ContainerPage, ContainerPageRequest, LoginVerifier, NativeClient,
-    NativeClientConfig, NativeClientError, NodeId, RefreshCredential,
+    AccessCredential, AccountFieldErrors, AdmittedOperation, ContainerAction,
+    ContainerActionOptions, ContainerList, ContainerTarget, ControllerSettings, ControllerStatus,
+    IdempotencyKey, ImageList, ImageNodes, NativeClient, NativeClientConfig, NativeClientError,
+    NodeId, NodeList, OperationSnapshot, PasswordSession, ProbeFailure, RefreshCredential,
+    SampleSeries, Traced, VolumeList, VolumeName, VolumeQuery, VolumeSpec,
 };
+use kontainer_native_client::{AttachedContainer, NetworkId, NetworkList, NetworkSpec};
+use kontainer_native_client::{ClusterSummary, StackList, StackName, StackRemovalPlan};
+use kontainer_native_client::{ExecConnection, ExecOpenRequest, LogOpenRequest, LogReceiver};
+use kontainer_native_client::{ServiceAction, ServiceDetail, ServiceId, ServiceList};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use super::errors::SessionError;
+use super::errors::{FieldErrorsView, LoginFailure, SessionError};
+
+/// Probes answer within two seconds so the connect card never hangs.
+const PROBE_DEADLINE: Duration = Duration::from_secs(2);
 
 /// Boxed future used by the object-safe controller trait.
 pub(crate) type ControllerFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
-/// A started login attempt, reduced to what custody needs.
-pub(crate) struct LoginStart {
-    pub attempt_id: Uuid,
-    pub authorize_url: String,
-    pub expires_at_unix_ms: i64,
-}
-
-/// The credential pair issued by redemption or rotation.
+/// The credential pair issued by sign-in, registration, or rotation.
 pub(crate) struct IssuedCredentials {
     pub access: AccessCredential,
     pub refresh: RefreshCredential,
@@ -39,14 +43,9 @@ pub(crate) struct IssuedCredentials {
 pub(crate) struct RedeemedSession {
     pub cluster_id: String,
     pub principal_id: Uuid,
-    pub github_login: String,
+    pub email: String,
+    pub display_name: String,
     pub issued: IssuedCredentials,
-}
-
-/// Redemption either completed or is still waiting for the browser step.
-pub(crate) enum Redemption {
-    Ready(RedeemedSession),
-    Pending,
 }
 
 /// The one-per-origin controller surface custody depends on.
@@ -54,18 +53,32 @@ pub(crate) trait Controller: Send + Sync + 'static {
     /// The validated origin this controller is bound to.
     fn canonical_origin(&self) -> &str;
 
-    fn start_login<'a>(
+    fn bootstrap_status<'a>(
         &'a self,
-        verifier: &'a LoginVerifier,
         cancellation: &'a CancellationToken,
-    ) -> ControllerFuture<'a, Result<LoginStart, SessionError>>;
+    ) -> ControllerFuture<'a, Result<bool, LoginFailure>>;
 
-    fn redeem_login<'a>(
+    fn password_login<'a>(
         &'a self,
-        attempt_id: Uuid,
-        verifier: &'a LoginVerifier,
+        email: &'a str,
+        password: &'a str,
         cancellation: &'a CancellationToken,
-    ) -> ControllerFuture<'a, Result<Redemption, SessionError>>;
+    ) -> ControllerFuture<'a, Result<RedeemedSession, LoginFailure>>;
+
+    fn register_owner<'a>(
+        &'a self,
+        display_name: &'a str,
+        email: &'a str,
+        password: &'a str,
+        setup_code: &'a str,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<RedeemedSession, LoginFailure>>;
+
+    /// `/health/ready` within two seconds.
+    fn probe<'a>(
+        &'a self,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<(), ProbeFailure>>;
 
     fn refresh_session<'a>(
         &'a self,
@@ -79,19 +92,226 @@ pub(crate) trait Controller: Send + Sync + 'static {
         cancellation: &'a CancellationToken,
     ) -> ControllerFuture<'a, Result<(), SessionError>>;
 
-    fn discover_node<'a>(
+    fn list_nodes<'a>(
         &'a self,
         access: &'a AccessCredential,
         cancellation: &'a CancellationToken,
-    ) -> ControllerFuture<'a, Result<Option<NodeId>, NativeClientError>>;
+    ) -> ControllerFuture<'a, Result<NodeList, NativeClientError>>;
+
+    fn cluster_summary<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ClusterSummary, NativeClientError>>;
+
+    /// Upgrade to one service's log stream; the credential is only needed for the upgrade.
+    fn connect_logs<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        request: &'a LogOpenRequest,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<Box<dyn LogReceiver>, NativeClientError>>;
+
+    /// Upgrade to a shell in one container; the credential is only needed for the upgrade.
+    fn connect_exec<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        request: &'a ExecOpenRequest,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ExecConnection, NativeClientError>>;
+
+    fn cluster_samples<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        window: &'a str,
+        bucket: &'a str,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<SampleSeries, NativeClientError>>;
+
+    fn get_status<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ControllerStatus, NativeClientError>>;
+
+    fn get_settings<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ControllerSettings, NativeClientError>>;
+
+    fn update_settings<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        metrics_retention_days: u32,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ControllerSettings, NativeClientError>>;
 
     fn list_containers<'a>(
         &'a self,
         access: &'a AccessCredential,
-        node_id: &'a NodeId,
-        page: &'a ContainerPageRequest,
+        node: Option<&'a NodeId>,
         cancellation: &'a CancellationToken,
-    ) -> ControllerFuture<'a, Result<ContainerPage, NativeClientError>>;
+    ) -> ControllerFuture<'a, Result<ContainerList, NativeClientError>>;
+
+    fn container_action<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        target: &'a ContainerTarget,
+        action: ContainerAction,
+        options: ContainerActionOptions,
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>>;
+
+    fn containers_bulk_action<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        action: ContainerAction,
+        targets: &'a [ContainerTarget],
+        force: bool,
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>>;
+
+    fn list_images<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ImageList, NativeClientError>>;
+
+    fn remove_image<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        image_id: &'a str,
+        nodes: &'a ImageNodes,
+        force: bool,
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>>;
+
+    fn pull_image<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        reference: &'a str,
+        nodes: &'a [NodeId],
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>>;
+
+    fn list_volumes<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        query: &'a VolumeQuery,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<VolumeList, NativeClientError>>;
+
+    fn create_volume<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        spec: &'a VolumeSpec,
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>>;
+
+    fn remove_volume<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        node_id: &'a NodeId,
+        name: &'a VolumeName,
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>>;
+
+    fn list_networks<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<NetworkList, NativeClientError>>;
+
+    fn inspect_network<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        network_id: &'a NetworkId,
+        node: Option<&'a NodeId>,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<Vec<AttachedContainer>, NativeClientError>>;
+
+    fn create_network<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        spec: &'a NetworkSpec,
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>>;
+
+    fn remove_network<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        network_id: &'a NetworkId,
+        node: Option<&'a NodeId>,
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>>;
+
+    fn list_services<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        stack: Option<&'a str>,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ServiceList, NativeClientError>>;
+
+    fn get_service<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        service_id: &'a ServiceId,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ServiceDetail, NativeClientError>>;
+
+    fn service_action<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        service_id: &'a ServiceId,
+        action: ServiceAction,
+        version: u64,
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>>;
+
+    fn list_stacks<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<StackList, NativeClientError>>;
+
+    fn stack_removal_plan<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        name: &'a StackName,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<StackRemovalPlan, NativeClientError>>;
+
+    fn remove_stack<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        name: &'a StackName,
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>>;
+
+    fn get_operation<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        operation_id: Uuid,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<OperationSnapshot, NativeClientError>>;
+
+    fn cancel_operation<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        operation_id: Uuid,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<OperationSnapshot, NativeClientError>>;
 }
 
 /// Builds a controller for a validated controller origin.
@@ -99,19 +319,43 @@ pub(crate) trait ControllerFactory: Send + Sync + 'static {
     fn for_origin(&self, origin: &str) -> Result<Arc<dyn Controller>, SessionError>;
 }
 
-/// Production factory: validates the origin, then builds the native client.
+/// Production factory: validates the origin, then builds the native clients.
 pub(crate) struct NativeControllerFactory;
 
 impl ControllerFactory for NativeControllerFactory {
     fn for_origin(&self, origin: &str) -> Result<Arc<dyn Controller>, SessionError> {
         let client = NativeClient::new(NativeClientConfig::new(origin))
             .map_err(|_| SessionError::InvalidOrigin)?;
-        Ok(Arc::new(NativeController { client }))
+        let mut probe_config = NativeClientConfig::new(origin);
+        probe_config.connect_timeout = PROBE_DEADLINE;
+        probe_config.request_deadline = PROBE_DEADLINE;
+        let probe_client =
+            NativeClient::new(probe_config).map_err(|_| SessionError::InvalidOrigin)?;
+        Ok(Arc::new(NativeController {
+            client,
+            probe_client,
+        }))
     }
 }
 
 struct NativeController {
     client: NativeClient,
+    probe_client: NativeClient,
+}
+
+fn redeemed_from(session: PasswordSession) -> RedeemedSession {
+    RedeemedSession {
+        cluster_id: session.cluster_id,
+        principal_id: session.principal_id,
+        email: session.email,
+        display_name: session.display_name,
+        issued: IssuedCredentials {
+            access: session.credentials.access,
+            refresh: session.credentials.refresh,
+            access_expires_at_unix_ms: session.credentials.access_expires_at.timestamp_millis(),
+            refresh_expires_at_unix_ms: session.credentials.refresh_expires_at.timestamp_millis(),
+        },
+    }
 }
 
 impl Controller for NativeController {
@@ -119,57 +363,55 @@ impl Controller for NativeController {
         self.client.controller_origin()
     }
 
-    fn start_login<'a>(
+    fn bootstrap_status<'a>(
         &'a self,
-        verifier: &'a LoginVerifier,
         cancellation: &'a CancellationToken,
-    ) -> ControllerFuture<'a, Result<LoginStart, SessionError>> {
+    ) -> ControllerFuture<'a, Result<bool, LoginFailure>> {
         Box::pin(async move {
             self.client
-                .start_login(verifier, cancellation)
+                .bootstrap_status(cancellation)
                 .await
-                .map(|attempt| LoginStart {
-                    attempt_id: attempt.attempt_id,
-                    authorize_url: attempt.authorize_url.as_str().to_owned(),
-                    expires_at_unix_ms: attempt.expires_at.timestamp_millis(),
-                })
-                .map_err(map_login_error)
+                .map_err(map_account_failure)
         })
     }
 
-    fn redeem_login<'a>(
+    fn password_login<'a>(
         &'a self,
-        attempt_id: Uuid,
-        verifier: &'a LoginVerifier,
+        email: &'a str,
+        password: &'a str,
         cancellation: &'a CancellationToken,
-    ) -> ControllerFuture<'a, Result<Redemption, SessionError>> {
+    ) -> ControllerFuture<'a, Result<RedeemedSession, LoginFailure>> {
         Box::pin(async move {
-            match self
-                .client
-                .redeem_login(attempt_id, verifier, cancellation)
+            self.client
+                .password_login(email, password, cancellation)
                 .await
-            {
-                Ok(session) => Ok(Redemption::Ready(RedeemedSession {
-                    cluster_id: session.cluster_id,
-                    principal_id: session.principal_id,
-                    github_login: session.github_login,
-                    issued: IssuedCredentials {
-                        access: session.credentials.access,
-                        refresh: session.credentials.refresh,
-                        access_expires_at_unix_ms: session
-                            .credentials
-                            .access_expires_at
-                            .timestamp_millis(),
-                        refresh_expires_at_unix_ms: session
-                            .credentials
-                            .refresh_expires_at
-                            .timestamp_millis(),
-                    },
-                })),
-                Err(NativeClientError::Conflict) => Ok(Redemption::Pending),
-                Err(error) => Err(map_redeem_error(error)),
-            }
+                .map(redeemed_from)
+                .map_err(map_account_failure)
         })
+    }
+
+    fn register_owner<'a>(
+        &'a self,
+        display_name: &'a str,
+        email: &'a str,
+        password: &'a str,
+        setup_code: &'a str,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<RedeemedSession, LoginFailure>> {
+        Box::pin(async move {
+            self.client
+                .register_owner(display_name, email, password, setup_code, cancellation)
+                .await
+                .map(redeemed_from)
+                .map_err(map_account_failure)
+        })
+    }
+
+    fn probe<'a>(
+        &'a self,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<(), ProbeFailure>> {
+        Box::pin(self.probe_client.probe_ready(cancellation))
     }
 
     fn refresh_session<'a>(
@@ -204,54 +446,369 @@ impl Controller for NativeController {
         })
     }
 
-    fn discover_node<'a>(
+    fn list_nodes<'a>(
         &'a self,
         access: &'a AccessCredential,
         cancellation: &'a CancellationToken,
-    ) -> ControllerFuture<'a, Result<Option<NodeId>, NativeClientError>> {
-        Box::pin(self.client.discover_node(access, cancellation))
+    ) -> ControllerFuture<'a, Result<NodeList, NativeClientError>> {
+        Box::pin(self.client.list_nodes(access, cancellation))
+    }
+
+    fn cluster_summary<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ClusterSummary, NativeClientError>> {
+        Box::pin(self.client.cluster_summary(access, cancellation))
+    }
+
+    fn connect_logs<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        request: &'a LogOpenRequest,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<Box<dyn LogReceiver>, NativeClientError>> {
+        Box::pin(self.client.connect_logs(access, request, cancellation))
+    }
+
+    fn connect_exec<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        request: &'a ExecOpenRequest,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ExecConnection, NativeClientError>> {
+        Box::pin(self.client.connect_exec(access, request, cancellation))
+    }
+
+    fn cluster_samples<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        window: &'a str,
+        bucket: &'a str,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<SampleSeries, NativeClientError>> {
+        Box::pin(
+            self.client
+                .cluster_samples(access, window, bucket, cancellation),
+        )
+    }
+
+    fn get_status<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ControllerStatus, NativeClientError>> {
+        Box::pin(self.client.get_status(access, cancellation))
+    }
+
+    fn get_settings<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ControllerSettings, NativeClientError>> {
+        Box::pin(self.client.get_settings(access, cancellation))
+    }
+
+    fn update_settings<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        metrics_retention_days: u32,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ControllerSettings, NativeClientError>> {
+        Box::pin(
+            self.client
+                .update_settings(access, metrics_retention_days, cancellation),
+        )
     }
 
     fn list_containers<'a>(
         &'a self,
         access: &'a AccessCredential,
-        node_id: &'a NodeId,
-        page: &'a ContainerPageRequest,
+        node: Option<&'a NodeId>,
         cancellation: &'a CancellationToken,
-    ) -> ControllerFuture<'a, Result<ContainerPage, NativeClientError>> {
+    ) -> ControllerFuture<'a, Result<ContainerList, NativeClientError>> {
+        Box::pin(self.client.list_containers(access, node, cancellation))
+    }
+
+    fn container_action<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        target: &'a ContainerTarget,
+        action: ContainerAction,
+        options: ContainerActionOptions,
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
         Box::pin(
             self.client
-                .list_containers(access, node_id, page, cancellation),
+                .container_action(access, target, action, options, key, cancellation),
+        )
+    }
+
+    fn containers_bulk_action<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        action: ContainerAction,
+        targets: &'a [ContainerTarget],
+        force: bool,
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
+        Box::pin(self.client.containers_bulk_action(
+            access,
+            action,
+            targets,
+            force,
+            key,
+            cancellation,
+        ))
+    }
+
+    fn list_images<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ImageList, NativeClientError>> {
+        Box::pin(self.client.list_images(access, cancellation))
+    }
+
+    fn remove_image<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        image_id: &'a str,
+        nodes: &'a ImageNodes,
+        force: bool,
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
+        Box::pin(
+            self.client
+                .remove_image(access, image_id, nodes, force, key, cancellation),
+        )
+    }
+
+    fn pull_image<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        reference: &'a str,
+        nodes: &'a [NodeId],
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
+        Box::pin(
+            self.client
+                .pull_image(access, reference, nodes, key, cancellation),
+        )
+    }
+
+    fn list_volumes<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        query: &'a VolumeQuery,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<VolumeList, NativeClientError>> {
+        Box::pin(self.client.list_volumes(access, query, cancellation))
+    }
+
+    fn create_volume<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        spec: &'a VolumeSpec,
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
+        Box::pin(self.client.create_volume(access, spec, key, cancellation))
+    }
+
+    fn remove_volume<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        node_id: &'a NodeId,
+        name: &'a VolumeName,
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
+        Box::pin(
+            self.client
+                .remove_volume(access, node_id, name, key, cancellation),
+        )
+    }
+
+    fn list_networks<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<NetworkList, NativeClientError>> {
+        Box::pin(self.client.list_networks(access, cancellation))
+    }
+
+    fn inspect_network<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        network_id: &'a NetworkId,
+        node: Option<&'a NodeId>,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<Vec<AttachedContainer>, NativeClientError>> {
+        Box::pin(
+            self.client
+                .inspect_network(access, network_id, node, cancellation),
+        )
+    }
+
+    fn create_network<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        spec: &'a NetworkSpec,
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
+        Box::pin(self.client.create_network(access, spec, key, cancellation))
+    }
+
+    fn remove_network<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        network_id: &'a NetworkId,
+        node: Option<&'a NodeId>,
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
+        Box::pin(
+            self.client
+                .remove_network(access, network_id, node, key, cancellation),
+        )
+    }
+
+    fn list_services<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        stack: Option<&'a str>,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ServiceList, NativeClientError>> {
+        Box::pin(self.client.list_services(access, stack, cancellation))
+    }
+
+    fn get_service<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        service_id: &'a ServiceId,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<ServiceDetail, NativeClientError>> {
+        Box::pin(self.client.get_service(access, service_id, cancellation))
+    }
+
+    fn service_action<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        service_id: &'a ServiceId,
+        action: ServiceAction,
+        version: u64,
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
+        Box::pin(
+            self.client
+                .service_action(access, service_id, action, version, key, cancellation),
+        )
+    }
+
+    fn list_stacks<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<StackList, NativeClientError>> {
+        Box::pin(self.client.list_stacks(access, cancellation))
+    }
+
+    fn stack_removal_plan<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        name: &'a StackName,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<StackRemovalPlan, NativeClientError>> {
+        Box::pin(self.client.stack_removal_plan(access, name, cancellation))
+    }
+
+    fn remove_stack<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        name: &'a StackName,
+        key: &'a IdempotencyKey,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<AdmittedOperation, NativeClientError>> {
+        Box::pin(self.client.remove_stack(access, name, key, cancellation))
+    }
+
+    fn get_operation<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        operation_id: Uuid,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<OperationSnapshot, NativeClientError>> {
+        Box::pin(
+            self.client
+                .get_operation(access, operation_id, cancellation),
+        )
+    }
+
+    fn cancel_operation<'a>(
+        &'a self,
+        access: &'a AccessCredential,
+        operation_id: Uuid,
+        cancellation: &'a CancellationToken,
+    ) -> ControllerFuture<'a, Result<OperationSnapshot, NativeClientError>> {
+        Box::pin(
+            self.client
+                .cancel_operation(access, operation_id, cancellation),
         )
     }
 }
 
-fn map_login_error(error: NativeClientError) -> SessionError {
-    match error {
+/// Map an account call's failure to its closed code plus the details the
+/// connect card renders. Auth calls are never retried.
+pub(crate) fn map_account_failure(failure: Traced<NativeClientError>) -> LoginFailure {
+    let mut mapped = LoginFailure::from(match failure.error {
         NativeClientError::InvalidOrigin | NativeClientError::InvalidConfiguration => {
             SessionError::InvalidOrigin
         }
-        NativeClientError::Cancelled => SessionError::LoginCancelled,
+        NativeClientError::InvalidCredentials { .. } => SessionError::InvalidCredentials,
+        NativeClientError::LoginLocked { .. } => SessionError::LoginLocked,
+        NativeClientError::OwnerExists => SessionError::OwnerExists,
+        NativeClientError::ValidationFailed { .. } => SessionError::ValidationFailed,
         NativeClientError::Unavailable
-        | NativeClientError::DeadlineExceeded
-        | NativeClientError::ServiceUnavailable
-        | NativeClientError::GatewayTimeout => SessionError::ControllerUnavailable,
-        NativeClientError::ProviderUnavailable => SessionError::ProviderUnavailable,
-        _ => SessionError::InvalidResponse,
-    }
-}
-
-fn map_redeem_error(error: NativeClientError) -> SessionError {
-    match error {
-        NativeClientError::Cancelled => SessionError::LoginCancelled,
-        NativeClientError::Forbidden | NativeClientError::NotFound => SessionError::LoginDenied,
-        NativeClientError::ProviderUnavailable => SessionError::ProviderUnavailable,
-        NativeClientError::Unavailable
+        | NativeClientError::Cancelled
         | NativeClientError::DeadlineExceeded
         | NativeClientError::ServiceUnavailable
         | NativeClientError::GatewayTimeout => SessionError::ControllerUnavailable,
         _ => SessionError::InvalidResponse,
+    });
+    match failure.error {
+        NativeClientError::InvalidCredentials { attempts_remaining } => {
+            mapped.attempts_remaining = Some(attempts_remaining);
+        }
+        NativeClientError::LoginLocked {
+            retry_after_seconds,
+        } => mapped.retry_after_seconds = Some(retry_after_seconds),
+        NativeClientError::ValidationFailed {
+            fields:
+                AccountFieldErrors {
+                    email,
+                    password,
+                    display_name,
+                    setup_code,
+                },
+        } => {
+            mapped.fields = Some(FieldErrorsView {
+                email,
+                password,
+                display_name,
+                setup_code,
+            });
+        }
+        _ => {}
     }
+    mapped.request_id = failure.request_id;
+    mapped
 }
 
 fn map_refresh_error(error: NativeClientError) -> SessionError {
@@ -294,16 +851,60 @@ fn map_logout_error(error: NativeClientError) -> SessionError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kontainer_native_client::FieldProblem;
+
+    fn traced(error: NativeClientError) -> Traced<NativeClientError> {
+        Traced {
+            error,
+            request_id: Some("req-1".to_owned()),
+        }
+    }
 
     #[test]
-    fn login_failures_map_to_closed_codes() {
+    fn account_failures_map_to_closed_codes_with_their_details() {
+        let failure = map_account_failure(traced(NativeClientError::InvalidCredentials {
+            attempts_remaining: 7,
+        }));
+        assert_eq!(failure.code, SessionError::InvalidCredentials);
+        assert_eq!(failure.attempts_remaining, Some(7));
+        assert_eq!(failure.request_id.as_deref(), Some("req-1"));
+
+        let failure = map_account_failure(traced(NativeClientError::LoginLocked {
+            retry_after_seconds: 600,
+        }));
+        assert_eq!(failure.code, SessionError::LoginLocked);
+        assert_eq!(failure.retry_after_seconds, Some(600));
+
+        let failure = map_account_failure(traced(NativeClientError::ValidationFailed {
+            fields: AccountFieldErrors {
+                email: Some(FieldProblem::Invalid),
+                ..AccountFieldErrors::default()
+            },
+        }));
+        assert_eq!(failure.code, SessionError::ValidationFailed);
         assert_eq!(
-            map_login_error(NativeClientError::InvalidOrigin),
-            SessionError::InvalidOrigin
+            failure.fields.and_then(|fields| fields.email),
+            Some(FieldProblem::Invalid)
         );
+
+        let failure = map_account_failure(traced(NativeClientError::ValidationFailed {
+            fields: AccountFieldErrors {
+                setup_code: Some(FieldProblem::Invalid),
+                ..AccountFieldErrors::default()
+            },
+        }));
+        assert_eq!(failure.code, SessionError::ValidationFailed);
         assert_eq!(
-            map_login_error(NativeClientError::Cancelled),
-            SessionError::LoginCancelled
+            failure.fields,
+            Some(FieldErrorsView {
+                setup_code: Some(FieldProblem::Invalid),
+                ..FieldErrorsView::default()
+            })
+        );
+
+        assert_eq!(
+            map_account_failure(traced(NativeClientError::OwnerExists)),
+            SessionError::OwnerExists
         );
         for transient in [
             NativeClientError::Unavailable,
@@ -312,47 +913,34 @@ mod tests {
             NativeClientError::GatewayTimeout,
         ] {
             assert_eq!(
-                map_login_error(transient),
+                map_account_failure(traced(transient)),
                 SessionError::ControllerUnavailable,
                 "{transient:?}"
             );
         }
         assert_eq!(
-            map_login_error(NativeClientError::ProviderUnavailable),
-            SessionError::ProviderUnavailable
-        );
-        assert_eq!(
-            map_login_error(NativeClientError::UnexpectedStatus { status: 418 }),
+            map_account_failure(traced(NativeClientError::UnexpectedStatus { status: 418 })),
             SessionError::InvalidResponse
         );
     }
 
     #[test]
-    fn redemption_failures_map_and_conflict_is_handled_before_mapping() {
+    fn a_login_failure_serializes_only_its_present_details() {
+        let serialized = serde_json::to_value(map_account_failure(traced(
+            NativeClientError::InvalidCredentials {
+                attempts_remaining: 3,
+            },
+        )))
+        .unwrap();
         assert_eq!(
-            map_redeem_error(NativeClientError::Cancelled),
-            SessionError::LoginCancelled
+            serialized,
+            serde_json::json!({ "code": "invalid_credentials", "attemptsRemaining": 3, "requestId": "req-1" })
         );
-        for denied in [NativeClientError::Forbidden, NativeClientError::NotFound] {
-            assert_eq!(
-                map_redeem_error(denied),
-                SessionError::LoginDenied,
-                "{denied:?}"
-            );
-        }
+        let serialized = serde_json::to_value(LoginFailure::from(SessionError::ProfileConflict))
+            .expect("serializes");
         assert_eq!(
-            map_redeem_error(NativeClientError::ProviderUnavailable),
-            SessionError::ProviderUnavailable
-        );
-        assert_eq!(
-            map_redeem_error(NativeClientError::GatewayTimeout),
-            SessionError::ControllerUnavailable
-        );
-        // `Conflict` never reaches this mapping: the controller port turns it
-        // into `Redemption::Pending` so the login loop polls again.
-        assert_eq!(
-            map_redeem_error(NativeClientError::Conflict),
-            SessionError::InvalidResponse
+            serialized,
+            serde_json::json!({ "code": "profile_conflict" })
         );
     }
 

@@ -4,7 +4,11 @@
 //! principal's operation and a nonexistent operation are indistinguishable
 //! (`404`), which this client passes through unchanged.
 
+mod admit;
+mod cancel;
 mod get;
+
+pub use admit::{AdmittedOperation, IdempotencyKey};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -44,14 +48,22 @@ pub struct OperationSnapshot {
     pub recoverable: bool,
     /// Whether the outcome is uncertain and requires inspection.
     pub uncertain: bool,
-    /// Highest persisted transition sequence.
-    pub last_event_sequence: i32,
     /// Stable error code of the last failure, when one exists.
     pub last_error_code: Option<String>,
     /// Admission time reported by the controller.
     pub created_at: DateTime<Utc>,
     /// Last transition time reported by the controller.
     pub updated_at: DateTime<Utc>,
+    /// Failure message of a failed operation.
+    pub error_message: Option<String>,
+    /// The latest progress or result document for the kind.
+    pub progress: Option<serde_json::Value>,
+    /// When a worker claimed it.
+    pub started_at: Option<DateTime<Utc>>,
+    /// When it reached a terminal state.
+    pub finished_at: Option<DateTime<Utc>>,
+    /// The admitting request's id.
+    pub request_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -64,8 +76,13 @@ pub(crate) struct OperationBody {
     uncertain: bool,
     last_event_sequence: i32,
     last_error_code: Option<String>,
+    error_message: Option<String>,
+    progress: Option<serde_json::Value>,
     created_at: String,
     updated_at: String,
+    started_at: Option<String>,
+    finished_at: Option<String>,
+    request_id: Option<String>,
 }
 
 impl OperationBody {
@@ -87,10 +104,22 @@ impl OperationBody {
             state: self.state,
             recoverable: self.recoverable,
             uncertain: self.uncertain,
-            last_event_sequence: self.last_event_sequence,
             last_error_code: self.last_error_code,
             created_at: parse_timestamp(&self.created_at)?,
             updated_at: parse_timestamp(&self.updated_at)?,
+            error_message: self.error_message,
+            progress: self.progress.filter(serde_json::Value::is_object),
+            started_at: self
+                .started_at
+                .as_deref()
+                .map(parse_timestamp)
+                .transpose()?,
+            finished_at: self
+                .finished_at
+                .as_deref()
+                .map(parse_timestamp)
+                .transpose()?,
+            request_id: self.request_id,
         })
     }
 }

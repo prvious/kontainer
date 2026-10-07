@@ -8,6 +8,9 @@ pub struct Model {
     pub kind: String,
     pub status: String,
     pub authorization_epoch: i32,
+    /// Sign-in email; unique case-insensitively (`lower(email)`).
+    pub email: Option<String>,
+    pub display_name: Option<String>,
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
 }
@@ -18,6 +21,14 @@ pub enum Relation {
     SessionFamilies,
     #[sea_orm(has_many = "super::security_audit_intent::Entity")]
     SecurityAuditIntents,
+    #[sea_orm(has_one = "super::password_credential::Entity")]
+    PasswordCredential,
+}
+
+impl Related<super::password_credential::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::PasswordCredential.def()
+    }
 }
 
 impl Related<super::session_family::Entity> for Entity {

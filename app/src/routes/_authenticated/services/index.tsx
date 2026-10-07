@@ -1,192 +1,242 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { useServices } from "@/hooks/use-services";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
-import { PageHeader } from "@/components/page-header";
-import { TableShell } from "@/components/table-shell";
-import { TableToolbar } from "@/components/table-toolbar";
-import { ColumnHeaders } from "@/components/column-headers";
-import { RefreshButton } from "@/components/refresh-button";
-import { AlertCircle, ArrowUpRight, Container, MoreHorizontal } from "lucide-react";
 import { useState } from "react";
-import type { ServiceItem } from "@/types/services";
-import { formatRelativeTime } from "@/lib/format-utils";
-
-const QUERY_KEYS: string[][] = [["services"]];
-
-function StatusDot({ service }: { service: ServiceItem }) {
-    if (service.replicasDesired === -1) {
-        return <span className='size-1.5 rounded-full bg-muted-foreground' title='global mode' />;
-    }
-    const healthy = service.replicasRunning >= service.replicasDesired && service.replicasDesired > 0;
-    return <span className={`size-1.5 rounded-full ${healthy ? "bg-success" : 'animate-pulse-dot bg-destructive'}`} />;
-}
-
-function ReplicasBadge({ service }: { service: ServiceItem }) {
-    if (service.replicasDesired === -1) {
-        return (
-            <Badge variant='secondary' className='h-4 px-1.5 font-mono text-[10px]'>
-                global
-            </Badge>
-        );
-    }
-    const healthy = service.replicasRunning >= service.replicasDesired && service.replicasDesired > 0;
-    return (
-        <Badge
-            className={`h-4 px-1.5 font-mono text-[10px] ${healthy ? 'bg-success/20 text-success hover:bg-success/20' : 'bg-destructive/20 text-destructive hover:bg-destructive/20'}`}
-        >
-            {service.replicasRunning}/{service.replicasDesired}
-        </Badge>
-    );
-}
-
-const SERVICE_COLUMNS = [
-    { label: "STATUS", width: 70 },
-    { label: "NAME" },
-    { label: "IMAGE", width: 200 },
-    { label: "STACK", width: 100 },
-    { label: "REPLICAS", width: 80 },
-    { label: "UPDATED", width: 100, align: "right" as const },
-    { label: "", width: 60 },
-];
-
-function ServiceRow({ service }: { service: ServiceItem }) {
-    return (
-        <div className='flex items-center border-b border-border px-4 py-2.5 hover:bg-bg-elevated/50'>
-            <div style={{ width: 70 }} className='flex items-center'>
-                <StatusDot service={service} />
-            </div>
-            <div style={{ flex: 1 }} className='flex items-center'>
-                <Link
-                    to='/services/$serviceId'
-                    params={{ serviceId: service.id }}
-                    className='group inline-flex items-center gap-1 font-mono text-xs font-medium hover:underline'
-                >
-                    {service.name}
-                    <ArrowUpRight className='size-3 opacity-0 transition-opacity group-hover:opacity-100' />
-                </Link>
-            </div>
-            <div style={{ width: 200 }}>
-                <span className='font-mono text-[11px] text-muted-foreground'>{service.image}</span>
-            </div>
-            <div style={{ width: 100 }}>
-                <span className='font-mono text-[11px] text-muted-foreground'>{service.stack || <span className='opacity-30'>—</span>}</span>
-            </div>
-            <div style={{ width: 80 }}>
-                <ReplicasBadge service={service} />
-            </div>
-            <div style={{ width: 100 }} className='text-right'>
-                <span className='font-mono text-[11px] text-muted-foreground'>{formatRelativeTime(service.updatedAt)}</span>
-            </div>
-            <div style={{ width: 60 }} className='flex items-center justify-end'>
-                <button className='flex size-6 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-bg-elevated hover:opacity-100 focus:opacity-100'>
-                    <MoreHorizontal className='size-3.5' />
-                </button>
-            </div>
-        </div>
-    );
-}
-
-function LoadingSkeleton() {
-    return (
-        <div className='flex flex-col gap-6 p-6'>
-            <div className='flex items-center justify-between'>
-                <div className='flex flex-col gap-1'>
-                    <Skeleton className='h-7 w-28' />
-                    <Skeleton className='h-3 w-48' />
-                </div>
-                <Skeleton className='h-7 w-32' />
-            </div>
-            <div className='flex flex-col overflow-hidden border border-border'>
-                <div className='flex items-center justify-between border-b border-border px-4 py-3'>
-                    <Skeleton className='h-4 w-32' />
-                    <Skeleton className='h-7 w-48' />
-                </div>
-                <div className='space-y-0'>
-                    {[1, 2, 3, 4, 5].map((i) => (
-                        <div key={i} className='flex items-center gap-3 border-b border-border px-4 py-2.5 last:border-0'>
-                            <Skeleton className='size-1.5 rounded-full' />
-                            <Skeleton className='h-3 w-28' />
-                            <Skeleton className='h-3 w-40' />
-                            <Skeleton className='h-3 w-16' />
-                            <Skeleton className='ml-auto h-4 w-12 rounded-full' />
-                        </div>
-                    ))}
-                </div>
-            </div>
-        </div>
-    );
-}
-
-function ServicesPage() {
-    const { data: services, isLoading, error } = useServices();
-    const [search, setSearch] = useState("");
-
-    const filtered = (services ?? []).filter(
-        (svc) =>
-            svc.name.toLowerCase().includes(search.toLowerCase()) ||
-            svc.image.toLowerCase().includes(search.toLowerCase()) ||
-            (svc.stack && svc.stack.toLowerCase().includes(search.toLowerCase())),
-    );
-
-    if (isLoading) {
-        return <LoadingSkeleton />;
-    }
-
-    if (error) {
-        return (
-            <div className='flex flex-col items-center justify-center gap-3 py-12'>
-                <AlertCircle className='size-5 text-destructive' />
-                <p className='text-sm text-destructive'>Failed to load services</p>
-                <RefreshButton queryKeys={QUERY_KEYS} />
-            </div>
-        );
-    }
-
-    const serviceCount = services?.length ?? 0;
-    const stackCount = new Set((services ?? []).map((s) => s.stack).filter(Boolean)).size;
-    const totalReplicas = (services ?? []).reduce((sum, s) => sum + (s.replicasDesired === -1 ? s.replicasRunning : s.replicasRunning), 0);
-    const subtitle = `${serviceCount} ${serviceCount === 1 ? "service" : "services"} · ${stackCount} ${stackCount === 1 ? "stack" : "stacks"} · ${totalReplicas} replicas running`;
-
-    return (
-        <div className='flex h-full flex-col gap-6 p-6'>
-            <PageHeader title='SERVICES' subtitle={subtitle}>
-                <RefreshButton queryKeys={QUERY_KEYS} />
-                <Button variant='outline' size='sm' disabled className='h-7 font-mono text-[11px] text-muted-foreground'>
-                    CREATE SERVICE
-                </Button>
-            </PageHeader>
-
-            <TableToolbar searchValue={search} onSearchChange={setSearch} searchPlaceholder='Search services...' />
-
-            <TableShell
-                title='SWARM SERVICES'
-                count={filtered.length}
-                filterSlot={
-                    <Button variant='outline' size='sm' disabled className='h-7 font-mono text-[11px] text-muted-foreground'>
-                        FILTER
-                    </Button>
-                }
-            >
-                <ColumnHeaders columns={SERVICE_COLUMNS} />
-                {filtered.length === 0 ? (
-                    <div className='flex flex-col items-center justify-center gap-1.5 py-12 text-xs text-muted-foreground'>
-                        <Container className='size-4' />
-                        <p>{search ? "No services match your filter" : "No services found"}</p>
-                    </div>
-                ) : (
-                    <div>
-                        {filtered.map((svc) => (
-                            <ServiceRow key={svc.id} service={svc} />
-                        ))}
-                    </div>
-                )}
-            </TableShell>
-        </div>
-    );
-}
+import { createFileRoute } from "@tanstack/react-router";
+import { Activity, Plus, RotateCcw, RotateCw } from "lucide-react";
+import { PageHeader } from "@/components/page-header";
+import { ActionButton } from "@/components/kit/action-button";
+import { ConfirmDialog } from "@/components/kit/confirm-dialog";
+import { EmptyState, ErrorState } from "@/components/kit/region-states";
+import { notify } from "@/components/kit/notify";
+import { StaleSnapshotAlert } from "@/components/kit/stale-snapshot-alert";
+import { TableToolbar, type FilterChip } from "@/components/data-table/table-toolbar";
+import { PinnedOperations } from "@/components/operations/pinned-operations";
+import { ServicesTable } from "@/components/services/services-table";
+import { ServiceFilters } from "@/components/services/service-filters";
+import {
+    SERVICE_SORTS,
+    SERVICE_SORT_LABELS,
+    activeServiceFilterCount,
+    applyServiceFilters,
+    parseServiceSearch,
+    serviceSortFor,
+    serviceSortingFor,
+    serviceSummary,
+    type ServiceSearch,
+} from "@/components/services/service-search";
+import { useNow } from "@/hooks/use-now";
+import { isSettled, useTrackedOperations } from "@/hooks/use-operation";
+import { withIdempotencyKey } from "@/hooks/use-operations";
+import { QUORUM_RETRY_MS, useRestartService, useRollbackService, useScaleService, useServices } from "@/hooks/use-services";
+import { clockTime, relativeTime } from "@/lib/time";
+import { serviceStatus, type ServiceView } from "@/types/services";
 
 export const Route = createFileRoute("/_authenticated/services/")({
+    validateSearch: (search: Record<string, unknown>): ServiceSearch => parseServiceSearch(search),
     component: ServicesPage,
 });
+
+const NOT_BUILT = { title: "Not built yet", reason: "Creating services from Kontainer isn't part of this build." };
+const PAUSED = { title: "Changes are paused", reason: "Writes need manager quorum. Create and scale come back once the managers are reachable." };
+
+type Pending = { kind: "restart" | "rollback"; service: ServiceView } | null;
+
+function ServicesPage() {
+    const search = Route.useSearch();
+    const navigate = Route.useNavigate();
+    const services = useServices();
+    const scale = useScaleService();
+    const restart = useRestartService();
+    const rollback = useRollbackService();
+    const tracked = useTrackedOperations("services");
+    const now = useNow();
+    const [editing, setEditing] = useState<string | null>(null);
+    const [confirming, setConfirming] = useState<Pending>(null);
+
+    const snapshot = services.data;
+    const rows = snapshot?.items ?? [];
+    const errorCode = services.error ? String(services.error) : null;
+    const quorumLost = errorCode === "quorum_unavailable";
+    const writable = !services.isError;
+
+    // Operations of ours still running, by service.
+    const scaling = new Map<string, { desired: number; running: number } | null>();
+    const updating = new Set<string>();
+    for (const { operation, view } of tracked) {
+        if (view && isSettled(view.state)) continue;
+        for (const target of operation.targets ?? []) {
+            const [kind, id] = target.split(":");
+            if (!id) continue;
+            if (kind === "scale") {
+                const progress = view?.progress;
+                scaling.set(
+                    id,
+                    progress && typeof progress.desired === "number" && typeof progress.running === "number"
+                        ? { desired: progress.desired, running: progress.running }
+                        : null,
+                );
+            } else updating.add(id);
+        }
+    }
+    const statusOf = (service: ServiceView) => serviceStatus(service, scaling.has(service.id) ? "scale" : updating.has(service.id) ? "other" : null);
+    const scalingOf = (service: ServiceView) =>
+        scaling.has(service.id) ? (scaling.get(service.id) ?? { desired: service.desiredReplicas, running: service.runningReplicas }) : null;
+    const filtered = applyServiceFilters(rows, search, statusOf);
+
+    function setSearch(next: ServiceSearch) {
+        void navigate({ search: next, replace: true });
+    }
+
+    function refused(title: string) {
+        return (code: unknown) => {
+            const reason = String(code);
+            if (reason === "version_conflict") void services.refetch();
+            notify.error(title, {
+                code: reason,
+                message:
+                    reason === "version_conflict"
+                        ? "The service changed since this page read it. The list was refreshed; try again."
+                        : reason === "quorum_unavailable"
+                          ? "The swarm has no quorum, so nothing was changed."
+                          : "The controller did not accept the change.",
+            });
+        };
+    }
+
+    function submitScale(service: ServiceView, replicas: number) {
+        setEditing(null);
+        if (replicas === service.desiredReplicas) return;
+        scale.mutate(withIdempotencyKey({ serviceId: service.id, name: service.name, version: service.version, replicas, from: service.desiredReplicas }), {
+            onError: refused(`Couldn't scale ${service.name}`),
+        });
+    }
+
+    function confirmAction(pending: NonNullable<Pending>) {
+        const variables = withIdempotencyKey({ serviceId: pending.service.id, name: pending.service.name, version: pending.service.version });
+        if (pending.kind === "restart") restart.mutate(variables, { onError: refused(`Couldn't restart ${pending.service.name}`) });
+        else rollback.mutate(variables, { onError: refused(`Couldn't roll back ${pending.service.name}`) });
+        setConfirming(null);
+    }
+
+    const chips: FilterChip[] = [
+        ...(search.mode ? [{ key: "mode", label: `mode: ${search.mode}`, onRemove: () => setSearch({ ...search, mode: undefined }) }] : []),
+        ...(search.stack ? [{ key: "stack", label: `stack: ${search.stack}`, onRemove: () => setSearch({ ...search, stack: undefined }) }] : []),
+        ...(search.status ? [{ key: "status", label: `status: ${search.status}`, onRemove: () => setSearch({ ...search, status: undefined }) }] : []),
+    ];
+    const clearChips = () => setSearch({ q: search.q, sort: search.sort });
+    const filtering = activeServiceFilterCount(search) > 0 || Boolean(search.q);
+
+    const emptyState =
+        rows.length === 0 && !filtering ? (
+            <EmptyState icon={Activity} title='No services yet' primaryAction={{ label: "CREATE SERVICE", icon: Plus, restricted: NOT_BUILT }}>
+                Services show up here once a stack is deployed or a service is created with the Docker CLI.
+            </EmptyState>
+        ) : (
+            <EmptyState
+                title='No services match these filters'
+                primaryAction={{ label: "CLEAR FILTERS", onClick: () => setSearch({ sort: search.sort }) }}
+                secondaryAction={{ label: `SHOW ALL ${rows.length}`, onClick: clearChips }}
+            >
+                Nothing matches {search.q ? `"${search.q}"` : "the search"}
+                {chips.length > 0 ? ` with ${chips.map((chip) => chip.label).join(" · ")}` : ""}.
+            </EmptyState>
+        );
+
+    const retryIn = Math.max(0, Math.ceil((services.errorUpdatedAt + QUORUM_RETRY_MS - now) / 1000));
+    // Quorum loss replaces the rows even when a snapshot exists, so nothing reads as down (04.S4);
+    // any other failed refetch keeps the snapshot under the stale banner.
+    const errorState =
+        errorCode && (quorumLost || !snapshot) ? (
+            <ErrorState
+                title="Couldn't load services"
+                details={{
+                    status: 503,
+                    code: errorCode,
+                    message: quorumLost ? "The swarm has no quorum." : "The service list request failed.",
+                }}
+                retryLabel={retryIn > 0 ? `RETRY IN ${retryIn}s` : "TRY AGAIN"}
+                onRetry={() => void services.refetch()}
+            >
+                {quorumLost
+                    ? "The Swarm manager can't reach a majority of managers, so the service list can't be read. Your workloads keep running — nothing here is reported as down while the cluster can't answer."
+                    : errorCode === "not_a_manager"
+                      ? "The controller's Docker host is not a Swarm manager, so there are no services to show."
+                      : "The controller answered, but the service list request failed. Nothing was changed."}
+            </ErrorState>
+        ) : undefined;
+
+    const subtitle =
+        services.isError && snapshot
+            ? `last known: ${rows.length} ${rows.length === 1 ? "service" : "services"} · snapshot ${clockTime(Date.parse(snapshot.snapshotAt), true)} (${relativeTime(Date.parse(snapshot.snapshotAt), now)})`
+            : serviceSummary(rows);
+
+    return (
+        <div className='flex flex-col gap-5'>
+            <PageHeader title='SERVICES' subtitle={subtitle}>
+                <ActionButton variant='primary' icon={Plus} restricted={writable ? NOT_BUILT : PAUSED}>
+                    CREATE SERVICE
+                </ActionButton>
+            </PageHeader>
+            <PinnedOperations scope='services' />
+            <div className='flex flex-col gap-3'>
+                <TableToolbar
+                    search={search.q ?? ""}
+                    onSearchChange={(q) => setSearch({ ...search, q: q || undefined })}
+                    searchPlaceholder='Search services by name or image'
+                    filters={
+                        <ServiceFilters
+                            search={search}
+                            stacks={[...new Set(rows.flatMap((row) => (row.stack ? [row.stack] : [])))].sort()}
+                            onChange={setSearch}
+                        />
+                    }
+                    chips={chips}
+                    onClearFilters={clearChips}
+                    sortOptions={SERVICE_SORTS.map((value) => ({ value, label: SERVICE_SORT_LABELS[value] }))}
+                    sort={search.sort ?? "name"}
+                    onSortChange={(sort) => setSearch({ ...search, sort: sort === "updated" ? "updated" : undefined })}
+                />
+                <ServicesTable
+                    rows={filtered}
+                    search={search.q ?? ""}
+                    sorting={serviceSortingFor(search.sort)}
+                    onSortingChange={(sorting) => {
+                        const sort = serviceSortFor(sorting);
+                        setSearch({ ...search, sort: sort === "updated" ? "updated" : undefined });
+                    }}
+                    statusOf={statusOf}
+                    scalingOf={scalingOf}
+                    editing={editing}
+                    onEdit={setEditing}
+                    onScale={submitScale}
+                    onRestart={(service) => setConfirming({ kind: "restart", service })}
+                    onRollback={(service) => setConfirming({ kind: "rollback", service })}
+                    onLogs={(service) => void navigate({ to: "/logs", search: { service: service.id } })}
+                    writable={writable}
+                    total={rows.length}
+                    isFirstLoad={services.isPending}
+                    isRefetching={services.isFetching && !services.isPending}
+                    stale={services.error && snapshot ? <StaleSnapshotAlert query={services} /> : undefined}
+                    emptyState={emptyState}
+                    errorState={errorState}
+                />
+            </div>
+
+            <ConfirmDialog
+                open={confirming !== null}
+                onOpenChange={(open) => !open && setConfirming(null)}
+                tone='neutral'
+                icon={confirming?.kind === "rollback" ? RotateCcw : RotateCw}
+                confirmIcon={confirming?.kind === "rollback" ? RotateCcw : RotateCw}
+                title={confirming?.kind === "rollback" ? `Roll back ${confirming.service.name}?` : `Restart ${confirming?.service.name ?? ""}?`}
+                description={
+                    confirming?.kind === "rollback"
+                        ? "Swarm returns it to its previous spec, replacing tasks as its update settings allow."
+                        : "Every task is replaced, as its update settings allow. Traffic keeps flowing if it has more than one replica."
+                }
+                confirmLabel={confirming?.kind === "rollback" ? "ROLL BACK" : "RESTART"}
+                onConfirm={() => {
+                    if (confirming) confirmAction(confirming);
+                }}
+            />
+        </div>
+    );
+}

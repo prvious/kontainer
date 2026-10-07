@@ -141,6 +141,18 @@ impl MutualTlsIdentityFiles {
         Ok(Arc::new(verifier))
     }
 
+    /// Build the verifier an agent uses for the controller: any controller instance of
+    /// `cluster_id`, still behind CA, DNS-name, and single-URI-SAN checks.
+    pub fn controller_verifier(
+        &self,
+        cluster_id: impl Into<String>,
+    ) -> io::Result<Arc<dyn ServerCertVerifier>> {
+        let peer_ca_pem = fs::read(&self.peer_ca_path)?;
+        let verifier = OutboundPeerVerifier::for_controller_of(&peer_ca_pem, cluster_id)
+            .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+        Ok(Arc::new(verifier))
+    }
+
     fn load_identity(&self) -> io::Result<Identity> {
         let certificate = fs::read(&self.certificate_path)?;
         let private_key = fs::read(&self.private_key_path)?;

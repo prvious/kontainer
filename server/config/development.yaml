@@ -32,14 +32,19 @@ database:
 
 settings:
   shutdown_grace: "<%= get_env(name="SHUTDOWN_GRACE", default="20s") %>"
+  # Development dials the dev cluster (dev/docker-compose.yml) with the
+  # certificates dev/pki.sh writes; run `pnpm dev:pki` before starting.
   agent_rpc:
-    enabled: <%= get_env(name="AGENT_RPC_ENABLED", default="false") %>
+    enabled: <%= get_env(name="AGENT_RPC_ENABLED", default="true") %>
     binding: <%= get_env(name="AGENT_RPC_BINDING", default="127.0.0.1:50051") %>
     cluster_id: <%= get_env(name="CLUSTER_ID", default="development") %>
     tls:
-      certificate_path: <%= get_env(name="AGENT_RPC_TLS_CERTIFICATE_PATH", default="config/dev-controller.pem") %>
-      private_key_path: <%= get_env(name="AGENT_RPC_TLS_PRIVATE_KEY_PATH", default="config/dev-controller-key.pem") %>
-      client_ca_path: <%= get_env(name="AGENT_RPC_TLS_CLIENT_CA_PATH", default="config/dev-agent-ca.pem") %>
+      certificate_path: <%= get_env(name="AGENT_RPC_TLS_CERTIFICATE_PATH", default="../dev/pki/controller.pem") %>
+      private_key_path: <%= get_env(name="AGENT_RPC_TLS_PRIVATE_KEY_PATH", default="../dev/pki/controller-key.pem") %>
+      client_ca_path: <%= get_env(name="AGENT_RPC_TLS_CLIENT_CA_PATH", default="../dev/pki/agent-ca.pem") %>
+  # tcp:// is accepted only in development and test (ADR 0004).
+  docker:
+    host: <%= get_env(name="KONTAINER_DOCKER_HOST", default="unix:///var/run/docker.sock") %>
   public_http:
     mode: plaintext
   # GitHub bootstrap login ships disabled. Enabling it requires a client

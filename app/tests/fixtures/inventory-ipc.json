@@ -1,20 +1,5 @@
 {
-    "commands": ["get_configured_node", "list_container_inventory"],
-    "configuredNode": "node-1",
-    "containerPage": {
-        "items": [
-            {
-                "containerId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                "displayName": "web",
-                "imageReference": "nginx:latest",
-                "state": "running",
-                "status": "Up 3 minutes",
-                "createdAt": "2026-09-19T06:00:00.000Z",
-                "nodeId": "node-1"
-            }
-        ],
-        "nextCursor": "v1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    },
+    "commands": [],
     "errorCodes": [
         "unauthenticated",
         "relogin_required",
@@ -23,12 +8,19 @@
         "local_state_failed",
         "cleanup_uncertain",
         "invalid_node_id",
-        "invalid_pagination",
+        "invalid_request",
         "node_not_found",
+        "not_found",
+        "conflict",
+        "too_many_containers",
         "forbidden",
         "controller_unavailable",
         "agent_unavailable",
         "agent_timeout",
+        "quorum_unavailable",
+        "not_a_manager",
+        "version_conflict",
+        "limit_reached",
         "invalid_response"
     ]
 }

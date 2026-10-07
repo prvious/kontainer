@@ -6,8 +6,17 @@
 
 mod auth;
 mod credentials;
+mod exec;
+mod images;
 mod leakage;
+mod logs;
+mod networks;
+mod operations;
+mod password_auth;
 mod reads;
 mod retry;
+mod services;
+mod stacks;
 mod support;
 mod transport;
+mod volumes;

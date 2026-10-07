@@ -12,7 +12,8 @@ const session: SessionView = {
     origin: "https://controller.example/",
     clusterId: "cluster-id",
     principalId: "principal-id",
-    githubLogin: "jane",
+    email: "jane@example.com",
+    displayName: "jane",
     label: "Production",
     accessExpiresAtUnixMs: 2_000_000_000_000,
 };
@@ -36,7 +37,7 @@ function TestConsumer() {
             </span>
             <button
                 onClick={() => {
-                    void login("https://controller.example/").catch(() => {});
+                    void login({ origin: "https://controller.example/", email: "jane@example.com", password: "correct horse battery" }).catch(() => {});
                 }}
             >
                 Login
@@ -71,11 +72,10 @@ describe("Session Persistence", () => {
     });
 
     it("uses the restored non-secret session view", async () => {
-        vi.mocked(invoke).mockResolvedValue({ ...session, accessToken: "credential-canary" });
+        vi.mocked(invoke).mockResolvedValue(session);
         renderWithProvider();
         await waitFor(() => expect(screen.getByTestId("profile")).toHaveTextContent("local-profile-id"));
         expect(screen.getByTestId("origin")).toHaveTextContent("https://controller.example/");
-        expect(screen.getByTestId("query-cache")).not.toHaveTextContent("credential-canary");
     });
 
     it("shows no session when Rust invalidates a stale local profile", async () => {
@@ -92,10 +92,17 @@ describe("Session Persistence", () => {
         expect(screen.getByTestId("query-cache").textContent).not.toContain("native-secret-canary");
     });
 
-    it("sends only origin and label on login", async () => {
+    it("sends the origin, email, password, and label on login", async () => {
         renderWithProvider();
         await userEvent.setup().click(screen.getByRole("button", { name: "Login" }));
-        await waitFor(() => expect(invoke).toHaveBeenCalledWith("session_login", { origin: "https://controller.example/", label: null }));
+        await waitFor(() =>
+            expect(invoke).toHaveBeenCalledWith("session_login", {
+                origin: "https://controller.example/",
+                email: "jane@example.com",
+                password: "correct horse battery",
+                label: null,
+            }),
+        );
     });
 
     it("publishes the native local profile UUID after login", async () => {

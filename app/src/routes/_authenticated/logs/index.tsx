@@ -1,108 +1,134 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { toast } from "sonner";
-import { Plus, ScrollText } from "lucide-react";
+import { Plus, ScrollText, Search, WrapText } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
-import { LogStreamTabs } from "@/components/logs/log-stream-tabs";
-import type { LogStream } from "@/components/logs/log-stream-tabs";
-import { LogPanel } from "@/components/logs/log-panel";
-import { StreamPickerDialog } from "@/components/logs/stream-picker-dialog";
-import { Button } from "@/components/ui/button";
+import { ActionButton } from "@/components/kit/action-button";
+import { EmptyState } from "@/components/kit/region-states";
+import { LabelTooltip } from "@/components/kit/tooltips";
+import { Input } from "@/components/ui/input";
+import { Tabs, TabsContent } from "@/components/ui/tabs";
+import { LogTabBody } from "@/components/logs/log-tab-body";
+import { LogTabs } from "@/components/logs/log-tabs";
+import { StreamPicker } from "@/components/logs/stream-picker";
+import { useLogBuffer, useLogStreams } from "@/hooks/use-log-tabs";
+import { useServices } from "@/hooks/use-services";
+import type { LogTab } from "@/contexts/log-streams-context-value";
+import { lineMatcher } from "@/types/logs";
+import { cn } from "@/lib/utils";
 
-const TAB_COLORS = ["bg-accent-green", "bg-accent-cyan", "bg-accent-orange", "bg-accent-purple", "bg-accent-red"];
-const MAX_STREAMS = 10;
+/** `?service=`: a service id or name whose tab opens on load. */
+interface LogsSearch {
+    service?: string;
+}
 
-function LogsPage() {
-    const [streams, setStreams] = useState<LogStream[]>([]);
-    const [activeStreamId, setActiveStreamId] = useState<string | null>(null);
-    const [pickerOpen, setPickerOpen] = useState(false);
+const SERVICE_REF = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$/;
 
-    function openPicker() {
-        if (streams.length >= MAX_STREAMS) {
-            toast.warning(`Maximum ${MAX_STREAMS} streams allowed. Close a tab first.`);
-            return;
-        }
-        setPickerOpen(true);
-    }
+export const Route = createFileRoute("/_authenticated/logs/")({
+    validateSearch: (search: Record<string, unknown>): LogsSearch =>
+        typeof search.service === "string" && SERVICE_REF.test(search.service) ? { service: search.service } : {},
+    component: LogsPage,
+});
 
-    function handleAddStream(service: { id: string; name: string }) {
-        if (streams.length >= MAX_STREAMS) return;
-        const id = crypto.randomUUID();
-        setStreams((prev) => [
-            ...prev,
-            {
-                id,
-                serviceId: service.id,
-                serviceName: service.name,
-                color: TAB_COLORS[prev.length % TAB_COLORS.length],
-            },
-        ]);
-        setActiveStreamId(id);
-        setPickerOpen(false);
-    }
-
-    function handleCloseStream(closeId: string) {
-        let nextStreams: LogStream[] = [];
-        setStreams((prev) => {
-            nextStreams = prev.filter((s) => s.id !== closeId);
-            return nextStreams;
-        });
-        setActiveStreamId((currentActive) => {
-            if (currentActive !== closeId) return currentActive;
-            return nextStreams.length > 0 ? nextStreams[nextStreams.length - 1].id : null;
-        });
-    }
-
-    function handleSelectTab(id: string) {
-        setActiveStreamId(id);
-    }
-
-    const hasStreams = streams.length > 0;
-
+function MatchCount({ tab, filter }: { tab: LogTab; filter: string }) {
+    const snapshot = useLogBuffer(tab.buffer);
+    const matches = lineMatcher(filter);
+    const count = snapshot.rows.filter((row) => row.kind === "line" && matches(row.line.text)).length;
     return (
-        <div className='flex h-full flex-col gap-4 p-6'>
-            <PageHeader title='LOGS' subtitle='// per-service log streams'>
-                <button
-                    onClick={openPicker}
-                    className='flex items-center gap-1.5 rounded-md border border-accent-green bg-accent-green-20 px-3 py-1.5 font-mono text-[11px] font-semibold text-accent-green'
-                >
-                    <Plus className='size-3.5' />
-                    New Stream
-                </button>
-            </PageHeader>
-
-            {hasStreams ? (
-                <>
-                    <LogStreamTabs
-                        streams={streams}
-                        activeStreamId={activeStreamId}
-                        onSelect={handleSelectTab}
-                        onClose={handleCloseStream}
-                        onAdd={openPicker}
-                    />
-                    <div className='flex flex-1 flex-col overflow-hidden rounded-b-lg border-x border-b border-border'>
-                        {streams.map((stream) => (
-                            <LogPanel key={stream.id} serviceId={stream.serviceId} visible={stream.id === activeStreamId} logFilter='' />
-                        ))}
-                    </div>
-                </>
-            ) : (
-                <div className='flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground'>
-                    <ScrollText className='size-8' />
-                    <p className='font-mono text-sm'>No log streams active</p>
-                    <p className='font-mono text-xs'>Click &quot;New Stream&quot; to start watching service logs</p>
-                    <Button variant='outline' size='sm' onClick={openPicker} className='mt-2 gap-1.5'>
-                        <Plus className='size-3.5' />
-                        Add Stream
-                    </Button>
-                </div>
-            )}
-
-            <StreamPickerDialog open={pickerOpen} onOpenChange={setPickerOpen} onSelect={handleAddStream} excludeServiceIds={streams.map((s) => s.serviceId)} />
-        </div>
+        <span className='font-mono text-3xs text-muted-foreground'>
+            {count.toLocaleString()} {count === 1 ? "match" : "matches"}
+        </span>
     );
 }
 
-export const Route = createFileRoute("/_authenticated/logs/")({
-    component: LogsPage,
-});
+function LogsPage() {
+    const search = Route.useSearch();
+    const navigate = Route.useNavigate();
+    const logs = useLogStreams();
+    const services = useServices();
+    const [picking, setPicking] = useState(false);
+    const [filter, setFilter] = useState("");
+    const [wrap, setWrap] = useState(false);
+
+    const serviceList = services.data?.items;
+    const active = logs.tabs.find((tab) => tab.id === logs.activeId) ?? null;
+
+    // Arriving with `?service=` (from a Services or Containers row) opens that service's stream once
+    // the service list can resolve a name to an id, then drops the parameter.
+    const { open } = logs;
+    useEffect(() => {
+        if (!search.service || !serviceList) return;
+        const match = serviceList.find((service) => service.id === search.service || service.name === search.service);
+        if (match) open(match);
+        void navigate({ search: {}, replace: true });
+    }, [search.service, serviceList, open, navigate]);
+
+    return (
+        <div className='flex h-full min-h-0 flex-col gap-5'>
+            <PageHeader title='LOGS' subtitle='// per-service log streams'>
+                {active && filter.trim() !== "" && <MatchCount tab={active} filter={filter} />}
+                <label className='flex h-8 w-60 items-center gap-2 rounded-md border border-border px-3 focus-within:border-ring'>
+                    <Search aria-hidden className='size-3.5 shrink-0 text-muted-foreground' />
+                    <Input
+                        type='search'
+                        aria-label='Filter logs'
+                        placeholder='Filter logs… (/regex/)'
+                        value={filter}
+                        onChange={(event) => setFilter(event.target.value)}
+                        className='h-auto border-0 bg-transparent p-0 font-mono text-2xs shadow-none focus-visible:ring-0 dark:bg-transparent'
+                    />
+                </label>
+                <LabelTooltip label={wrap ? "Don't wrap lines" : "Wrap lines"}>
+                    <button
+                        type='button'
+                        aria-label='Wrap lines'
+                        aria-pressed={wrap}
+                        onClick={() => setWrap((current) => !current)}
+                        className={cn(
+                            "flex size-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:text-foreground",
+                            wrap && "border-primary text-sidebar-accent-foreground",
+                        )}
+                    >
+                        <WrapText aria-hidden className='size-3.5' />
+                    </button>
+                </LabelTooltip>
+                <ActionButton variant='primary' icon={Plus} onClick={() => setPicking(true)}>
+                    NEW STREAM
+                </ActionButton>
+            </PageHeader>
+            {logs.tabs.length === 0 ? (
+                <div className='flex flex-1 items-center justify-center rounded-md border border-border bg-card'>
+                    <EmptyState
+                        icon={ScrollText}
+                        title='No log streams open'
+                        primaryAction={{ label: "NEW STREAM", icon: Plus, onClick: () => setPicking(true) }}
+                    >
+                        Follow a service's logs from every task, live. Open one here, or from a service's row menu.
+                    </EmptyState>
+                </div>
+            ) : (
+                <Tabs
+                    value={logs.activeId}
+                    onValueChange={(value) => typeof value === "string" && logs.select(value)}
+                    className='flex min-h-0 flex-1 flex-col gap-0 overflow-hidden rounded-md border border-border bg-card'
+                >
+                    <LogTabs tabs={logs.tabs} onClose={logs.close} onNew={() => setPicking(true)} />
+                    {logs.tabs.map((tab) => (
+                        <TabsContent key={tab.id} value={tab.id} className='flex min-h-0 flex-1 flex-col data-[hidden]:hidden'>
+                            <LogTabBody
+                                tab={tab}
+                                name={tab.serviceName}
+                                filter={filter}
+                                wrap={wrap}
+                                onClearFilter={() => setFilter("")}
+                                onLoadPreviousHour={() => logs.loadPreviousHour(tab.id)}
+                                onResume={() => logs.resume(tab.id)}
+                                onRetryNow={() => logs.retryNow(tab.id)}
+                            />
+                        </TabsContent>
+                    ))}
+                </Tabs>
+            )}
+            <StreamPicker open={picking} onOpenChange={setPicking} onPick={logs.open} />
+        </div>
+    );
+}

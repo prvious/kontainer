@@ -4,11 +4,12 @@ use sea_orm::{
 };
 use uuid::Uuid;
 
+use super::is_visible;
 use crate::{
     auth::domain::PrincipalContext,
     operations::{
-        domain::{CorruptOperationState, OperationSnapshot},
-        entities::{idempotency_record, operation, operation_event},
+        domain::{CorruptOperationState, OperationSnapshot, OperationState},
+        entities::{operation, operation_event},
     },
 };
 
@@ -38,22 +39,19 @@ pub async fn execute(
                     // binding. A missing binding returns the same NotFound as
                     // a nonexistent operation so callers cannot probe for
                     // another principal's operations.
-                    let visible = idempotency_record::Entity::find()
-                        .filter(idempotency_record::Column::OperationId.eq(operation_id))
-                        .filter(idempotency_record::Column::PrincipalRef.eq(&principal_ref))
-                        .one(transaction)
+                    if !is_visible(transaction, &principal_ref, operation_id)
                         .await
                         .map_err(GetOperationError::Persistence)?
-                        .is_some();
-                    if !visible {
+                    {
                         return Err(GetOperationError::NotFound);
                     }
-                    let operation = operation::Entity::find_by_id(operation_id)
-                        .one(transaction)
-                        .await
-                        .map_err(GetOperationError::Persistence)?
-                        .ok_or(GetOperationError::NotFound)?
-                        .try_into()?;
+                    let operation: crate::operations::domain::DurableOperation =
+                        operation::Entity::find_by_id(operation_id)
+                            .one(transaction)
+                            .await
+                            .map_err(GetOperationError::Persistence)?
+                            .ok_or(GetOperationError::NotFound)?
+                            .try_into()?;
                     let last_event = operation_event::Entity::find()
                         .filter(operation_event::Column::OperationId.eq(operation_id))
                         .order_by_desc(operation_event::Column::Sequence)
@@ -61,11 +59,26 @@ pub async fn execute(
                         .await
                         .map_err(GetOperationError::Persistence)?
                         .ok_or(GetOperationError::MissingEvent)?;
+                    let progress = operation_event::Entity::find()
+                        .filter(operation_event::Column::OperationId.eq(operation_id))
+                        .filter(operation_event::Column::Detail.is_not_null())
+                        .order_by_desc(operation_event::Column::Sequence)
+                        .one(transaction)
+                        .await
+                        .map_err(GetOperationError::Persistence)?
+                        .and_then(|event| event.detail);
+                    let error_message = if operation.state == OperationState::Failed {
+                        last_event.message.clone()
+                    } else {
+                        None
+                    };
 
                     Ok(OperationSnapshot {
                         operation,
                         last_event_sequence: last_event.sequence,
                         last_error_code: last_event.error_code,
+                        progress,
+                        error_message,
                     })
                 })
             },

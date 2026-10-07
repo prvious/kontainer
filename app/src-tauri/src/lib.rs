@@ -1,7 +1,18 @@
 mod actions;
 mod session;
 
-use tauri::Manager;
+use tauri::{webview::PageLoadEvent, Manager, Runtime};
+
+/// Log streams and shells belong to the page that opened them: a window close or a reload
+/// leaves nobody reading them, so they end and free their server slots.
+fn end_page_streams<R: Runtime>(app: &impl Manager<R>) {
+    if let Some(streams) = app.try_state::<session::log_streams::LogStreams>() {
+        streams.cancel_all();
+    }
+    if let Some(shells) = app.try_state::<session::exec_sessions::ExecSessions>() {
+        shells.cancel_all();
+    }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -15,59 +26,88 @@ pub fn run() {
             // keeps the app from starting.
             let manager = session::initialize(app.handle())?;
             app.manage(manager);
+            app.manage(session::log_streams::LogStreams::default());
+            app.manage(session::exec_sessions::ExecSessions::default());
             Ok(())
         })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::Destroyed = event {
+                end_page_streams(window);
+            }
+        })
+        .on_page_load(|webview, payload| {
+            if payload.event() == PageLoadEvent::Started {
+                end_page_streams(webview);
+            }
+        })
         .invoke_handler(tauri::generate_handler![
+            actions::session::session_bootstrap::session_bootstrap,
             actions::session::session_login::session_login,
-            actions::session::session_cancel_login::session_cancel_login,
+            actions::session::session_register::session_register,
             actions::session::session_restore::session_restore,
             actions::session::session_retry_commit::session_retry_commit,
             actions::session::session_logout::session_logout,
-            actions::session::session_login_hint::session_login_hint,
-            actions::inventory::get_configured_node::get_configured_node,
-            actions::inventory::list_container_inventory::list_container_inventory,
-            actions::agent::fetch_providers::fetch_providers,
-            actions::agent::ping_agent::ping_agent,
-            actions::agent::check_auth::check_auth,
-            actions::agent::setup_verify_token::setup_verify_token,
-            actions::agent::setup_github_connect::setup_github_connect,
-            actions::agent::setup_complete::setup_complete,
-            actions::agent::list_services::list_services,
-            actions::agent::inspect_service::inspect_service,
-            actions::agent::list_service_tasks::list_service_tasks,
-            actions::agent::inspect_task::inspect_task,
-            actions::agent::list_stacks::list_stacks,
-            actions::agent::remove_stack::remove_stack,
-            actions::agent::list_networks::list_networks,
-            actions::agent::list_volumes::list_volumes,
-            actions::agent::list_nodes::list_nodes,
-            actions::agent::list_node_tasks::list_node_tasks,
-            actions::agent::list_task_stats::list_task_stats,
-            actions::agent::scale_service::scale_service,
-            actions::agent::restart_service::restart_service,
-            actions::agent::rollback_service::rollback_service,
-            actions::agent::update_service_env::update_service_env,
-            actions::agent::update_service_image::update_service_image,
-            actions::agent::update_node_availability::update_node_availability,
-            actions::agent::update_node_role::update_node_role,
-            actions::agent::list_secrets::list_secrets,
-            actions::agent::create_secret::create_secret,
-            actions::agent::remove_secret::remove_secret,
-            actions::agent::list_configs::list_configs,
-            actions::agent::create_config::create_config,
-            actions::agent::remove_config::remove_config,
-            actions::agent::inspect_config::inspect_config,
-            actions::agent::list_cluster_metrics::list_cluster_metrics,
-            actions::agent::list_node_metrics::list_node_metrics,
-            actions::agent::list_images::list_images,
-            actions::agent::remove_image::remove_image,
-            actions::agent::prune_images::prune_images,
-            actions::agent::get_agent_settings::get_agent_settings,
-            actions::agent::update_agent_settings::update_agent_settings,
+            actions::session::session_connections::session_connections,
+            actions::session::session_forget_connection::session_forget_connection,
+            actions::session::connection_probe::connection_probe,
+            actions::session::controller_health::controller_health,
+            actions::containers::list_containers::list_containers,
+            actions::containers::container_action::container_action,
+            actions::containers::containers_bulk_action::containers_bulk_action,
+            actions::images::list_images::list_images,
+            actions::images::remove_image::remove_image,
+            actions::images::pull_image::pull_image,
+            actions::volumes::list_volumes::list_volumes,
+            actions::volumes::create_volume::create_volume,
+            actions::volumes::remove_volume::remove_volume,
+            actions::networks::list_networks::list_networks,
+            actions::networks::inspect_network::inspect_network,
+            actions::networks::create_network::create_network,
+            actions::networks::remove_network::remove_network,
+            actions::services::list_services::list_services,
+            actions::services::get_service::get_service,
+            actions::services::scale_service::scale_service,
+            actions::services::restart_service::restart_service,
+            actions::services::rollback_service::rollback_service,
+            actions::stacks::list_stacks::list_stacks,
+            actions::stacks::get_stack_removal_plan::get_stack_removal_plan,
+            actions::stacks::remove_stack::remove_stack,
+            actions::nodes::list_nodes::list_nodes,
+            actions::logs::logs_open::logs_open,
+            actions::logs::logs_close::logs_close,
+            actions::logs::logs_retry_now::logs_retry_now,
+            actions::exec::exec_open::exec_open,
+            actions::exec::exec_write::exec_write,
+            actions::exec::exec_resize::exec_resize,
+            actions::exec::exec_close::exec_close,
+            actions::nodes::get_cluster_summary::get_cluster_summary,
+            actions::nodes::get_cluster_samples::get_cluster_samples,
+            actions::settings::get_settings::get_settings,
+            actions::settings::get_status::get_status,
+            actions::settings::update_settings::update_settings,
+            actions::operations::get_operation::get_operation,
+            actions::operations::cancel_operation::cancel_operation,
             actions::app::close_splashscreen::close_splashscreen,
             actions::app::load_app_settings::load_app_settings,
             actions::app::save_app_settings::save_app_settings
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    /// Rust reads and writes `session.json` and `settings.json` through `StoreExt`. The WebView
+    /// gets no store permission, so page script can't rewrite either file.
+    #[test]
+    fn the_webview_has_no_store_permission() {
+        let capability: serde_json::Value =
+            serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
+        let permissions = capability["permissions"].as_array().unwrap();
+        assert!(!permissions.is_empty());
+        assert!(permissions.iter().all(|permission| !permission
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("store:")));
+    }
 }

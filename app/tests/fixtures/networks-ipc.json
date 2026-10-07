@@ -1,0 +1,58 @@
+{
+    "commands": [
+        ["networks", "list_networks"],
+        ["networks", "inspect_network"],
+        ["networks", "create_network"],
+        ["networks", "remove_network"]
+    ],
+    "networkList": {
+        "items": [
+            {
+                "id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                "name": "bridge",
+                "driver": "bridge",
+                "scope": "local",
+                "subnets": ["172.17.0.0/16"],
+                "containers": 0,
+                "createdAt": "2026-09-20T10:00:00.000Z",
+                "attachable": false,
+                "builtin": true,
+                "nodeIds": ["manager"]
+            },
+            {
+                "id": "x7kq2m9p0r1s3t5u7w9y0z2b4",
+                "name": "toolbox_kontainer",
+                "driver": "overlay",
+                "scope": "swarm",
+                "subnets": ["10.0.1.0/24"],
+                "containers": 6,
+                "createdAt": "2026-09-21T09:00:00.000Z",
+                "attachable": true,
+                "builtin": false,
+                "nodeIds": ["manager", "worker-1"]
+            },
+            {
+                "id": "e1e1e1e1e1e1e1e1e1e1e1e1e",
+                "name": "empty-overlay",
+                "driver": "overlay",
+                "scope": "swarm",
+                "subnets": [],
+                "containers": 0,
+                "createdAt": null,
+                "attachable": false,
+                "builtin": false,
+                "nodeIds": []
+            }
+        ],
+        "nodes": [
+            { "nodeId": "manager", "status": "ok", "message": null },
+            { "nodeId": "worker-1", "status": "ok", "message": null }
+        ],
+        "manager": "ok",
+        "snapshotAt": "2026-09-28T12:05:00.000Z"
+    },
+    "attached": [
+        { "nodeId": "manager", "containerId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "name": "toolbox_nginx.1.x7kq" },
+        { "nodeId": "worker-1", "containerId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "name": "toolbox_redis.1.a2b3" }
+    ]
+}

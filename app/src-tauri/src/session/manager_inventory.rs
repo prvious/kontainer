@@ -1,14 +1,18 @@
-//! Authenticated, read-only inventory through the session's Rust-held access credential.
+//! Authenticated controller reads through the session's Rust-held access credential.
+//!
+//! Every call runs through [`SessionManager::authenticated`]: one attempt, and on a 401 one
+//! refresh-then-retry of the same call before the session is invalidated.
 
-use kontainer_native_client::{
-    AccessCredential, ContainerPage, ContainerPageRequest, NativeClientError, NodeId,
-};
+use kontainer_native_client::{AccessCredential, NativeClientError};
 use serde::Serialize;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use super::{ActiveSession, SessionManager};
-use crate::session::{controller::Controller, errors::SessionError};
+use crate::session::{
+    controller::{Controller, ControllerFuture},
+    errors::SessionError,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -20,12 +24,19 @@ pub(crate) enum InventoryError {
     LocalStateFailed,
     CleanupUncertain,
     InvalidNodeId,
-    InvalidPagination,
+    InvalidRequest,
     NodeNotFound,
+    NotFound,
+    Conflict,
+    TooManyContainers,
     Forbidden,
     ControllerUnavailable,
     AgentUnavailable,
     AgentTimeout,
+    QuorumUnavailable,
+    NotAManager,
+    VersionConflict,
+    LimitReached,
     InvalidResponse,
 }
 
@@ -39,12 +50,19 @@ impl InventoryError {
         Self::LocalStateFailed,
         Self::CleanupUncertain,
         Self::InvalidNodeId,
-        Self::InvalidPagination,
+        Self::InvalidRequest,
         Self::NodeNotFound,
+        Self::NotFound,
+        Self::Conflict,
+        Self::TooManyContainers,
         Self::Forbidden,
         Self::ControllerUnavailable,
         Self::AgentUnavailable,
         Self::AgentTimeout,
+        Self::QuorumUnavailable,
+        Self::NotAManager,
+        Self::VersionConflict,
+        Self::LimitReached,
         Self::InvalidResponse,
     ];
 }
@@ -70,12 +88,18 @@ impl From<NativeClientError> for InventoryError {
     fn from(error: NativeClientError) -> Self {
         match error {
             NativeClientError::InvalidNodeId => Self::InvalidNodeId,
-            NativeClientError::InvalidPagination => Self::InvalidPagination,
+            NativeClientError::InvalidRequest => Self::InvalidRequest,
             NativeClientError::Unauthorized => Self::ReloginRequired,
             NativeClientError::Forbidden => Self::Forbidden,
             NativeClientError::NotFound => Self::NodeNotFound,
+            NativeClientError::Conflict => Self::Conflict,
+            NativeClientError::TooManyContainers => Self::TooManyContainers,
             NativeClientError::AgentUnavailable => Self::AgentUnavailable,
             NativeClientError::AgentTimeout => Self::AgentTimeout,
+            NativeClientError::QuorumUnavailable { .. } => Self::QuorumUnavailable,
+            NativeClientError::NotAManager => Self::NotAManager,
+            NativeClientError::VersionConflict => Self::VersionConflict,
+            NativeClientError::LimitReached => Self::LimitReached,
             NativeClientError::Unavailable
             | NativeClientError::DeadlineExceeded
             | NativeClientError::ServiceUnavailable
@@ -84,59 +108,6 @@ impl From<NativeClientError> for InventoryError {
             _ => Self::InvalidResponse,
         }
     }
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct ContainerPageView {
-    items: Vec<ContainerItemView>,
-    next_cursor: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ContainerItemView {
-    container_id: String,
-    display_name: String,
-    image_reference: String,
-    state: kontainer_native_client::ContainerState,
-    status: String,
-    created_at: String,
-    node_id: String,
-}
-
-impl From<ContainerPage> for ContainerPageView {
-    fn from(page: ContainerPage) -> Self {
-        Self {
-            items: page
-                .items
-                .into_iter()
-                .map(|item| ContainerItemView {
-                    container_id: item.container_id,
-                    display_name: item.display_name,
-                    image_reference: item.image_reference,
-                    state: item.state,
-                    status: item.status,
-                    created_at: item.created_at.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string(),
-                    node_id: item.node_id,
-                })
-                .collect(),
-            next_cursor: page.next_cursor,
-        }
-    }
-}
-
-enum ReadKind {
-    Discover,
-    Containers {
-        node: NodeId,
-        page: ContainerPageRequest,
-    },
-}
-
-enum ReadResult {
-    Node(Option<NodeId>),
-    Page(ContainerPage),
 }
 
 /// An in-flight read temporarily owns access without cloning it. Cancellation
@@ -157,58 +128,24 @@ impl Drop for ReadCustody<'_> {
     }
 }
 
-async fn read_once(
-    controller: &dyn Controller,
-    access: &AccessCredential,
-    kind: &ReadKind,
-    cancellation: &CancellationToken,
-) -> Result<ReadResult, NativeClientError> {
-    match kind {
-        ReadKind::Discover => controller
-            .discover_node(access, cancellation)
-            .await
-            .map(ReadResult::Node),
-        ReadKind::Containers { node, page } => controller
-            .list_containers(access, node, page, cancellation)
-            .await
-            .map(ReadResult::Page),
-    }
-}
-
 impl SessionManager {
-    pub(crate) async fn configured_node(
+    /// Run `call` with the active profile's access credential, rotating once on a 401. The call
+    /// borrows its inputs from `arguments` so the same call can repeat with the successor.
+    pub(crate) async fn authenticated<A, T, F>(
         &self,
         profile_id: Uuid,
-    ) -> Result<Option<String>, InventoryError> {
-        match self.read_inventory(profile_id, ReadKind::Discover).await? {
-            ReadResult::Node(node) => Ok(node.map(|node| node.to_string())),
-            ReadResult::Page(_) => unreachable!("discovery read returned a page"),
-        }
-    }
-
-    pub(crate) async fn container_inventory(
-        &self,
-        profile_id: Uuid,
-        node_id: &str,
-        cursor: Option<String>,
-        limit: u32,
-    ) -> Result<ContainerPageView, InventoryError> {
-        let node = NodeId::parse(node_id)?;
-        let page = ContainerPageRequest { limit, cursor };
-        match self
-            .read_inventory(profile_id, ReadKind::Containers { node, page })
-            .await?
-        {
-            ReadResult::Page(page) => Ok(page.into()),
-            ReadResult::Node(_) => unreachable!("container read returned a node"),
-        }
-    }
-
-    async fn read_inventory(
-        &self,
-        profile_id: Uuid,
-        kind: ReadKind,
-    ) -> Result<ReadResult, InventoryError> {
+        arguments: &A,
+        call: F,
+    ) -> Result<T, InventoryError>
+    where
+        A: ?Sized + Sync,
+        F: for<'a> Fn(
+            &'a dyn Controller,
+            &'a AccessCredential,
+            &'a CancellationToken,
+            &'a A,
+        ) -> ControllerFuture<'a, Result<T, NativeClientError>>,
+    {
         let _ops = self.ops.lock().await;
         if let Some(error) = self.custody_error() {
             return Err(error.into());
@@ -228,7 +165,13 @@ impl SessionManager {
             .for_origin(&active.view.origin)
             .map_err(InventoryError::from)?;
         let cancellation = CancellationToken::new();
-        let first = read_once(controller.as_ref(), &active.access, &kind, &cancellation).await;
+        let first = call(
+            controller.as_ref(),
+            &active.access,
+            &cancellation,
+            arguments,
+        )
+        .await;
         if !matches!(&first, Err(NativeClientError::Unauthorized)) {
             return first.map_err(InventoryError::from);
         }
@@ -243,13 +186,19 @@ impl SessionManager {
         if anchor.profile_id != profile_id {
             return Err(InventoryError::Unauthenticated);
         }
-        let refreshed = self.restore_ready(anchor).await?;
+        self.restore_ready(anchor).await?;
         custody.active = self.slots().active.take();
         let active = custody
             .active
             .as_ref()
             .ok_or(InventoryError::LocalStateFailed)?;
-        let second = read_once(controller.as_ref(), &active.access, &kind, &cancellation).await;
+        let second = call(
+            controller.as_ref(),
+            &active.access,
+            &cancellation,
+            arguments,
+        )
+        .await;
         if !matches!(&second, Err(NativeClientError::Unauthorized)) {
             return second.map_err(InventoryError::from);
         }
@@ -259,9 +208,6 @@ impl SessionManager {
             .load_anchor()
             .await?
             .ok_or(InventoryError::LocalStateFailed)?;
-        Err(self
-            .invalidate_to_relogin(&anchor, refreshed.label)
-            .await
-            .into())
+        Err(self.invalidate_to_relogin(&anchor).await.into())
     }
 }

@@ -3,11 +3,8 @@ use serde::Serialize;
 use utoipa::openapi::security::{HttpAuthScheme, HttpBuilder, SecurityScheme};
 use utoipa::{Modify, OpenApi, ToSchema};
 
-use super::containers::{
-    ContainerErrorResponse, ContainerItemResponse, ContainerPageResponse, ContainerStateResponse,
-};
-use super::operations::{OperationResponse, OperationStateResponse};
 use crate::auth::domain::PrincipalContext;
+use crate::server::ControllerRuntime;
 
 mod deep;
 
@@ -17,14 +14,22 @@ pub struct StatusResponse {
     pub status: &'static str,
     pub version: &'static str,
     pub architecture: &'static str,
+    /// The tracing filter the controller logs with (`RUST_LOG`, else the configured level).
+    pub log_level: String,
+    /// When this controller process started, RFC 3339 in UTC.
+    pub started_at: String,
 }
 
 impl StatusResponse {
-    fn current() -> Self {
+    fn current(runtime: &ControllerRuntime) -> Self {
         Self {
             status: "ok",
             version: env!("CARGO_PKG_VERSION"),
             architecture: std::env::consts::ARCH,
+            log_level: runtime.log_level.clone(),
+            started_at: runtime
+                .started_at
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
         }
     }
 }
@@ -32,14 +37,19 @@ impl StatusResponse {
 #[utoipa::path(
     get,
     path = "/api/v1/status",
+    operation_id = "status",
     responses(
         (status = 200, description = "Controller build and liveness only; use /health/ready for readiness", body = StatusResponse),
         (status = 401, description = "Missing, malformed, expired, or revoked access credential"),
         (status = 503, description = "Controller draining new work or session persistence unavailable; the body is either HealthResponse or a generic error")
     )
 )]
-async fn show(_principal: PrincipalContext) -> Result<Response> {
-    format::json(StatusResponse::current())
+async fn show(_principal: PrincipalContext, State(ctx): State<AppContext>) -> Result<Response> {
+    let runtime = ctx
+        .shared_store
+        .get::<ControllerRuntime>()
+        .ok_or(Error::InternalServerError)?;
+    format::json(StatusResponse::current(&runtime))
 }
 
 #[allow(dead_code)]
@@ -70,10 +80,41 @@ impl Modify for AccessSessionSecurity {
         show,
         deep::show,
         super::operations::show,
-        super::nodes::configured,
+        super::operations::events,
+        super::operations::cancel,
+        super::operations::admit_noop,
+        super::nodes::index,
+        super::nodes::cluster_samples,
+        super::nodes::cluster_summary,
+        super::logs::stream,
+        super::exec::stream,
+        super::settings::show,
+        super::settings::update,
         super::containers::index,
+        super::containers::action,
+        super::containers::bulk,
+        super::images::index,
+        super::images::remove,
+        super::images::pull,
+        super::volumes::index,
+        super::volumes::create,
+        super::volumes::remove,
+        super::networks::index,
+        super::networks::show,
+        super::networks::create,
+        super::networks::remove,
+        super::services::index,
+        super::services::show,
+        super::services::action,
+        super::stacks::index,
+        super::stacks::plan,
+        super::stacks::remove,
         super::sessions::refresh,
         super::sessions::logout_current,
+        super::password_auth::bootstrap,
+        super::password_auth::register,
+        super::password_auth::password_login,
+        super::account::current,
         super::github_login::start,
         super::github_login::callback,
         super::github_login::redeem,
@@ -81,28 +122,6 @@ impl Modify for AccessSessionSecurity {
         super::health::startup,
         super::health::ready
     ),
-    components(schemas(
-        StatusResponse,
-        deep::DeepStatusResponse,
-        deep::BuildResponse,
-        deep::MigrationState,
-        deep::DatabaseState,
-        deep::AgentRpcState,
-        OperationResponse,
-        OperationStateResponse,
-        ContainerPageResponse,
-        ContainerItemResponse,
-        ContainerStateResponse,
-        ContainerErrorResponse,
-        super::nodes::ConfiguredNodeResponse,
-        super::sessions::RefreshRequest,
-        super::sessions::SessionTokenResponse,
-        super::github_login::StartLoginRequest,
-        super::github_login::StartLoginResponse,
-        super::github_login::RedeemLoginRequest,
-        super::github_login::GithubLoginResponse,
-        super::health::HealthResponse
-    )),
     modifiers(&AccessSessionSecurity),
     security(("access_session" = []))
 )]
@@ -135,14 +154,41 @@ mod tests {
     use std::collections::BTreeSet;
 
     use super::{ApiDoc, OPENAPI_ARTIFACT, OpenApi, StatusResponse};
+    use crate::server::{ControllerRuntime, effective_log_level};
 
     #[test]
     fn status_reports_the_current_controller_build() {
-        let response = StatusResponse::current();
+        let started_at = chrono::DateTime::parse_from_rfc3339("2026-09-28T12:00:00.250Z")
+            .unwrap()
+            .to_utc();
+        let response = StatusResponse::current(&ControllerRuntime {
+            started_at,
+            log_level: "info".to_owned(),
+        });
 
         assert_eq!(response.status, "ok");
         assert_eq!(response.version, env!("CARGO_PKG_VERSION"));
         assert!(!response.architecture.is_empty());
+        assert_eq!(response.log_level, "info");
+        assert_eq!(response.started_at, "2026-09-28T12:00:00.250Z");
+    }
+
+    #[test]
+    fn the_log_level_follows_rust_log_then_the_override_then_the_level() {
+        assert_eq!(effective_log_level(None, None, "info"), "info");
+        assert_eq!(
+            effective_log_level(None, Some("kontainer=trace"), "info"),
+            "kontainer=trace"
+        );
+        assert_eq!(
+            effective_log_level(
+                Some("warn,tower_http=debug"),
+                Some("kontainer=trace"),
+                "info"
+            ),
+            "warn,tower_http=debug"
+        );
+        assert_eq!(effective_log_level(Some("  "), None, "debug"), "debug");
     }
 
     #[test]
@@ -186,8 +232,10 @@ mod tests {
         assert!(route["responses"]["401"].is_object());
         assert!(route["responses"]["503"].is_object());
         assert_eq!(route["operationId"], "deep_status");
+        // No per-route override, so the document's access-session requirement applies.
+        assert!(route.get("security").is_none());
         assert_eq!(
-            route["security"],
+            document["security"],
             serde_json::json!([{"access_session": []}])
         );
 
@@ -201,10 +249,16 @@ mod tests {
             .collect();
         assert_eq!(
             fields,
-            BTreeSet::from(["build", "migration", "database", "agentRpc"])
+            BTreeSet::from([
+                "build",
+                "migration",
+                "database",
+                "nodesOnline",
+                "nodesTotal"
+            ])
         );
         assert_eq!(response["additionalProperties"], false);
-        assert_eq!(response["required"].as_array().unwrap().len(), 4);
+        assert_eq!(response["required"].as_array().unwrap().len(), 5);
         let build = &schemas["BuildResponse"];
         assert_eq!(build["additionalProperties"], false);
         assert_eq!(build["properties"].as_object().unwrap().len(), 1);
@@ -217,115 +271,133 @@ mod tests {
             schemas["DatabaseState"]["enum"],
             serde_json::json!(["reachable", "unreachable", "timeout"])
         );
-        assert_eq!(
-            schemas["AgentRpcState"]["enum"],
-            serde_json::json!(["up", "down", "timeout"])
-        );
     }
 
     #[test]
-    fn configured_node_openapi_has_one_closed_field() {
+    fn membership_metrics_and_settings_routes_are_documented() {
         let document = serde_json::to_value(ApiDoc::openapi()).unwrap();
-        let route = &document["paths"]["/api/v1/nodes/configured"]["get"];
-        assert_eq!(route["operationId"], "configured_node");
+        for (path, method, operation) in [
+            ("/api/v1/nodes", "get", "list_nodes"),
+            ("/api/v1/cluster/samples", "get", "cluster_samples"),
+            ("/api/v1/cluster/summary", "get", "cluster_summary"),
+            ("/api/v1/settings", "get", "get_settings"),
+            ("/api/v1/settings", "patch", "update_settings"),
+        ] {
+            let route = &document["paths"][path][method];
+            assert_eq!(route["operationId"], operation, "{path}");
+            // No override: the document's access-session requirement applies.
+            assert!(route.get("security").is_none(), "{path}");
+            assert!(route["responses"]["401"].is_object(), "{path}");
+        }
+        assert!(document["paths"]["/api/v1/nodes/configured"].is_null());
+        assert!(document["paths"]["/api/v1/nodes/{nodeId}/samples"].is_null());
+        let schemas = &document["components"]["schemas"];
         assert_eq!(
-            route["security"],
-            serde_json::json!([{"access_session": []}])
+            schemas["AgentStatusResponse"]["enum"],
+            serde_json::json!(["online", "degraded", "offline", "no-agent"])
         );
-        assert!(route["responses"]["200"].is_object());
-        assert!(route["responses"]["401"].is_object());
-        assert!(route["responses"]["503"].is_object());
-        let response = &document["components"]["schemas"]["ConfiguredNodeResponse"];
-        assert_eq!(response["additionalProperties"], false);
-        assert_eq!(response["properties"].as_object().unwrap().len(), 1);
-        assert!(response["properties"]["nodeId"].is_object());
-        assert_eq!(response["required"], serde_json::json!(["nodeId"]));
-    }
-
-    #[test]
-    fn openapi_documents_the_bounded_container_collection() {
-        let value = serde_json::to_value(ApiDoc::openapi()).unwrap();
-        let route = &value["paths"]["/api/v1/nodes/{nodeId}/containers"]["get"];
-        assert!(route.is_object(), "container collection must be documented");
-
-        for status in ["200", "400", "401", "404", "503", "504"] {
+        assert_eq!(
+            schemas["NodeHealthResponse"]["enum"],
+            serde_json::json!(["active", "degraded", "down"])
+        );
+        let node = schemas["NodeResponse"]["required"].as_array().unwrap();
+        for nullable in ["availability", "address", "agentVersion", "lastCheckInAt"] {
             assert!(
-                route["responses"].get(status).is_some(),
-                "containers documents {status}"
+                node.contains(&serde_json::json!(nullable)),
+                "{nullable} is nullable, not optional"
             );
         }
-
-        let parameters = route["parameters"].as_array().unwrap();
-        let limit = parameters
-            .iter()
-            .find(|parameter| parameter["name"] == "limit")
-            .expect("limit is documented");
-        assert_eq!(limit["in"], "query");
-        assert_eq!(limit["schema"]["minimum"], 1);
-        assert_eq!(limit["schema"]["maximum"], 100);
-        let description = limit["description"].as_str().unwrap_or_default();
         assert!(
-            description.contains("50"),
-            "limit default must be documented, got: {description}"
-        );
-
-        let cursor = parameters
-            .iter()
-            .find(|parameter| parameter["name"] == "cursor")
-            .expect("cursor is documented");
-        assert_eq!(cursor["in"], "query");
-        assert_eq!(cursor["schema"]["maxLength"], 67);
-
-        let node = parameters
-            .iter()
-            .find(|parameter| parameter["name"] == "nodeId")
-            .expect("nodeId is documented");
-        assert_eq!(node["in"], "path");
-
-        // Exact page DTO: exactly items plus nextCursor, and exactly the
-        // seven allowlisted item fields. Exact key sets — not a partial
-        // allowlist or a substring blacklist — are what stop an added
-        // environment, port, label, mount, or networking field.
-        let page = &value["components"]["schemas"]["ContainerPageResponse"];
-        assert!(
-            page["required"]
+            schemas["ClusterSummaryResponse"]["required"]
                 .as_array()
-                .is_some_and(|required| required.contains(&serde_json::json!("items"))
-                    && required.contains(&serde_json::json!("nextCursor")))
+                .unwrap()
+                .contains(&serde_json::json!("cpuPercent"))
         );
-        assert_eq!(page["properties"]["items"]["maxItems"], 100);
-        let page_fields: BTreeSet<&str> = page["properties"]
-            .as_object()
-            .expect("page schema documents properties")
-            .keys()
-            .map(String::as_str)
-            .collect();
-        assert_eq!(
-            page_fields,
-            BTreeSet::from(["items", "nextCursor"]),
-            "page envelope exposes exactly items and nextCursor"
+        let point = schemas["SamplePointResponse"]["required"]
+            .as_array()
+            .unwrap();
+        assert!(
+            point.contains(&serde_json::json!("cpuPercent")),
+            "nullable, not optional"
         );
+    }
 
-        let item = &value["components"]["schemas"]["ContainerItemResponse"];
-        let item_fields: BTreeSet<&str> = item["properties"]
+    #[test]
+    fn openapi_documents_the_cluster_container_collection_and_actions() {
+        let value = serde_json::to_value(ApiDoc::openapi()).unwrap();
+        assert!(value["paths"]["/api/v1/nodes/{nodeId}/containers"].is_null());
+        let list = &value["paths"]["/api/v1/containers"]["get"];
+        for status in ["200", "400", "401", "404", "413", "503"] {
+            assert!(
+                list["responses"].get(status).is_some(),
+                "list documents {status}"
+            );
+        }
+        for (path, operation) in [
+            (
+                "/api/v1/containers/{nodeId}/{containerId}/actions/{action}",
+                "container_action",
+            ),
+            ("/api/v1/containers/actions/bulk", "containers_bulk_action"),
+        ] {
+            let route = &value["paths"][path]["post"];
+            assert_eq!(route["operationId"], operation);
+            assert!(route["responses"]["202"].is_object());
+            assert!(route["responses"]["409"].is_object());
+        }
+        let item = &value["components"]["schemas"]["ContainerResponse"];
+        let fields: std::collections::BTreeSet<_> = item["properties"]
             .as_object()
-            .expect("item schema documents properties")
+            .unwrap()
             .keys()
-            .map(String::as_str)
+            .cloned()
             .collect();
-        assert_eq!(
-            item_fields,
-            BTreeSet::from([
-                "containerId",
-                "displayName",
-                "imageReference",
-                "state",
-                "status",
-                "createdAt",
-                "nodeId",
-            ]),
-            "page item exposes exactly the seven allowlisted fields"
-        );
+        for forbidden in ["command", "labels", "env", "mounts"] {
+            assert!(!fields.contains(forbidden), "{forbidden} never crosses");
+        }
+        assert!(fields.contains("nodeName") && fields.contains("ports"));
+    }
+
+    #[test]
+    fn operation_ids_are_unique() {
+        let value = serde_json::to_value(ApiDoc::openapi()).unwrap();
+        let mut seen = BTreeSet::new();
+        for (path, item) in value["paths"].as_object().unwrap() {
+            for (method, operation) in item.as_object().unwrap() {
+                let id = operation["operationId"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned();
+                assert!(
+                    seen.insert(id.clone()),
+                    "{method} {path} reuses operationId {id}"
+                );
+            }
+        }
+        assert!(seen.contains("status") && seen.contains("operation"));
+    }
+
+    #[test]
+    fn password_auth_routes_are_documented_without_a_session_requirement() {
+        let value = serde_json::to_value(ApiDoc::openapi()).unwrap();
+        for (path, method) in [
+            ("/api/v1/auth/bootstrap", "get"),
+            ("/api/v1/auth/register", "post"),
+            ("/api/v1/auth/password/login", "post"),
+        ] {
+            let route = &value["paths"][path][method];
+            assert!(route.is_object(), "{path} is documented");
+            assert_eq!(
+                route["security"],
+                serde_json::json!([{}]),
+                "{path} is anonymous"
+            );
+        }
+        let login = &value["paths"]["/api/v1/auth/password/login"]["post"]["responses"];
+        for status in ["200", "400", "401", "429", "503"] {
+            assert!(login.get(status).is_some(), "login documents {status}");
+        }
+        assert!(value["paths"]["/api/v1/auth/session"]["get"].is_object());
     }
 
     #[test]
@@ -346,6 +418,6 @@ mod tests {
         );
         // The runtime serves this exact file.
         let runtime: serde_json::Value = serde_json::from_str(&checked).unwrap();
-        assert!(runtime["paths"]["/api/v1/nodes/{nodeId}/containers"].is_object());
+        assert!(runtime["paths"]["/api/v1/containers"].is_object());
     }
 }

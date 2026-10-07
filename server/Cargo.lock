@@ -2678,6 +2678,8 @@ dependencies = [
  "kontainer-lifecycle",
  "kontainer-node-agent",
  "kontainer-rpc-auth",
+ "kontainer-stream-protocol",
+ "kontainer-stream-transport",
  "loco-rs",
  "migration",
  "rcgen",
@@ -2695,7 +2697,6 @@ dependencies = [
  "tokio-stream",
  "tokio-util",
  "tonic",
- "tonic-prost",
  "tower",
  "tracing",
  "url",
@@ -2709,6 +2710,8 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bollard",
+ "chrono",
+ "futures-util",
  "tokio",
  "tokio-util",
 ]
@@ -2721,8 +2724,12 @@ version = "0.1.0"
 name = "kontainer-native-client"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "axum",
  "base64 0.22.1",
  "chrono",
+ "kontainer-stream-protocol",
+ "kontainer-stream-transport",
  "rcgen",
  "reqwest",
  "rustls",
@@ -2743,6 +2750,7 @@ name = "kontainer-node-agent"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "futures-util",
  "kontainer-agent-proto",
  "kontainer-engine",
  "kontainer-lifecycle",

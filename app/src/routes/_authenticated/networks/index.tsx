@@ -1,153 +1,195 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useNetworks } from "@/hooks/use-networks";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
-import { PageHeader } from "@/components/page-header";
-import { TableShell } from "@/components/table-shell";
-import { TableToolbar } from "@/components/table-toolbar";
-import { ColumnHeaders } from "@/components/column-headers";
-import { RefreshButton } from "@/components/refresh-button";
-import { AlertCircle, MoreHorizontal, Network } from "lucide-react";
 import { useState } from "react";
-import type { NetworkItem } from "@/types/networks";
-
-const QUERY_KEYS: string[][] = [["networks"]];
-
-const NETWORK_COLUMNS = [
-    { label: "STATUS", width: 70 },
-    { label: "NAME" },
-    { label: "ID", width: 150 },
-    { label: "DRIVER", width: 100 },
-    { label: "SCOPE", width: 80 },
-    { label: "SUBNET", width: 120 },
-    { label: "", width: 60 },
-];
-
-function NetworkRow({ network }: { network: NetworkItem }) {
-    const scopeClass = network.scope === "swarm" ? "text-cyan-400" : "text-muted-foreground";
-
-    return (
-        <div className='flex items-center border-b border-border px-4 py-2.5 hover:bg-bg-elevated/50'>
-            <div style={{ width: 70 }} className='flex items-center'>
-                <span className='size-1.5 rounded-full bg-success' title='active' />
-            </div>
-            <div style={{ flex: 1 }} className='flex items-center'>
-                <span className='font-mono text-xs font-medium'>{network.name}</span>
-            </div>
-            <div style={{ width: 150 }}>
-                <span className='truncate font-mono text-[11px] text-muted-foreground' title={network.id}>
-                    {network.id.slice(0, 12)}
-                </span>
-            </div>
-            <div style={{ width: 100 }}>
-                <span className='font-mono text-[11px] text-muted-foreground'>{network.driver}</span>
-            </div>
-            <div style={{ width: 80 }}>
-                <span className={`font-mono text-[11px] ${scopeClass}`}>{network.scope}</span>
-            </div>
-            <div style={{ width: 120 }}>
-                <span className='font-mono text-[11px] text-muted-foreground'>{network.subnet ?? <span className='opacity-30'>—</span>}</span>
-            </div>
-            <div style={{ width: 60 }} className='flex items-center justify-end'>
-                <button className='flex size-6 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-bg-elevated hover:opacity-100 focus:opacity-100'>
-                    <MoreHorizontal className='size-3.5' />
-                </button>
-            </div>
-        </div>
-    );
-}
-
-function LoadingSkeleton() {
-    return (
-        <div className='flex flex-col gap-6 p-6'>
-            <div className='flex items-center justify-between'>
-                <div className='flex flex-col gap-1'>
-                    <Skeleton className='h-7 w-28' />
-                    <Skeleton className='h-3 w-48' />
-                </div>
-                <Skeleton className='h-7 w-36' />
-            </div>
-            <div className='flex flex-col overflow-hidden border border-border'>
-                <div className='flex items-center justify-between border-b border-border px-4 py-3'>
-                    <Skeleton className='h-4 w-32' />
-                    <Skeleton className='h-7 w-48' />
-                </div>
-                <div className='space-y-0'>
-                    {[1, 2, 3, 4, 5].map((i) => (
-                        <div key={i} className='flex items-center gap-3 border-b border-border px-4 py-2.5 last:border-0'>
-                            <Skeleton className='size-1.5 rounded-full' />
-                            <Skeleton className='h-3 w-28' />
-                            <Skeleton className='h-3 w-28' />
-                            <Skeleton className='h-3 w-16' />
-                            <Skeleton className='ml-auto h-3 w-14' />
-                        </div>
-                    ))}
-                </div>
-            </div>
-        </div>
-    );
-}
-
-function NetworksPage() {
-    const { data: networks, isLoading, error } = useNetworks();
-    const [search, setSearch] = useState("");
-
-    const filtered = (networks ?? []).filter(
-        (net) =>
-            net.name.toLowerCase().includes(search.toLowerCase()) ||
-            net.driver.toLowerCase().includes(search.toLowerCase()) ||
-            net.scope.toLowerCase().includes(search.toLowerCase()),
-    );
-
-    if (isLoading) {
-        return <LoadingSkeleton />;
-    }
-
-    if (error) {
-        return (
-            <div className='flex flex-col items-center justify-center gap-3 py-12'>
-                <AlertCircle className='size-5 text-destructive' />
-                <p className='text-sm text-destructive'>Failed to load networks</p>
-                <RefreshButton queryKeys={QUERY_KEYS} />
-            </div>
-        );
-    }
-
-    const networkCount = networks?.length ?? 0;
-    const overlayCount = (networks ?? []).filter((n) => n.driver === "overlay").length;
-    const bridgeCount = (networks ?? []).filter((n) => n.driver === "bridge").length;
-    const subtitle = `${networkCount} ${networkCount === 1 ? "network" : "networks"} · ${overlayCount} overlay · ${bridgeCount} bridge`;
-
-    return (
-        <div className='flex h-full flex-col gap-6 p-6'>
-            <PageHeader title='NETWORKS' subtitle={subtitle}>
-                <RefreshButton queryKeys={QUERY_KEYS} />
-                <Button variant='outline' size='sm' disabled className='h-7 font-mono text-[11px] text-muted-foreground'>
-                    CREATE NETWORK
-                </Button>
-            </PageHeader>
-
-            <TableToolbar searchValue={search} onSearchChange={setSearch} searchPlaceholder='Search networks...' />
-
-            <TableShell title='ALL NETWORKS' count={filtered.length}>
-                <ColumnHeaders columns={NETWORK_COLUMNS} />
-                {filtered.length === 0 ? (
-                    <div className='flex flex-col items-center justify-center gap-1.5 py-12 text-xs text-muted-foreground'>
-                        <Network className='size-4' />
-                        <p>{search ? "No networks match your filter" : "No networks found"}</p>
-                    </div>
-                ) : (
-                    <div>
-                        {filtered.map((net) => (
-                            <NetworkRow key={net.id} network={net} />
-                        ))}
-                    </div>
-                )}
-            </TableShell>
-        </div>
-    );
-}
+import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { Network, Plus, RefreshCw } from "lucide-react";
+import { PageHeader } from "@/components/page-header";
+import { ActionButton } from "@/components/kit/action-button";
+import { ConfirmDialog } from "@/components/kit/confirm-dialog";
+import { EmptyState, ErrorState } from "@/components/kit/region-states";
+import { InlineAlert } from "@/components/kit/inline-alert";
+import { notify } from "@/components/kit/notify";
+import { StaleSnapshotAlert } from "@/components/kit/stale-snapshot-alert";
+import { TableToolbar, type FilterChip } from "@/components/data-table/table-toolbar";
+import { PinnedOperations } from "@/components/operations/pinned-operations";
+import { NetworkOverviewStrip } from "@/components/networks/network-overview-strip";
+import { NetworksTable } from "@/components/networks/networks-table";
+import { NetworkFilters } from "@/components/networks/network-filters";
+import { CreateNetworkDialog } from "@/components/networks/create-network-dialog";
+import { activeNetworkFilterCount, applyNetworkFilters, driverSummary, parseNetworkSearch, type NetworkSearch } from "@/components/networks/network-search";
+import { useNetworks, useRemoveNetwork } from "@/hooks/use-networks";
+import { useNodes } from "@/hooks/use-nodes";
+import { isSettled, useTrackedOperations } from "@/hooks/use-operation";
+import { withIdempotencyKey } from "@/hooks/use-operations";
+import type { NetworkView } from "@/types/networks";
 
 export const Route = createFileRoute("/_authenticated/networks/")({
+    validateSearch: (search: Record<string, unknown>): NetworkSearch => parseNetworkSearch(search),
     component: NetworksPage,
 });
+
+const HIGHLIGHT_MS = 3000;
+
+function NetworksPage() {
+    const search = Route.useSearch();
+    const navigate = Route.useNavigate();
+    const router = useRouter();
+    const networks = useNetworks();
+    const nodes = useNodes();
+    const remove = useRemoveNetwork();
+    const tracked = useTrackedOperations("networks");
+    const [removing, setRemoving] = useState<NetworkView | null>(null);
+    const [createOpen, setCreateOpen] = useState(false);
+
+    const snapshot = networks.data;
+    const rows = snapshot?.items ?? [];
+    const outcomes = snapshot?.nodes ?? [];
+    const silent = outcomes.filter((node) => node.status !== "ok");
+    const filtered = applyNetworkFilters(rows, search);
+
+    const pending = new Set<string>();
+    for (const { operation, view } of tracked) if (!view || !isSettled(view.state)) for (const target of operation.targets ?? []) pending.add(target);
+
+    /** Every navigation drops the highlight. */
+    function setSearch(next: NetworkSearch) {
+        void navigate({ search: { ...next, highlightedRow: undefined }, replace: true });
+    }
+
+    /** The create operation settles after polling; the user may be on another page by then. */
+    const onNetworksPage = () => router.matchRoute({ to: Route.to }) !== false;
+
+    function created(row: string) {
+        setCreateOpen(false);
+        if (!onNetworksPage()) return;
+        void navigate({ search: (previous: NetworkSearch) => ({ ...previous, highlightedRow: row }), replace: true });
+        setTimeout(() => {
+            if (!onNetworksPage()) return;
+            void navigate({
+                search: (previous: NetworkSearch) => (previous.highlightedRow === row ? { ...previous, highlightedRow: undefined } : previous),
+                replace: true,
+            });
+        }, HIGHLIGHT_MS);
+    }
+
+    function confirmRemove(network: NetworkView) {
+        remove.mutate(withIdempotencyKey({ id: network.id, scope: network.scope, nodeIds: network.nodeIds, name: network.name }), {
+            onError: (code) =>
+                notify.error(`Couldn't remove ${network.name}`, {
+                    code: String(code),
+                    message:
+                        String(code) === "not_a_manager"
+                            ? "The controller's Docker host is not a Swarm manager."
+                            : "The controller did not accept the removal.",
+                }),
+        });
+        setRemoving(null);
+    }
+
+    const chips: FilterChip[] = [
+        ...(search.driver ? [{ key: "driver", label: `driver: ${search.driver}`, onRemove: () => setSearch({ ...search, driver: undefined }) }] : []),
+        ...(search.scope ? [{ key: "scope", label: `scope: ${search.scope}`, onRemove: () => setSearch({ ...search, scope: undefined }) }] : []),
+        ...(search.node ? [{ key: "node", label: `node: ${search.node}`, onRemove: () => setSearch({ ...search, node: undefined }) }] : []),
+    ];
+    const clearChips = () => setSearch({ q: search.q });
+    const filtering = activeNetworkFilterCount(search) > 0 || Boolean(search.q);
+
+    const emptyState =
+        rows.length === 0 && !filtering ? (
+            <EmptyState icon={Network} title='No networks yet' primaryAction={{ label: "CREATE NETWORK", icon: Plus, onClick: () => setCreateOpen(true) }}>
+                Networks show up here as soon as the nodes report them.
+            </EmptyState>
+        ) : (
+            <EmptyState
+                title='No networks match these filters'
+                primaryAction={{ label: "CLEAR FILTERS", onClick: () => setSearch({}) }}
+                secondaryAction={{ label: `SHOW ALL ${rows.length}`, onClick: clearChips }}
+            >
+                Nothing matches {search.q ? `"${search.q}"` : "the search"}
+                {chips.length > 0 ? ` with ${chips.map((chip) => chip.label).join(" · ")}` : ""}.
+            </EmptyState>
+        );
+
+    const errorState =
+        networks.error && !snapshot ? (
+            <ErrorState
+                title="Couldn't load networks"
+                details={{ code: String(networks.error), message: "The controller answered, but the network list request failed. Nothing was changed." }}
+                onRetry={() => void networks.refetch()}
+            />
+        ) : undefined;
+
+    return (
+        <div className='flex flex-col gap-5'>
+            <PageHeader title='NETWORKS' subtitle={driverSummary(rows)}>
+                <ActionButton variant='outline' icon={RefreshCw} pending={networks.isFetching} onClick={() => void networks.refetch()}>
+                    REFRESH
+                </ActionButton>
+                <ActionButton variant='primary' icon={Plus} mutates onClick={() => setCreateOpen(true)}>
+                    CREATE NETWORK
+                </ActionButton>
+            </PageHeader>
+            {snapshot && snapshot.manager !== "ok" && (
+                <InlineAlert
+                    tone='warning'
+                    title={snapshot.manager === "not_a_manager" ? "The controller isn't connected to a Swarm manager" : "The Swarm manager didn't answer"}
+                >
+                    Swarm networks are listed from the nodes that use them, and overlay networks can't be created or removed until the manager answers.
+                </InlineAlert>
+            )}
+            {silent.length > 0 && snapshot && (
+                <InlineAlert tone='destructive' title={`${silent.map((node) => node.nodeId).join(", ")} didn't answer — their networks may be missing`}>
+                    Partial results: {outcomes.length - silent.length} of {outcomes.length} nodes responded.
+                </InlineAlert>
+            )}
+            <NetworkOverviewStrip networks={rows} />
+            <div className='flex flex-col gap-3'>
+                <TableToolbar
+                    search={search.q ?? ""}
+                    onSearchChange={(q) => setSearch({ ...search, q: q || undefined })}
+                    searchPlaceholder='Search networks by name or id'
+                    filters={
+                        <NetworkFilters
+                            search={search}
+                            drivers={[...new Set(rows.map((row) => row.driver))].sort()}
+                            nodes={outcomes.map((node) => node.nodeId)}
+                            onChange={setSearch}
+                        />
+                    }
+                    chips={chips}
+                    onClearFilters={clearChips}
+                    sortOptions={[{ value: "name", label: "Name" }]}
+                    sort='name'
+                    onSortChange={() => {}}
+                />
+                <PinnedOperations scope='networks' />
+                <NetworksTable
+                    rows={filtered}
+                    search={search.q ?? ""}
+                    pending={pending}
+                    highlighted={search.highlightedRow}
+                    onRemove={setRemoving}
+                    total={rows.length}
+                    isFirstLoad={networks.isPending}
+                    isRefetching={networks.isFetching && !networks.isPending}
+                    stale={networks.error && snapshot ? <StaleSnapshotAlert query={networks} /> : undefined}
+                    emptyState={emptyState}
+                    errorState={errorState}
+                />
+            </div>
+
+            <ConfirmDialog
+                open={removing !== null}
+                onOpenChange={(open) => !open && setRemoving(null)}
+                title={`Remove network ${removing?.name ?? ""}?`}
+                description={
+                    removing?.scope === "swarm"
+                        ? "Nothing is attached. It is removed from the swarm; services can't join it afterwards."
+                        : `Nothing is attached. It is removed from ${removing?.nodeIds[0] ?? "its node"}.`
+                }
+                confirmLabel='REMOVE'
+                onConfirm={() => {
+                    if (removing) confirmRemove(removing);
+                }}
+            />
+            <CreateNetworkDialog open={createOpen} onOpenChange={setCreateOpen} nodes={nodes.data?.items ?? []} networks={rows} onCreated={created} />
+        </div>
+    );
+}

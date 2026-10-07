@@ -1,0 +1,30 @@
+{
+    "commands": ["get_operation", "cancel_operation"],
+    "operation": {
+        "id": "018f2e34-0000-7000-8000-0000000000cc",
+        "kind": "noop",
+        "state": "running",
+        "errorCode": null,
+        "errorMessage": null,
+        "progress": { "total": 3, "done": 1 },
+        "createdAt": "2026-09-28T12:00:00.000Z",
+        "updatedAt": "2026-09-28T12:00:01.000Z",
+        "startedAt": "2026-09-28T12:00:00.500Z",
+        "finishedAt": null,
+        "requestId": "01J9ZM2R"
+    },
+    "failedOperation": {
+        "id": "018f2e34-0000-7000-8000-0000000000dd",
+        "kind": "service.scale",
+        "state": "failed",
+        "errorCode": "no_eligible_nodes",
+        "errorMessage": "No node satisfies the placement constraints.",
+        "progress": null,
+        "createdAt": "2026-09-28T12:00:00.000Z",
+        "updatedAt": "2026-09-28T12:00:09.000Z",
+        "startedAt": "2026-09-28T12:00:00.500Z",
+        "finishedAt": "2026-09-28T12:00:09.000Z",
+        "requestId": "01J9ZM2R"
+    },
+    "admitted": { "operationId": "018f2e34-0000-7000-8000-0000000000cc", "replayed": false }
+}

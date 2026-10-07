@@ -1,30 +1,12 @@
 import { describe, expect, it } from "vitest";
 import fixture from "../fixtures/inventory-ipc.json";
-import { INVENTORY_ERROR_CODES, configuredNodeFromIpc, containerPageFromIpc, inventoryErrorCode } from "@/types/inventory";
+import { INVENTORY_ERROR_CODES, inventoryErrorCode } from "@/types/inventory";
 
-describe("inventory IPC contract", () => {
-    it("matches the Rust fixture and projects exactly the page fields", () => {
-        expect(configuredNodeFromIpc(fixture.configuredNode)).toBe("node-1");
-        expect(configuredNodeFromIpc(null)).toBeNull();
-        expect(containerPageFromIpc(fixture.containerPage)).toEqual(fixture.containerPage);
-        expect(Object.keys(containerPageFromIpc(fixture.containerPage))).toEqual(["items", "nextCursor"]);
-        expect(Object.keys(containerPageFromIpc(fixture.containerPage).items[0])).toEqual([
-            "containerId",
-            "displayName",
-            "imageReference",
-            "state",
-            "status",
-            "createdAt",
-            "nodeId",
-        ]);
+describe("authenticated call error codes", () => {
+    it("match the Rust fixture and close over unknown values", () => {
         expect(INVENTORY_ERROR_CODES).toEqual(fixture.errorCodes);
-        expect(fixture.commands).toEqual(["get_configured_node", "list_container_inventory"]);
-    });
-
-    it("rejects extra fields, malformed nodes, and unknown states without caching canaries", () => {
-        expect(() => configuredNodeFromIpc("../secret-canary")).toThrow();
-        expect(() => containerPageFromIpc({ ...fixture.containerPage, credential: "secret-canary" })).toThrow();
-        expect(() => containerPageFromIpc({ ...fixture.containerPage, items: [{ ...fixture.containerPage.items[0], state: "secret-canary" }] })).toThrow();
+        expect(inventoryErrorCode("too_many_containers")).toBe("too_many_containers");
         expect(inventoryErrorCode(new Error("secret-canary"))).toBe("invalid_response");
+        expect(inventoryErrorCode(undefined)).toBe("invalid_response");
     });
 });

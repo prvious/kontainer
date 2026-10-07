@@ -1,0 +1,32 @@
+{
+    "commands": [
+        ["logs", "logs_open"],
+        ["logs", "logs_close"],
+        ["logs", "logs_retry_now"]
+    ],
+    "events": [
+        {
+            "type": "lines",
+            "lines": [
+                {
+                    "seq": 1,
+                    "ts": 1790000000123,
+                    "stream": "stderr",
+                    "taskId": "x0xza695s4xgf5rqmbvkpsizf",
+                    "nodeId": "tj42rq5nzwf8r8avruy1a45b6",
+                    "text": "GET / 200",
+                    "truncated": false
+                }
+            ]
+        },
+        { "type": "gap", "dropped": 42 },
+        { "type": "reconnecting", "attempt": 3, "nextRetryMs": 4000 },
+        { "type": "reconnected" },
+        {
+            "type": "ended",
+            "reason": "service_removed",
+            "code": "service_removed",
+            "message": "The service was removed."
+        }
+    ]
+}

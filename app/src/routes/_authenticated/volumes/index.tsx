@@ -1,144 +1,209 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useVolumes } from "@/hooks/use-volumes";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
-import { PageHeader } from "@/components/page-header";
-import { TableShell } from "@/components/table-shell";
-import { TableToolbar } from "@/components/table-toolbar";
-import { ColumnHeaders } from "@/components/column-headers";
-import { RefreshButton } from "@/components/refresh-button";
-import { AlertCircle, HardDrive, MoreHorizontal } from "lucide-react";
 import { useState } from "react";
-import type { VolumeItem } from "@/types/volumes";
-import { formatRelativeTime, formatBytes } from "@/lib/format-utils";
-
-const QUERY_KEYS: string[][] = [["volumes"]];
-
-const VOLUME_COLUMNS = [
-    { label: "NAME" },
-    { label: "DRIVER", width: 100 },
-    { label: "MOUNTPOINT" },
-    { label: "SIZE", width: 80, align: "right" as const },
-    { label: "CREATED", width: 100, align: "right" as const },
-    { label: "", width: 60 },
-];
-
-function VolumeRow({ volume }: { volume: VolumeItem }) {
-    return (
-        <div className='flex items-center border-b border-border px-4 py-2.5 hover:bg-bg-elevated/50'>
-            <div style={{ flex: 1 }} className='flex items-center'>
-                <span className='font-mono text-xs font-medium'>{volume.name}</span>
-            </div>
-            <div style={{ width: 100 }}>
-                <span className='font-mono text-[11px] text-muted-foreground'>{volume.driver}</span>
-            </div>
-            <div style={{ flex: 1 }} className='min-w-0 pr-4'>
-                <span className='block truncate font-mono text-[11px] text-muted-foreground'>{volume.mountpoint}</span>
-            </div>
-            <div style={{ width: 80 }} className='text-right'>
-                <span className='font-mono text-[11px] text-muted-foreground'>{formatBytes(volume.sizeBytes)}</span>
-            </div>
-            <div style={{ width: 100 }} className='text-right'>
-                <span className='font-mono text-[11px] text-muted-foreground'>{formatRelativeTime(volume.createdAt)}</span>
-            </div>
-            <div style={{ width: 60 }} className='flex items-center justify-end'>
-                <button className='flex size-6 items-center justify-center rounded text-muted-foreground opacity-0 transition-opacity hover:bg-bg-elevated hover:opacity-100 focus:opacity-100'>
-                    <MoreHorizontal className='size-3.5' />
-                </button>
-            </div>
-        </div>
-    );
-}
-
-function LoadingSkeleton() {
-    return (
-        <div className='flex flex-col gap-6 p-6'>
-            <div className='flex items-center justify-between'>
-                <div className='flex flex-col gap-1'>
-                    <Skeleton className='h-7 w-28' />
-                    <Skeleton className='h-3 w-48' />
-                </div>
-                <Skeleton className='h-7 w-36' />
-            </div>
-            <div className='flex flex-col overflow-hidden border border-border'>
-                <div className='flex items-center justify-between border-b border-border px-4 py-3'>
-                    <Skeleton className='h-4 w-32' />
-                    <Skeleton className='h-7 w-48' />
-                </div>
-                <div className='space-y-0'>
-                    {[1, 2, 3, 4, 5].map((i) => (
-                        <div key={i} className='flex items-center gap-3 border-b border-border px-4 py-2.5 last:border-0'>
-                            <Skeleton className='h-3 w-32' />
-                            <Skeleton className='h-3 w-16' />
-                            <Skeleton className='h-3 w-40' />
-                            <Skeleton className='ml-auto h-3 w-12' />
-                        </div>
-                    ))}
-                </div>
-            </div>
-        </div>
-    );
-}
-
-function VolumesPage() {
-    const { data: volumes, isLoading, error } = useVolumes();
-    const [search, setSearch] = useState("");
-
-    const filtered = (volumes ?? []).filter(
-        (vol) =>
-            vol.name.toLowerCase().includes(search.toLowerCase()) ||
-            vol.driver.toLowerCase().includes(search.toLowerCase()) ||
-            (vol.stack?.toLowerCase().includes(search.toLowerCase()) ?? false),
-    );
-
-    if (isLoading) {
-        return <LoadingSkeleton />;
-    }
-
-    if (error) {
-        return (
-            <div className='flex flex-col items-center justify-center gap-3 py-12'>
-                <AlertCircle className='size-5 text-destructive' />
-                <p className='text-sm text-destructive'>Failed to load volumes</p>
-                <RefreshButton queryKeys={QUERY_KEYS} />
-            </div>
-        );
-    }
-
-    const volumeCount = volumes?.length ?? 0;
-    const driverCount = new Set((volumes ?? []).map((v) => v.driver).filter(Boolean)).size;
-    const subtitle = `${volumeCount} ${volumeCount === 1 ? "volume" : "volumes"} · ${driverCount} ${driverCount === 1 ? "driver" : "drivers"}`;
-
-    return (
-        <div className='flex h-full flex-col gap-6 p-6'>
-            <PageHeader title='VOLUMES' subtitle={subtitle}>
-                <RefreshButton queryKeys={QUERY_KEYS} />
-                <Button variant='outline' size='sm' disabled className='h-7 font-mono text-[11px] text-muted-foreground'>
-                    CREATE VOLUME
-                </Button>
-            </PageHeader>
-
-            <TableToolbar searchValue={search} onSearchChange={setSearch} searchPlaceholder='Search volumes...' />
-
-            <TableShell title='ALL VOLUMES' count={filtered.length}>
-                <ColumnHeaders columns={VOLUME_COLUMNS} />
-                {filtered.length === 0 ? (
-                    <div className='flex flex-col items-center justify-center gap-1.5 py-12 text-xs text-muted-foreground'>
-                        <HardDrive className='size-4' />
-                        <p>{search ? "No volumes match your filter" : "No volumes found"}</p>
-                    </div>
-                ) : (
-                    <div>
-                        {filtered.map((vol) => (
-                            <VolumeRow key={vol.name} volume={vol} />
-                        ))}
-                    </div>
-                )}
-            </TableShell>
-        </div>
-    );
-}
+import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { ArrowDownUp, HardDrive, Plus, RefreshCw } from "lucide-react";
+import { PageHeader } from "@/components/page-header";
+import { ActionButton } from "@/components/kit/action-button";
+import { ConfirmDialog } from "@/components/kit/confirm-dialog";
+import { EmptyState, ErrorState } from "@/components/kit/region-states";
+import { InlineAlert } from "@/components/kit/inline-alert";
+import { notify } from "@/components/kit/notify";
+import { StaleSnapshotAlert } from "@/components/kit/stale-snapshot-alert";
+import { TableToolbar, type FilterChip } from "@/components/data-table/table-toolbar";
+import { PinnedOperations } from "@/components/operations/pinned-operations";
+import { bytes } from "@/components/containers/container-format";
+import { VolumeStorageStrip } from "@/components/volumes/volume-storage-strip";
+import { VolumesTable } from "@/components/volumes/volumes-table";
+import { VolumeFilters } from "@/components/volumes/volume-filters";
+import { CreateVolumeDialog } from "@/components/volumes/create-volume-dialog";
+import {
+    VOLUME_SORTS,
+    VOLUME_SORT_LABELS,
+    activeVolumeFilterCount,
+    allocated,
+    applyVolumeFilters,
+    parseVolumeSearch,
+    volumeSortFor,
+    volumeSortingFor,
+    type VolumeSearch,
+} from "@/components/volumes/volume-search";
+import { useNodes } from "@/hooks/use-nodes";
+import { isSettled, useTrackedOperations } from "@/hooks/use-operation";
+import { withIdempotencyKey } from "@/hooks/use-operations";
+import { useRemoveVolume, useVolumes } from "@/hooks/use-volumes";
+import { volumeRowId, type VolumeView } from "@/types/volumes";
 
 export const Route = createFileRoute("/_authenticated/volumes/")({
+    validateSearch: (search: Record<string, unknown>): VolumeSearch => parseVolumeSearch(search),
     component: VolumesPage,
 });
+
+const HIGHLIGHT_MS = 3000;
+const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
+
+function VolumesPage() {
+    const search = Route.useSearch();
+    const navigate = Route.useNavigate();
+    const router = useRouter();
+    const volumes = useVolumes();
+    const nodes = useNodes();
+    const remove = useRemoveVolume();
+    const tracked = useTrackedOperations("volumes");
+    const [removing, setRemoving] = useState<VolumeView | null>(null);
+    const [createOpen, setCreateOpen] = useState(false);
+
+    const snapshot = volumes.data;
+    const rows = snapshot?.items ?? [];
+    const outcomes = snapshot?.nodes ?? [];
+    const silent = outcomes.filter((node) => node.status !== "ok");
+    const filtered = applyVolumeFilters(rows, search);
+    const total = allocated(rows);
+
+    const pending = new Set<string>();
+    for (const { operation, view } of tracked) if (!view || !isSettled(view.state)) for (const target of operation.targets ?? []) pending.add(target);
+
+    /** Every navigation drops the highlight. */
+    function setSearch(next: VolumeSearch) {
+        void navigate({ search: { ...next, highlightedRow: undefined }, replace: true });
+    }
+
+    /** The create operation settles after polling; the user may be on another page by then. */
+    const onVolumesPage = () => router.matchRoute({ to: Route.to }) !== false;
+
+    function created(volume: { nodeId: string; name: string }) {
+        setCreateOpen(false);
+        if (!onVolumesPage()) return;
+        const row = volumeRowId(volume);
+        void navigate({ search: (previous: VolumeSearch) => ({ ...previous, highlightedRow: row }), replace: true });
+        setTimeout(() => {
+            if (!onVolumesPage()) return;
+            void navigate({
+                search: (previous: VolumeSearch) => (previous.highlightedRow === row ? { ...previous, highlightedRow: undefined } : previous),
+                replace: true,
+            });
+        }, HIGHLIGHT_MS);
+    }
+
+    function confirmRemove(volume: VolumeView) {
+        remove.mutate(withIdempotencyKey({ nodeId: volume.nodeId, name: volume.name }), {
+            onError: (code) =>
+                notify.error(`Couldn't remove ${volume.name}`, {
+                    code: String(code),
+                    message: "The controller did not accept the removal. Nothing was changed.",
+                }),
+        });
+        setRemoving(null);
+    }
+
+    const chips: FilterChip[] = [
+        ...(search.node ? [{ key: "node", label: `node: ${search.node}`, onRemove: () => setSearch({ ...search, node: undefined }) }] : []),
+        ...(search.driver ? [{ key: "driver", label: `driver: ${search.driver}`, onRemove: () => setSearch({ ...search, driver: undefined }) }] : []),
+        ...(search.attached
+            ? [{ key: "attached", label: search.attached === "yes" ? "attached" : "unattached", onRemove: () => setSearch({ ...search, attached: undefined }) }]
+            : []),
+    ];
+    const clearChips = () => setSearch({ q: search.q, sort: search.sort });
+    const filtering = activeVolumeFilterCount(search) > 0 || Boolean(search.q);
+
+    const emptyState =
+        rows.length === 0 && !filtering ? (
+            <EmptyState icon={HardDrive} title='No volumes yet' primaryAction={{ label: "CREATE VOLUME", icon: Plus, onClick: () => setCreateOpen(true) }}>
+                Volumes keep data outside a container's writable layer. Create one here, or let a stack declare it.
+            </EmptyState>
+        ) : (
+            <EmptyState
+                title='No volumes match these filters'
+                primaryAction={{ label: "CLEAR FILTERS", onClick: () => setSearch({ sort: search.sort }) }}
+                secondaryAction={{ label: `SHOW ALL ${rows.length}`, onClick: clearChips }}
+            >
+                Nothing matches {search.q ? `"${search.q}"` : "the search"}
+                {chips.length > 0 ? ` with ${chips.map((chip) => chip.label).join(" · ")}` : ""}.
+            </EmptyState>
+        );
+
+    const errorState =
+        volumes.error && !snapshot ? (
+            <ErrorState
+                title="Couldn't load volumes"
+                details={{ code: String(volumes.error), message: "The controller answered, but the volume list request failed. Nothing was changed." }}
+                onRetry={() => void volumes.refetch()}
+            />
+        ) : undefined;
+
+    const sort = search.sort ?? "size";
+    const subtitle = `${plural(rows.length, "volume")} · ${bytes(total.bytes)} allocated${total.pending ? " · sizes pending" : ""}`;
+    return (
+        <div className='flex flex-col gap-5'>
+            <PageHeader title='VOLUMES' subtitle={subtitle}>
+                <ActionButton variant='outline' icon={RefreshCw} pending={volumes.isFetching} onClick={() => void volumes.refetch()}>
+                    REFRESH
+                </ActionButton>
+                <ActionButton variant='primary' icon={Plus} mutates onClick={() => setCreateOpen(true)}>
+                    CREATE VOLUME
+                </ActionButton>
+            </PageHeader>
+            {silent.length > 0 && snapshot && (
+                <InlineAlert tone='destructive' title={`${silent.map((node) => node.nodeId).join(", ")} didn't answer — their volumes may be missing`}>
+                    Partial results: {outcomes.length - silent.length} of {outcomes.length} nodes responded.
+                </InlineAlert>
+            )}
+            <VolumeStorageStrip volumes={rows} />
+            <div className='flex flex-col gap-3'>
+                <TableToolbar
+                    search={search.q ?? ""}
+                    onSearchChange={(q) => setSearch({ ...search, q: q || undefined })}
+                    searchPlaceholder='Search volumes or mount points'
+                    filters={
+                        <VolumeFilters
+                            search={search}
+                            nodes={outcomes.map((node) => node.nodeId)}
+                            drivers={[...new Set(rows.map((row) => row.driver))].sort()}
+                            onChange={setSearch}
+                        />
+                    }
+                    chips={chips}
+                    onClearFilters={clearChips}
+                    sortOptions={VOLUME_SORTS.map((value) => ({ value, label: VOLUME_SORT_LABELS[value] }))}
+                    sort={sort}
+                    onSortChange={(next) => setSearch({ ...search, sort: next === "size" ? undefined : (next as VolumeSearch["sort"]) })}
+                />
+                <PinnedOperations scope='volumes' />
+                <VolumesTable
+                    rows={filtered}
+                    search={search.q ?? ""}
+                    sorting={volumeSortingFor(search.sort)}
+                    onSortingChange={(sorting) => {
+                        const next = volumeSortFor(sorting);
+                        setSearch({ ...search, sort: next === "size" ? undefined : next });
+                    }}
+                    pending={pending}
+                    highlighted={search.highlightedRow}
+                    onRemove={setRemoving}
+                    total={rows.length}
+                    headerRight={
+                        <span className='flex items-center gap-1.5 font-mono text-3xs font-bold tracking-[1px] text-muted-foreground uppercase'>
+                            <ArrowDownUp aria-hidden className='size-3' /> {VOLUME_SORT_LABELS[sort]} {sort === "name" ? "asc" : "desc"}
+                        </span>
+                    }
+                    isFirstLoad={volumes.isPending}
+                    isRefetching={volumes.isFetching && !volumes.isPending}
+                    stale={volumes.error && snapshot ? <StaleSnapshotAlert query={volumes} /> : undefined}
+                    emptyState={emptyState}
+                    errorState={errorState}
+                />
+            </div>
+
+            <ConfirmDialog
+                open={removing !== null}
+                onOpenChange={(open) => !open && setRemoving(null)}
+                title={`Remove volume ${removing?.name ?? ""}?`}
+                description={`Its data on ${removing?.nodeId ?? "the node"} is deleted. This cannot be undone.`}
+                confirmationText={removing?.name}
+                confirmLabel='REMOVE'
+                onConfirm={() => {
+                    if (removing) confirmRemove(removing);
+                }}
+            />
+            <CreateVolumeDialog open={createOpen} onOpenChange={setCreateOpen} nodes={nodes.data?.items ?? []} onCreated={created} />
+        </div>
+    );
+}

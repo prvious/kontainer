@@ -1,0 +1,31 @@
+{
+  "items": [
+    {
+      "nodeId": "node-1",
+      "name": "toolbox_redis-data",
+      "driver": "local",
+      "mountPoint": "/var/lib/docker/volumes/toolbox_redis-data/_data",
+      "createdAt": "2026-09-21T14:13:20.000Z",
+      "labels": { "com.docker.stack.namespace": "toolbox" },
+      "usedBy": 1,
+      "users": ["toolbox_redis.1.x7kq"],
+      "sizeBytes": 4096
+    },
+    {
+      "nodeId": "worker-1",
+      "name": "scratch",
+      "driver": "local",
+      "mountPoint": "/var/lib/docker/volumes/scratch/_data",
+      "createdAt": null,
+      "labels": {},
+      "usedBy": 0,
+      "users": [],
+      "sizeBytes": null
+    }
+  ],
+  "nodes": [
+    { "nodeId": "node-1", "status": "ok" },
+    { "nodeId": "worker-1", "status": "ok" }
+  ],
+  "snapshotAt": "2026-09-28T09:00:00.000Z"
+}

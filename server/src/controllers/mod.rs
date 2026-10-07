@@ -1,10 +1,21 @@
+pub mod account;
+pub mod admission;
 pub mod containers;
+pub mod exec;
 pub mod github_login;
 pub mod health;
+pub mod images;
+pub mod logs;
+pub mod networks;
 pub mod nodes;
 pub mod operations;
+pub mod password_auth;
+pub mod services;
 pub mod sessions;
+pub mod settings;
+pub mod stacks;
 pub mod status;
+pub mod volumes;
 
 use loco_rs::controller::Routes;
 
@@ -13,7 +24,11 @@ use loco_rs::controller::Routes;
 /// middleware. Membership here is explicit; never infer it from a path
 /// prefix.
 pub fn auth_lifecycle_routes() -> Vec<Routes> {
-    vec![sessions::routes(), github_login::routes()]
+    vec![
+        sessions::routes(),
+        password_auth::routes(),
+        github_login::routes(),
+    ]
 }
 
 /// Application routes. Every route in this group requires a live access
@@ -24,8 +39,17 @@ pub fn auth_lifecycle_routes() -> Vec<Routes> {
 pub fn protected_application_routes() -> Vec<Routes> {
     vec![
         status::routes(),
+        account::routes(),
         operations::routes(),
         nodes::routes(),
+        settings::routes(),
         containers::routes(),
+        images::routes(),
+        volumes::routes(),
+        networks::routes(),
+        services::routes(),
+        stacks::routes(),
+        logs::routes(),
+        exec::routes(),
     ]
 }

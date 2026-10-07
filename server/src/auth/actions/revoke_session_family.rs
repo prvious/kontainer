@@ -35,7 +35,7 @@ pub async fn execute(
         })
 }
 
-async fn revoke_in_transaction<C>(
+pub(crate) async fn revoke_in_transaction<C>(
     database: &C,
     family_id: Uuid,
     reason: RevocationReason,

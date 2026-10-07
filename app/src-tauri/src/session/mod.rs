@@ -11,17 +11,20 @@
 //! - the non-secret `session.json` metadata document, which is never trusted
 //!   without a matching anchor;
 //! - startup invalidation of legacy plaintext credential stores;
-//! - login, restart restore with ordered rotation, commit retry, and logout.
+//! - password sign-in and owner registration, restart restore with ordered
+//!   rotation, commit retry, and logout;
+//! - the saved-connections list and readiness probes for the connect card.
 //!
-//! No custody command accepts or returns a credential: they take an origin and
-//! optional label, return [`models::SessionView`], and fail with closed
-//! [`errors::SessionError`] codes. The pre-custody auth commands are not
-//! registered with Tauri.
+//! No custody command returns a credential. Sign-in and registration take the
+//! password only as a request argument (zeroed after use), return
+//! [`models::SessionView`], and fail with [`errors::LoginFailure`]; the other
+//! commands fail with closed [`errors::SessionError`] codes.
 
-pub(crate) mod browser;
 pub(crate) mod controller;
 pub(crate) mod errors;
+pub(crate) mod exec_sessions;
 pub(crate) mod legacy;
+pub(crate) mod log_streams;
 pub(crate) mod manager;
 pub(crate) mod metadata;
 pub(crate) mod models;
@@ -32,7 +35,6 @@ mod tests;
 
 use std::sync::Arc;
 
-use crate::session::browser::PluginBrowserOpener;
 use crate::session::controller::NativeControllerFactory;
 use crate::session::manager::SessionManager;
 use crate::session::metadata::{MetadataError, SessionDocumentStore};
@@ -47,7 +49,6 @@ pub(crate) fn initialize(app: &tauri::AppHandle) -> Result<SessionManager, Strin
         Arc::new(KeyringVault::spawn()),
         Arc::new(metadata),
         Arc::new(NativeControllerFactory),
-        Arc::new(PluginBrowserOpener::new(app.clone())),
     ))
 }
 

@@ -1,0 +1,62 @@
+{
+    "commands": [
+        ["services", "list_services"],
+        ["services", "get_service"],
+        ["services", "scale_service"],
+        ["services", "restart_service"],
+        ["services", "rollback_service"]
+    ],
+    "serviceList": {
+        "items": [
+            {
+                "id": "monitoring000000000000000",
+                "name": "monitoring_collector",
+                "image": "traefik/whoami",
+                "imageReference": "traefik/whoami@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                "mode": "global",
+                "desiredReplicas": 3,
+                "runningReplicas": 3,
+                "ports": [],
+                "createdAt": "2026-09-20T10:00:00.000Z",
+                "updatedAt": "2026-09-27T10:00:00.000Z",
+                "version": 3,
+                "stack": "monitoring",
+                "updateState": null
+            },
+            {
+                "id": "webappweb0000000000000000",
+                "name": "webapp_web",
+                "image": "nginx:alpine",
+                "imageReference": "nginx:alpine@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "mode": "replicated",
+                "desiredReplicas": 3,
+                "runningReplicas": 2,
+                "ports": ["8080:80/tcp"],
+                "createdAt": "2026-09-20T10:00:00.000Z",
+                "updatedAt": "2026-09-28T11:00:00.000Z",
+                "version": 7,
+                "stack": "webapp",
+                "updateState": null
+            },
+            {
+                "id": "toolboxalpine000000000000",
+                "name": "toolbox_alpine",
+                "image": "alpine:latest",
+                "imageReference": "alpine:latest",
+                "mode": "replicated",
+                "desiredReplicas": 1,
+                "runningReplicas": 0,
+                "ports": [],
+                "createdAt": null,
+                "updatedAt": null,
+                "version": 12,
+                "stack": "toolbox",
+                "updateState": "updating"
+            }
+        ],
+        "snapshotAt": "2026-09-28T12:05:00.000Z"
+    },
+    "serviceDetail": {
+        "latestError": "no suitable node (insufficient memory on 3 nodes)"
+    }
+}

@@ -14,6 +14,17 @@ pub enum EngineErrorKind {
     UnsupportedApiVersion,
     UnsupportedCapability,
     DependencyFailure,
+    /// The daemon has no such object (404).
+    NotFound,
+    /// The object's state forbids the request, e.g. removing a running container (409).
+    Conflict,
+    /// The Swarm has no leader: too few managers are reachable to change or read cluster state.
+    QuorumUnavailable,
+    /// The object changed since the version the request was based on.
+    VersionConflict,
+    /// The daemon is not a Swarm manager (a worker, or not in a Swarm), so it can't read or
+    /// change cluster state.
+    NotAManager,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,6 +36,26 @@ pub enum EngineOperation {
     ReadSystemInfo,
     Describe,
     ListContainers,
+    ReadContainerStats,
+    ReadDiskUsage,
+    InspectContainer,
+    ContainerAction,
+    ListImages,
+    RemoveImage,
+    PullImage,
+    ListVolumes,
+    CreateVolume,
+    RemoveVolume,
+    ListNetworks,
+    InspectNetwork,
+    CreateNetwork,
+    RemoveNetwork,
+    ListServices,
+    ListTasks,
+    UpdateService,
+    ReadSwarm,
+    ReadServiceLogs,
+    Exec,
 }
 
 impl fmt::Display for EngineOperation {
@@ -37,6 +68,26 @@ impl fmt::Display for EngineOperation {
             Self::ReadSystemInfo => "read system information",
             Self::Describe => "describe",
             Self::ListContainers => "list containers",
+            Self::ReadContainerStats => "read container stats",
+            Self::ReadDiskUsage => "read disk usage",
+            Self::InspectContainer => "inspect container",
+            Self::ContainerAction => "container action",
+            Self::ListImages => "list images",
+            Self::RemoveImage => "remove image",
+            Self::PullImage => "pull image",
+            Self::ListVolumes => "list volumes",
+            Self::CreateVolume => "create volume",
+            Self::RemoveVolume => "remove volume",
+            Self::ListNetworks => "list networks",
+            Self::InspectNetwork => "inspect network",
+            Self::CreateNetwork => "create network",
+            Self::RemoveNetwork => "remove network",
+            Self::ListServices => "list services",
+            Self::ListTasks => "list tasks",
+            Self::UpdateService => "update service",
+            Self::ReadSwarm => "read swarm state",
+            Self::ReadServiceLogs => "read service logs",
+            Self::Exec => "exec",
         };
         formatter.write_str(name)
     }
@@ -101,6 +152,25 @@ fn classify_bollard_error(error: &BollardError) -> EngineErrorKind {
         BollardError::APIVersionParseError {} | BollardError::JsonDataError { .. } => {
             EngineErrorKind::InvalidResponse
         }
+        BollardError::DockerResponseServerError {
+            status_code: 404, ..
+        } => EngineErrorKind::NotFound,
+        BollardError::DockerResponseServerError { message, .. }
+            if message.to_ascii_lowercase().contains("not a swarm manager") =>
+        {
+            EngineErrorKind::NotAManager
+        }
+        BollardError::DockerResponseServerError { message, .. } if is_quorum_message(message) => {
+            EngineErrorKind::QuorumUnavailable
+        }
+        BollardError::DockerResponseServerError { message, .. }
+            if message.contains("update out of sequence") =>
+        {
+            EngineErrorKind::VersionConflict
+        }
+        BollardError::DockerResponseServerError {
+            status_code: 409, ..
+        } => EngineErrorKind::Conflict,
         BollardError::DockerResponseServerError { .. } => EngineErrorKind::DaemonRejected,
         BollardError::IOError { err } => classify_io_error(err),
         BollardError::HyperResponseError { .. } | BollardError::HyperLegacyError { .. } => {
@@ -108,6 +178,15 @@ fn classify_bollard_error(error: &BollardError) -> EngineErrorKind {
         }
         _ => EngineErrorKind::DependencyFailure,
     }
+}
+
+/// Swarm's own wording when a manager can't reach a majority. The text only classifies the error;
+/// it never leaves the engine.
+fn is_quorum_message(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("does not have a leader")
+        || lower.contains("quorum")
+        || lower.contains("no leader")
 }
 
 fn classify_io_error(error: &io::Error) -> EngineErrorKind {
@@ -143,6 +222,50 @@ mod tests {
             EngineError::from_bollard(EngineOperation::Ping, &error).kind(),
             EngineErrorKind::ConnectionUnavailable
         );
+    }
+
+    #[test]
+    fn swarm_quorum_and_version_messages_map_to_their_own_kinds() {
+        for message in [
+            "rpc error: code = Unknown desc = The swarm does not have a leader. It's possible that too few managers are online.",
+            "context deadline exceeded: raft quorum lost",
+        ] {
+            let error = BollardError::DockerResponseServerError {
+                status_code: 503,
+                message: message.to_owned(),
+            };
+            assert_eq!(
+                EngineError::from_bollard(EngineOperation::ListServices, &error).kind(),
+                EngineErrorKind::QuorumUnavailable,
+                "{message}"
+            );
+        }
+        let out_of_sequence = BollardError::DockerResponseServerError {
+            status_code: 500,
+            message: "rpc error: code = Unknown desc = update out of sequence".to_owned(),
+        };
+        assert_eq!(
+            EngineError::from_bollard(EngineOperation::UpdateService, &out_of_sequence).kind(),
+            EngineErrorKind::VersionConflict
+        );
+    }
+
+    #[test]
+    fn a_daemon_that_is_not_a_manager_maps_to_its_own_kind() {
+        for message in [
+            "This node is not a swarm manager. Worker nodes can't be used to view or modify cluster state. Please run this command on a manager node or promote the current node to a manager.",
+            "This node is not a swarm manager. Use \"docker swarm init\" or \"docker swarm join\" to connect this node to swarm and try again.",
+        ] {
+            let error = BollardError::DockerResponseServerError {
+                status_code: 503,
+                message: message.to_owned(),
+            };
+            assert_eq!(
+                EngineError::from_bollard(EngineOperation::ListServices, &error).kind(),
+                EngineErrorKind::NotAManager,
+                "{message}"
+            );
+        }
     }
 
     #[test]
@@ -187,9 +310,9 @@ mod tests {
         let error = EngineError::from_bollard(EngineOperation::ListContainers, &not_found);
         assert_eq!(error.kind(), EngineErrorKind::InvalidInput);
 
-        // Other operations keep the daemon-rejected mapping.
+        // Elsewhere a 404 means the object is gone.
         let error = EngineError::from_bollard(EngineOperation::ReadVersion, &not_found);
-        assert_eq!(error.kind(), EngineErrorKind::DaemonRejected);
+        assert_eq!(error.kind(), EngineErrorKind::NotFound);
     }
 
     #[test]

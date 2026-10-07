@@ -1,15 +1,14 @@
 import { describe, expect, it } from "vitest";
-import fixtureSource from "../fixtures/session-ipc.json?raw";
-import { SESSION_ERROR_CODES, loginHintFromIpc, sessionViewFromIpc, type LoginHint, type SessionView } from "@/types/session";
+import fixture from "../fixtures/session-ipc.json";
+import { ipcFixture } from "../ipc-fixture";
+import { SESSION_ERROR_CODES, loginFailureFromIpc, type LoginFailure, type ProbeView, type SavedConnection, type SessionView } from "@/types/session";
 
-interface SessionIpcFixture {
-    commands: string[];
-    sessionView: SessionView;
-    loginHint: LoginHint;
-    errorCodes: string[];
-}
-
-const fixture: SessionIpcFixture = JSON.parse(fixtureSource) as SessionIpcFixture;
+// The shared fixture must fit the views Rust's own tests serialize to it.
+ipcFixture<SessionView>(fixture.sessionView);
+ipcFixture<SavedConnection>(fixture.savedConnection);
+ipcFixture<ProbeView>(fixture.probeView);
+const loginFailure = ipcFixture<LoginFailure>(fixture.loginFailure);
+const setupCodeFailure = ipcFixture<LoginFailure>(fixture.setupCodeFailure);
 
 /** Compile-time proof that every `SessionView` field is covered below. */
 const SESSION_VIEW_KEYS: Record<keyof SessionView, true> = {
@@ -17,15 +16,18 @@ const SESSION_VIEW_KEYS: Record<keyof SessionView, true> = {
     origin: true,
     clusterId: true,
     principalId: true,
-    githubLogin: true,
+    email: true,
+    displayName: true,
     label: true,
     accessExpiresAtUnixMs: true,
 };
 
-/** Compile-time proof that every `LoginHint` field is covered below. */
-const LOGIN_HINT_KEYS: Record<keyof LoginHint, true> = {
+const SAVED_CONNECTION_KEYS: Record<keyof SavedConnection, true> = {
+    id: true,
     origin: true,
     label: true,
+    lastUsedAtUnixMs: true,
+    lastSummary: true,
 };
 
 describe("session IPC contract fixture", () => {
@@ -33,34 +35,32 @@ describe("session IPC contract fixture", () => {
         expect(fixture.errorCodes).toEqual([...SESSION_ERROR_CODES]);
     });
 
-    it("matches the session view shape", () => {
+    it("carries no field the session view and saved connection lack", () => {
         expect(Object.keys(fixture.sessionView).sort()).toEqual(Object.keys(SESSION_VIEW_KEYS).sort());
-        expect(fixture.sessionView.profileId).toBeTypeOf("string");
-        expect(fixture.sessionView.accessExpiresAtUnixMs).toBeTypeOf("number");
+        expect(Object.keys(fixture.savedConnection).sort()).toEqual(Object.keys(SAVED_CONNECTION_KEYS).sort());
     });
 
-    it("matches the login hint shape", () => {
-        expect(Object.keys(fixture.loginHint).sort()).toEqual(Object.keys(LOGIN_HINT_KEYS).sort());
+    it("reads login failures the way Rust writes them and closes anything else over a code", () => {
+        expect(loginFailureFromIpc(loginFailure)).toEqual(loginFailure);
+        expect(loginFailureFromIpc(setupCodeFailure)).toEqual(setupCodeFailure);
+        // Plain SessionError strings still arrive from the non-login commands.
+        expect(loginFailureFromIpc("profile_conflict")).toEqual({ code: "profile_conflict" });
+        expect(loginFailureFromIpc({ code: "not-a-code" })).toEqual({ code: "invalid_response" });
+        expect(loginFailureFromIpc(new Error("native-secret-canary"))).toEqual({ code: "invalid_response" });
     });
 
     it("lists the registered custody commands", () => {
         expect(fixture.commands).toEqual([
+            "session_bootstrap",
             "session_login",
-            "session_cancel_login",
+            "session_register",
             "session_restore",
             "session_retry_commit",
             "session_logout",
-            "session_login_hint",
+            "session_connections",
+            "session_forget_connection",
+            "connection_probe",
+            "controller_health",
         ]);
-    });
-
-    it("drops unexpected native fields before they can enter React state", () => {
-        expect(sessionViewFromIpc({ ...fixture.sessionView, accessToken: "credential-canary", refreshToken: "refresh-canary" })).toEqual(fixture.sessionView);
-        expect(loginHintFromIpc({ ...fixture.loginHint, verifier: "verifier-canary" })).toEqual(fixture.loginHint);
-    });
-
-    it("rejects malformed native output with a closed code", () => {
-        expect(() => sessionViewFromIpc({ ...fixture.sessionView, profileId: null })).toThrow("invalid_response");
-        expect(() => loginHintFromIpc({ ...fixture.loginHint, label: 123 })).toThrow("invalid_response");
     });
 });

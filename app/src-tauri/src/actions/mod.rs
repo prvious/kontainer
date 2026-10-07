@@ -1,4 +1,13 @@
-pub mod agent;
 pub mod app;
-pub mod inventory;
+pub mod containers;
+pub mod exec;
+pub mod images;
+pub mod logs;
+pub mod networks;
+pub mod nodes;
+pub mod operations;
+pub mod services;
 pub mod session;
+pub mod settings;
+pub mod stacks;
+pub mod volumes;

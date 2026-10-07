@@ -1,373 +1,40 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { invoke } from "@tauri-apps/api/core";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider } from "@tanstack/react-router";
-import { AuthContext } from "@/contexts/auth-context-value";
-import type { AuthContextValue } from "@/contexts/auth-context-value";
-import type { NodeItem } from "@/types/nodes";
-import type { TaskStats } from "@/types/task-stats";
-import type { ClusterMetricsResponse } from "@/types/metrics";
-import { StatusBar } from "@/components/status-bar";
-import { TerminalProvider } from "@/contexts/terminal-context";
-import { CommandPaletteProvider } from "@/contexts/command-palette-context";
-
-function createTestQueryClient() {
-    return new QueryClient({
-        defaultOptions: {
-            queries: { retry: false, gcTime: 0 },
-        },
-    });
-}
-
-const mockAuth: AuthContextValue = {
-    user: { id: "1", name: "Test", email: "test@test.com", avatarUrl: "", provider: "github" },
-    token: "test-jwt",
-    expiresAt: Math.floor(Date.now() / 1000) + 9999,
-    agentUrl: "http://localhost:3000",
-    isLoading: false,
-    login: vi.fn(),
-    logout: vi.fn(),
-    profiles: [
-        {
-            id: "profile-1",
-            label: "production-swarm",
-            agentUrl: "http://localhost:3000",
-            token: "test-jwt",
-            expiresAt: Math.floor(Date.now() / 1000) + 9999,
-            userId: "1",
-            userName: "Test",
-            userEmail: "test@test.com",
-            userAvatarUrl: "",
-            userProvider: "github",
-        },
-    ],
-    activeProfileId: "profile-1",
-    switchProfile: vi.fn(),
-    removeProfile: vi.fn(),
-    updateProfile: vi.fn(),
-};
-
-const sampleNodes: NodeItem[] = [
-    {
-        id: "node1",
-        hostname: "manager-1",
-        role: "manager",
-        status: "ready",
-        availability: "active",
-        engineVersion: "24.0.7",
-        os: "linux",
-        architecture: "x86_64",
-        ip: "10.0.0.1",
-        leader: true,
-        updatedAt: new Date().toISOString(),
-    },
-    {
-        id: "node2",
-        hostname: "worker-1",
-        role: "worker",
-        status: "ready",
-        availability: "active",
-        engineVersion: "24.0.7",
-        os: "linux",
-        architecture: "aarch64",
-        ip: "10.0.0.2",
-        leader: false,
-        updatedAt: new Date().toISOString(),
-    },
-    {
-        id: "node3",
-        hostname: "worker-2",
-        role: "worker",
-        status: "ready",
-        availability: "active",
-        engineVersion: "24.0.7",
-        os: "linux",
-        architecture: "x86_64",
-        ip: "10.0.0.3",
-        leader: false,
-        updatedAt: new Date().toISOString(),
-    },
-];
-
-const sampleTaskStats: TaskStats = {
-    total: 50,
-    running: 42,
-    failed: 0,
-    preparing: 2,
-    complete: 6,
-    desiredRunning: 42,
-};
-
-const sampleMetrics: ClusterMetricsResponse = {
-    agents: [
-        {
-            timestamp: new Date().toISOString(),
-            nodeId: "node1",
-            hostname: "manager-1",
-            node: {
-                cpus: 4,
-                memoryTotal: 8_000_000_000,
-                memoryUsed: 3_000_000_000,
-                memoryPercent: 37.5,
-                cpuPercent: 25,
-                diskTotal: 100_000_000_000,
-                diskUsed: 50_000_000_000,
-                diskPercent: 50,
-            },
-            containers: [],
-        },
-        {
-            timestamp: new Date().toISOString(),
-            nodeId: "node2",
-            hostname: "worker-1",
-            node: {
-                cpus: 8,
-                memoryTotal: 16_000_000_000,
-                memoryUsed: 10_000_000_000,
-                memoryPercent: 62.5,
-                cpuPercent: 45,
-                diskTotal: 200_000_000_000,
-                diskUsed: 120_000_000_000,
-                diskPercent: 60,
-            },
-            containers: [],
-        },
-    ],
-    history: [],
-};
-
-let navigatedTo: string | null = null;
-
-function createTestRouter(component: () => React.JSX.Element) {
-    navigatedTo = null;
-    const rootRoute = createRootRoute({});
-    const indexRoute = createRoute({
-        getParentRoute: () => rootRoute,
-        path: "/",
-        component,
-    });
-    const nodesRoute = createRoute({
-        getParentRoute: () => rootRoute,
-        path: "/nodes",
-        component: () => {
-            navigatedTo = "/nodes";
-            return <div>Nodes Page</div>;
-        },
-    });
-    const tasksRoute = createRoute({
-        getParentRoute: () => rootRoute,
-        path: "/tasks",
-        component: () => {
-            navigatedTo = "/tasks";
-            return <div>Tasks Page</div>;
-        },
-    });
-    const routeTree = rootRoute.addChildren([indexRoute, nodesRoute, tasksRoute]);
-    return createRouter({
-        routeTree,
-        history: createMemoryHistory({ initialEntries: ["/"] }),
-    });
-}
-
-function renderWithProviders(authOverrides: Partial<AuthContextValue> = {}) {
-    const queryClient = createTestQueryClient();
-    const auth = { ...mockAuth, ...authOverrides };
-    const router = createTestRouter(StatusBar);
-
-    return render(
-        <AuthContext value={auth}>
-            <QueryClientProvider client={queryClient}>
-                <CommandPaletteProvider>
-                    <TerminalProvider>
-                        <RouterProvider router={router} />
-                    </TerminalProvider>
-                </CommandPaletteProvider>
-            </QueryClientProvider>
-        </AuthContext>,
-    );
-}
-
-function mockAllInvokes(nodesData: NodeItem[] = sampleNodes, taskStatsData: TaskStats = sampleTaskStats, metricsData: ClusterMetricsResponse = sampleMetrics) {
-    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-        if (cmd === "list_nodes") return { nodes: nodesData };
-        if (cmd === "list_task_stats") return { taskStats: taskStatsData };
-        if (cmd === "list_cluster_metrics") return metricsData;
-        return undefined;
-    });
-}
+import { describe, expect, it } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { StatusBar } from "@/components/shell/status-bar";
 
 describe("StatusBar", () => {
-    beforeEach(() => {
-        vi.clearAllMocks();
-        navigatedTo = null;
+    it("renders a dash for every missing field", () => {
+        render(<StatusBar data={{}} />);
+        for (const text of ["Docker —", "CPU —", "MEM —", "— TASKS", "— ALERTS", "— TERMINALS", "— LOG STREAMS", "WS —"]) {
+            expect(screen.getByText(text)).toBeInTheDocument();
+        }
     });
 
-    it("renders task count", async () => {
-        mockAllInvokes();
-        renderWithProviders();
-        await waitFor(() => {
-            expect(screen.getByTestId("status-tasks")).toHaveTextContent("42 TASKS");
-        });
-    });
-
-    it("renders aggregated CPU and MEM", async () => {
-        mockAllInvokes();
-        renderWithProviders();
-
-        // Average CPU: (25 + 45) / 2 = 35%
-        await waitFor(() => {
-            expect(screen.getByTestId("cpu-value")).toHaveTextContent("CPU 35%");
-        });
-        // MEM: (3G + 10G) used, (8G + 16G) total -> "MEM 13.0/24G"
-        expect(screen.getByTestId("mem-value")).toHaveTextContent("MEM 13.0/24G");
-    });
-
-    it("renders degraded task count", async () => {
-        const degradedTasks: TaskStats = { total: 50, running: 35, failed: 0, preparing: 5, complete: 10, desiredRunning: 42 };
-        mockAllInvokes(sampleNodes, degradedTasks);
-        renderWithProviders();
-        await waitFor(() => {
-            expect(screen.getByTestId("status-tasks")).toHaveTextContent("35 TASKS");
-        });
-    });
-
-    it("shows red when tasks have failures", async () => {
-        const failedTasks: TaskStats = { total: 50, running: 40, failed: 5, preparing: 0, complete: 5, desiredRunning: 42 };
-        mockAllInvokes(sampleNodes, failedTasks);
-        renderWithProviders();
-        await waitFor(() => {
-            expect(screen.getByTestId("status-tasks")).toHaveTextContent("40 TASKS");
-        });
-        expect(screen.getByTestId("status-tasks")).toHaveClass("text-accent-red");
-    });
-
-    it("shows dashes when data is loading", async () => {
-        vi.mocked(invoke).mockImplementation(() => new Promise(() => {}));
-        renderWithProviders();
-        await waitFor(() => {
-            expect(screen.getByTestId("cpu-value")).toHaveTextContent("--");
-        });
-        expect(screen.getByTestId("mem-value")).toHaveTextContent("--");
-        expect(screen.getByTestId("status-tasks")).toHaveTextContent("--");
-    });
-
-    it("navigates to /tasks when clicking task count", async () => {
-        mockAllInvokes();
-        const user = userEvent.setup();
-        renderWithProviders();
-
-        await waitFor(() => {
-            expect(screen.getByTestId("status-tasks")).toHaveTextContent("42 TASKS");
-        });
-
-        await user.click(screen.getByTestId("status-tasks"));
-
-        await waitFor(() => {
-            expect(navigatedTo).toBe("/tasks");
-        });
-    });
-
-    it("navigates to / when clicking CPU segment", async () => {
-        mockAllInvokes();
-        const user = userEvent.setup();
-        // Start from /nodes so we can detect navigation to /
-        const queryClient = createTestQueryClient();
-        const auth = { ...mockAuth };
-        const rootRoute = createRootRoute({});
-        const indexRoute = createRoute({
-            getParentRoute: () => rootRoute,
-            path: "/",
-            component: () => <div data-testid='dashboard-page'>Dashboard</div>,
-        });
-        const nodesRoute = createRoute({
-            getParentRoute: () => rootRoute,
-            path: "/nodes",
-            component: StatusBar,
-        });
-        const tasksRoute = createRoute({
-            getParentRoute: () => rootRoute,
-            path: "/tasks",
-            component: () => <div>Tasks Page</div>,
-        });
-        const routeTree = rootRoute.addChildren([indexRoute, nodesRoute, tasksRoute]);
-        const router = createRouter({
-            routeTree,
-            history: createMemoryHistory({ initialEntries: ["/nodes"] }),
-        });
-
+    it("formats figures and keeps TASKS and ALERTS as neutral dashes until a feature produces them", () => {
         render(
-            <AuthContext value={auth}>
-                <QueryClientProvider client={queryClient}>
-                    <CommandPaletteProvider>
-                        <TerminalProvider>
-                            <RouterProvider router={router} />
-                        </TerminalProvider>
-                    </CommandPaletteProvider>
-                </QueryClientProvider>
-            </AuthContext>,
+            <StatusBar
+                data={{
+                    dockerVersion: "24.0.7",
+                    cpuPercent: 47.4,
+                    memoryUsedBytes: 12.4 * 1024 ** 3,
+                    memoryTotalBytes: 24 * 1024 ** 3,
+                    terminals: 2,
+                    logStreams: 3,
+                    connection: "connected",
+                }}
+            />,
         );
-
-        await waitFor(() => {
-            expect(screen.getByTestId("cpu-value")).toHaveTextContent("CPU");
-        });
-
-        await user.click(screen.getByTestId("status-cpu"));
-
-        await waitFor(() => {
-            expect(screen.getByTestId("dashboard-page")).toBeInTheDocument();
-        });
+        expect(screen.getByText("Docker 24.0.7")).toBeInTheDocument();
+        expect(screen.getByText("CPU 47%")).toBeInTheDocument();
+        expect(screen.getByText("MEM 12.4/24G")).toBeInTheDocument();
+        expect(screen.getByText("— TASKS")).toBeInTheDocument();
+        expect(screen.getByText("— ALERTS")).not.toHaveClass("text-destructive");
+        expect(screen.getByText("2 TERMINALS")).toBeInTheDocument();
+        expect(screen.getByText("WS CONNECTED")).toBeInTheDocument();
     });
 
-    it("navigates to / when clicking MEM segment", async () => {
-        mockAllInvokes();
-        const user = userEvent.setup();
-        // Start from /nodes so we can detect navigation to /
-        const queryClient = createTestQueryClient();
-        const auth = { ...mockAuth };
-        const rootRoute = createRootRoute({});
-        const indexRoute = createRoute({
-            getParentRoute: () => rootRoute,
-            path: "/",
-            component: () => <div data-testid='dashboard-page'>Dashboard</div>,
-        });
-        const nodesRoute = createRoute({
-            getParentRoute: () => rootRoute,
-            path: "/nodes",
-            component: StatusBar,
-        });
-        const tasksRoute = createRoute({
-            getParentRoute: () => rootRoute,
-            path: "/tasks",
-            component: () => <div>Tasks Page</div>,
-        });
-        const routeTree = rootRoute.addChildren([indexRoute, nodesRoute, tasksRoute]);
-        const router = createRouter({
-            routeTree,
-            history: createMemoryHistory({ initialEntries: ["/nodes"] }),
-        });
-
-        render(
-            <AuthContext value={auth}>
-                <QueryClientProvider client={queryClient}>
-                    <CommandPaletteProvider>
-                        <TerminalProvider>
-                            <RouterProvider router={router} />
-                        </TerminalProvider>
-                    </CommandPaletteProvider>
-                </QueryClientProvider>
-            </AuthContext>,
-        );
-
-        await waitFor(() => {
-            expect(screen.getByTestId("mem-value")).toHaveTextContent("MEM");
-        });
-
-        await user.click(screen.getByTestId("status-mem"));
-
-        await waitFor(() => {
-            expect(screen.getByTestId("dashboard-page")).toBeInTheDocument();
-        });
+    it("reads RECONNECTING while the controller is away", () => {
+        render(<StatusBar data={{ connection: "reconnecting" }} />);
+        expect(screen.getByText("RECONNECTING")).toBeInTheDocument();
     });
 });

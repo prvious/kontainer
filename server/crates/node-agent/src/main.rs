@@ -2,9 +2,11 @@
 
 use std::{env, error::Error, ffi::OsString, sync::Arc};
 
-use kontainer_engine::{LocalDockerEngine, LocalEngineOptions};
+use kontainer_engine::{ContainerEngine, LocalDockerEngine, LocalEngineOptions};
 use kontainer_node_agent::{
-    AgentConfig, AgentShutdown, NodeAgentService, serve_node_agent_rpc, supervise_node_agent_server,
+    AgentConfig, AgentFacts, AgentShutdown, CheckInTiming, ContainerStatsCache, MtlsControllerLink,
+    NodeAgentService, NodeSampler, VolumeSizeCache, run_check_in, serve_node_agent_rpc,
+    supervise_node_agent_server,
 };
 use tokio::net::TcpListener;
 use tokio_util::task::TaskTracker;
@@ -30,18 +32,46 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .init();
 
     let config = AgentConfig::from_environment()?;
+    let controller = Arc::new(MtlsControllerLink::new(
+        &config.controller_rpc_endpoint,
+        &config.controller_server_name,
+        &config.cluster_id,
+        &config.tls_files,
+    )?);
     let listener = TcpListener::bind(config.binding).await?;
     let shutdown = AgentShutdown::new(config.shutdown_grace);
     let connections = TaskTracker::new();
     let requests = TaskTracker::new();
     let (failures, task_failures) = tokio::sync::mpsc::unbounded_channel();
-    let service = NodeAgentService::new(
-        config.node_id,
-        Arc::new(LocalDockerEngine::connect_for_node(
-            LocalEngineOptions::default(),
-        )?),
-        shutdown.force(),
-    );
+    let engine = Arc::new(LocalDockerEngine::connect_for_node(LocalEngineOptions {
+        host: config.docker_host.clone(),
+        ..LocalEngineOptions::default()
+    })?);
+    // A failed ping is logged, not fatal: Describe reports Docker health and
+    // the agent keeps serving while the daemon restarts.
+    match engine.is_available().await {
+        Ok(true) => tracing::info!(docker.host = %config.docker_host, "docker ping succeeded"),
+        Ok(false) | Err(_) => {
+            tracing::warn!(docker.host = %config.docker_host, "docker ping failed");
+        }
+    }
+    let stats = ContainerStatsCache::default();
+    let volume_sizes = VolumeSizeCache::default();
+    let facts = AgentFacts {
+        node_id: config.node_id.clone(),
+        advertise_address: config.advertise_address.clone(),
+    };
+    // Tracked with in-flight requests: draining cancels the loop and the grace deadline joins it.
+    requests.spawn(run_check_in(
+        controller,
+        NodeSampler::new(engine.clone(), stats.clone()).with_volume_sizes(volume_sizes.clone()),
+        facts,
+        CheckInTiming::default(),
+        shutdown.draining(),
+    ));
+    let service = NodeAgentService::new(config.node_id, engine, shutdown.force())
+        .with_stats(stats)
+        .with_volume_sizes(volume_sizes);
     let server = serve_node_agent_rpc(
         listener,
         config.cluster_id,

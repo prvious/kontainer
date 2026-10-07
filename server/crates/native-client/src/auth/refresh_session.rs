@@ -15,7 +15,8 @@ pub(crate) struct RefreshSessionBody<'a> {
     pub(crate) refresh_credential: &'a str,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+// No `Debug`: this holds plaintext credentials and must never be formatted.
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct RefreshSessionReply {
     access_credential: String,

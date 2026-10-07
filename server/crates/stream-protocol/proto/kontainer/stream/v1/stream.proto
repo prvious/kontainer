@@ -2,18 +2,124 @@ syntax = "proto3";
 
 package kontainer.stream.v1;
 
-// StreamEnvelope is the shared public framing boundary. Product-specific log
-// and exec payload messages will extend this contract additively after their
-// state machines are implemented.
+// StreamEnvelope is the shared public framing boundary. Each product frame
+// kind carries exactly one payload message below; kinds and messages are
+// added, and a retired one's number and name stay reserved.
 message StreamEnvelope {
   uint32 protocol_version = 1;
+  // No product frame numbers its envelopes; log and exec frames send 0.
   uint64 sequence = 2;
   FrameKind kind = 3;
   bytes payload = 4;
 }
 
 enum FrameKind {
+  // LogsClose was never sent; a client ends a log stream by closing the socket (ADR 0040).
+  reserved 4;
+  reserved "FRAME_KIND_LOGS_CLOSE";
   FRAME_KIND_UNSPECIFIED = 0;
   FRAME_KIND_DATA = 1;
   FRAME_KIND_ACKNOWLEDGEMENT = 2;
+  // Client to server: LogsOpen only; closing the socket ends the stream.
+  FRAME_KIND_LOGS_OPEN = 3;
+  // Server to client.
+  FRAME_KIND_LOG_LINE = 5;
+  FRAME_KIND_LOG_GAP = 6;
+  FRAME_KIND_LOG_END = 7;
+  // Client to server: ExecOpen first, then input, resizes, and a close.
+  FRAME_KIND_EXEC_OPEN = 8;
+  FRAME_KIND_EXEC_INPUT = 9;
+  FRAME_KIND_EXEC_RESIZE = 10;
+  FRAME_KIND_EXEC_CLOSE = 11;
+  // Server to client.
+  FRAME_KIND_EXEC_STARTED = 12;
+  FRAME_KIND_EXEC_OUTPUT = 13;
+  FRAME_KIND_EXEC_EXIT = 14;
+  FRAME_KIND_EXEC_ERROR = 15;
+}
+
+// Follow one service's logs. `tail` defaults to 500 and is at most 5000.
+message LogsOpen {
+  string service_id = 1;
+  optional int64 since_unix_ms = 2;
+  optional uint32 tail = 3;
+}
+
+enum LogStreamKind {
+  LOG_STREAM_KIND_UNSPECIFIED = 0;
+  LOG_STREAM_KIND_STDOUT = 1;
+  LOG_STREAM_KIND_STDERR = 2;
+}
+
+message LogLine {
+  // The server's line counter; the client counts the lines it delivers itself (ADR 0040).
+  reserved 1;
+  reserved "seq";
+  int64 ts_unix_ms = 2;
+  LogStreamKind stream = 3;
+  string task_id = 4;
+  string node_id = 5;
+  string line = 6;
+  bool truncated = 7;
+}
+
+// Lines dropped because the client fell behind.
+message LogGap {
+  uint64 dropped = 1;
+}
+
+enum LogEndReason {
+  LOG_END_REASON_UNSPECIFIED = 0;
+  LOG_END_REASON_SERVICE_REMOVED = 1;
+  LOG_END_REASON_ERROR = 2;
+}
+
+message LogEnd {
+  LogEndReason reason = 1;
+  string code = 2;
+  string message = 3;
+}
+
+// A shell in one container; without `shell` the node tries bash, then sh.
+message ExecOpen {
+  string node_id = 1;
+  string container_id = 2;
+  optional string shell = 3;
+  uint32 cols = 4;
+  uint32 rows = 5;
+}
+
+message ExecInput {
+  bytes bytes = 1;
+}
+
+message ExecResize {
+  uint32 cols = 1;
+  uint32 rows = 2;
+}
+
+message ExecClose {}
+
+message ExecStarted {
+  string exec_id = 1;
+  string shell = 2;
+}
+
+message ExecOutput {
+  bytes bytes = 1;
+}
+
+// `code` is absent when the exit status is unknown. `reason` says why the session ended:
+// `exited`, `idle_timeout`, `max_duration`, `connection_lost`, or `abandoned` (the session
+// closed while the shell was still running, and it was left running).
+message ExecExit {
+  optional int64 code = 1;
+  string reason = 2;
+}
+
+// `target_not_running`, `shell_not_found`, `node_unavailable`, `limit_reached`,
+// `session_expired`, or `invalid_request`.
+message ExecError {
+  string code = 1;
+  string message = 2;
 }

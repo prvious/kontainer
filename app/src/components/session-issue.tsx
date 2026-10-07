@@ -1,23 +1,22 @@
-import { Button } from "@/components/ui/button";
+import { ActionButton } from "@/components/kit/action-button";
 import type { SessionErrorCode } from "@/types/session";
 
 const messages: Record<SessionErrorCode, string> = {
-    invalid_origin: "Enter a valid controller URL.",
-    browser_open_failed: "The browser could not be opened. Try signing in again.",
-    login_cancelled: "Sign-in was cancelled.",
-    login_expired: "Sign-in expired. Start again.",
-    login_denied: "GitHub sign-in was denied for this controller.",
-    provider_unavailable: "GitHub is unavailable. Try again later.",
-    controller_unavailable: "The controller is unavailable. Check the address and try again.",
-    invalid_response: "The controller returned an invalid response. Try again.",
-    profile_conflict: "This desktop already has a different session. Sign out before connecting another controller.",
+    invalid_origin: "Enter a valid agent URL.",
+    invalid_credentials: "Email or password is incorrect.",
+    login_locked: "Sign-in is locked for this email. Try again later.",
+    owner_exists: "This agent already has its owner. Sign in instead.",
+    validation_failed: "Some fields need attention.",
+    controller_unavailable: "The agent is unavailable. Check the address and try again.",
+    invalid_response: "The agent returned an invalid response. Try again.",
+    profile_conflict: "This desktop already has a different session. Sign out before connecting another agent.",
     relogin_required: "Your session expired or was revoked. Sign in again.",
     vault_unavailable: "The system credential vault is unavailable. Unlock it and retry.",
     vault_write_failed: "Your session was issued but could not be saved to the credential vault.",
     local_state_failed: "Local session state could not be read or saved. Retry after checking local storage.",
-    revoke_failed: "The controller could not confirm sign-out. Your session is still held; retry sign-out.",
-    local_cleanup_failed: "The controller session was revoked, but local cleanup failed. Retry cleanup.",
-    cleanup_uncertain: "Session cleanup could not be confirmed. Retry saving or signing out before starting another login.",
+    revoke_failed: "The agent could not confirm sign-out. Your session is still held; retry sign-out.",
+    local_cleanup_failed: "The agent session was revoked, but local cleanup failed. Retry cleanup.",
+    cleanup_uncertain: "Session cleanup could not be confirmed. Retry saving or signing out before signing in again.",
 };
 
 export function SessionIssue({
@@ -32,13 +31,16 @@ export function SessionIssue({
     onLogout?: () => void;
 }) {
     return (
-        <div role='alert' className='space-y-3 border border-destructive/50 bg-destructive/10 p-3 text-sm text-foreground'>
+        <div
+            role='alert'
+            className='flex flex-col gap-3 rounded-sm border-l-2 border-l-destructive bg-destructive-soft px-3.5 py-2.5 font-mono text-2xs text-foreground'
+        >
             <p>{messages[code]}</p>
             <div className='flex flex-wrap gap-2'>
                 {(code === "vault_write_failed" || code === "cleanup_uncertain") && onRetryCommit && (
-                    <Button size='sm' variant='outline' onClick={onRetryCommit}>
+                    <ActionButton variant='outline' onClick={onRetryCommit}>
                         Retry saving session
-                    </Button>
+                    </ActionButton>
                 )}
                 {(code === "cleanup_uncertain" ||
                     code === "local_cleanup_failed" ||
@@ -46,14 +48,14 @@ export function SessionIssue({
                     code === "profile_conflict" ||
                     code === "vault_write_failed") &&
                     onLogout && (
-                        <Button size='sm' variant='outline' onClick={onLogout}>
+                        <ActionButton variant='outline' onClick={onLogout}>
                             Retry sign-out
-                        </Button>
+                        </ActionButton>
                     )}
                 {(code === "vault_unavailable" || code === "local_state_failed") && onRetryRestore && (
-                    <Button size='sm' variant='outline' onClick={onRetryRestore}>
+                    <ActionButton variant='outline' onClick={onRetryRestore}>
                         Retry restore
-                    </Button>
+                    </ActionButton>
                 )}
             </div>
         </div>

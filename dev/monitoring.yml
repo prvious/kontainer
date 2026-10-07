@@ -20,6 +20,8 @@ services:
 
   collector:
     image: traefik/whoami
+    volumes:
+      - collector-cache:/cache
     deploy:
       mode: global
       resources:
@@ -31,6 +33,9 @@ services:
           memory: 16M
     networks:
       - kontainer
+
+volumes:
+  collector-cache:
 
 networks:
   kontainer:

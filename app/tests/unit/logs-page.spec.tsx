@@ -1,267 +1,278 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { createMemoryHistory, createRootRoute, createRoute, createRouter, RouterProvider } from "@tanstack/react-router";
-import { AuthContext } from "@/contexts/auth-context-value";
-import type { AuthContextValue } from "@/contexts/auth-context-value";
-import type { ServiceItem } from "@/types/services";
+import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
+import { routeTree } from "@/routeTree.gen";
+import { AuthContext, type AuthContextValue } from "@/contexts/auth-context-value";
+import services from "../fixtures/services-ipc.json";
 
-// --- Route component under test ---
-import { Route as LogsRoute } from "@/routes/_authenticated/logs/index";
-
-// --- Mock useLogStream to avoid WebSocket connections ---
-vi.mock("@/hooks/use-log-stream", () => ({
-    useLogStream: () => ({
-        logs: [],
-        status: "connected" as const,
-        isPaused: false,
-        clearLogs: vi.fn(),
-        pause: vi.fn(),
-        resume: vi.fn(),
-        reconnect: vi.fn(),
-    }),
-}));
-
-// --- Helpers ---
-
-function createTestQueryClient() {
-    return new QueryClient({
-        defaultOptions: {
-            queries: { retry: false, gcTime: 0 },
-        },
-    });
-}
-
-const mockAuth: AuthContextValue = {
-    user: { id: "1", name: "Test", email: "test@test.com", avatarUrl: "", provider: "github" },
-    token: "test-jwt",
-    expiresAt: Math.floor(Date.now() / 1000) + 9999,
-    agentUrl: "http://localhost:3000",
-    isLoading: false,
-    profiles: [
-        {
-            id: "profile-1",
-            label: "My Cluster",
-            agentUrl: "http://localhost:3000",
-            userId: "1",
-            userName: "Test",
-            userEmail: "test@test.com",
-            userAvatarUrl: "",
-            userProvider: "github",
-            token: "test-jwt",
-            expiresAt: Math.floor(Date.now() / 1000) + 9999,
-        },
-    ],
-    activeProfileId: "profile-1",
-    login: vi.fn(),
-    logout: vi.fn(),
-    switchProfile: vi.fn(),
-    removeProfile: vi.fn(),
-    updateProfile: vi.fn(),
+const session = {
+    profileId: "018f2e34-0000-7000-8000-0000000000bb",
+    origin: "https://controller.example/",
+    clusterId: "cluster",
+    principalId: "principal",
+    email: "owner@example.com",
+    displayName: "Owner",
+    label: "Production",
+    accessExpiresAtUnixMs: 2_000_000_000_000,
 };
+const auth = {
+    session,
+    isLoading: false,
+    expired: false,
+    issue: null,
+    reportInventoryCustodyError: vi.fn(),
+    logout: vi.fn(),
+    retryCommit: vi.fn(),
+    retryRestore: vi.fn(),
+} as unknown as AuthContextValue;
 
-const sampleServices: ServiceItem[] = [
-    {
-        id: "svc-1",
-        name: "nginx-proxy",
-        image: "nginx:latest",
-        stack: "",
-        replicasRunning: 3,
-        replicasDesired: 3,
-        updatedAt: new Date().toISOString(),
-    },
-    {
-        id: "svc-2",
-        name: "api-gateway",
-        image: "node:18",
-        stack: "backend",
-        replicasRunning: 2,
-        replicasDesired: 2,
-        updatedAt: new Date().toISOString(),
-    },
-];
+const [web] = services.serviceList.items;
+const STREAM = "018f2e34-0000-7000-8000-00000000f001";
 
-// Extract the component from the route module
-const LogsPage = LogsRoute.options.component!;
+type Channel = { onmessage: (message: unknown) => void };
+let channels: Channel[] = [];
+let serviceList = services.serviceList;
 
-function createTestRouter() {
-    const rootRoute = createRootRoute({});
-    const indexRoute = createRoute({
-        getParentRoute: () => rootRoute,
-        path: "/",
-        component: LogsPage,
-    });
-    const routeTree = rootRoute.addChildren([indexRoute]);
-    return createRouter({
-        routeTree,
-        history: createMemoryHistory({ initialEntries: ["/"] }),
+function mockCommands() {
+    channels = [];
+    serviceList = services.serviceList;
+    vi.mocked(invoke).mockImplementation(async (command: string, args?: unknown) => {
+        switch (command) {
+            case "logs_open":
+                channels.push((args as { channel: Channel }).channel);
+                return `018f2e34-0000-7000-8000-00000000f00${channels.length}`;
+            case "logs_close":
+            case "logs_retry_now":
+                return null;
+            case "list_services":
+                return serviceList;
+            case "load_app_settings":
+                return { refreshInterval: 60_000 };
+            case "controller_health":
+                return { status: "ready" };
+            case "session_connections":
+                return [];
+            default:
+                return null;
+        }
     });
 }
 
-let uuidCounter = 0;
+function Harness({ path }: { path: string }) {
+    const [router] = useState(() => createRouter({ routeTree, context: { auth }, history: createMemoryHistory({ initialEntries: [path] }) }));
+    return <RouterProvider router={router} context={{ auth }} />;
+}
 
-function renderWithProviders() {
-    const queryClient = createTestQueryClient();
-    const router = createTestRouter();
-
+function renderPage(path = `/logs?service=${web.name}`) {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     return render(
-        <AuthContext value={mockAuth}>
+        <AuthContext value={auth}>
             <QueryClientProvider client={queryClient}>
-                <RouterProvider router={router} />
+                <Harness path={path} />
             </QueryClientProvider>
         </AuthContext>,
     );
 }
 
-// --- Tests ---
+let ts = 1_790_000_000_000;
+function lines(...texts: string[]) {
+    return {
+        type: "lines",
+        lines: texts.map((text, index) => {
+            ts += 10;
+            return {
+                seq: index + 1,
+                ts,
+                stream: text.startsWith("!") ? "stderr" : "stdout",
+                taskId: "t",
+                nodeId: "n",
+                text: text.replace(/^!/, ""),
+                truncated: false,
+            };
+        }),
+    };
+}
 
-describe("LogsPage", () => {
+async function push(event: unknown, channel = 0) {
+    await act(async () => channels[channel].onmessage(event));
+}
+
+const originalHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
+
+describe("Logs page", () => {
+    beforeAll(() => {
+        // jsdom lays nothing out; the virtualizer needs a viewport to render rows into, and the
+        // picker's list scrolls its highlighted item into view.
+        Object.defineProperty(HTMLElement.prototype, "offsetHeight", { configurable: true, get: () => 600 });
+        Element.prototype.scrollIntoView = vi.fn();
+    });
+    afterAll(() => {
+        if (originalHeight) Object.defineProperty(HTMLElement.prototype, "offsetHeight", originalHeight);
+        delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    });
     beforeEach(() => {
         vi.clearAllMocks();
-        uuidCounter = 0;
-        vi.spyOn(crypto, "randomUUID").mockImplementation(() => `uuid-${++uuidCounter}` as `${string}-${string}-${string}-${string}-${string}`);
-        vi.mocked(invoke).mockImplementation(async (cmd: string) => {
-            if (cmd === "list_services") return { services: sampleServices };
-            return undefined;
-        });
+        mockCommands();
     });
 
-    it("renders page header with LOGS title", async () => {
-        renderWithProviders();
-
-        await waitFor(() => {
-            expect(screen.getByText("LOGS")).toBeInTheDocument();
-        });
+    it("opens a tab from the search param and shows lines with their levels", async () => {
+        renderPage();
+        await waitFor(() =>
+            expect(invoke).toHaveBeenCalledWith(
+                "logs_open",
+                expect.objectContaining({ profileId: session.profileId, serviceId: web.id, since: null, tail: 500 }),
+            ),
+        );
+        expect(await screen.findByRole("tab", { name: new RegExp(web.name) })).toHaveAttribute("aria-selected", "true");
+        await push(lines("level=info started", "WARN slow", "!panic: boom", "GET / 200"));
+        const view = screen.getByRole("table", { name: "Log lines" });
+        expect(within(view).getByRole("rowgroup")).toHaveAttribute("tabindex", "0");
+        expect(within(view).getByText("level=info started")).toBeInTheDocument();
+        expect(within(view).getByText("INFO")).toBeInTheDocument();
+        expect(within(view).getByText("WARN")).toBeInTheDocument();
+        expect(within(view).getByText("ERR")).toBeInTheDocument();
+        expect(within(within(view).getByRole("rowgroup")).getAllByRole("row")).toHaveLength(4);
+        await waitFor(() => expect(screen.getByText(/1 LOG STREAMS/)).toBeInTheDocument());
     });
 
-    it("shows empty state when no streams", async () => {
-        renderWithProviders();
-
-        await waitFor(() => {
-            expect(screen.getByText("No log streams active")).toBeInTheDocument();
+    it("pauses following on scroll up, counts new lines, and jumps back", async () => {
+        renderPage();
+        await waitFor(() => expect(channels).toHaveLength(1));
+        await push(lines("one", "two"));
+        const view = within(screen.getByRole("table", { name: "Log lines" })).getByRole("rowgroup");
+        Object.defineProperties(view, {
+            scrollHeight: { configurable: true, value: 2_000 },
+            clientHeight: { configurable: true, value: 600 },
+            scrollTop: { configurable: true, writable: true, value: 100 },
         });
+        fireEvent.scroll(view);
+        await push(lines("three", "four", "five"));
+        expect(await screen.findByText("3 new lines")).toBeInTheDocument();
+        await userEvent.setup().click(screen.getByRole("button", { name: "JUMP TO LATEST" }));
+        expect(screen.queryByText(/new lines/)).not.toBeInTheDocument();
     });
 
-    it("opens stream picker when clicking New Stream", async () => {
+    it("keeps lines while reconnecting, counts down, retries now, and marks dropped lines", async () => {
+        renderPage();
+        await waitFor(() => expect(channels).toHaveLength(1));
+        await push(lines("before the drop"));
+        await push({ type: "reconnecting", attempt: 3, nextRetryMs: 4_000 });
+        expect(await screen.findByText(`Reconnecting to ${web.name}… attempt 3 · next try in 4s`)).toBeInTheDocument();
+        expect(screen.getByText("before the drop")).toBeInTheDocument();
+        expect(screen.getByTestId(`log-tab-dot-${web.name}`)).toHaveAttribute("data-tone", "warning");
+        await userEvent.setup().click(screen.getByRole("button", { name: /RETRY NOW/ }));
+        expect(invoke).toHaveBeenCalledWith("logs_retry_now", { streamId: STREAM });
+        await push({ type: "reconnected" });
+        await push({ type: "gap", dropped: 214 });
+        await push(lines("after the drop"));
+        expect(screen.queryByText(/Reconnecting to/)).not.toBeInTheDocument();
+        expect(screen.getByText("214 lines dropped while the client caught up")).toBeInTheDocument();
+        expect(screen.getByTestId(`log-tab-dot-${web.name}`)).toHaveAttribute("data-tone", "success");
+    });
+
+    it("explains a filter with no matches and loads the previous hour", async () => {
+        renderPage();
+        await waitFor(() => expect(channels).toHaveLength(1));
+        await push(lines("GET / 200", "GET /health 200"));
         const user = userEvent.setup();
-        renderWithProviders();
+        await user.type(screen.getByRole("searchbox", { name: "Filter logs" }), "timeout");
+        expect(await screen.findByText("No lines match 'timeout'")).toBeInTheDocument();
+        expect(screen.getByText(new RegExp(`Searched the last 2 lines of ${web.name} since \\d\\d:\\d\\d`))).toBeInTheDocument();
+        expect(screen.getByText("0 matches")).toBeInTheDocument();
 
-        await waitFor(() => {
-            expect(screen.getByText("New Stream")).toBeInTheDocument();
-        });
+        const before = Date.now();
+        await user.click(screen.getByRole("button", { name: /LOAD PREVIOUS HOUR/ }));
+        await waitFor(() => expect(channels).toHaveLength(2));
+        const reopen = vi.mocked(invoke).mock.calls.filter(([command]) => command === "logs_open")[1][1] as { since: number; tail: number };
+        expect(reopen.tail).toBe(5_000);
+        expect(reopen.since).toBeGreaterThanOrEqual(before - 3_600_000);
+        expect(reopen.since).toBeLessThanOrEqual(Date.now() - 3_600_000);
+        expect(invoke).toHaveBeenCalledWith("logs_close", { streamId: STREAM });
 
-        await user.click(screen.getByText("New Stream"));
-
-        await waitFor(() => {
-            expect(screen.getByText("Select Service")).toBeInTheDocument();
-        });
+        await user.click(screen.getByRole("button", { name: /CLEAR FILTER/ }));
+        expect(screen.getByRole("searchbox", { name: "Filter logs" })).toHaveValue("");
+        await user.type(screen.getByRole("searchbox", { name: "Filter logs" }), "/health/");
+        // The replaced stream's late lines don't reach the new buffer.
+        await push(lines("GET /health 200 from the old stream"), 0);
+        await push(lines("GET /health 200"), 1);
+        expect(await screen.findByText("1 match")).toBeInTheDocument();
+        expect(screen.queryByText("GET /health 200 from the old stream")).not.toBeInTheDocument();
     });
 
-    it("adds a stream tab when selecting a service", async () => {
+    it("keeps a tab whose service was removed, explains it, and resumes from the last line", async () => {
+        renderPage();
+        await waitFor(() => expect(channels).toHaveLength(1));
+        await push(lines("last words"));
+        const lastTs = ts;
+        await push({ type: "ended", reason: "service_removed", code: "service_removed", message: "The service was removed." });
+        expect(await screen.findByText(`${web.name} was removed — the stream stopped`)).toBeInTheDocument();
+        expect(screen.getByText("last words")).toBeInTheDocument();
+        expect(screen.getByTestId(`log-tab-dot-${web.name}`)).toHaveAttribute("data-tone", "destructive");
         const user = userEvent.setup();
-        renderWithProviders();
+        await user.click(screen.getByRole("button", { name: /RESUME/ }));
+        await waitFor(() => expect(channels).toHaveLength(2));
+        expect(invoke).toHaveBeenCalledWith("logs_open", expect.objectContaining({ serviceId: web.id, since: lastTs, tail: 5_000 }));
+        expect(screen.getByText("last words")).toBeInTheDocument();
 
-        await waitFor(() => {
-            expect(screen.getByText("New Stream")).toBeInTheDocument();
-        });
-
-        await user.click(screen.getByText("New Stream"));
-
-        await waitFor(() => {
-            expect(screen.getByText("Select Service")).toBeInTheDocument();
-        });
-
-        // Wait for services to load in the picker
-        await waitFor(() => {
-            expect(screen.getByText("nginx-proxy")).toBeInTheDocument();
-        });
-
-        await user.click(screen.getByText("nginx-proxy"));
-
-        // Tab should appear with service name
-        await waitFor(() => {
-            // The empty state should be gone
-            expect(screen.queryByText("No log streams active")).not.toBeInTheDocument();
-            // The tab with the service name should be visible
-            expect(screen.getByText("nginx-proxy")).toBeInTheDocument();
-        });
+        await user.click(screen.getByRole("button", { name: `Close ${web.name}` }));
+        expect(await screen.findByText("No log streams open")).toBeInTheDocument();
+        expect(invoke).toHaveBeenCalledWith("logs_close", { streamId: "018f2e34-0000-7000-8000-00000000f002" });
     });
 
-    it("switches between tabs", async () => {
-        const user = userEvent.setup();
-        renderWithProviders();
-
-        await waitFor(() => {
-            expect(screen.getByText("New Stream")).toBeInTheDocument();
-        });
-
-        // Add first stream
-        await user.click(screen.getByText("New Stream"));
-        await waitFor(() => {
-            expect(screen.getByText("nginx-proxy")).toBeInTheDocument();
-        });
-        await user.click(screen.getByText("nginx-proxy"));
-
-        // Add second stream via the + button in the tab bar
-        // After adding first stream, the "New Stream" button is still in the header
-        await user.click(screen.getByText("New Stream"));
-        await waitFor(() => {
-            expect(screen.getByText("Select Service")).toBeInTheDocument();
-        });
-        await waitFor(() => {
-            expect(screen.getByText("api-gateway")).toBeInTheDocument();
-        });
-        await user.click(screen.getByText("api-gateway"));
-
-        // Both tabs should exist
-        await waitFor(() => {
-            expect(screen.getByText("nginx-proxy")).toBeInTheDocument();
-            expect(screen.getByText("api-gateway")).toBeInTheDocument();
-        });
-
-        // The second tab (api-gateway) should be active since it was just added.
-        // Click the first tab to switch.
-        await user.click(screen.getByText("nginx-proxy"));
-
-        // After clicking, the first tab button should have the active class
-        await waitFor(() => {
-            const nginxTab = screen.getByText("nginx-proxy").closest("button");
-            expect(nginxTab).toHaveClass("text-accent-green");
-        });
+    it("resumes a redeployed service under its new id, by name", async () => {
+        renderPage();
+        await waitFor(() => expect(channels).toHaveLength(1));
+        await push(lines("before the redeploy"));
+        await push({ type: "ended", reason: "service_removed", code: "service_removed", message: "The service was removed." });
+        // Redeployed: same name, new id; the services cache still holds the old one.
+        const redeployed = "webappweb1111111111111111";
+        serviceList = {
+            ...services.serviceList,
+            items: services.serviceList.items.map((service) => (service.id === web.id ? { ...service, id: redeployed } : service)),
+        };
+        await userEvent.setup().click(await screen.findByRole("button", { name: /RESUME/ }));
+        await waitFor(() => expect(channels).toHaveLength(2));
+        const opens = vi.mocked(invoke).mock.calls.filter(([command]) => command === "logs_open");
+        expect(opens[1][1]).toMatchObject({ serviceId: redeployed });
+        expect(screen.getByRole("tab", { name: new RegExp(web.name) })).toBeInTheDocument();
+        expect(screen.getByText("before the redeploy")).toBeInTheDocument();
     });
 
-    it("closes a stream tab", async () => {
+    it("closes the focused tab with Delete; its close button stays out of the tab order", async () => {
+        renderPage();
+        const tab = await screen.findByRole("tab", { name: new RegExp(web.name) });
+        await waitFor(() => expect(screen.getByTestId(`log-tab-dot-${web.name}`)).toHaveAttribute("data-tone", "success"));
+        expect(tab).toHaveAttribute("aria-keyshortcuts", "Delete");
+        expect(screen.getByRole("button", { name: `Close ${web.name}` })).toHaveAttribute("tabindex", "-1");
+        act(() => tab.focus());
+        await userEvent.setup().keyboard("{Delete}");
+        expect(await screen.findByText("No log streams open")).toBeInTheDocument();
+        expect(invoke).toHaveBeenCalledWith("logs_close", { streamId: STREAM });
+    });
+
+    it("opens more streams from the picker, side by side", async () => {
+        renderPage("/logs");
         const user = userEvent.setup();
-        renderWithProviders();
+        await screen.findByText("No log streams open");
+        await user.click(screen.getAllByRole("button", { name: /NEW STREAM/ })[0]);
+        await user.click(await screen.findByRole("option", { name: new RegExp(web.name) }));
+        await waitFor(() => expect(channels).toHaveLength(1));
+        const other = services.serviceList.items[1];
+        await user.click(screen.getByRole("button", { name: "New stream" }));
+        await user.click(await screen.findByRole("option", { name: new RegExp(other.name) }));
+        await waitFor(() => expect(channels).toHaveLength(2));
+        expect(screen.getAllByRole("tab")).toHaveLength(2);
+        expect(screen.getByRole("tab", { name: new RegExp(other.name) })).toHaveAttribute("aria-selected", "true");
 
-        await waitFor(() => {
-            expect(screen.getByText("New Stream")).toBeInTheDocument();
-        });
-
-        // Add a stream
-        await user.click(screen.getByText("New Stream"));
-        await waitFor(() => {
-            expect(screen.getByText("nginx-proxy")).toBeInTheDocument();
-        });
-        await user.click(screen.getByText("nginx-proxy"));
-
-        // Verify the tab is present
-        await waitFor(() => {
-            expect(screen.queryByText("No log streams active")).not.toBeInTheDocument();
-            expect(screen.getByText("nginx-proxy")).toBeInTheDocument();
-        });
-
-        // Find the close (X) button inside the tab — it is an SVG with class "size-3"
-        const tabButton = screen.getByText("nginx-proxy").closest("button")!;
-        const closeIcon = tabButton.querySelector(".size-3.text-muted-foreground");
-        expect(closeIcon).toBeTruthy();
-        await user.click(closeIcon!);
-
-        // Tab should be removed and empty state should return
-        await waitFor(() => {
-            expect(screen.getByText("No log streams active")).toBeInTheDocument();
-        });
+        // A service that already has a tab gets it focused, not a second stream.
+        await user.click(screen.getByRole("button", { name: "New stream" }));
+        await user.click(await screen.findByRole("option", { name: new RegExp(web.name) }));
+        expect(screen.getByRole("tab", { name: new RegExp(web.name) })).toHaveAttribute("aria-selected", "true");
+        expect(screen.getAllByRole("tab")).toHaveLength(2);
+        expect(channels).toHaveLength(2);
     });
 });

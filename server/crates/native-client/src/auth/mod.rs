@@ -1,14 +1,33 @@
-//! GitHub bootstrap login, refresh, and logout contracts.
+//! Password sign-in and owner registration, GitHub bootstrap login, refresh,
+//! and logout contracts.
 //!
 //! The controller issues credentials exactly once, in a `no-store` JSON
 //! response. The client never retries these calls: a replayed login,
 //! redemption, or refresh would be a credential-safety incident, not a
 //! transient failure.
 
+mod bootstrap_status;
+mod current_session;
 mod logout;
+mod password_login;
+mod password_session;
 mod redeem_login;
 mod refresh_session;
+mod register_owner;
 mod start_login;
+
+#[cfg(test)]
+pub(crate) use bootstrap_status::BootstrapReply;
+pub use current_session::Account;
+#[cfg(test)]
+pub(crate) use current_session::AccountReply;
+#[cfg(test)]
+pub(crate) use password_login::PasswordLoginBody;
+pub use password_session::PasswordSession;
+#[cfg(test)]
+pub(crate) use password_session::PasswordSessionReply;
+#[cfg(test)]
+pub(crate) use register_owner::RegisterOwnerBody;
 
 #[cfg(test)]
 pub(crate) use redeem_login::{RedeemLoginBody, RedeemLoginReply};

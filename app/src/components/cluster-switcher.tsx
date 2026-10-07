@@ -1,64 +1,127 @@
-import { useState } from "react";
-import { ChevronDown } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ChevronDown, LogOut, Plus, Server } from "lucide-react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { LabelBadge, StatusDot, type Tone } from "@/components/kit/badges";
+import { TooltipRich } from "@/components/kit/tooltips";
+import { connectionHost } from "@/components/connect/connect-rules";
 import { useAuth } from "@/hooks/use-auth";
+import { useSwitchAgent } from "@/hooks/use-switch-agent";
+import { useConnectionProbes, useSessionConnections } from "@/hooks/session/use-session-connections";
+import { relativeTime } from "@/lib/time";
+import { useNow } from "@/hooks/use-now";
+import type { ProbeView, SavedConnection } from "@/types/session";
+import { cn } from "@/lib/utils";
 
-export function ClusterSwitcher({ variant = "sidebar" }: { variant?: "sidebar" | "titlebar" }) {
+type RowStatus = "active" | "healthy" | "offline" | "unknown";
+
+const statusTone: Record<RowStatus, Tone> = { active: "primary", healthy: "success", offline: "neutral", unknown: "neutral" };
+const statusBadge: Record<RowStatus, string> = {
+    active: "border-primary bg-primary-soft text-sidebar-accent-foreground",
+    healthy: "border-success bg-success-soft text-success",
+    offline: "border-border bg-secondary text-muted-foreground",
+    unknown: "border-border bg-secondary text-muted-foreground",
+};
+
+function rowStatus(connection: SavedConnection, activeOrigin: string | undefined, probe: ProbeView | undefined): RowStatus {
+    if (connection.origin === activeOrigin) return "active";
+    if (!probe) return "unknown";
+    return probe.status === "ready" ? "healthy" : "offline";
+}
+
+function subtitle(connection: SavedConnection): string {
+    const summary = connection.lastSummary;
+    if (!summary) return connectionHost(connection.origin);
+    return `${summary.nodes} ${summary.nodes === 1 ? "node" : "nodes"} · ${summary.services} ${summary.services === 1 ? "service" : "services"}`;
+}
+
+/**
+ * The titlebar centre pill and the Cluster Switcher dropdown (`23tdn`, state 02.S6). Choosing
+ * another agent signs out and opens Connect with that origin; offline agents are dimmed.
+ */
+export function ClusterSwitcher({ health }: { health?: ProbeView | null }) {
     const { session, logout } = useAuth();
-    const [open, setOpen] = useState(false);
-    const label = session?.label ?? session?.githubLogin ?? "No connection";
+    const connections = useSessionConnections();
+    const rows = connections.data ?? [];
+    const probes = useConnectionProbes(rows.filter((connection) => connection.origin !== session?.origin).map((connection) => connection.origin));
+    const label = session?.label ?? (session ? connectionHost(session.origin) : "No connection");
+    const dot: Tone = health === undefined || health === null ? "neutral" : health.status === "ready" ? "success" : "destructive";
+    const now = useNow();
 
-    async function handleLogout() {
-        try {
-            await logout();
-            setOpen(false);
-        } catch {
-            // The provider exposes a closed error code and clears the session
-            // only when Rust has left authenticated state.
-            setOpen(false);
-        }
-    }
-
-    const trigger =
-        variant === "titlebar" ? (
-            <button className='flex items-center gap-2 text-text-secondary transition-colors hover:text-foreground'>
-                <span className='size-[7px] shrink-0 rounded-full bg-accent-green' />
-                <span className='font-mono text-[11px] font-medium tracking-[0.5px]'>{label}</span>
-                <ChevronDown className='size-3 text-muted-foreground' />
-            </button>
-        ) : (
-            <button className='flex w-full items-center gap-3 rounded-md p-1.5 text-left transition-colors hover:bg-accent'>
-                <span className='size-2 shrink-0 rounded-full bg-accent-green' />
-                <div className='flex-1 overflow-hidden'>
-                    <p className='truncate text-sm font-semibold'>{label}</p>
-                    <span className='truncate font-mono text-[11px] text-muted-foreground'>
-                        {session?.origin.replace(/^https?:\/\//, "") ?? "Connect a controller"}
-                    </span>
-                </div>
-                <ChevronDown className={`size-4 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
-            </button>
-        );
+    const leaveFor = useSwitchAgent();
 
     return (
-        <Popover open={open} onOpenChange={setOpen}>
-            <PopoverTrigger render={trigger} />
-            <PopoverContent side={variant === "titlebar" ? "bottom" : "top"} align='center' className='w-[300px] space-y-3 border-border bg-card p-3'>
-                <div>
-                    <p className='truncate text-sm font-semibold'>{label}</p>
-                    <p className='truncate font-mono text-[11px] text-muted-foreground'>{session?.origin}</p>
+        <DropdownMenu>
+            <DropdownMenuTrigger
+                aria-label={`Switch cluster (current: ${label})`}
+                className='flex items-center gap-2 rounded-sm px-2 py-1 font-mono text-2xs font-medium tracking-[0.5px] text-secondary-foreground transition-colors hover:text-foreground'
+            >
+                <StatusDot tone={dot} data-testid='controller-health-dot' />
+                <span>{label}</span>
+                <ChevronDown aria-hidden className='size-3 text-muted-foreground' />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align='center' className='w-80 p-0'>
+                <div className='flex items-center justify-between border-b border-border px-4 py-3'>
+                    <span className='flex items-center gap-2 font-mono text-3xs font-semibold tracking-[1px] text-muted-foreground uppercase'>
+                        <Server aria-hidden className='size-3.5' /> Switch cluster
+                    </span>
+                    <LabelBadge>
+                        {rows.length} {rows.length === 1 ? "agent" : "agents"}
+                    </LabelBadge>
                 </div>
-                <Button
-                    variant='outline'
-                    size='sm'
-                    className='w-full'
-                    onClick={() => {
-                        void handleLogout();
-                    }}
+                {rows.map((connection) => {
+                    const status = rowStatus(connection, session?.origin, probes.data?.[connection.origin]);
+                    const row = (
+                        <DropdownMenuItem
+                            key={connection.id}
+                            disabled={status === "offline" || status === "active"}
+                            onClick={() => void leaveFor(connection.origin)}
+                            className={cn(
+                                "flex items-center gap-3 rounded-none border-b border-border px-4 py-3",
+                                status === "active" && "bg-primary-faint",
+                                status === "offline" && "opacity-50",
+                            )}
+                        >
+                            <StatusDot tone={statusTone[status]} />
+                            <span className='flex min-w-0 flex-1 flex-col gap-0.5'>
+                                <span className='truncate font-mono text-xs font-semibold text-foreground'>
+                                    {connection.label ?? connectionHost(connection.origin)}
+                                </span>
+                                <span className='truncate font-mono text-3xs text-muted-foreground'>{subtitle(connection)}</span>
+                            </span>
+                            <span
+                                data-testid={`switch-status-${connection.id}`}
+                                className={cn("rounded-sm border px-1.5 py-0.5 font-mono text-3xs font-bold", statusBadge[status])}
+                            >
+                                {status === "unknown" ? "checking" : status}
+                            </span>
+                        </DropdownMenuItem>
+                    );
+                    return status === "offline" ? (
+                        <TooltipRich
+                            key={connection.id}
+                            side='right'
+                            title="Agent offline — can't switch"
+                            reason={`Last used ${relativeTime(connection.lastUsedAtUnixMs, now)}. Start the agent on that host, or remove it from the saved connections.`}
+                        >
+                            <div>{row}</div>
+                        </TooltipRich>
+                    ) : (
+                        row
+                    );
+                })}
+                <DropdownMenuItem
+                    onClick={() => void leaveFor("")}
+                    className='justify-center gap-2 rounded-none py-3 font-mono text-2xs text-secondary-foreground'
                 >
-                    Sign out
-                </Button>
-            </PopoverContent>
-        </Popover>
+                    <Plus aria-hidden className='size-3.5' /> Add new agent
+                </DropdownMenuItem>
+                <DropdownMenuSeparator className='my-0' />
+                <DropdownMenuItem
+                    onClick={() => void logout().catch(() => {})}
+                    className='justify-center gap-2 rounded-none py-3 font-mono text-2xs text-secondary-foreground'
+                >
+                    <LogOut aria-hidden className='size-3.5' /> Sign out
+                </DropdownMenuItem>
+            </DropdownMenuContent>
+        </DropdownMenu>
     );
 }

@@ -1,46 +1,32 @@
-//! `GET /api/v1/nodes/{nodeId}/containers`.
+//! `GET /api/v1/containers`.
 
 use reqwest::Method;
 use tokio_util::sync::CancellationToken;
 
-use super::{ContainerPage, ContainerPageBody, ContainerPageRequest, NodeId};
+use super::{ContainerList, ContainerListBody, NodeId};
 use crate::client::{ErrorBodyPolicy, NativeClient, RetryPolicy, decode_json};
 use crate::credentials::AccessCredential;
 use crate::error::NativeClientError;
 
 impl NativeClient {
-    /// Read one bounded page of the configured node's containers.
-    ///
-    /// Local pagination validation runs before any network access. The access
-    /// credential is presented only in a sensitive `Authorization` header; a
-    /// page cursor is opaque, so pass [`ContainerPage::next_cursor`] back
-    /// unchanged.
+    /// Every container on the answering member nodes (or on `node` alone), with one outcome per
+    /// member so a silent node is visible rather than missing.
     ///
     /// # Errors
     ///
-    /// [`NativeClientError::InvalidPagination`] when the limit or cursor is
-    /// outside the documented bounds (no request leaves the client),
-    /// [`NativeClientError::NotFound`] for an unknown node,
-    /// [`NativeClientError::AgentUnavailable`] when the node agent is
-    /// unavailable, and [`NativeClientError::AgentTimeout`] when the agent
-    /// deadline expires. This is a read-only GET, so a classified
-    /// pre-response transient failure is retried exactly once inside the
-    /// call's original deadline.
+    /// [`NativeClientError::TooManyContainers`] past the controller's cap (list one node then),
+    /// [`NativeClientError::NotFound`] for an unknown `node`, and
+    /// [`NativeClientError::AgentUnavailable`] when the controller has no agent RPC. A read-only
+    /// GET, retried once on a classified pre-response transient failure.
     pub async fn list_containers(
         &self,
         access: &AccessCredential,
-        node_id: &NodeId,
-        page: &ContainerPageRequest,
+        node: Option<&NodeId>,
         cancellation: &CancellationToken,
-    ) -> Result<ContainerPage, NativeClientError> {
-        let (limit, cursor) = page.validated()?;
-        let mut url = self.containers_endpoint(node_id)?;
-        {
-            let mut query = url.query_pairs_mut();
-            query.append_pair("limit", &limit.to_string());
-            if let Some(cursor) = cursor {
-                query.append_pair("cursor", cursor);
-            }
+    ) -> Result<ContainerList, NativeClientError> {
+        let mut url = self.endpoint("/api/v1/containers")?;
+        if let Some(node) = node {
+            url.query_pairs_mut().append_pair("node", node.as_str());
         }
         let request = self.authorized_request(Method::GET, url, access)?;
         let body = self
@@ -52,6 +38,6 @@ impl NativeClient {
                 ErrorBodyPolicy::Inventory,
             )
             .await?;
-        decode_json::<ContainerPageBody>(&body)?.into_page(node_id)
+        decode_json::<ContainerListBody>(&body)?.into_list()
     }
 }

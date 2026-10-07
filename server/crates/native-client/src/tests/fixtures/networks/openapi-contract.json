@@ -1,0 +1,441 @@
+{
+  "paths": {
+    "/api/v1/networks": {
+      "get": {
+        "operationId": "list_networks",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkListResponse"
+                }
+              }
+            },
+            "description": "Swarm-scope networks once, local ones per node, and one outcome per member"
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "Agent RPC not configured, persistence unavailable, or controller draining"
+          }
+        },
+        "tags": [
+          "super::networks"
+        ]
+      },
+      "post": {
+        "operationId": "create_network",
+        "parameters": [
+          {
+            "description": "16–64 printable ASCII characters, one per user gesture",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateNetworkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmittedResponse"
+                }
+              }
+            },
+            "description": "Admitted as one `network.create` operation"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FieldErrorResponse"
+                }
+              }
+            },
+            "description": "`idempotency_key_required`, or `invalid_request` naming `name`, `driver`, `nodeId`, or `subnet`"
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "`idempotency_conflict`"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "`not_a_manager` for an overlay without a Swarm manager, persistence unavailable, or draining"
+          }
+        },
+        "tags": [
+          "super::networks"
+        ]
+      }
+    },
+    "/api/v1/networks/{networkId}": {
+      "delete": {
+        "operationId": "remove_network",
+        "parameters": [
+          {
+            "description": "Docker network id",
+            "in": "path",
+            "name": "networkId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The node of a local network; omit for a swarm-scope one",
+            "in": "query",
+            "name": "node",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "16–64 printable ASCII characters, one per user gesture",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmittedResponse"
+                }
+              }
+            },
+            "description": "Admitted as one `network.remove` operation; attached containers fail it with `in_use` and their names"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "`builtin_network`, `idempotency_key_required`, or `invalid_request`"
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "No such network (on that node)"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "`idempotency_conflict`"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "`not_a_manager` for a swarm network without a Swarm manager, persistence unavailable, or draining"
+          }
+        },
+        "tags": [
+          "super::networks"
+        ]
+      },
+      "get": {
+        "operationId": "inspect_network",
+        "parameters": [
+          {
+            "description": "Docker network id",
+            "in": "path",
+            "name": "networkId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The node of a local network; omit for a swarm-scope one",
+            "in": "query",
+            "name": "node",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NetworkContainersResponse"
+                }
+              }
+            },
+            "description": "The containers attached, with their nodes"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FieldErrorResponse"
+                }
+              }
+            },
+            "description": "`invalid_request` naming the field"
+          },
+          "401": {
+            "description": "Missing, malformed, expired, or revoked access credential"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "No such member node, or the node doesn't have it"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdmissionErrorResponse"
+                }
+              }
+            },
+            "description": "Agent RPC not configured, agent or persistence unavailable"
+          }
+        },
+        "tags": [
+          "super::networks"
+        ]
+      }
+    }
+  },
+  "schemas": {
+    "AttachedContainerResponse": {
+      "properties": {
+        "containerId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "nodeId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "nodeId",
+        "containerId",
+        "name"
+      ],
+      "type": "object"
+    },
+    "CreateNetworkRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "attachable": {
+          "description": "Overlay only: standalone containers may attach.",
+          "type": "boolean"
+        },
+        "driver": {
+          "description": "`overlay` (swarm scope, on the manager) or `bridge` (local, on `nodeId`).",
+          "type": "string"
+        },
+        "name": {
+          "description": "`[a-zA-Z0-9][a-zA-Z0-9_.-]*`, 1–128 characters, unique across the current list.",
+          "type": "string"
+        },
+        "nodeId": {
+          "description": "Required for `bridge`, refused for `overlay`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "subnet": {
+          "description": "A canonical CIDR, e.g. `10.0.9.0/24`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "driver"
+      ],
+      "type": "object"
+    },
+    "NetworkContainersResponse": {
+      "properties": {
+        "containers": {
+          "items": {
+            "$ref": "#/components/schemas/AttachedContainerResponse"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "containers"
+      ],
+      "type": "object"
+    },
+    "NetworkListResponse": {
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/components/schemas/NetworkResponse"
+          },
+          "type": "array"
+        },
+        "manager": {
+          "description": "`ok`, `not_a_manager`, or `unavailable`: whether swarm-scope rows came from the manager.",
+          "type": "string"
+        },
+        "nodes": {
+          "items": {
+            "$ref": "#/components/schemas/NodeOutcomeResponse"
+          },
+          "type": "array"
+        },
+        "snapshotAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "items",
+        "nodes",
+        "manager",
+        "snapshotAt"
+      ],
+      "type": "object"
+    },
+    "NetworkResponse": {
+      "properties": {
+        "attachable": {
+          "type": "boolean"
+        },
+        "builtin": {
+          "description": "Docker's own networks (`host`, `bridge`, `none`, `docker_gwbridge`, `ingress`).",
+          "type": "boolean"
+        },
+        "containers": {
+          "description": "Running containers attached, summed across nodes.",
+          "format": "int32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "createdAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "driver": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "nodeIds": {
+          "description": "Local: its node. Swarm: the nodes with endpoints on it.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "scope": {
+          "description": "`swarm` (one row for the cluster) or `local` (one row per node).",
+          "type": "string"
+        },
+        "subnets": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "driver",
+        "scope",
+        "subnets",
+        "containers",
+        "attachable",
+        "builtin",
+        "nodeIds"
+      ],
+      "type": "object"
+    }
+  },
+  "securitySchemes": {
+    "access_session": {
+      "bearerFormat": "opaque",
+      "scheme": "bearer",
+      "type": "http"
+    }
+  }
+}
