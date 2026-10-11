@@ -4,10 +4,11 @@ use std::{env, error::Error, ffi::OsString, sync::Arc};
 
 use kontainer_engine::{ContainerEngine, LocalDockerEngine, LocalEngineOptions};
 use kontainer_node_agent::{
-    AgentConfig, AgentFacts, AgentShutdown, CheckInTiming, ContainerStatsCache, MtlsControllerLink,
-    NodeAgentService, NodeSampler, VolumeSizeCache, run_check_in, serve_node_agent_rpc,
-    supervise_node_agent_server,
+    AgentConfig, AgentFacts, AgentShutdown, AgentTrust, CheckInTiming, ContainerStatsCache,
+    MtlsControllerLink, NodeAgentService, NodeSampler, VolumeSizeCache, advertise_toward,
+    discover_node_id, run_check_in, serve_node_agent_rpc, supervise_node_agent_server,
 };
+use kontainer_rpc_auth::{AGENT_DNS_SUFFIX, WorkloadIdentity};
 use tokio::net::TcpListener;
 use tokio_util::task::TaskTracker;
 use tracing_subscriber::EnvFilter;
@@ -32,34 +33,55 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         .init();
 
     let config = AgentConfig::from_environment()?;
-    let controller = Arc::new(MtlsControllerLink::new(
-        &config.controller_rpc_endpoint,
-        &config.controller_server_name,
-        &config.cluster_id,
-        &config.tls_files,
-    )?);
-    let listener = TcpListener::bind(config.binding).await?;
-    let shutdown = AgentShutdown::new(config.shutdown_grace);
-    let connections = TaskTracker::new();
-    let requests = TaskTracker::new();
-    let (failures, task_failures) = tokio::sync::mpsc::unbounded_channel();
     let engine = Arc::new(LocalDockerEngine::connect_for_node(LocalEngineOptions {
         host: config.docker_host.clone(),
         ..LocalEngineOptions::default()
     })?);
     // A failed ping is logged, not fatal: Describe reports Docker health and
-    // the agent keeps serving while the daemon restarts.
+    // the agent keeps serving while the daemon restarts. Only discovering the
+    // node id needs Docker up front.
     match engine.is_available().await {
         Ok(true) => tracing::info!(docker.host = %config.docker_host, "docker ping succeeded"),
         Ok(false) | Err(_) => {
             tracing::warn!(docker.host = %config.docker_host, "docker ping failed");
         }
     }
+    let node_id = match config.node_id {
+        Some(node_id) => node_id,
+        None => discover_node_id(engine.as_ref()).await?,
+    };
+    let advertise_address = match config.advertise_address {
+        Some(address) => address,
+        None => advertise_toward(&config.controller_rpc_endpoint, config.binding.port()).await?,
+    };
+    let tls_files = match config.trust {
+        AgentTrust::Files(files) => files,
+        AgentTrust::Secret(secret) => secret.issue_identity_files(
+            &WorkloadIdentity::NodeAgent {
+                cluster_id: config.cluster_id.clone(),
+                node_id: node_id.clone(),
+            },
+            &format!("{node_id}.{AGENT_DNS_SUFFIX}"),
+            &env::temp_dir().join(format!("kontainer-agent-{}", std::process::id())),
+        )?,
+    };
+    tracing::info!(node.id = %node_id, node.advertise_address = %advertise_address, "node agent identity");
+    let controller = Arc::new(MtlsControllerLink::new(
+        &config.controller_rpc_endpoint,
+        &config.controller_server_name,
+        &config.cluster_id,
+        &tls_files,
+    )?);
+    let listener = TcpListener::bind(config.binding).await?;
+    let shutdown = AgentShutdown::new(config.shutdown_grace);
+    let connections = TaskTracker::new();
+    let requests = TaskTracker::new();
+    let (failures, task_failures) = tokio::sync::mpsc::unbounded_channel();
     let stats = ContainerStatsCache::default();
     let volume_sizes = VolumeSizeCache::default();
     let facts = AgentFacts {
-        node_id: config.node_id.clone(),
-        advertise_address: config.advertise_address.clone(),
+        node_id: node_id.clone(),
+        advertise_address,
     };
     // Tracked with in-flight requests: draining cancels the loop and the grace deadline joins it.
     requests.spawn(run_check_in(
@@ -69,13 +91,13 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         CheckInTiming::default(),
         shutdown.draining(),
     ));
-    let service = NodeAgentService::new(config.node_id, engine, shutdown.force())
+    let service = NodeAgentService::new(node_id, engine, shutdown.force())
         .with_stats(stats)
         .with_volume_sizes(volume_sizes);
     let server = serve_node_agent_rpc(
         listener,
         config.cluster_id,
-        config.tls_files,
+        tls_files,
         service,
         shutdown.draining(),
         shutdown.force(),
