@@ -1,11 +1,15 @@
 #![forbid(unsafe_code)]
 
+mod cluster_secret;
 mod identity;
 mod interceptor;
 mod server;
 mod tls;
 mod verifier;
 
+pub use cluster_secret::{
+    AGENT_DNS_SUFFIX, CONTROLLER_DNS_NAME, ClusterSecret, DEFAULT_CLUSTER_ID, MINIMUM_SECRET_LENGTH,
+};
 pub use identity::{
     AuthenticatedPeerIdentity, IdentityError, WorkloadIdentity, WorkloadKind,
     valid_identity_segment,
