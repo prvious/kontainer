@@ -37,3 +37,6 @@ docs/plans
 # Development PKI and agent logs (dev/pki.sh, dev/agents.sh)
 dev/pki/
 dev/logs/
+
+# WebDriver logs and screenshots.
+app/tests/e2e/results/
