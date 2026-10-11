@@ -3,8 +3,8 @@ use std::{env, error::Error, net::SocketAddr};
 use kontainer_engine::{ContainerEngine, DockerHost};
 use kontainer_lifecycle::ShutdownGrace;
 use kontainer_rpc_auth::{
-    CONTROLLER_DNS_NAME, ClusterSecret, DEFAULT_CLUSTER_ID, MutualTlsIdentityFiles,
-    valid_identity_segment,
+    AGENT_DNS_SUFFIX, CONTROLLER_DNS_NAME, ClusterSecret, DEFAULT_CLUSTER_ID,
+    MutualTlsIdentityFiles, valid_identity_segment,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -137,10 +137,18 @@ impl AgentConfig {
         {
             return Err("KONTAINER_NODE_ADVERTISE_ADDRESS must be host:port".into());
         }
-        if let Some(node_id) = &self.node_id
-            && !valid_identity_segment(node_id)
-        {
-            return Err("KONTAINER_NODE_ID must be a canonical workload identity segment".into());
+        if let Some(node_id) = &self.node_id {
+            if !valid_identity_segment(node_id) {
+                return Err(
+                    "KONTAINER_NODE_ID must be a canonical workload identity segment".into(),
+                );
+            }
+            if !valid_agent_dns_name(node_id) {
+                return Err(
+                    "KONTAINER_NODE_ID must also fit a DNS name: letters, digits, dots and hyphens"
+                        .into(),
+                );
+            }
         }
         if !valid_identity_segment(&self.cluster_id) {
             return Err(
@@ -160,12 +168,18 @@ pub async fn discover_node_id(
         .await
         .map_err(|_| "Docker did not answer, so the node id is unknown; set KONTAINER_NODE_ID")?;
     let node_id = info.swarm_node_id.unwrap_or(info.hostname);
-    if !valid_identity_segment(&node_id) {
+    if !valid_identity_segment(&node_id) || !valid_agent_dns_name(&node_id) {
         return Err(
             "this node's Swarm id or hostname is not a valid node id; set KONTAINER_NODE_ID".into(),
         );
     }
     Ok(node_id)
+}
+
+/// The controller dials `{node_id}.{AGENT_DNS_SUFFIX}`, so the id must make a valid DNS name too:
+/// identity segments allow underscores, DNS labels don't.
+fn valid_agent_dns_name(node_id: &str) -> bool {
+    valid_dns_name(&format!("{node_id}.{AGENT_DNS_SUFFIX}"))
 }
 
 /// `ip:port` of this host on the route to the controller, which is the address the controller can
@@ -287,8 +301,14 @@ mod tests {
             "tj42rq5nzwf8"
         );
         assert_eq!(discover_node_id(&node(None, "vm-1")).await.unwrap(), "vm-1");
-        let error = discover_node_id(&node(None, "bad/host")).await.unwrap_err();
-        assert!(error.to_string().contains("set KONTAINER_NODE_ID"));
+        // `worker_1` is a valid identity but not a DNS label, so the controller could never dial it.
+        for hostname in ["bad/host", "worker_1"] {
+            let error = discover_node_id(&node(None, hostname)).await.unwrap_err();
+            assert!(
+                error.to_string().contains("set KONTAINER_NODE_ID"),
+                "{hostname}"
+            );
+        }
 
         // The default engine method answers UnsupportedCapability, like a daemon that is down.
         struct SilentEngine;
@@ -387,6 +407,19 @@ mod tests {
             assert_eq!(
                 error,
                 "KONTAINER_CLUSTER_ID must be a canonical workload identity segment"
+            );
+        }
+
+        config.cluster_id = "cluster-1".to_owned();
+        for undialable in ["worker_1", "-node", "node-"] {
+            config.node_id = Some(undialable.to_owned());
+            assert!(
+                config
+                    .validate()
+                    .unwrap_err()
+                    .to_string()
+                    .contains("must also fit a DNS name"),
+                "{undialable}"
             );
         }
     }

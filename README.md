@@ -203,8 +203,10 @@ before any handler is admitted. There is no ACME, rotation, or hot reload.
 
 Images are published to `ghcr.io/prvious/kontainer/controller` and
 `ghcr.io/prvious/kontainer/agent` (`latest` follows `main`; releases are
-tagged by version). A stack is the controller on a manager, an agent on every
-node, and PostgreSQL:
+tagged by version). The packages are private: log in to `ghcr.io` with a token
+that can read them and deploy with `docker stack deploy --with-registry-auth`.
+A stack is the controller on a manager, an agent on every node, and
+PostgreSQL:
 
 ```yaml
 services:
@@ -240,6 +242,9 @@ services:
     volumes:
       - database:/var/lib/postgresql/data
     networks: [kontainer]
+    deploy:
+      placement:
+        constraints: [node.role == manager]
 
 networks:
   kontainer:
@@ -261,6 +266,9 @@ volumes:
   `KONTAINER_NODE_ID` and `KONTAINER_NODE_ADVERTISE_ADDRESS` override them.
 - Publish the controller only through your proxy; don't publish 5150 or the
   agent ports on the host.
+- PostgreSQL's volume lives on whichever node runs it. With more than one
+  manager, pin it to one node with a label (`node.labels.kontainer-db == true`)
+  and back that volume up, or Swarm may reschedule it onto an empty volume.
 - On first start the controller prints a setup code
   (`docker service logs <stack>_controller`); enter it on the desktop app's
   Create owner screen.

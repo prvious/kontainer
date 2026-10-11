@@ -17,8 +17,8 @@ use hyper_util::{rt::TokioIo, server::conn::auto, service::TowerToHyperService};
 use kontainer_engine::DockerHost;
 use kontainer_lifecycle::{DrainClock, ShutdownGrace};
 use kontainer_rpc_auth::{
-    CONTROLLER_DNS_NAME, ClusterSecret, MutualTlsIdentityFiles, WorkloadIdentity, spawn_tracked,
-    valid_identity_segment,
+    CONTROLLER_DNS_NAME, ClusterSecret, MutualTlsIdentityFiles, WorkloadIdentity,
+    runtime_directory, spawn_tracked, valid_identity_segment,
 };
 use loco_rs::{
     Error, Result,
@@ -891,10 +891,15 @@ pub fn init_shared_auth_state(ctx: &AppContext) -> Result<()> {
 
     if settings.agent_rpc.enabled {
         // Issued once: the RPC listener and every agent client share this identity.
+        // Configured files win, so a stale secret in the environment is never read.
+        let secret = match settings.agent_rpc.tls {
+            Some(_) => None,
+            None => ClusterSecret::from_environment().map_err(|message| Error::string(&message))?,
+        };
         let tls_files = agent_rpc_tls_files(
             &settings.agent_rpc,
-            ClusterSecret::from_environment().map_err(|message| Error::string(&message))?,
-            &std::env::temp_dir().join(format!("kontainer-controller-{}", std::process::id())),
+            secret,
+            &runtime_directory("controller"),
         )?;
         ctx.shared_store.insert(AgentRpcTls(tls_files.clone()));
         let directory = crate::nodes::agents::MtlsAgentDirectory::new(
@@ -1121,7 +1126,8 @@ mod tests {
         assert!(error.to_string().contains("KONTAINER_SECRET"));
 
         let secret = ClusterSecret::new(&"s".repeat(32)).unwrap();
-        let files = agent_rpc_tls_files(&issued, Some(secret), directory.path()).unwrap();
+        let files =
+            agent_rpc_tls_files(&issued, Some(secret), &directory.path().join("issued")).unwrap();
         assert!(files.server_acceptor().is_ok());
     }
 

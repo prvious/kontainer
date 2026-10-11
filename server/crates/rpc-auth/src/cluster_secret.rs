@@ -9,6 +9,8 @@ use std::{
     fmt, fs,
     io::{self, Write},
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
+    time::{SystemTime, UNIX_EPOCH},
 };
 
 use rcgen::{
@@ -84,7 +86,9 @@ impl ClusterSecret {
     }
 
     /// Write a certificate for `identity`, its fresh private key, and the cluster CA into
-    /// `directory` (owner-only), and return them as the files the mTLS code reads.
+    /// `directory`, and return them as the files the mTLS code reads. `directory` must not exist
+    /// yet: it is created owner-only and its files exclusively, so nothing planted in a shared
+    /// temporary directory is followed or reused. [`runtime_directory`] picks a fresh one.
     pub fn issue_identity_files(
         &self,
         identity: &WorkloadIdentity,
@@ -152,9 +156,24 @@ fn invalid(error: impl std::error::Error + Send + Sync + 'static) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, error)
 }
 
+/// A fresh, unused path under the system temporary directory for one process's identity files.
+/// The time covers a restarted container reusing its pid; the counter covers calls in one process.
+#[must_use]
+pub fn runtime_directory(role: &str) -> PathBuf {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos());
+    let sequence = NEXT.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "kontainer-{role}-{}-{nanos}-{sequence}",
+        std::process::id()
+    ))
+}
+
+/// Not recursive: an existing directory, whoever made it, is an error.
 fn create_private_directory(directory: &Path) -> io::Result<()> {
     let mut builder = fs::DirBuilder::new();
-    builder.recursive(true);
     #[cfg(unix)]
     std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
     builder.create(directory)
@@ -162,7 +181,7 @@ fn create_private_directory(directory: &Path) -> io::Result<()> {
 
 fn write_private_file(path: &Path, contents: &[u8]) -> io::Result<()> {
     let mut options = fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
+    options.write(true).create_new(true);
     #[cfg(unix)]
     std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
     options.open(path)?.write_all(contents)
@@ -170,7 +189,7 @@ fn write_private_file(path: &Path, contents: &[u8]) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{ClusterSecret, MINIMUM_SECRET_LENGTH};
+    use super::{ClusterSecret, MINIMUM_SECRET_LENGTH, runtime_directory};
     use crate::WorkloadIdentity;
 
     const SECRET: &str = "0123456789abcdef0123456789abcdef";
@@ -206,11 +225,8 @@ mod tests {
                 .is_some()
         );
 
-        let directory = std::env::temp_dir().join(format!(
-            "kontainer-secret-source-test-{}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&directory).unwrap();
+        let directory = runtime_directory("secret-source-test");
+        std::fs::create_dir(&directory).unwrap();
         let file = directory.join("secret");
         std::fs::write(&file, format!("{SECRET}\n")).unwrap();
         assert!(
@@ -236,11 +252,26 @@ mod tests {
     }
 
     #[test]
+    fn a_planted_directory_is_never_reused() {
+        let planted = runtime_directory("planted-test");
+        std::fs::create_dir(&planted).unwrap();
+        let error = ClusterSecret::new(SECRET)
+            .unwrap()
+            .issue_identity_files(
+                &agent("node-1"),
+                "node-1.agent.kontainer.internal",
+                &planted,
+            )
+            .unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::AlreadyExists);
+        assert!(std::fs::read_dir(&planted).unwrap().next().is_none());
+        std::fs::remove_dir(&planted).unwrap();
+        assert_ne!(runtime_directory("x"), runtime_directory("x"));
+    }
+
+    #[test]
     fn issued_files_carry_the_workload_identity_and_stay_private() {
-        let directory = std::env::temp_dir().join(format!(
-            "kontainer-issued-files-test-{}",
-            std::process::id()
-        ));
+        let directory = runtime_directory("issued-files-test");
         let files = ClusterSecret::new(SECRET)
             .unwrap()
             .issue_identity_files(

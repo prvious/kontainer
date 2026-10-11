@@ -8,7 +8,7 @@ use kontainer_node_agent::{
     MtlsControllerLink, NodeAgentService, NodeSampler, VolumeSizeCache, advertise_toward,
     discover_node_id, run_check_in, serve_node_agent_rpc, supervise_node_agent_server,
 };
-use kontainer_rpc_auth::{AGENT_DNS_SUFFIX, WorkloadIdentity};
+use kontainer_rpc_auth::{AGENT_DNS_SUFFIX, WorkloadIdentity, runtime_directory};
 use tokio::net::TcpListener;
 use tokio_util::task::TaskTracker;
 use tracing_subscriber::EnvFilter;
@@ -62,7 +62,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
                 node_id: node_id.clone(),
             },
             &format!("{node_id}.{AGENT_DNS_SUFFIX}"),
-            &env::temp_dir().join(format!("kontainer-agent-{}", std::process::id())),
+            &runtime_directory("agent"),
         )?,
     };
     tracing::info!(node.id = %node_id, node.advertise_address = %advertise_address, "node agent identity");

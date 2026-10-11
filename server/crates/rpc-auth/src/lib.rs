@@ -8,7 +8,8 @@ mod tls;
 mod verifier;
 
 pub use cluster_secret::{
-    AGENT_DNS_SUFFIX, CONTROLLER_DNS_NAME, ClusterSecret, DEFAULT_CLUSTER_ID, MINIMUM_SECRET_LENGTH,
+    AGENT_DNS_SUFFIX, CONTROLLER_DNS_NAME, ClusterSecret, DEFAULT_CLUSTER_ID,
+    MINIMUM_SECRET_LENGTH, runtime_directory,
 };
 pub use identity::{
     AuthenticatedPeerIdentity, IdentityError, WorkloadIdentity, WorkloadKind,
