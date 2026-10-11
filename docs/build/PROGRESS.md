@@ -125,3 +125,13 @@ Append one line per work session: date, spec, what happened, what is next.
     - The vestigial session `hint` dropped.
 
   Every batch passed the full check set (rule 8) with PostgreSQL.
+- 2026-10-07 — Testing and CI review: consolidated Desktop, Server and Docker workflows;
+  added seven built-app Connect scenarios and completed at least three successful passes
+  with each of Astra, Fable, Sol and Opus. Local frontend, desktop Rust/vault,
+  PostgreSQL-required server and live DinD checks passed. Native Linux/Windows E2E
+  and new CI timings remain pending. Retirement candidates are in `docs/testing.md`;
+  no tests were deleted.
+- 2026-10-10 — Testing and CI review, re-checked before commit: no coverage lost from the six
+  removed workflows (native smoke still builds both binaries; desktop Clippy needs no `app/dist`
+  in debug). actionlint, shellcheck, 310 frontend units, frontend types/lint/format, 131 desktop
+  Rust units and the 8 macOS E2E tests passed. Next: a GitHub run to qualify Linux and Windows E2E.

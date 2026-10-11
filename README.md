@@ -240,9 +240,16 @@ macOS, Windows and Linux and needs no external driver. The `e2e` build has its o
 keychain service, so it never touches your real saved connections (ADR 0044):
 
 ```bash
-pnpm --filter app e2e:build
+pnpm --filter app e2e:build -- --locked
 pnpm --filter app e2e
 ```
+
+The `Desktop` workflow (`.github/workflows/desktop.yml`) runs unit tests and this
+E2E suite in Linux, Windows and macOS matrix jobs. Linux wraps the runner in
+Xvfb and a D-Bus session with an unlocked Secret Service keyring. `Server`
+combines workspace tests, stream evidence and native release smoke checks;
+`Docker` keeps pinned real-daemon qualification and offers an explicit manual
+`backend=fake` API-contract fallback. See [the testing plan](docs/testing.md).
 
 ## Notes
 

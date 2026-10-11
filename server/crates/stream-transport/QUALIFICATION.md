@@ -58,10 +58,12 @@ client-initiated close sending and acknowledgement share one shutdown deadline.
 
 ## Reproducible evidence
 
-The `Stream qualification` workflow records the commit, runner architecture,
+The `Tests` job in the `Server` workflow (`.github/workflows/server.yml`) records the commit, runner architecture,
 Rust version, resolved Axum/Tokio/Hyper/rustls/tokio-tungstenite graph, command,
 frame fixture, effective limits, close codes/reasons, lifecycle counters, and
-raw test output in the uploaded `stream-qualification` artifact.
+raw workspace test output in the uploaded `server-tests` artifact. The loopback
+suite runs within the workspace tests, and the job requires its qualification
+and lifecycle markers.
 
 Run the same loopback suite locally with:
 

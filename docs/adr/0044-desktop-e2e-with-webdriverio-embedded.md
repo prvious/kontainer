@@ -36,15 +36,22 @@ external driver.
   - `pnpm --filter app e2e` runs `app/tests/e2e/*.e2e.ts` with Mocha against that binary.
   - The specs have their own `tsconfig.json`, so WebdriverIO's globals stay out of the app's types.
   - Vitest only collects `*.spec.ts(x)`, so it never picks up the e2e specs.
-- **Scope today.** One smoke test: the app starts on the Connect card, and its Agent URL field takes
-  input. Flows that need a controller come later, against the dev cluster.
+- **Scope today.** The Connect smoke test and seven connection scenarios exercise the built webview,
+  real Tauri IPC and Rust HTTP client. A loopback HTTP fixture supplies bootstrap and rejected-login
+  replies and rejects unknown endpoints. Successful authentication, process-restart restoration,
+  inventory, mutations and real Swarm streaming remain the next journeys to add.
+  All spec files share one worker/session so automatic service recovery between workers cannot hide
+  an application crash.
 
 ## Consequences
 
 - macOS, Windows and Linux use the same suite and provider.
-- CI runs the suite on macOS only, in `.github/workflows/desktop-e2e.yml`. That job builds the e2e
-  binary, unlocks the login keychain and runs the specs, on any change under `app/`, the native
-  client or the pnpm files. Windows can be added as is; Linux also needs `xvfb`.
+- CI uses `.github/workflows/desktop.yml`: one matrix produces Linux, Windows and macOS jobs. Each
+  runs frontend units, Rust units, native-vault qualification and the same E2E suite. Linux runs
+  the suite under Xvfb inside a D-Bus session with an unlocked Secret Service keyring; macOS unlocks
+  its login keychain. Triggers include the native client, its stream dependencies and workspace
+  manifests. Local macOS execution is verified; Linux and Windows runtime qualification comes from
+  their native CI jobs.
 - The `e2e` feature must stay out of release tooling. A release built with it would ship a WebDriver
   server.
 - WebdriverIO v10 exists, but `@wdio/tauri-service` 1.4 targets v9. Upgrade them together.

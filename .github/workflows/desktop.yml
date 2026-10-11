@@ -1,0 +1,175 @@
+name: Desktop
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "server/crates/native-client/**"
+      - "server/crates/stream-protocol/**"
+      - "server/crates/stream-transport/**"
+      - "server/Cargo.toml"
+      - "server/Cargo.lock"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/desktop.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "server/crates/native-client/**"
+      - "server/crates/stream-protocol/**"
+      - "server/crates/stream-transport/**"
+      - "server/Cargo.toml"
+      - "server/Cargo.lock"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/desktop.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+  MANIFEST: app/src-tauri/Cargo.toml
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  test:
+    name: ${{ matrix.name }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            runner: ubuntu-24.04
+          - name: Windows
+            runner: windows-latest
+          - name: macOS
+            runner: macos-latest
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.0
+          components: rustfmt, clippy
+
+      - name: Rust format
+        run: cargo fmt --manifest-path "$MANIFEST" --all -- --check
+
+      - name: Linux libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev \
+            libxdo-dev libssl-dev build-essential gnome-keyring dbus-x11 xvfb xauth
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app/src-tauri
+          cache-workspace-crates: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 12.8.1
+
+      - name: Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Frontend checks
+        if: runner.os == 'Linux'
+        run: |
+          pnpm types
+          pnpm lint
+          pnpm --filter app fmt:check
+
+      - name: Frontend units
+        run: pnpm --filter app test
+
+      - name: Linux vault graph
+        if: runner.os == 'Linux'
+        run: |
+          tree="$(cargo tree --manifest-path "$MANIFEST" --locked --prefix none)"
+          if grep -E '^(keyring v|linux-keyutils-keyring-store|db-keystore)' <<<"$tree"; then
+            echo "Unsupported credential store entered the dependency graph." >&2
+            exit 1
+          fi
+          tree="$(cargo tree --manifest-path "$MANIFEST" --locked -e features)"
+          if grep -qE 'secret-service.*crypto-openssl' <<<"$tree"; then
+            echo "The Linux vault must use Rust cryptography, not OpenSSL." >&2
+            exit 1
+          fi
+
+      - name: Clippy
+        run: cargo clippy --manifest-path "$MANIFEST" --locked --all-targets -- -D warnings
+
+      - name: Rust units
+        run: cargo test --manifest-path "$MANIFEST" --locked
+
+      - name: Build desktop
+        run: pnpm --filter app e2e:build -- --locked
+
+      - name: Linux vault and E2E
+        if: runner.os == 'Linux'
+        env:
+          WEBKIT_DISABLE_DMABUF_RENDERER: "1"
+          NO_AT_BRIDGE: "1"
+        run: |
+          dbus-run-session -- bash -euo pipefail <<'TEST'
+          keyring_env="$(printf 'kontainer-ci' | gnome-keyring-daemon --unlock --components=secrets --daemonize)" \
+            || { echo "gnome-keyring-daemon did not start" >&2; exit 1; }
+          eval "$keyring_env"
+          mkdir -p app/tests/e2e/results
+          cargo test --manifest-path "$MANIFEST" --locked --lib -- --ignored --nocapture real_vault_round_trip \
+            2>&1 | tee app/tests/e2e/results/vault.log
+          grep -q 'real_vault_round_trip \.\.\. ok' app/tests/e2e/results/vault.log
+          xvfb-run -a --server-args='-screen 0 1920x1080x24' pnpm --filter app e2e
+          TEST
+
+      - name: Unlock macOS vault
+        if: runner.os == 'macOS'
+        run: security unlock-keychain -p "" "$HOME/Library/Keychains/login.keychain-db"
+
+      - name: Native vault and E2E
+        if: runner.os != 'Linux'
+        run: |
+          mkdir -p app/tests/e2e/results
+          cargo test --manifest-path "$MANIFEST" --locked --lib -- --ignored --nocapture real_vault_round_trip \
+            2>&1 | tee app/tests/e2e/results/vault.log
+          grep -q 'real_vault_round_trip \.\.\. ok' app/tests/e2e/results/vault.log
+          pnpm --filter app e2e
+
+      - name: Desktop evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.name }}
+          path: app/tests/e2e/results
+          if-no-files-found: ignore
