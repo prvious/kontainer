@@ -82,3 +82,5 @@ What becomes easier, what becomes harder, what must be revisited and when.
 | [0042](./0042-the-controller-runs-on-a-swarm-manager.md) | Run the controller on a Swarm manager with its Docker socket | accepted |
 | [0043](./0043-idempotent-container-actions-and-chrono-times.md) | Idempotent start and stop, Docker times through chrono, and the agent RPC's last unread fields | accepted |
 | [0044](./0044-desktop-e2e-with-webdriverio-embedded.md) | Drive the desktop app end to end with WebdriverIO's embedded WebDriver | accepted |
+| [0045](./0045-cluster-trust-from-one-shared-secret.md) | Derive cluster trust from one shared secret | accepted |
+| [0046](./0046-plaintext-behind-the-operators-proxy.md) | Serve plaintext behind the operator's reverse proxy | accepted |
