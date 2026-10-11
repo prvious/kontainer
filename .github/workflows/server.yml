@@ -1,0 +1,166 @@
+name: Server
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "server/**"
+      - ".github/workflows/server.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "server/**"
+      - ".github/workflows/server.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: server-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+
+jobs:
+  verify:
+    name: Tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_PASSWORD: kontainer
+          POSTGRES_USER: kontainer
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U kontainer -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      KONTAINER_REQUIRE_POSTGRES_TESTS: "1"
+      KONTAINER_TEST_DATABASE_URL: postgres://kontainer:kontainer@127.0.0.1:5432/postgres
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.0
+          components: rustfmt, clippy
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+          shared-key: server-tests
+          cache-workspace-crates: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Format
+        run: cargo fmt --manifest-path server/Cargo.toml --all -- --check
+
+      - name: TLS graph
+        run: |
+          tree="$(cargo tree --manifest-path server/Cargo.toml --locked --workspace -e features)"
+          if grep -E "aws-lc-rs|aws-lc-sys" <<<"$tree"; then
+            echo "aws-lc packages must stay out of the tree: ring is the only rustls crypto engine" >&2
+            exit 1
+          fi
+
+      - name: Clippy
+        run: cargo clippy --manifest-path server/Cargo.toml --locked --workspace --all-targets --features kontainer-engine/real-engine-tests -- -D warnings
+
+      - name: Tests and stream evidence
+        run: |
+          set -euo pipefail
+          {
+            echo "commit=$GITHUB_SHA"
+            echo "runner_architecture=$(uname -m)"
+            echo "rust_version=$(rustc --version)"
+            for dependency in rustls tokio-tungstenite axum; do
+              cargo tree --manifest-path server/Cargo.toml --locked \
+                --package kontainer-stream-transport --invert "$dependency"
+            done
+            cargo tree --manifest-path server/Cargo.toml --locked \
+              --package kontainer-stream-transport --edges features --invert rustls
+            cargo test --manifest-path server/Cargo.toml --locked --workspace -- --nocapture
+          } 2>&1 | tee server-tests.log
+          grep -q "KONTAINER_STREAM_EVIDENCE" server-tests.log
+          grep -q "KONTAINER_STREAM_SLOW_CONSUMER_EVIDENCE" server-tests.log
+          grep -q "active=0 failed_joins=0" server-tests.log
+          tree="$(cargo tree --manifest-path server/Cargo.toml --locked \
+            --package kontainer-stream-transport --edges features --invert rustls)"
+          grep -q 'rustls feature "ring"' <<<"$tree"
+          tree="$(cargo tree --manifest-path server/Cargo.toml --locked --duplicates)"
+          if grep -Eq "^(axum|hyper|http|http-body|rustls|tokio|tokio-tungstenite|tungstenite) v" <<<"$tree"; then
+            echo "duplicate core HTTP/runtime/TLS dependency detected" >&2
+            exit 1
+          fi
+
+      - name: Test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-tests
+          path: server-tests.log
+          if-no-files-found: error
+
+  native:
+    name: Linux ${{ matrix.architecture }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: amd64
+            runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            uname_machine: x86_64
+          - architecture: arm64
+            runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            uname_machine: aarch64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.98.0
+
+      - name: Cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+          shared-key: server-native-${{ matrix.target }}
+          cache-workspace-crates: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Native smoke
+        run: >-
+          bash server/scripts/native-smoke.sh
+          "${{ matrix.target }}"
+          "${{ matrix.uname_machine }}"
+          "native-evidence/${{ matrix.architecture }}"
+
+      - name: Native evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-${{ matrix.architecture }}
+          path: native-evidence/${{ matrix.architecture }}
+          if-no-files-found: error
+          retention-days: 14

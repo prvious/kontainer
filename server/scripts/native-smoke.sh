@@ -51,6 +51,7 @@ cargo build \
 cargo test \
   --manifest-path server/Cargo.toml \
   --locked \
+  --release \
   --target "$target_triple" \
   --package kontainer-agent-proto \
   -- --nocapture 2>&1 | tee "$evidence_directory/protobuf-runtime-test.txt"

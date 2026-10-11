@@ -5,7 +5,7 @@ This slice qualifies the local Unix-socket connection, API negotiation,
 does not establish the final Kontainer 1.0 Engine support range or qualify
 any Swarm mutation.
 
-The `Engine qualification` workflow runs the same adapter test against these
+The `Docker` workflow (`.github/workflows/docker.yml`) runs the same adapter test against these
 pinned real daemon images:
 
 | Daemon image | Negotiated API | Purpose |
@@ -23,6 +23,11 @@ If both lanes pass, Engine API 1.47, represented by Docker Engine 27.5.1, is
 the provisional evidence floor for this walking skeleton. This is not the
 advertised Kontainer 1.0 support floor: that claim remains blocked on the full
 resource and Swarm compatibility suite.
+
+Manual dispatch accepts `backend=fake` to run the existing scripted Docker API
+fixtures without a daemon. This fallback checks adapter contracts and error
+mapping; it does not produce real-engine or Swarm compatibility evidence.
+Pushes and pull requests always qualify the real pinned daemons.
 
 Run one qualification locally against an already isolated daemon socket with:
 

@@ -137,10 +137,10 @@ importers:
         version: 9.32.0(@types/node@24.10.11)(expect-webdriverio@6.1.0)(supports-color@8.1.1)
       '@wdio/globals':
         specifier: ^9.29.1
-        version: 9.29.1(expect-webdriverio@6.1.0)(webdriverio@9.32.0(supports-color@8.1.1))
+        version: 9.31.3(expect-webdriverio@6.1.0)(webdriverio@9.32.0(supports-color@8.1.1))
       '@wdio/local-runner':
         specifier: ^9.32.0
-        version: 9.32.0(@wdio/globals@9.29.1)(supports-color@8.1.1)(webdriverio@9.32.0(supports-color@8.1.1))
+        version: 9.32.0(@wdio/globals@9.31.3)(supports-color@8.1.1)(webdriverio@9.32.0(supports-color@8.1.1))
       '@wdio/mocha-framework':
         specifier: ^9.32.0
         version: 9.32.0(supports-color@8.1.1)
@@ -165,6 +165,9 @@ importers:
       jsdom:
         specifier: ^28.0.0
         version: 28.0.0(@noble/hashes@1.8.0)(supports-color@8.1.1)
+      oxfmt:
+        specifier: ^0.23.0
+        version: 0.23.0
       typescript:
         specifier: ~5.9.3
         version: 5.9.3
@@ -1046,6 +1049,50 @@ packages:
 
   '@open-draft/until@2.1.0':
     resolution: {integrity: sha512-U69T3ItWHvLwGg5eJ0n3I62nWuE6ilHlmz7zM0npLBRvPRd7e6NYmg54vvRtP5mZG7kZqZCFVdsTWo7BPtBujg==}
+
+  '@oxfmt/darwin-arm64@0.23.0':
+    resolution: {integrity: sha512-shGng2EjBspvuqtFtcjcKf0WoZ9QCdL8iLYgdOoKSiSQ9pPyLJ4jQf62yhm4b2PpZNVcV/20gV6d8SyKzg6SZQ==}
+    cpu: [arm64]
+    os: [darwin]
+
+  '@oxfmt/darwin-x64@0.23.0':
+    resolution: {integrity: sha512-DxQ7Hm7B+6JiIkiRU3CSJmM15nTJDDezyaAv+x9NN8BfU0C49O8JuZIFu1Lr9AKEPV+ECIYM2X4HU0xm6IdiMQ==}
+    cpu: [x64]
+    os: [darwin]
+
+  '@oxfmt/linux-arm64-gnu@0.23.0':
+    resolution: {integrity: sha512-7qTXPpENi45sEKsaYFit4VRywPVkX+ZJc5JVA17KW1coJ/SLUuRAdLjRipU+QTZsr1TF93HCmGFSlUjB7lmEVQ==}
+    cpu: [arm64]
+    os: [linux]
+    libc: [glibc]
+
+  '@oxfmt/linux-arm64-musl@0.23.0':
+    resolution: {integrity: sha512-qkFXbf+K01B++j69o9mLvvyfhmmL4+qX7hGPA2PRDkE5xxuUTWdqboQQc1FgGI0teUlIYYyxjamq9UztL2A7NA==}
+    cpu: [arm64]
+    os: [linux]
+    libc: [musl]
+
+  '@oxfmt/linux-x64-gnu@0.23.0':
+    resolution: {integrity: sha512-J7Q13Ujyn8IgjHD96urA377GOy8HerxC13OrEyYaM8iwH3gc/EoboK9AKu0bxp9qai4btPFDhnkRnpCwJE9pAw==}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
+
+  '@oxfmt/linux-x64-musl@0.23.0':
+    resolution: {integrity: sha512-3gb25Zk2/y4An8fi399KdpLkDYFTJEB5Nq/sSHmeXG0pZlR/jnKoXEFHsjU+9nqF2wsuZ+tmkoi/swcaGG8+Qg==}
+    cpu: [x64]
+    os: [linux]
+    libc: [musl]
+
+  '@oxfmt/win32-arm64@0.23.0':
+    resolution: {integrity: sha512-JKfRP2ENWwRZ73rMZFyChvRi/+oDEW+3obp1XIwecot8gvDHgGZ4nX3hTp4VPiBFL89JORMpWSKzJvjRDucJIw==}
+    cpu: [arm64]
+    os: [win32]
+
+  '@oxfmt/win32-x64@0.23.0':
+    resolution: {integrity: sha512-vgqtYK1X1n/KexCNQKWXao3hyOnmWuCzk2sQyCSpkLhjSNIDPm7dmnEkvOXhf1t0O5RjCwHpk2VB6Fuaq3GULg==}
+    cpu: [x64]
+    os: [win32]
 
   '@pkgjs/parseargs@0.11.0':
     resolution: {integrity: sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg==}
@@ -3921,6 +3968,11 @@ packages:
   outvariant@1.4.3:
     resolution: {integrity: sha512-+Sl2UErvtsoajRDKCE5/dBz4DIvHXQQnAxtQTF04OJxY0+DyZXSo5P5Bb7XYWOh81syohlYL24hbDwxedPUJCA==}
 
+  oxfmt@0.23.0:
+    resolution: {integrity: sha512-dh4rlNBua93aVf2ZaDecbQxVLMnUUTvDi1K1fdvBdontQeEf6K22Z1KQg5QKl2D9aNFeFph+wOVwcjjYUIO6Mw==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+    hasBin: true
+
   p-limit@3.1.0:
     resolution: {integrity: sha512-TYOanM3wGwNGsZN2cVTYPArw454xnXj5qmWF1bEoAc4+cU/ol7GVh7odevjp1FNHduHc3KZMcFduxU5Xc6uJRQ==}
     engines: {node: '>=10'}
@@ -4615,6 +4667,10 @@ packages:
   tinyglobby@0.2.15:
     resolution: {integrity: sha512-j2Zq4NyQYG5XMST4cbs02Ak8iJUdxRM0XI5QyxXuZOzKOINmWurp3smXu3y5wDcJrptwpSjgXHzIQxR0omXljQ==}
     engines: {node: '>=12.0.0'}
+
+  tinypool@2.0.0:
+    resolution: {integrity: sha512-/RX9RzeH2xU5ADE7n2Ykvmi9ED3FBGPAjw9u3zucrNNaEBIO0HPSYgL0NT7+3p147ojeSdaVu08F6hjpv31HJg==}
+    engines: {node: ^20.0.0 || >=22.0.0}
 
   tinyrainbow@2.0.0:
     resolution: {integrity: sha512-op4nsTR47R6p0vMUUoYl/a+ljLFVtlfaXkLQmqfLR1qHma1h/ysYk4hEXZ880bf2CYgTskvTa/e196Vd5dDQXw==}
@@ -6011,6 +6067,30 @@ snapshots:
 
   '@open-draft/until@2.1.0': {}
 
+  '@oxfmt/darwin-arm64@0.23.0':
+    optional: true
+
+  '@oxfmt/darwin-x64@0.23.0':
+    optional: true
+
+  '@oxfmt/linux-arm64-gnu@0.23.0':
+    optional: true
+
+  '@oxfmt/linux-arm64-musl@0.23.0':
+    optional: true
+
+  '@oxfmt/linux-x64-gnu@0.23.0':
+    optional: true
+
+  '@oxfmt/linux-x64-musl@0.23.0':
+    optional: true
+
+  '@oxfmt/win32-arm64@0.23.0':
+    optional: true
+
+  '@oxfmt/win32-x64@0.23.0':
+    optional: true
+
   '@pkgjs/parseargs@0.11.0':
     optional: true
 
@@ -7005,15 +7085,15 @@ snapshots:
 
   '@wdio/globals@9.29.1(expect-webdriverio@6.1.0)(webdriverio@9.32.0(supports-color@8.1.1))':
     dependencies:
-      expect-webdriverio: 6.1.0(@wdio/globals@9.29.1)(@wdio/logger@9.29.1)(webdriverio@9.32.0(supports-color@8.1.1))
+      expect-webdriverio: 6.1.0(@wdio/globals@9.31.3)(@wdio/logger@9.29.1)(webdriverio@9.32.0(supports-color@8.1.1))
       webdriverio: 9.32.0(supports-color@8.1.1)
 
   '@wdio/globals@9.31.3(expect-webdriverio@6.1.0)(webdriverio@9.32.0(supports-color@8.1.1))':
     dependencies:
-      expect-webdriverio: 6.1.0(@wdio/globals@9.29.1)(@wdio/logger@9.29.1)(webdriverio@9.32.0(supports-color@8.1.1))
+      expect-webdriverio: 6.1.0(@wdio/globals@9.31.3)(@wdio/logger@9.29.1)(webdriverio@9.32.0(supports-color@8.1.1))
       webdriverio: 9.32.0(supports-color@8.1.1)
 
-  '@wdio/local-runner@9.32.0(@wdio/globals@9.29.1)(supports-color@8.1.1)(webdriverio@9.32.0(supports-color@8.1.1))':
+  '@wdio/local-runner@9.32.0(@wdio/globals@9.31.3)(supports-color@8.1.1)(webdriverio@9.32.0(supports-color@8.1.1))':
     dependencies:
       '@types/node': 20.19.43
       '@wdio/logger': 9.29.1
@@ -7022,7 +7102,7 @@ snapshots:
       '@wdio/types': 9.32.0
       '@wdio/xvfb': 9.32.0
       exit-hook: 4.0.0
-      expect-webdriverio: 6.1.0(@wdio/globals@9.29.1)(@wdio/logger@9.29.1)(webdriverio@9.32.0(supports-color@8.1.1))
+      expect-webdriverio: 6.1.0(@wdio/globals@9.31.3)(@wdio/logger@9.29.1)(webdriverio@9.32.0(supports-color@8.1.1))
       split2: 4.2.0
       stream-buffers: 3.0.3
     transitivePeerDependencies:
@@ -7119,7 +7199,7 @@ snapshots:
       '@wdio/types': 9.32.0
       '@wdio/utils': 9.32.0(supports-color@8.1.1)
       deepmerge-ts: 8.0.2
-      expect-webdriverio: 6.1.0(@wdio/globals@9.29.1)(@wdio/logger@9.29.1)(webdriverio@9.32.0(supports-color@8.1.1))
+      expect-webdriverio: 6.1.0(@wdio/globals@9.31.3)(@wdio/logger@9.29.1)(webdriverio@9.32.0(supports-color@8.1.1))
       webdriver: 9.32.0(supports-color@8.1.1)
       webdriverio: 9.32.0(supports-color@8.1.1)
     transitivePeerDependencies:
@@ -8093,10 +8173,10 @@ snapshots:
 
   expect-type@1.3.0: {}
 
-  expect-webdriverio@6.1.0(@wdio/globals@9.29.1)(@wdio/logger@9.29.1)(webdriverio@9.32.0(supports-color@8.1.1)):
+  expect-webdriverio@6.1.0(@wdio/globals@9.31.3)(@wdio/logger@9.29.1)(webdriverio@9.32.0(supports-color@8.1.1)):
     dependencies:
       '@vitest/snapshot': 4.1.11
-      '@wdio/globals': 9.29.1(expect-webdriverio@6.1.0)(webdriverio@9.32.0(supports-color@8.1.1))
+      '@wdio/globals': 9.31.3(expect-webdriverio@6.1.0)(webdriverio@9.32.0(supports-color@8.1.1))
       '@wdio/logger': 9.29.1
       deep-eql: 5.0.2
       expect: 30.5.2
@@ -9101,6 +9181,19 @@ snapshots:
 
   outvariant@1.4.3: {}
 
+  oxfmt@0.23.0:
+    dependencies:
+      tinypool: 2.0.0
+    optionalDependencies:
+      '@oxfmt/darwin-arm64': 0.23.0
+      '@oxfmt/darwin-x64': 0.23.0
+      '@oxfmt/linux-arm64-gnu': 0.23.0
+      '@oxfmt/linux-arm64-musl': 0.23.0
+      '@oxfmt/linux-x64-gnu': 0.23.0
+      '@oxfmt/linux-x64-musl': 0.23.0
+      '@oxfmt/win32-arm64': 0.23.0
+      '@oxfmt/win32-x64': 0.23.0
+
   p-limit@3.1.0:
     dependencies:
       yocto-queue: 0.1.0
@@ -9959,6 +10052,8 @@ snapshots:
     dependencies:
       fdir: 6.5.0(picomatch@4.0.3)
       picomatch: 4.0.3
+
+  tinypool@2.0.0: {}
 
   tinyrainbow@2.0.0: {}
 
