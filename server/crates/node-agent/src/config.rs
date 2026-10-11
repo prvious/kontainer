@@ -132,6 +132,15 @@ impl AgentConfig {
         if !valid_dns_name(&self.controller_server_name) {
             return Err("KONTAINER_CONTROLLER_SERVER_NAME must be a DNS name".into());
         }
+        // A secret-issued controller certificate always carries the default name.
+        if matches!(self.trust, AgentTrust::Secret(_))
+            && self.controller_server_name != CONTROLLER_DNS_NAME
+        {
+            return Err(
+                "KONTAINER_CONTROLLER_SERVER_NAME applies only with KONTAINER_NODE_RPC_TLS_* files"
+                    .into(),
+            );
+        }
         if let Some(address) = &self.advertise_address
             && !valid_host_port(address)
         {
@@ -184,9 +193,11 @@ fn valid_agent_dns_name(node_id: &str) -> bool {
 
 /// `ip:port` of this host on the route to the controller, which is the address the controller can
 /// dial back. Connecting a UDP socket only picks the route; nothing is sent.
+/// Only controller addresses in the listener's family count, so an IPv4 listener never advertises
+/// an IPv6 address on a dual-stack network.
 pub async fn advertise_toward(
     controller_rpc_endpoint: &str,
-    port: u16,
+    binding: SocketAddr,
 ) -> Result<String, Box<dyn Error + Send + Sync>> {
     let authority = controller_rpc_endpoint
         .strip_prefix("https://")
@@ -194,15 +205,15 @@ pub async fn advertise_toward(
         .trim_end_matches('/');
     let controller = tokio::net::lookup_host(authority)
         .await?
-        .next()
-        .ok_or("the controller's address did not resolve")?;
-    let probe = std::net::UdpSocket::bind(if controller.is_ipv4() {
+        .find(|address| address.is_ipv4() == binding.is_ipv4())
+        .ok_or("the controller has no address in the listener's IP family; set KONTAINER_NODE_ADVERTISE_ADDRESS")?;
+    let probe = std::net::UdpSocket::bind(if binding.is_ipv4() {
         "0.0.0.0:0"
     } else {
         "[::]:0"
     })?;
     probe.connect(controller)?;
-    Ok(SocketAddr::new(probe.local_addr()?.ip(), port).to_string())
+    Ok(SocketAddr::new(probe.local_addr()?.ip(), binding.port()).to_string())
 }
 
 /// `host:port` with a non-empty host of DNS or IP characters and a non-zero port.
@@ -265,7 +276,7 @@ mod tests {
     use async_trait::async_trait;
     use kontainer_engine::{ContainerEngine, DockerHost, EngineError, NodeInfo};
     use kontainer_lifecycle::ShutdownGrace;
-    use kontainer_rpc_auth::MutualTlsIdentityFiles;
+    use kontainer_rpc_auth::{ClusterSecret, MutualTlsIdentityFiles};
     use tokio_util::sync::CancellationToken;
 
     fn files() -> AgentTrust {
@@ -324,18 +335,53 @@ mod tests {
 
     #[tokio::test]
     async fn the_advertise_address_is_this_host_on_the_route_to_the_controller() {
+        let every_ipv4 = "0.0.0.0:50052".parse().unwrap();
         assert_eq!(
-            advertise_toward("https://127.0.0.1:50051", 50052)
+            advertise_toward("https://127.0.0.1:50051", every_ipv4)
                 .await
                 .unwrap(),
             "127.0.0.1:50052"
         );
         assert_eq!(
-            advertise_toward("https://127.0.0.1:50051/", 7)
+            advertise_toward("https://127.0.0.1:50051/", "0.0.0.0:7".parse().unwrap())
                 .await
                 .unwrap(),
             "127.0.0.1:7"
         );
+        // An IPv6 listener can't advertise toward a controller that only has IPv4.
+        let error = advertise_toward("https://127.0.0.1:50051", "[::]:50052".parse().unwrap())
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("listener's IP family"));
+    }
+
+    #[test]
+    fn a_secret_issued_controller_has_the_default_server_name() {
+        let config = AgentConfig {
+            node_id: None,
+            cluster_id: "default".to_owned(),
+            binding: "0.0.0.0:50052".parse().unwrap(),
+            trust: AgentTrust::Secret(ClusterSecret::new(&"s".repeat(32)).unwrap()),
+            shutdown_grace: ShutdownGrace::default(),
+            environment: AgentEnvironment::Production,
+            docker_host: DockerHost::default(),
+            controller_rpc_endpoint: "https://controller:50051".to_owned(),
+            controller_server_name: "controller.kontainer.internal".to_owned(),
+            advertise_address: None,
+        };
+        assert!(config.validate().is_ok());
+
+        let mut renamed = config.clone();
+        renamed.controller_server_name = "controller.example".to_owned();
+        assert!(
+            renamed
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("applies only with KONTAINER_NODE_RPC_TLS_* files")
+        );
+        renamed.trust = files();
+        assert!(renamed.validate().is_ok(), "operator files can name it");
     }
 
     #[test]

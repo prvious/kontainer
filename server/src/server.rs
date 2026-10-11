@@ -17,7 +17,7 @@ use hyper_util::{rt::TokioIo, server::conn::auto, service::TowerToHyperService};
 use kontainer_engine::DockerHost;
 use kontainer_lifecycle::{DrainClock, ShutdownGrace};
 use kontainer_rpc_auth::{
-    CONTROLLER_DNS_NAME, ClusterSecret, MutualTlsIdentityFiles, WorkloadIdentity,
+    AGENT_DNS_SUFFIX, CONTROLLER_DNS_NAME, ClusterSecret, MutualTlsIdentityFiles, WorkloadIdentity,
     runtime_directory, spawn_tracked, valid_identity_segment,
 };
 use loco_rs::{
@@ -854,6 +854,13 @@ fn agent_rpc_tls_files(
     if let Some(tls) = &settings.tls {
         return Ok(tls.clone().into());
     }
+    // Secret-issued agent certificates always carry the default suffix, so dialling another would
+    // fail every call.
+    if settings.agent_server_name_suffix != AGENT_DNS_SUFFIX {
+        return Err(Error::string(
+            "agent_server_name_suffix applies only with settings.agent_rpc.tls certificate files",
+        ));
+    }
     let secret = secret.ok_or_else(|| {
         Error::string(
             "agent RPC needs KONTAINER_SECRET (or KONTAINER_SECRET_FILE), or settings.agent_rpc.tls certificate paths",
@@ -1126,9 +1133,30 @@ mod tests {
         assert!(error.to_string().contains("KONTAINER_SECRET"));
 
         let secret = ClusterSecret::new(&"s".repeat(32)).unwrap();
-        let files =
-            agent_rpc_tls_files(&issued, Some(secret), &directory.path().join("issued")).unwrap();
+        let files = agent_rpc_tls_files(
+            &issued,
+            Some(secret.clone()),
+            &directory.path().join("issued"),
+        )
+        .unwrap();
         assert!(files.server_acceptor().is_ok());
+
+        // Agents issue `{node_id}.agent.kontainer.internal`; another suffix could never match.
+        let mut custom_suffix = settings_without_rpc_tls();
+        custom_suffix["agent_rpc"]["agent_server_name_suffix"] =
+            serde_json::json!("agents.example");
+        let custom_suffix = parse_controller_settings(custom_suffix).unwrap().agent_rpc;
+        let error = agent_rpc_tls_files(
+            &custom_suffix,
+            Some(secret),
+            &directory.path().join("custom"),
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("agent_server_name_suffix applies only")
+        );
     }
 
     fn valid_settings() -> serde_json::Value {
@@ -1312,10 +1340,15 @@ mod tests {
     /// Renders `config/production.yaml` in a child process, so its environment stays private.
     #[test]
     fn production_config_child() {
-        let Ok(expected_mode) = std::env::var("KONTAINER_TEST_PRODUCTION_CONFIG_CHILD") else {
+        let Ok(expected) = std::env::var("KONTAINER_TEST_PRODUCTION_CONFIG_CHILD") else {
             return;
         };
-        let config = Config::from_folder(&Environment::Production, Path::new("config")).unwrap();
+        let config = Config::from_folder(&Environment::Production, Path::new("config"));
+        if expected == "error" {
+            assert!(config.is_err(), "a partial TLS setting must fail to load");
+            return;
+        }
+        let config = config.unwrap();
         assert!(config.database.auto_migrate);
         assert_eq!(config.server.host, "http://localhost:5150");
         let settings = parse_controller_settings(config.settings.unwrap()).unwrap();
@@ -1325,27 +1358,51 @@ mod tests {
             PublicHttpMode::Plaintext => "plaintext",
             PublicHttpMode::Tls => "tls",
         };
-        assert_eq!(mode, expected_mode);
+        assert_eq!(mode, expected);
     }
 
     #[test]
     fn production_config_serves_plaintext_unless_given_a_certificate() {
-        for (certificate, expected_mode) in [("", "plaintext"), ("/certs/public.pem", "tls")] {
-            let result = std::process::Command::new(std::env::current_exe().unwrap())
+        const TLS_PATHS: [&str; 5] = [
+            "PUBLIC_HTTP_TLS_CERTIFICATE_PATH",
+            "PUBLIC_HTTP_TLS_PRIVATE_KEY_PATH",
+            "AGENT_RPC_TLS_CERTIFICATE_PATH",
+            "AGENT_RPC_TLS_PRIVATE_KEY_PATH",
+            "AGENT_RPC_TLS_CLIENT_CA_PATH",
+        ];
+        let cases: [(&[&str], &str); 4] = [
+            (&[], "plaintext"),
+            (
+                &[
+                    "PUBLIC_HTTP_TLS_CERTIFICATE_PATH",
+                    "PUBLIC_HTTP_TLS_PRIVATE_KEY_PATH",
+                ],
+                "tls",
+            ),
+            // A key without its certificate fails closed instead of serving plaintext.
+            (&["PUBLIC_HTTP_TLS_PRIVATE_KEY_PATH"], "error"),
+            // Likewise a partial agent RPC bundle instead of falling back to the secret.
+            (&["AGENT_RPC_TLS_PRIVATE_KEY_PATH"], "error"),
+        ];
+        for (set, expected) in cases {
+            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+            command
                 .args(["--exact", "server::tests::production_config_child"])
-                .env("KONTAINER_TEST_PRODUCTION_CONFIG_CHILD", expected_mode)
+                .env("KONTAINER_TEST_PRODUCTION_CONFIG_CHILD", expected)
                 .env("DATABASE_URL", "postgres://kontainer@postgres/kontainer")
-                .env("PUBLIC_HTTP_TLS_CERTIFICATE_PATH", certificate)
-                .env("PUBLIC_HTTP_TLS_PRIVATE_KEY_PATH", "/certs/public-key.pem")
                 .env_remove("HOST")
                 .env_remove("DB_AUTO_MIGRATE")
-                .env_remove("CLUSTER_ID")
-                .env_remove("AGENT_RPC_TLS_CERTIFICATE_PATH")
-                .output()
-                .unwrap();
+                .env_remove("CLUSTER_ID");
+            for name in TLS_PATHS {
+                command.env_remove(name);
+            }
+            for name in set {
+                command.env(name, format!("/certs/{name}.pem"));
+            }
+            let result = command.output().unwrap();
             assert!(
                 result.status.success(),
-                "{expected_mode}: {}",
+                "{set:?} => {expected}: {}",
                 String::from_utf8_lossy(&result.stderr)
             );
             assert!(String::from_utf8_lossy(&result.stdout).contains("1 passed"));

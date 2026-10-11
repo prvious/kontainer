@@ -261,6 +261,8 @@ volumes:
   cluster CA from it and issues its own certificate, so there is nothing to
   generate (ADR 0045). `KONTAINER_SECRET_FILE` reads it from a Swarm secret
   instead.
+- `DB_PASSWORD` goes inside `DATABASE_URL`, so keep it URL-safe
+  (`openssl rand -hex 24`) or percent-encode it there.
 - The controller migrates its database on start. Agents find their node id
   (the Swarm node id) and their address on the `kontainer` network themselves;
   `KONTAINER_NODE_ID` and `KONTAINER_NODE_ADVERTISE_ADDRESS` override them.

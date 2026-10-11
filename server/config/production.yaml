@@ -39,7 +39,8 @@ settings:
     binding: <%= get_env(name="AGENT_RPC_BINDING", default="0.0.0.0:50051") %>
     cluster_id: <%= get_env(name="CLUSTER_ID", default="default") %>
     # Without certificate paths the controller issues its own from KONTAINER_SECRET (ADR 0045).
-<% if get_env(name="AGENT_RPC_TLS_CERTIFICATE_PATH", default="") %>
+    # Setting any path requires all three: a missing one fails startup instead of falling back.
+<% if get_env(name="AGENT_RPC_TLS_CERTIFICATE_PATH", default="") or get_env(name="AGENT_RPC_TLS_PRIVATE_KEY_PATH", default="") or get_env(name="AGENT_RPC_TLS_CLIENT_CA_PATH", default="") %>
     tls:
       certificate_path: <%= get_env(name="AGENT_RPC_TLS_CERTIFICATE_PATH") %>
       private_key_path: <%= get_env(name="AGENT_RPC_TLS_PRIVATE_KEY_PATH") %>
@@ -48,9 +49,10 @@ settings:
   # Must stay a unix:// socket; tcp:// fails startup outside development/test.
   docker:
     host: <%= get_env(name="KONTAINER_DOCKER_HOST", default="unix:///var/run/docker.sock") %>
-  # Plaintext behind the operator's reverse proxy, which terminates TLS (ADR 0046).
+  # Plaintext behind the operator's reverse proxy, which terminates TLS (ADR 0046). Setting either
+  # path requires both: a missing one fails startup instead of serving plaintext.
   public_http:
-<% if get_env(name="PUBLIC_HTTP_TLS_CERTIFICATE_PATH", default="") %>
+<% if get_env(name="PUBLIC_HTTP_TLS_CERTIFICATE_PATH", default="") or get_env(name="PUBLIC_HTTP_TLS_PRIVATE_KEY_PATH", default="") %>
     mode: tls
     tls:
       certificate_path: <%= get_env(name="PUBLIC_HTTP_TLS_CERTIFICATE_PATH") %>

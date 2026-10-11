@@ -52,7 +52,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     };
     let advertise_address = match config.advertise_address {
         Some(address) => address,
-        None => advertise_toward(&config.controller_rpc_endpoint, config.binding.port()).await?,
+        None => advertise_toward(&config.controller_rpc_endpoint, config.binding).await?,
     };
     let tls_files = match config.trust {
         AgentTrust::Files(files) => files,
