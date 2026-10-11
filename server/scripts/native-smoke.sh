@@ -73,13 +73,16 @@ timeout --kill-after=2s 10s "$controller_binary" --help > "$evidence_directory/c
 timeout --kill-after=2s 10s "$node_agent_binary" --version > "$evidence_directory/node-agent-version.txt"
 
 missing_config_exit=0
-timeout --kill-after=2s 10s env -u KONTAINER_NODE_ID "$node_agent_binary" \
+# With no certificate paths and no cluster secret the agent has no identity and must fail closed.
+timeout --kill-after=2s 10s env -u KONTAINER_SECRET -u KONTAINER_SECRET_FILE \
+  -u KONTAINER_NODE_RPC_TLS_CERTIFICATE_PATH -u KONTAINER_NODE_RPC_TLS_PRIVATE_KEY_PATH \
+  -u KONTAINER_NODE_RPC_TLS_CLIENT_CA_PATH "$node_agent_binary" \
   > "$evidence_directory/node-agent-missing-config.txt" 2>&1 || missing_config_exit=$?
 if [[ "$missing_config_exit" -ne 1 ]]; then
   echo "expected node-agent configuration exit 1, got $missing_config_exit" >&2
   exit 1
 fi
-grep -q "required environment variable KONTAINER_NODE_ID is not set" \
+grep -q "set KONTAINER_SECRET (or KONTAINER_SECRET_FILE)" \
   "$evidence_directory/node-agent-missing-config.txt"
 
 install -m 0755 "$controller_binary" "$evidence_directory/artifacts/kontainer-controller"
