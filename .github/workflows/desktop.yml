@@ -103,9 +103,12 @@ jobs:
       - name: Dependencies
         run: pnpm install --frozen-lockfile
 
+      # ponytail: oxfmt is installed globally on dev machines, not declared in app/package.json;
+      # declaring it as a devDependency would let this step drop the install.
       - name: Frontend checks
         if: runner.os == 'Linux'
         run: |
+          npm install --global oxfmt@0.23.0
           pnpm types
           pnpm lint
           pnpm --filter app fmt:check
