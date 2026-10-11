@@ -32,7 +32,10 @@ use kontainer_lifecycle::ShutdownGrace;
 use kontainer_node_agent::{
     AgentShutdown, NodeAgentService, serve_node_agent_rpc, supervise_node_agent_server,
 };
-use kontainer_rpc_auth::MutualTlsIdentityFiles;
+use kontainer_rpc_auth::{
+    AGENT_DNS_SUFFIX, CONTROLLER_DNS_NAME, ClusterSecret, DEFAULT_CLUSTER_ID,
+    MutualTlsIdentityFiles, WorkloadIdentity,
+};
 use support::pki::{
     AGENT_URI, CLUSTER_ID, CONTROLLER_NAME, CONTROLLER_URI, NODE_AGENT_NAME, NODE_ID,
     OTHER_CLUSTER_ID, TestPki,
@@ -250,6 +253,87 @@ async fn dev_pki_files_complete_a_verified_describe() {
     .unwrap();
     assert!(
         wrong_node
+            .describe(&CancellationToken::new())
+            .await
+            .is_err()
+    );
+
+    cancellation.cancel();
+    let _ = timeout(Duration::from_secs(2), task).await;
+}
+
+/// Each side issues its own certificate from the shared secret (ADR 0045); the unchanged mTLS
+/// checks accept the pair, and a controller holding another secret is refused.
+#[tokio::test]
+async fn secret_issued_identities_complete_a_verified_describe() {
+    let secret = |value: &str| ClusterSecret::new(&value.repeat(32)).unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let issue = |secret: ClusterSecret, name: &str, identity: WorkloadIdentity, dns: &str| {
+        secret
+            .issue_identity_files(&identity, dns, &directory.path().join(name))
+            .unwrap()
+    };
+    let controller = |secret: ClusterSecret, name: &str| {
+        issue(
+            secret,
+            name,
+            WorkloadIdentity::Controller {
+                cluster_id: DEFAULT_CLUSTER_ID.to_owned(),
+                instance_id: "controller".to_owned(),
+            },
+            CONTROLLER_DNS_NAME,
+        )
+    };
+    let agent_files = issue(
+        secret("s"),
+        "agent",
+        WorkloadIdentity::NodeAgent {
+            cluster_id: DEFAULT_CLUSTER_ID.to_owned(),
+            node_id: "tj42rq5nzwf8".to_owned(),
+        },
+        &format!("tj42rq5nzwf8.{AGENT_DNS_SUFFIX}"),
+    );
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let cancellation = CancellationToken::new();
+    let service = NodeAgentService::new(
+        "tj42rq5nzwf8",
+        Arc::new(AvailableEngine),
+        cancellation.clone(),
+    );
+    let server = serve_node_agent_rpc(
+        listener,
+        DEFAULT_CLUSTER_ID.to_owned(),
+        agent_files,
+        service,
+        cancellation.clone(),
+        cancellation.clone(),
+        TaskTracker::new(),
+        TaskTracker::new(),
+        unused_failure_sender(),
+    )
+    .unwrap();
+    let task = tokio::spawn(server);
+
+    let client = |files| {
+        NodeAgentClientConfig::new(
+            format!("https://{address}"),
+            format!("tj42rq5nzwf8.{AGENT_DNS_SUFFIX}"),
+            DEFAULT_CLUSTER_ID.to_owned(),
+            "tj42rq5nzwf8".to_owned(),
+            files,
+        )
+        .unwrap()
+    };
+    let description = client(controller(secret("s"), "controller"))
+        .describe(&CancellationToken::new())
+        .await
+        .unwrap();
+    assert_eq!(description.node_id, "tj42rq5nzwf8");
+
+    assert!(
+        client(controller(secret("x"), "stranger"))
             .describe(&CancellationToken::new())
             .await
             .is_err()

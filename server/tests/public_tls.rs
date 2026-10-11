@@ -1,8 +1,8 @@
 //! Public HTTP transport tests for issue #77.
 //!
-//! The controller must never expose `/api/v1` over remotely reachable
-//! plaintext. Production requires an explicit TLS identity; Development and
-//! Test may use plaintext only on loopback. These tests drive the real
+//! A configured TLS identity fails closed before any handler runs; without
+//! one the controller serves plaintext behind the operator's reverse proxy,
+//! which terminates TLS (ADR 0046). These tests drive the real
 //! `server::serve` entry point and the real supervisor over real TCP/TLS:
 //! no handshake outcome is mocked, and handler counters prove whether
 //! traffic reached application code.
@@ -488,35 +488,48 @@ fn serve_params(binding: &str) -> loco_rs::boot::ServeParams {
     }
 }
 
+/// Behind a reverse proxy the controller serves plaintext on every interface (ADR 0046); the
+/// proxy terminates TLS. Real TCP, the real supervisor, and a handler counter prove the request
+/// reached application code.
 #[tokio::test]
-async fn development_plaintext_with_non_loopback_bind_fails_startup() {
-    let context = serve_context(Environment::Test, test_settings(), "http://127.0.0.1:5150").await;
-    let error = serve(Router::new(), &context, &serve_params("0.0.0.0"))
+async fn plaintext_on_every_interface_reaches_the_handler() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let listener = TcpListener::bind("0.0.0.0:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let cancellation = CancellationToken::new();
+    let task_cancellation = cancellation.clone();
+    let router = counter_router(&calls);
+    let server = tokio::spawn(async move {
+        kontainer_controller::server::supervise_controller_servers(
+            router,
+            BoundHttpServer {
+                listener,
+                transport: HttpTransport::Plaintext,
+            },
+            None,
+            task_cancellation,
+        )
         .await
-        .unwrap_err();
-    assert!(
-        error.to_string().contains("must bind loopback"),
-        "unexpected error: {error}"
-    );
-}
+        .unwrap();
+    });
 
-#[tokio::test]
-async fn development_plaintext_with_non_loopback_host_fails_startup() {
-    let context = serve_context(
-        Environment::Test,
-        test_settings(),
-        "http://192.168.1.10:5150",
-    )
-    .await;
-    let error = serve(Router::new(), &context, &serve_params("127.0.0.1"))
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    stream
+        .write_all(
+            b"GET /application HTTP/1.1\r\nHost: kontainer.example\r\nConnection: close\r\n\r\n",
+        )
         .await
-        .unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains("must advertise a loopback http URL"),
-        "unexpected error: {error}"
-    );
+        .unwrap();
+    let mut response = String::new();
+    timeout(BUDGET, stream.read_to_string(&mut response))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+    assert!(response.ends_with("application"), "{response}");
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+    join_server(server, &cancellation).await;
 }
 
 fn tls_test_settings(cert: &Path, key: &Path) -> serde_json::Value {
@@ -586,25 +599,6 @@ async fn invalid_tls_identities_fail_the_serve_startup_path() {
             "{name} must admit zero handlers"
         );
     }
-}
-
-#[tokio::test]
-async fn production_rejects_plaintext_even_on_loopback() {
-    let context = serve_context(
-        Environment::Production,
-        test_settings(),
-        "http://127.0.0.1:5150",
-    )
-    .await;
-    let error = serve(Router::new(), &context, &serve_params("127.0.0.1"))
-        .await
-        .unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains("plaintext public HTTP is not allowed"),
-        "unexpected error: {error}"
-    );
 }
 
 fn require_test_database() -> Option<String> {
