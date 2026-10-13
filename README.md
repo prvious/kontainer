@@ -259,11 +259,11 @@ volumes:
   database:
 ```
 
-- `KONTAINER_SECRET` is any string of at least 32 characters, the same on the
-  controller and every agent (`openssl rand -hex 32`). Each process derives the
-  cluster CA from it and issues its own certificate, so there is nothing to
-  generate (ADR 0045). `KONTAINER_SECRET_FILE` reads it from a Swarm secret
-  instead.
+- `KONTAINER_SECRET` is at least 64 hex characters of randomness, the same on
+  the controller and every agent: generate it with `openssl rand -hex 32`, never
+  type one. Each process derives the cluster CA from it and issues its own
+  certificate, so there is nothing else to generate (ADR 0045).
+  `KONTAINER_SECRET_FILE` reads it from a Swarm secret instead.
 - `DB_PASSWORD` goes inside `DATABASE_URL`, so keep it URL-safe
   (`openssl rand -hex 24`) or percent-encode it there.
 - The controller migrates its database on start. Agents find their node id

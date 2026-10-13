@@ -43,7 +43,8 @@ The development cluster, `dev/pki.sh`, and every mTLS check. Only who issues the
 ## Tests
 
 - rpc-auth: the same secret derives the same CA and another does not; issued files carry the
-  workload identity, load as a matching pair, and are owner-only; short secrets fail without echoing.
+  workload identity, load as a matching pair, and are owner-only; secrets shorter than 64 hex
+  characters, or not hex, fail without echoing.
 - Agent: node id from the Swarm id, then the hostname, else a clear error; advertise address on the
   route to the controller; unresolved node id and address validate.
 - Controller: optional RPC bundle; files win, else the secret, else a startup error; the rendered

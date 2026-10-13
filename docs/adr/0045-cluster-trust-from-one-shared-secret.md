@@ -22,7 +22,8 @@ without certificates, a CA stored in PostgreSQL, and still a shared secret to au
 - It writes the certificate, key and CA as owner-only files and hands their paths to the existing
   `MutualTlsIdentityFiles`. Every verifier, identity rule and handshake stays as it was.
 - Configured certificate paths still win, so the dev cluster and operator-issued PKI keep working.
-- The secret must be at least 32 characters; the docs generate it with `openssl rand -hex 32`.
+- The secret must be at least 64 hex characters, which is what `openssl rand -hex 32` prints.
+  Requiring hex, not just length, rules out passphrases and repeated words.
 - Leaf certificates keep rcgen's default validity and nothing renews them.
 
 ## Consequences
@@ -31,8 +32,10 @@ without certificates, a CA stored in PostgreSQL, and still a shared secret to au
 - Trust is the secret. Anyone holding it can mint any controller or agent identity, which is also
   true of an enrollment scheme authenticated by the same secret. Revoking means rotating the secret
   and restarting the stack.
-- The CA's public key is visible to anything that completes a handshake on the private network, so a
-  weak secret could be brute-forced offline. The length floor guards against that; a slow KDF needs
-  a new dependency (Argon2 only reaches the controller through loco-rs) and is deferred.
+- Every certificate the CA signs names its key and carries its signature, and anything that can
+  open a connection to an RPC port receives one (the controller's also listens on the proxy network
+  it joins). A guessable secret could therefore be found offline with one SHA-256 per guess. The hex
+  floor demands 32 random bytes instead; a slow KDF would protect chosen passphrases too, but needs a
+  new dependency (Argon2 only reaches the controller through loco-rs) and is deferred.
 - `rcgen` becomes a normal dependency of `kontainer-rpc-auth` (it was already in the lockfile), and
   `sha2` joins it from the workspace.

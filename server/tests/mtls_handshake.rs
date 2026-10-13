@@ -266,7 +266,7 @@ async fn dev_pki_files_complete_a_verified_describe() {
 /// checks accept the pair, and a controller holding another secret is refused.
 #[tokio::test]
 async fn secret_issued_identities_complete_a_verified_describe() {
-    let secret = |value: &str| ClusterSecret::new(&value.repeat(32)).unwrap();
+    let secret = |digit: &str| ClusterSecret::new(&digit.repeat(64)).unwrap();
     let directory = tempfile::tempdir().unwrap();
     let issue = |secret: ClusterSecret, name: &str, identity: WorkloadIdentity, dns: &str| {
         secret
@@ -285,7 +285,7 @@ async fn secret_issued_identities_complete_a_verified_describe() {
         )
     };
     let agent_files = issue(
-        secret("s"),
+        secret("a"),
         "agent",
         WorkloadIdentity::NodeAgent {
             cluster_id: DEFAULT_CLUSTER_ID.to_owned(),
@@ -326,14 +326,14 @@ async fn secret_issued_identities_complete_a_verified_describe() {
         )
         .unwrap()
     };
-    let description = client(controller(secret("s"), "controller"))
+    let description = client(controller(secret("a"), "controller"))
         .describe(&CancellationToken::new())
         .await
         .unwrap();
     assert_eq!(description.node_id, "tj42rq5nzwf8");
 
     assert!(
-        client(controller(secret("x"), "stranger"))
+        client(controller(secret("b"), "stranger"))
             .describe(&CancellationToken::new())
             .await
             .is_err()

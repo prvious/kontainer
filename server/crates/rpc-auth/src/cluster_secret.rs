@@ -28,9 +28,10 @@ pub const DEFAULT_CLUSTER_ID: &str = "default";
 pub const CONTROLLER_DNS_NAME: &str = "controller.kontainer.internal";
 /// Agent certificates carry `{node_id}.{AGENT_DNS_SUFFIX}`.
 pub const AGENT_DNS_SUFFIX: &str = "agent.kontainer.internal";
-/// Shortest secret accepted: the CA key is derived from it, so it must resist guessing.
-/// `openssl rand -hex 32` prints 64 characters.
-pub const MINIMUM_SECRET_LENGTH: usize = 32;
+/// Fewest hex digits accepted, i.e. 32 bytes. The CA key is one fast hash of the secret, and any
+/// certificate it signed lets someone test guesses offline, so the secret must be random rather
+/// than merely long: hex rules out passphrases. `openssl rand -hex 32` prints exactly this.
+pub const MINIMUM_SECRET_LENGTH: usize = 64;
 
 /// PKCS#8 v1 header for a raw Ed25519 seed (RFC 8410 section 7).
 const ED25519_PKCS8_PREFIX: [u8; 16] = [
@@ -51,9 +52,11 @@ impl ClusterSecret {
     /// Trailing newlines are dropped: secret files usually end with one.
     pub fn new(value: &str) -> Result<Self, String> {
         let value = value.trim_end_matches(['\r', '\n']);
-        if value.chars().count() < MINIMUM_SECRET_LENGTH {
+        if value.len() < MINIMUM_SECRET_LENGTH
+            || !value.bytes().all(|byte| byte.is_ascii_hexdigit())
+        {
             return Err(format!(
-                "KONTAINER_SECRET must be at least {MINIMUM_SECRET_LENGTH} characters; generate one with `openssl rand -hex 32`"
+                "KONTAINER_SECRET must be at least {MINIMUM_SECRET_LENGTH} hex characters; generate one with `openssl rand -hex 32`"
             ));
         }
         Ok(Self(value.to_owned()))
@@ -192,7 +195,8 @@ mod tests {
     use super::{ClusterSecret, MINIMUM_SECRET_LENGTH, runtime_directory};
     use crate::WorkloadIdentity;
 
-    const SECRET: &str = "0123456789abcdef0123456789abcdef";
+    /// What `openssl rand -hex 32` prints.
+    const SECRET: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
     fn agent(node_id: &str) -> WorkloadIdentity {
         WorkloadIdentity::NodeAgent {
@@ -202,14 +206,19 @@ mod tests {
     }
 
     #[test]
-    fn short_secrets_are_refused_without_echoing_them() {
-        let short = "s".repeat(MINIMUM_SECRET_LENGTH - 1);
-        let error = ClusterSecret::new(&short).unwrap_err();
-        assert!(error.contains("at least 32 characters"));
-        assert!(!error.contains(&short));
+    fn only_long_hex_secrets_are_accepted_and_never_echoed() {
+        let short = &SECRET[..MINIMUM_SECRET_LENGTH - 1];
+        // Long enough but guessable: a repeated word is refused because it isn't hex.
+        let passphrase = "kontainer".repeat(8);
+        for refused in [short, passphrase.as_str()] {
+            let error = ClusterSecret::new(refused).unwrap_err();
+            assert!(error.contains("at least 64 hex characters"), "{refused}");
+            assert!(!error.contains(refused));
+        }
         // A newline from a secret file does not count toward the length.
         assert!(ClusterSecret::new(&format!("{short}\n")).is_err());
         assert!(ClusterSecret::new(&format!("{SECRET}\n")).is_ok());
+        assert!(ClusterSecret::new(&SECRET.to_uppercase()).is_ok());
         assert_eq!(
             format!("{:?}", ClusterSecret::new(SECRET).unwrap()),
             "ClusterSecret(redacted)"

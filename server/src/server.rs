@@ -1132,7 +1132,7 @@ mod tests {
         let error = agent_rpc_tls_files(&issued, None, directory.path()).unwrap_err();
         assert!(error.to_string().contains("KONTAINER_SECRET"));
 
-        let secret = ClusterSecret::new(&"s".repeat(32)).unwrap();
+        let secret = ClusterSecret::new(&"5".repeat(64)).unwrap();
         let files = agent_rpc_tls_files(
             &issued,
             Some(secret.clone()),

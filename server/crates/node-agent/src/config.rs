@@ -365,7 +365,7 @@ mod tests {
             node_id: None,
             cluster_id: "default".to_owned(),
             binding: "0.0.0.0:50052".parse().unwrap(),
-            trust: AgentTrust::Secret(ClusterSecret::new(&"s".repeat(32)).unwrap()),
+            trust: AgentTrust::Secret(ClusterSecret::new(&"5".repeat(64)).unwrap()),
             shutdown_grace: ShutdownGrace::default(),
             environment: AgentEnvironment::Production,
             docker_host: DockerHost::default(),
