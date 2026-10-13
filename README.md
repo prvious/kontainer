@@ -146,13 +146,12 @@ keys. Configured cluster/node IDs use the same canonical segment rules as
 certificate identities: 1–128 ASCII letters, digits, dots, underscores, or
 hyphens, excluding `.` and `..`. When private RPC is enabled, its TLS files and
 key/certificate pair are validated before the controller starts admitting HTTP
-requests; setup failure closes both bound listeners. When `agent_rpc.client`
-is configured, the static agent endpoint, expected DNS server name, and node
-ID are validated with the same TLS bundle before admission: the endpoint must
-be an `https` origin with no routing path, and the peer must present the exact
-configured node-agent workload identity plus a matching `Describe` node ID.
-An unreachable agent does not fail startup; it surfaces only as a typed call
-failure. This is not certificate enrollment.
+requests; setup failure closes both bound listeners. Development reads them
+from `dev/pki/`; without configured paths the controller and agents issue
+their own from `KONTAINER_SECRET` (ADR 0045). The controller dials each agent
+at the address the agent's check-in recorded and requires that node's exact
+workload identity plus a matching `Describe` node ID. An unreachable agent does
+not fail startup; it surfaces only as a typed call failure.
 The node agent's `--version` still requires no runtime configuration.
 
 The [canonical controller probes](docs/v2/approved-greenfield-reset.md#controller-probe-paths)
@@ -192,23 +191,96 @@ connected.
 
 ### Public HTTP transport
 
-Production serves the public API (including the probes above) over TLS and
-fails closed before admitting any handler when the identity is missing,
-malformed, or mismatched:
+The controller serves plain HTTP and expects a reverse proxy (Traefik,
+HAProxy, nginx) to terminate TLS in front of it, as Portainer does (ADR 0046).
+The desktop app only connects to remote controllers over `https://`, so it
+always goes through that proxy. Setting `PUBLIC_HTTP_TLS_CERTIFICATE_PATH` and
+`PUBLIC_HTTP_TLS_PRIVATE_KEY_PATH` makes the controller serve that certificate
+itself instead; a missing, malformed or mismatched identity fails startup
+before any handler is admitted. There is no ACME, rotation, or hot reload.
+
+## Run on a Swarm
+
+Images are published to `ghcr.io/prvious/kontainer/controller` and
+`ghcr.io/prvious/kontainer/agent` (`latest` follows `main`; releases are
+tagged by version). The packages are private: log in to `ghcr.io` with a token
+that can read them and deploy with `docker stack deploy --with-registry-auth`.
+A stack is the controller on a manager, an agent on every node, and
+PostgreSQL:
 
 ```yaml
-settings:
-  public_http:
-    mode: tls
-    tls:
-      certificate_path: <%= get_env(name="PUBLIC_HTTP_TLS_CERTIFICATE_PATH") %>
-      private_key_path: <%= get_env(name="PUBLIC_HTTP_TLS_PRIVATE_KEY_PATH") %>
+services:
+  controller:
+    image: ghcr.io/prvious/kontainer/controller:latest
+    environment:
+      DATABASE_URL: postgres://kontainer:${DB_PASSWORD}@postgres/kontainer
+      KONTAINER_SECRET: ${KONTAINER_SECRET}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks: [kontainer, proxy]
+    # Longer than the 20 s drain (SHUTDOWN_GRACE), so Swarm doesn't kill it mid-drain.
+    stop_grace_period: 30s
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+      # Route your proxy to port 5150, for example with Traefik labels.
+
+  agent:
+    image: ghcr.io/prvious/kontainer/agent:latest
+    environment:
+      KONTAINER_SECRET: ${KONTAINER_SECRET}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks: [kontainer]
+    stop_grace_period: 30s
+    deploy:
+      mode: global
+
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: kontainer
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: kontainer
+    volumes:
+      - database:/var/lib/postgresql/data
+    networks: [kontainer]
+    deploy:
+      placement:
+        constraints: [node.role == manager]
+
+networks:
+  kontainer:
+    driver: overlay
+  proxy:
+    external: true
+
+volumes:
+  database:
 ```
 
-Development and Test may use `mode: plaintext` only when the bind address
-and the advertised `server.host` URL are both loopback; production rejects
-plaintext even on loopback. There is no plaintext fallback, redirect
-listener, ACME, rotation, or hot reload.
+- `KONTAINER_SECRET` is at least 64 hex characters of randomness, the same on
+  the controller and every agent: generate it with `openssl rand -hex 32`, never
+  type one. Each process derives the cluster CA from it and issues its own
+  certificate, so there is nothing else to generate (ADR 0045).
+  `KONTAINER_SECRET_FILE` reads it from a Swarm secret instead.
+- `DB_PASSWORD` goes inside `DATABASE_URL`, so keep it URL-safe
+  (`openssl rand -hex 24`) or percent-encode it there.
+- The controller migrates its database on start. Agents find their node id
+  (the Swarm node id) and their address on the `kontainer` network themselves;
+  `KONTAINER_NODE_ID` and `KONTAINER_NODE_ADVERTISE_ADDRESS` override them.
+- The controller and every agent mount the Docker socket, which is root on
+  that node: whoever controls one of them controls its host, and through the
+  controller the cluster. Run them only on nodes you trust, and guard
+  `KONTAINER_SECRET` and the owner account accordingly.
+- Publish the controller only through your proxy; don't publish 5150 or the
+  agent ports on the host.
+- PostgreSQL's volume lives on whichever node runs it. With more than one
+  manager, pin it to one node with a label (`node.labels.kontainer-db == true`)
+  and back that volume up, or Swarm may reschedule it onto an empty volume.
+- On first start the controller prints a setup code
+  (`docker service logs <stack>_controller`); enter it on the desktop app's
+  Create owner screen.
 
 ## Testing
 

@@ -7,7 +7,8 @@ logger:
 server:
   binding: <%= get_env(name="BINDING", default="0.0.0.0") %>
   port: <%= get_env(name="PORT", default="5150") %>
-  host: <%= get_env(name="HOST") %>
+  # The public URL; only GitHub login reads it.
+  host: <%= get_env(name="HOST", default="http://localhost:5150") %>
   middlewares:
     catch_panic:
       enable: true
@@ -26,7 +27,8 @@ database:
   idle_timeout: <%= get_env(name="DB_IDLE_TIMEOUT", default="500") %>
   min_connections: <%= get_env(name="DB_MIN_CONNECTIONS", default="2") %>
   max_connections: <%= get_env(name="DB_MAX_CONNECTIONS", default="20") %>
-  auto_migrate: <%= get_env(name="DB_AUTO_MIGRATE", default="false") %>
+  # One controller per cluster, so it migrates its own database on start.
+  auto_migrate: <%= get_env(name="DB_AUTO_MIGRATE", default="true") %>
   dangerously_truncate: false
   dangerously_recreate: false
 
@@ -35,19 +37,29 @@ settings:
   agent_rpc:
     enabled: true
     binding: <%= get_env(name="AGENT_RPC_BINDING", default="0.0.0.0:50051") %>
-    cluster_id: <%= get_env(name="CLUSTER_ID") %>
+    cluster_id: <%= get_env(name="CLUSTER_ID", default="default") %>
+    # Without certificate paths the controller issues its own from KONTAINER_SECRET (ADR 0045).
+    # Setting any path requires all three: a missing one fails startup instead of falling back.
+<% if get_env(name="AGENT_RPC_TLS_CERTIFICATE_PATH", default="") or get_env(name="AGENT_RPC_TLS_PRIVATE_KEY_PATH", default="") or get_env(name="AGENT_RPC_TLS_CLIENT_CA_PATH", default="") %>
     tls:
       certificate_path: <%= get_env(name="AGENT_RPC_TLS_CERTIFICATE_PATH") %>
       private_key_path: <%= get_env(name="AGENT_RPC_TLS_PRIVATE_KEY_PATH") %>
       client_ca_path: <%= get_env(name="AGENT_RPC_TLS_CLIENT_CA_PATH") %>
+<% endif %>
   # Must stay a unix:// socket; tcp:// fails startup outside development/test.
   docker:
     host: <%= get_env(name="KONTAINER_DOCKER_HOST", default="unix:///var/run/docker.sock") %>
+  # Plaintext behind the operator's reverse proxy, which terminates TLS (ADR 0046). Setting either
+  # path requires both: a missing one fails startup instead of serving plaintext.
   public_http:
+<% if get_env(name="PUBLIC_HTTP_TLS_CERTIFICATE_PATH", default="") or get_env(name="PUBLIC_HTTP_TLS_PRIVATE_KEY_PATH", default="") %>
     mode: tls
     tls:
       certificate_path: <%= get_env(name="PUBLIC_HTTP_TLS_CERTIFICATE_PATH") %>
       private_key_path: <%= get_env(name="PUBLIC_HTTP_TLS_PRIVATE_KEY_PATH") %>
+<% else %>
+    mode: plaintext
+<% endif %>
   # GitHub bootstrap login ships disabled. Enabling it requires a client
   # ID, a secret file, and at least one numeric account ID; anything less
   # fails startup or login closed.

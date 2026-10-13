@@ -11,7 +11,7 @@ use kontainer_rpc_auth::MutualTlsIdentityFiles;
 use crate::rpc::{AgentClient, AgentClientError, NodeAgentClientConfig};
 
 /// DNS names agent certificates carry: `{node_id}.agent.kontainer.internal`.
-pub const DEFAULT_AGENT_SERVER_NAME_SUFFIX: &str = "agent.kontainer.internal";
+pub const DEFAULT_AGENT_SERVER_NAME_SUFFIX: &str = kontainer_rpc_auth::AGENT_DNS_SUFFIX;
 
 /// Where to reach one node, as membership recorded it.
 #[derive(Debug, Clone, PartialEq, Eq)]

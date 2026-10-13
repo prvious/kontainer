@@ -1,7 +1,7 @@
 use std::{
     future::Future,
-    net::{IpAddr, SocketAddr},
-    path::PathBuf,
+    net::SocketAddr,
+    path::{Path, PathBuf},
     sync::Arc,
     time::Instant,
 };
@@ -16,7 +16,10 @@ use hyper::server::conn::http1;
 use hyper_util::{rt::TokioIo, server::conn::auto, service::TowerToHyperService};
 use kontainer_engine::DockerHost;
 use kontainer_lifecycle::{DrainClock, ShutdownGrace};
-use kontainer_rpc_auth::{MutualTlsIdentityFiles, spawn_tracked, valid_identity_segment};
+use kontainer_rpc_auth::{
+    AGENT_DNS_SUFFIX, CONTROLLER_DNS_NAME, ClusterSecret, MutualTlsIdentityFiles, WorkloadIdentity,
+    runtime_directory, spawn_tracked, valid_identity_segment,
+};
 use loco_rs::{
     Error, Result,
     app::AppContext,
@@ -236,7 +239,9 @@ struct AgentRpcSettings {
     binding: SocketAddr,
     #[serde(deserialize_with = "deserialize_cluster_id")]
     cluster_id: String,
-    tls: AgentRpcTlsSettings,
+    /// Operator-issued files; without them the controller issues its own from the cluster secret.
+    #[serde(default)]
+    tls: Option<AgentRpcTlsSettings>,
     /// Agent certificates carry `{node_id}.{suffix}` as their DNS name.
     #[serde(
         default = "default_agent_server_name_suffix",
@@ -299,14 +304,8 @@ pub async fn serve(router: Router, ctx: &AppContext, params: &ServeParams) -> Re
     let settings = controller_settings(ctx)?;
     let http_listener = TcpListener::bind(format!("{}:{}", params.binding, params.port)).await?;
     // Validate the public transport before any listener admits handlers: a bad
-    // TLS identity or a non-loopback plaintext request fails startup here.
-    let transport = resolve_public_transport(
-        &settings.public_http,
-        &ctx.environment,
-        http_listener.local_addr().map_err(Error::wrap)?,
-        &ctx.config.server.host,
-    )
-    .await?;
+    // TLS identity fails startup here.
+    let transport = resolve_public_transport(&settings.public_http)?;
     // Only once startup can no longer fail on configuration, so the code isn't printed for a
     // controller that never serves.
     announce_setup_code(ctx).await;
@@ -318,7 +317,11 @@ pub async fn serve(router: Router, ctx: &AppContext, params: &ServeParams) -> Re
         Some(BoundAgentRpcServer {
             listener: TcpListener::bind(settings.agent_rpc.binding).await?,
             cluster_id: settings.agent_rpc.cluster_id,
-            tls_files: settings.agent_rpc.tls.into(),
+            tls_files: ctx
+                .shared_store
+                .get::<AgentRpcTls>()
+                .ok_or_else(|| Error::string("agent RPC TLS is not initialized"))?
+                .0,
             intake: crate::rpc::ControllerIntakeService::recording(Arc::new(recorder)),
         })
     } else {
@@ -837,6 +840,44 @@ async fn path_only_request_log(request: Request, next: Next) -> Response {
 #[derive(Debug, Clone)]
 pub struct ControllerClusterId(pub String);
 
+/// The controller's agent RPC identity, issued once in [`init_shared_auth_state`].
+#[derive(Debug, Clone)]
+pub struct AgentRpcTls(pub MutualTlsIdentityFiles);
+
+/// Configured certificate files, or a certificate issued from the cluster secret into
+/// `directory` (ADR 0045).
+fn agent_rpc_tls_files(
+    settings: &AgentRpcSettings,
+    secret: Option<ClusterSecret>,
+    directory: &Path,
+) -> Result<MutualTlsIdentityFiles> {
+    if let Some(tls) = &settings.tls {
+        return Ok(tls.clone().into());
+    }
+    // Secret-issued agent certificates always carry the default suffix, so dialling another would
+    // fail every call.
+    if settings.agent_server_name_suffix != AGENT_DNS_SUFFIX {
+        return Err(Error::string(
+            "agent_server_name_suffix applies only with settings.agent_rpc.tls certificate files",
+        ));
+    }
+    let secret = secret.ok_or_else(|| {
+        Error::string(
+            "agent RPC needs KONTAINER_SECRET (or KONTAINER_SECRET_FILE), or settings.agent_rpc.tls certificate paths",
+        )
+    })?;
+    secret
+        .issue_identity_files(
+            &WorkloadIdentity::Controller {
+                cluster_id: settings.cluster_id.clone(),
+                instance_id: "controller".to_owned(),
+            },
+            CONTROLLER_DNS_NAME,
+            directory,
+        )
+        .map_err(Error::wrap)
+}
+
 /// Build the GitHub login service and cluster identity from validated
 /// settings. A missing secret file or invalid origin fails startup when
 /// login is enabled; a disabled service fails login requests closed.
@@ -856,9 +897,21 @@ pub fn init_shared_auth_state(ctx: &AppContext) -> Result<()> {
         .insert(crate::auth::credentials::SetupCode::generate());
 
     if settings.agent_rpc.enabled {
+        // Issued once: the RPC listener and every agent client share this identity.
+        // Configured files win, so a stale secret in the environment is never read.
+        let secret = match settings.agent_rpc.tls {
+            Some(_) => None,
+            None => ClusterSecret::from_environment().map_err(|message| Error::string(&message))?,
+        };
+        let tls_files = agent_rpc_tls_files(
+            &settings.agent_rpc,
+            secret,
+            &runtime_directory("controller"),
+        )?;
+        ctx.shared_store.insert(AgentRpcTls(tls_files.clone()));
         let directory = crate::nodes::agents::MtlsAgentDirectory::new(
             settings.agent_rpc.cluster_id.clone(),
-            settings.agent_rpc.tls.clone().into(),
+            tls_files,
             settings.agent_rpc.agent_server_name_suffix.clone(),
         );
         ctx.shared_store
@@ -983,15 +1036,11 @@ fn tls_identity_error(settings: &PublicTlsSettings, detail: &str) -> Error {
     ))
 }
 /// Load and validate the public HTTP transport before any listener admits
-/// handlers. TLS identities are proven by loading the certificate/key pair;
-/// plaintext is confined to Development/Test on loopback only.
-async fn resolve_public_transport(
-    settings: &PublicHttpSettings,
-    environment: &Environment,
-    bind: SocketAddr,
-    advertised_host: &str,
-) -> Result<HttpTransport> {
-    // Shape (()TLS with bundle, plaintext without) was already enforced by
+/// handlers. TLS identities are proven by loading the certificate/key pair.
+/// Plaintext is allowed in every environment: in production a reverse proxy
+/// terminates TLS in front of the controller (ADR 0046).
+fn resolve_public_transport(settings: &PublicHttpSettings) -> Result<HttpTransport> {
+    // Shape (TLS with bundle, plaintext without) was already enforced by
     // `PublicHttpSettings::validate` at settings load; match the mode here.
     match settings.mode {
         PublicHttpMode::Tls => {
@@ -1000,50 +1049,7 @@ async fn resolve_public_transport(
             })?;
             load_public_tls_config(tls).map(HttpTransport::Tls)
         }
-        PublicHttpMode::Plaintext => {
-            if !matches!(environment, Environment::Development | Environment::Test) {
-                return Err(Error::Message(format!(
-                    "plaintext public HTTP is not allowed in the {environment:?} environment; configure TLS"
-                )));
-            }
-            if !bind.ip().is_loopback() {
-                return Err(Error::Message(format!(
-                    "plaintext public HTTP must bind loopback, got {bind}"
-                )));
-            }
-            if !advertised_url_is_loopback_http(advertised_host) {
-                return Err(Error::Message(format!(
-                    "plaintext public HTTP must advertise a loopback http URL, got {advertised_host}"
-                )));
-            }
-            Ok(HttpTransport::Plaintext)
-        }
-    }
-}
-
-/// Structural check with a real URL parser, not string-prefix matching:
-/// the URL must use the http scheme with no credentials, and name
-/// `localhost` or a loopback IP literal. Anything the parser rejects, or
-/// any host that is not loopback, fails closed.
-fn advertised_url_is_loopback_http(url: &str) -> bool {
-    let Ok(parsed) = url::Url::parse(url) else {
-        return false;
-    };
-    if parsed.scheme() != "http" || !parsed.has_authority() {
-        return false;
-    }
-    if !parsed.username().is_empty() || parsed.password().is_some() {
-        return false;
-    }
-    match parsed.host_str() {
-        Some(host) => {
-            let host = host
-                .strip_prefix('[')
-                .and_then(|host| host.strip_suffix(']'))
-                .unwrap_or(host);
-            host == "localhost" || host.parse::<IpAddr>().is_ok_and(|addr| addr.is_loopback())
-        }
-        None => false,
+        PublicHttpMode::Plaintext => Ok(HttpTransport::Plaintext),
     }
 }
 
@@ -1075,14 +1081,15 @@ fn completed_server(
 #[cfg(test)]
 mod tests {
     use super::{
-        AgentRpcSettings, ControllerSettings, PublicHttpMode, PublicHttpSettings,
-        parse_controller_settings, resolve_public_transport,
+        AgentRpcSettings, ControllerSettings, HttpTransport, PublicHttpMode, PublicHttpSettings,
+        agent_rpc_tls_files, parse_controller_settings, resolve_public_transport,
     };
+    use kontainer_rpc_auth::ClusterSecret;
     use loco_rs::{config::Config, environment::Environment};
-    use std::{net::SocketAddr, path::Path};
+    use std::path::Path;
 
     #[test]
-    fn controller_rpc_settings_require_an_explicit_mtls_bundle() {
+    fn controller_rpc_settings_take_an_optional_mtls_bundle() {
         let settings: ControllerSettings = serde_json::from_value(valid_settings()).unwrap();
 
         let AgentRpcSettings {
@@ -1095,7 +1102,61 @@ mod tests {
         assert!(enabled);
         assert_eq!(binding.to_string(), "127.0.0.1:50051");
         assert_eq!(cluster_id, "cluster-1");
-        assert_eq!(tls.client_ca_path.to_string_lossy(), "/certs/agent-ca.pem");
+        assert_eq!(
+            tls.unwrap().client_ca_path.to_string_lossy(),
+            "/certs/agent-ca.pem"
+        );
+
+        let parsed = parse_controller_settings(settings_without_rpc_tls()).unwrap();
+        assert!(parsed.agent_rpc.tls.is_none());
+    }
+
+    fn settings_without_rpc_tls() -> serde_json::Value {
+        let mut settings = valid_settings();
+        settings["agent_rpc"].as_object_mut().unwrap().remove("tls");
+        settings
+    }
+
+    #[test]
+    fn agent_rpc_identity_comes_from_files_or_the_cluster_secret() {
+        let directory = tempfile::tempdir().unwrap();
+        let configured = parse_controller_settings(valid_settings())
+            .unwrap()
+            .agent_rpc;
+        let files = agent_rpc_tls_files(&configured, None, directory.path()).unwrap();
+        assert!(format!("{files:?}").contains("/certs/controller.pem"));
+
+        let issued = parse_controller_settings(settings_without_rpc_tls())
+            .unwrap()
+            .agent_rpc;
+        let error = agent_rpc_tls_files(&issued, None, directory.path()).unwrap_err();
+        assert!(error.to_string().contains("KONTAINER_SECRET"));
+
+        let secret = ClusterSecret::new(&"5".repeat(64)).unwrap();
+        let files = agent_rpc_tls_files(
+            &issued,
+            Some(secret.clone()),
+            &directory.path().join("issued"),
+        )
+        .unwrap();
+        assert!(files.server_acceptor().is_ok());
+
+        // Agents issue `{node_id}.agent.kontainer.internal`; another suffix could never match.
+        let mut custom_suffix = settings_without_rpc_tls();
+        custom_suffix["agent_rpc"]["agent_server_name_suffix"] =
+            serde_json::json!("agents.example");
+        let custom_suffix = parse_controller_settings(custom_suffix).unwrap().agent_rpc;
+        let error = agent_rpc_tls_files(
+            &custom_suffix,
+            Some(secret),
+            &directory.path().join("custom"),
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("agent_server_name_suffix applies only")
+        );
     }
 
     fn valid_settings() -> serde_json::Value {
@@ -1276,6 +1337,78 @@ mod tests {
         }
     }
 
+    /// Renders `config/production.yaml` in a child process, so its environment stays private.
+    #[test]
+    fn production_config_child() {
+        let Ok(expected) = std::env::var("KONTAINER_TEST_PRODUCTION_CONFIG_CHILD") else {
+            return;
+        };
+        let config = Config::from_folder(&Environment::Production, Path::new("config"));
+        if expected == "error" {
+            assert!(config.is_err(), "a partial TLS setting must fail to load");
+            return;
+        }
+        let config = config.unwrap();
+        assert!(config.database.auto_migrate);
+        assert_eq!(config.server.host, "http://localhost:5150");
+        let settings = parse_controller_settings(config.settings.unwrap()).unwrap();
+        assert_eq!(settings.agent_rpc.cluster_id, "default");
+        assert!(settings.agent_rpc.tls.is_none());
+        let mode = match settings.public_http.mode {
+            PublicHttpMode::Plaintext => "plaintext",
+            PublicHttpMode::Tls => "tls",
+        };
+        assert_eq!(mode, expected);
+    }
+
+    #[test]
+    fn production_config_serves_plaintext_unless_given_a_certificate() {
+        const TLS_PATHS: [&str; 5] = [
+            "PUBLIC_HTTP_TLS_CERTIFICATE_PATH",
+            "PUBLIC_HTTP_TLS_PRIVATE_KEY_PATH",
+            "AGENT_RPC_TLS_CERTIFICATE_PATH",
+            "AGENT_RPC_TLS_PRIVATE_KEY_PATH",
+            "AGENT_RPC_TLS_CLIENT_CA_PATH",
+        ];
+        let cases: [(&[&str], &str); 4] = [
+            (&[], "plaintext"),
+            (
+                &[
+                    "PUBLIC_HTTP_TLS_CERTIFICATE_PATH",
+                    "PUBLIC_HTTP_TLS_PRIVATE_KEY_PATH",
+                ],
+                "tls",
+            ),
+            // A key without its certificate fails closed instead of serving plaintext.
+            (&["PUBLIC_HTTP_TLS_PRIVATE_KEY_PATH"], "error"),
+            // Likewise a partial agent RPC bundle instead of falling back to the secret.
+            (&["AGENT_RPC_TLS_PRIVATE_KEY_PATH"], "error"),
+        ];
+        for (set, expected) in cases {
+            let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+            command
+                .args(["--exact", "server::tests::production_config_child"])
+                .env("KONTAINER_TEST_PRODUCTION_CONFIG_CHILD", expected)
+                .env("DATABASE_URL", "postgres://kontainer@postgres/kontainer")
+                .env_remove("HOST")
+                .env_remove("DB_AUTO_MIGRATE")
+                .env_remove("CLUSTER_ID");
+            for name in TLS_PATHS {
+                command.env_remove(name);
+            }
+            for name in set {
+                command.env(name, format!("/certs/{name}.pem"));
+            }
+            let result = command.output().unwrap();
+            assert!(
+                result.status.success(),
+                "{set:?} => {expected}: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            assert!(String::from_utf8_lossy(&result.stdout).contains("1 passed"));
+        }
+    }
+
     #[test]
     fn checked_in_non_production_configs_parse() {
         for environment in [Environment::Development, Environment::Test] {
@@ -1430,119 +1563,27 @@ mod tests {
         serde_json::from_value(serde_json::json!({ "mode": "plaintext" })).unwrap()
     }
 
-    #[tokio::test]
-    async fn plaintext_is_confined_to_development_and_test_loopback() {
-        use std::net::{IpAddr, Ipv4Addr};
-
-        let settings = plaintext_settings();
-        let loopback = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 5150);
-        for environment in [Environment::Development, Environment::Test] {
-            for host in [
-                "http://127.0.0.1:5150",
-                "http://localhost:5150",
-                "http://[::1]:5150",
-            ] {
-                assert!(
-                    resolve_public_transport(&settings, &environment, loopback, host)
-                        .await
-                        .is_ok(),
-                    "{environment:?} {host} must allow loopback plaintext"
-                );
-            }
-        }
-
-        for environment in [
-            Environment::Production,
-            Environment::Any("staging".to_owned()),
-        ] {
-            let error = resolve_public_transport(
-                &settings,
-                &environment,
-                loopback,
-                "http://127.0.0.1:5150",
-            )
-            .await
-            .unwrap_err();
-            assert!(error.to_string().contains("plaintext public HTTP"));
-        }
-
-        let public = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 5150);
-        let error = resolve_public_transport(
-            &settings,
-            &Environment::Development,
-            public,
-            "http://127.0.0.1:5150",
-        )
-        .await
-        .unwrap_err();
-        assert!(error.to_string().contains("must bind loopback"));
-
-        for host in [
-            "http://192.168.1.10:5150",
-            "https://127.0.0.1:5150",
-            "http://example.com:5150",
-            "not-a-url",
-            "http://user:pass@127.0.0.1:5150/",
-            "http://evil@localhost/",
-            "http://evil\\@localhost/",
-            "http://[::1].evil/",
-            "http://127.0.0.1:99999/",
-            "http://localhost.:5150/",
-            "http://::1:5150/",
-        ] {
-            let error =
-                resolve_public_transport(&settings, &Environment::Development, loopback, host)
-                    .await
-                    .unwrap_err();
-            assert!(
-                error
-                    .to_string()
-                    .contains("must advertise a loopback http URL"),
-                "{host} must be rejected"
-            );
-        }
-
-        // URL schemes are case-insensitive; the parser normalizes them.
-        assert!(
-            resolve_public_transport(
-                &settings,
-                &Environment::Development,
-                loopback,
-                "HTTP://127.0.0.1:5150/",
-            )
-            .await
-            .is_ok(),
-            "uppercase scheme with a loopback host must be accepted"
-        );
+    #[test]
+    fn plaintext_serves_behind_a_proxy() {
+        assert!(matches!(
+            resolve_public_transport(&plaintext_settings()),
+            Ok(HttpTransport::Plaintext)
+        ));
     }
 
-    #[tokio::test]
-    async fn tls_identities_fail_closed_before_admission() {
+    #[test]
+    fn tls_identities_fail_closed_before_admission() {
         let directory = tempfile::tempdir().unwrap();
         let missing = |name: &str| directory.path().join(name);
 
         let missing_settings = tls_settings(missing("public.pem"), missing("public-key.pem"));
-        let error = resolve_public_transport(
-            &missing_settings,
-            &Environment::Production,
-            loopback(),
-            "https://controller.example:5150",
-        )
-        .await
-        .unwrap_err();
+        let error = resolve_public_transport(&missing_settings).unwrap_err();
         assert!(error.to_string().contains("invalid public TLS identity"));
 
         let malformed = directory.path().join("malformed.pem");
         std::fs::write(&malformed, "secret-canary-invalid-pem").unwrap();
         let malformed_settings = tls_settings(malformed.clone(), malformed);
-        let error = resolve_public_transport(
-            &malformed_settings,
-            &Environment::Production,
-            loopback(),
-            "https://controller.example:5150",
-        )
-        .await
-        .unwrap_err();
+        let error = resolve_public_transport(&malformed_settings).unwrap_err();
         assert!(error.to_string().contains("invalid public TLS identity"));
         assert!(!error.to_string().contains("secret-canary"));
 
@@ -1553,14 +1594,7 @@ mod tests {
         std::fs::write(&cert_path, first.cert.pem()).unwrap();
         std::fs::write(&key_path, second.signing_key.serialize_pem()).unwrap();
         let mismatched_settings = tls_settings(cert_path, key_path);
-        let error = resolve_public_transport(
-            &mismatched_settings,
-            &Environment::Production,
-            loopback(),
-            "https://controller.example:5150",
-        )
-        .await
-        .unwrap_err();
+        let error = resolve_public_transport(&mismatched_settings).unwrap_err();
         assert!(error.to_string().contains("invalid public TLS identity"));
     }
 
@@ -1576,10 +1610,6 @@ mod tests {
             }
         }))
         .unwrap()
-    }
-
-    fn loopback() -> SocketAddr {
-        SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 5150)
     }
 
     mod worker_supervision {

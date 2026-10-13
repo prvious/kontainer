@@ -2769,7 +2769,9 @@ version = "0.1.0"
 dependencies = [
  "hyper",
  "hyper-util",
+ "rcgen",
  "rustls",
+ "sha2 0.10.9",
  "tokio",
  "tokio-rustls",
  "tokio-util",

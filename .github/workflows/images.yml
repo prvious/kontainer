@@ -1,0 +1,120 @@
+name: Images
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - "server/**"
+      - ".github/workflows/images.yml"
+  # Pull requests build the image when its recipe or dependencies change: a new crate can need a
+  # system package the slim builder lacks. Source-only changes compile the same anywhere.
+  pull_request:
+    branches: [main]
+    paths:
+      - "server/Cargo.lock"
+      - "server/**/Cargo.toml"
+      - "server/Dockerfile"
+      - "server/.dockerignore"
+      - "server/config/production.yaml"
+      - ".github/workflows/images.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: images-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  REGISTRY: ghcr.io/prvious/kontainer
+  # Only main and version tags publish; pull requests and other branches just build.
+  PUBLISH: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
+
+jobs:
+  build:
+    name: Linux ${{ matrix.architecture }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: amd64
+            runner: ubuntu-24.04
+          - architecture: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Registry
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The agent build reuses the controller's compile stage from the same builder.
+      - name: Controller
+        uses: docker/build-push-action@v6
+        with:
+          context: server
+          target: controller
+          platforms: linux/${{ matrix.architecture }}
+          push: ${{ env.PUBLISH == 'true' }}
+          provenance: false
+          build-args: BUILD_SHA=${{ github.sha }}
+          tags: ${{ env.REGISTRY }}/controller:${{ github.sha }}-${{ matrix.architecture }}
+
+      - name: Agent
+        uses: docker/build-push-action@v6
+        with:
+          context: server
+          target: agent
+          platforms: linux/${{ matrix.architecture }}
+          push: ${{ env.PUBLISH == 'true' }}
+          provenance: false
+          build-args: BUILD_SHA=${{ github.sha }}
+          tags: ${{ env.REGISTRY }}/agent:${{ github.sha }}-${{ matrix.architecture }}
+
+  publish:
+    name: Publish
+    needs: build
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # main moves `latest`; a v1.2.3 tag publishes `1.2.3`. Both keep the commit SHA.
+      - name: Multi-arch tags
+        env:
+          CHANNEL: ${{ github.ref_type == 'tag' && github.ref_name || 'latest' }}
+        run: |
+          for image in controller agent; do
+            docker buildx imagetools create \
+              --tag "$REGISTRY/$image:$GITHUB_SHA" \
+              --tag "$REGISTRY/$image:${CHANNEL#v}" \
+              "$REGISTRY/$image:$GITHUB_SHA-amd64" \
+              "$REGISTRY/$image:$GITHUB_SHA-arm64"
+          done
