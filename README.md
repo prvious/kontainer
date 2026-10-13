@@ -269,6 +269,10 @@ volumes:
 - The controller migrates its database on start. Agents find their node id
   (the Swarm node id) and their address on the `kontainer` network themselves;
   `KONTAINER_NODE_ID` and `KONTAINER_NODE_ADVERTISE_ADDRESS` override them.
+- The controller and every agent mount the Docker socket, which is root on
+  that node: whoever controls one of them controls its host, and through the
+  controller the cluster. Run them only on nodes you trust, and guard
+  `KONTAINER_SECRET` and the owner account accordingly.
 - Publish the controller only through your proxy; don't publish 5150 or the
   agent ports on the host.
 - PostgreSQL's volume lives on whichever node runs it. With more than one
