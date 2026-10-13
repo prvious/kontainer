@@ -7,9 +7,13 @@ on:
     paths:
       - "server/**"
       - ".github/workflows/images.yml"
+  # Pull requests build the image when its recipe or dependencies change: a new crate can need a
+  # system package the slim builder lacks. Source-only changes compile the same anywhere.
   pull_request:
     branches: [main]
     paths:
+      - "server/Cargo.lock"
+      - "server/**/Cargo.toml"
       - "server/Dockerfile"
       - "server/.dockerignore"
       - "server/config/production.yaml"
@@ -68,6 +72,7 @@ jobs:
           platforms: linux/${{ matrix.architecture }}
           push: ${{ env.PUBLISH == 'true' }}
           provenance: false
+          build-args: BUILD_SHA=${{ github.sha }}
           tags: ${{ env.REGISTRY }}/controller:${{ github.sha }}-${{ matrix.architecture }}
 
       - name: Agent
@@ -78,6 +83,7 @@ jobs:
           platforms: linux/${{ matrix.architecture }}
           push: ${{ env.PUBLISH == 'true' }}
           provenance: false
+          build-args: BUILD_SHA=${{ github.sha }}
           tags: ${{ env.REGISTRY }}/agent:${{ github.sha }}-${{ matrix.architecture }}
 
   publish:

@@ -3,6 +3,8 @@
 # See README "Run on a Swarm" for the stack that runs them.
 
 FROM rust:1.98-slim-trixie AS build
+# The controller reports this commit as its version; local builds stay `dev`.
+ARG BUILD_SHA
 WORKDIR /src
 COPY . .
 RUN --mount=type=cache,target=/usr/local/cargo/registry \

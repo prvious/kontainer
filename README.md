@@ -218,6 +218,8 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     networks: [kontainer, proxy]
+    # Longer than the 20 s drain (SHUTDOWN_GRACE), so Swarm doesn't kill it mid-drain.
+    stop_grace_period: 30s
     deploy:
       placement:
         constraints: [node.role == manager]
@@ -230,6 +232,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     networks: [kontainer]
+    stop_grace_period: 30s
     deploy:
       mode: global
 

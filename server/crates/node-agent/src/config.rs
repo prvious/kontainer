@@ -111,6 +111,10 @@ impl AgentConfig {
     }
 
     fn validate(&self) -> Result<(), Box<dyn Error + Send + Sync>> {
+        // The controller dials the advertised port, so it must be known before binding.
+        if self.binding.port() == 0 {
+            return Err("KONTAINER_NODE_RPC_BINDING needs a fixed, non-zero port".into());
+        }
         if self.docker_host.is_remote_tcp() {
             return Err(
                 "KONTAINER_DOCKER_HOST may select tcp:// only for a loopback host (localhost, 127.0.0.0/8, ::1)"
@@ -525,6 +529,18 @@ mod tests {
         unresolved.node_id = None;
         unresolved.advertise_address = None;
         assert!(unresolved.validate().is_ok(), "both are discovered later");
+        for ephemeral in ["0.0.0.0:0", "127.0.0.1:0", "[::]:0"] {
+            let mut config = unresolved.clone();
+            config.binding = ephemeral.parse().unwrap();
+            assert!(
+                config
+                    .validate()
+                    .unwrap_err()
+                    .to_string()
+                    .contains("non-zero port"),
+                "{ephemeral}"
+            );
+        }
 
         for (endpoint, message) in [
             ("http://127.0.0.1:50051", "must be an https:// URL"),
